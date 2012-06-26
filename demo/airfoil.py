@@ -20,6 +20,7 @@ from math import atan, sqrt
 import numpy as np
 
 from pyop2 import op2
+op2.init()
 
 from airfoil_kernels import save_soln, adt_calc, res_calc, bres_calc, update
 
