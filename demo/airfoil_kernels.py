@@ -1,7 +1,7 @@
 # This file contains code from the original OP2 distribution, in the code
 # variables. The original copyright notice follows:
 
-# "Copyright (c) 2011, Mike Giles and others. Please see the AUTHORS file in
+# Copyright (c) 2011, Mike Giles and others. Please see the AUTHORS file in
 # the main source directory for a full list of copyright holders.
 # All rights reserved.
 #
@@ -30,14 +30,13 @@
 # Markall and others. Please see the AUTHORS file in the main source directory
 # for a full list of copyright holders.
 
-from op2 import Kernel
+from pyop2.op2 import Kernel
 
 save_soln_code = """
 void save_soln(double *q, double *qold){
   for (int n=0; n<4; n++) qold[n] = q[n];
 }
 """
-
 
 adt_calc_code = """
 void adt_calc(double *x[2], double q[4], double * adt){
@@ -109,7 +108,7 @@ void bres_calc(double *x[2], double q[4], double * adt, double res[4], int * bou
 
   ri = 1.0f/q[0];
   p1 = gm1*(q[3]-0.5f*ri*(q[1]*q[1]+q[2]*q[2]));
-  
+
   if (*bound==1) {
     res[1] += + p1*dy;
     res[2] += - p1*dx;
@@ -120,9 +119,9 @@ void bres_calc(double *x[2], double q[4], double * adt, double res[4], int * bou
     ri   = 1.0f/qinf[0];
     p2   = gm1*(qinf[3]-0.5f*ri*(qinf[1]*qinf[1]+qinf[2]*qinf[2]));
     vol2 =  ri*(qinf[1]*dy - qinf[2]*dx);
-  
+
     mu = (*adt)*eps;
-  
+
     f = 0.5f*(vol1* q[0]         + vol2* qinf[0]        ) + mu*(q[0]-qinf[0]);
     res[0] += f;
     f = 0.5f*(vol1* q[1] + p1*dy + vol2* qinf[1] + p2*dy) + mu*(q[1]-qinf[1]);
@@ -136,22 +135,22 @@ void bres_calc(double *x[2], double q[4], double * adt, double res[4], int * bou
 """
 
 update_code = """
-void update(double *qold, double *q, double *res, double *adt, double *rms){ 
+void update(double *qold, double *q, double *res, double *adt, double *rms){
   double del, adti;
 
   adti = 1.0f/(*adt);
-  
+
   for (int n=0; n<4; n++) {
     del    = adti*res[n];
     q[n]   = qold[n] - del;
     res[n] = 0.0f;
     *rms  += del*del;
-  } 
-}   
+  }
+}
 """
 
-save_soln = Kernel("save_soln", save_soln_code)
-adt_calc  = Kernel("adt_calc",  adt_calc_code)
-res_calc  = Kernel("res_calc",  res_calc_code)
-bres_calc = Kernel("bres_calc", bres_calc_code)
-update    = Kernel("update",    update_code)
+save_soln = Kernel(save_soln_code, "save_soln")
+adt_calc  = Kernel(adt_calc_code,  "adt_calc")
+res_calc  = Kernel(res_calc_code,  "res_calc")
+bres_calc = Kernel(bres_calc_code, "bres_calc")
+update    = Kernel(update_code,    "update")
