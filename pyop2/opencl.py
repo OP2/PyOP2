@@ -39,7 +39,7 @@ class OpenCL(backend.Backend):
             self._buffers[map] = buf
         pass
     
-    def handle_par_loop_call(self, kernel, it_space, *args):
+    def _handle_par_loop_call(self, parloop):
         pass
     
     def handle_datacarrier_retrieve_value(self, datacarrier):
