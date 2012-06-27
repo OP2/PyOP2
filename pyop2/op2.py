@@ -156,33 +156,35 @@ class Dat(DataCarrier):
             raise ValueError("Invalid data: expected %d values, got %d" % \
                     (dataset.size*np.prod(dim), np.asarray(data).size))
         self._name = name or "dat_%d" % Dat._globalcount
-        self._map = None
-        self._access = None
         Dat._globalcount += 1
         _op2['backend'].handle_datacarrier_declaration(self)
 
     def __call__(self, map, access):
         assert access in self._modes, \
-                "Acess descriptor must be one of %s" % self._modes
-        assert map == IdentityMap or map._dataset == self._dataset, \
+                "Access descriptor must be one of %s" % self._modes
+        if isinstance(map, Map):
+            _map = map
+            _index = None
+        else:
+            _map = map['map']
+            _index = map['index']
+        assert _map == IdentityMap or _map._dataset == self._dataset, \
                 "Invalid data set for map %s (is %s, should be %s)" \
-                % (map._name, map._dataset._name, self._dataset._name)
-        arg = copy(self)
-        arg._map = map
-        arg._access = access
+                % (_map._name, _map._dataset._name, self._dataset._name)
+        arg = {}
+        arg['dat'] = self
+        arg['map'] = _map
+        arg['index'] = _index
+        arg['access'] = access
         return arg
 
     def __str__(self):
-        call = " associated with (%s) in mode %s" % (self._map, self._access) \
-                if self._map and self._access else ""
-        return "OP2 Dat: %s on (%s) with dim %s and datatype %s%s" \
-               % (self._name, self._dataset, self._dim, self._data.dtype.name, call)
+        return "OP2 Dat: %s on (%s) with dim %s and datatype %s" \
+               % (self._name, self._dataset, self._dim, self._data.dtype.name)
 
     def __repr__(self):
-        call = "(%r, %r)" % (self._map, self._access) \
-                if self._map and self._access else ""
-        return "Dat(%r, %s, '%s', None, '%s')%s" \
-               % (self._dataset, self._dim, self._data.dtype, self._name, call)
+        return "Dat(%r, %s, '%s', None, '%s')" \
+               % (self._dataset, self._dim, self._data.dtype, self._name)
 
 class Mat(DataCarrier):
     """OP2 matrix data. A Mat is defined on the cartesian product of two Sets
@@ -197,34 +199,31 @@ class Mat(DataCarrier):
         self._dim = as_tuple(dim, int)
         self._datatype = np.dtype(datatype)
         self._name = name or "mat_%d" % Mat._globalcount
-        self._maps = None
-        self._access = None
         Mat._globalcount += 1
-        _op2['backend'].handle_kernel_declaration(self)
 
     def __call__(self, maps, access):
         assert access in self._modes, \
-                "Acess descriptor must be one of %s" % self._modes
-        for map, dataset in zip(maps, self._datasets):
+                "Access descriptor must be one of %s" % self._modes
+        _maps = [(isinstance(map, Map) and map) or map['map'] for map in maps]
+        _indices = [(not isinstance(map, Map) and map['index']) or None for map in maps]
+        for map, dataset in zip(_maps, self._datasets):
             assert map._dataset == dataset, \
                     "Invalid data set for map %s (is %s, should be %s)" \
                     % (map._name, map._dataset._name, dataset._name)
-        arg = copy(self)
-        arg._maps = maps
-        arg._access = access
+        arg = {}
+        arg['mat'] = self
+        arg['maps'] = as_tuple(_maps)
+        arg['indices'] = as_tuple(_indices)
+        arg['access'] = access
         return arg
 
     def __str__(self):
-        call = " associated with (%s, %s) in mode %s" % (self._maps[0], self._maps[1], self._access) \
-                if self._maps and self._access else ""
-        return "OP2 Mat: %s, row set (%s), col set (%s), dimension %s, datatype %s%s" \
-               % (self._name, self._datasets[0], self._datasets[1], self._dim, self._datatype.name, call)
+        return "OP2 Mat: %s, row set (%s), col set (%s), dimension %s, datatype %s" \
+               % (self._name, self._datasets[0], self._datasets[1], self._dim, self._datatype.name)
 
     def __repr__(self):
-        call = "(%r, %r)" % (self._maps, self._access) \
-                if self._maps and self._access else ""
-        return "Mat(%r, %s, '%s', '%s')%s" \
-               % (self._datasets, self._dim, self._datatype, self._name, call)
+        return "Mat(%r, %s, '%s', '%s')" \
+               % (self._datasets, self._dim, self._datatype, self._name)
 
 class Const(DataCarrier):
     """Data that is constant for any element of any set."""
@@ -264,25 +263,23 @@ class Global(DataCarrier):
         self._dim = as_tuple(dim, int)
         self._value = np.asarray(value).reshape(dim)
         self._name = name or "global_%d" % Global._globalcount
-        self._access = None
         Global._globalcount += 1
         _op2['backend'].handle_datacarrier_declaration(self)
 
     def __call__(self, access):
         assert access in self._modes, \
-                "Acess descriptor must be one of %s" % self._modes
-        arg = copy(self)
-        arg._access = access
+                "Access descriptor must be one of %s" % self._modes
+        arg = {}
+        arg['global'] = self
+        arg['access'] = access
         return arg
 
     def __str__(self):
-        call = " in mode %s" % self._access if self._access else ""
-        return "OP2 Global Argument: %s with dim %s and value %s%s" \
-                % (self._name, self._dim, self._value, call)
+        return "OP2 Global Argument: %s with dim %s and value %s" \
+                % (self._name, self._dim, self._value)
 
     def __repr__(self):
-        call = "(%r)" % self._access if self._access else ""
-        return "Global('%s', %r, %r)%s" % (self._name, self._dim, self._value, call)
+        return "Global('%s', %r, %r)%s" % (self._name, self._dim, self._value)
 
     @property
     def value(self):
@@ -308,32 +305,23 @@ class Map(object):
             raise ValueError("Invalid data: expected %d values, got %d" % \
                     (iterset.size*dim, np.asarray(values).size))
         self._name = name or "map_%d" % Map._globalcount
-        self._index = None
         Map._globalcount += 1
         _op2['backend'].handle_map_declaration(self)
 
     def __call__(self, index):
         assert isinstance(index, int), "Only integer indices are allowed"
-        return self.indexed(index)
-
-    def indexed(self, index):
-        # Check we haven't already been indexed
-        assert self._index is None, "Map has already been indexed"
-        assert 0 <= index < self._dim, \
-                "Index must be in interval [0,%d]" % (self._dim-1)
-        indexed = copy(self)
-        indexed._index = index
-        return indexed
+        arg = {}
+        arg['map'] = self
+        arg['index'] = index
+        return arg
 
     def __str__(self):
-        indexed = " and component %s" % self._index if self._index else ""
-        return "OP2 Map: %s from (%s) to (%s) with dim %s%s" \
-               % (self._name, self._iterset, self._dataset, self._dim, indexed)
+        return "OP2 Map: %s from (%s) to (%s) with dim %s" \
+               % (self._name, self._iterset, self._dataset, self._dim)
 
     def __repr__(self):
-        indexed = "(%s)" % self._index if self._index else ""
-        return "Map(%r, %r, %s, None, '%s')%s" \
-               % (self._iterset, self._dataset, self._dim, self._name, indexed)
+        return "Map(%r, %r, %s, None, '%s')" \
+               % (self._iterset, self._dataset, self._dim, self._name)
 
 # Parallel loop API
 
