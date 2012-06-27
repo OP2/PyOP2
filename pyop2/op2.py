@@ -342,7 +342,7 @@ def par_loop(self, kernel, it_space, *args):
     _op2['backend'].handle_par_loop_call(kernel, it_space, *args)
     pass
 
-def init(config):
+def init(config={}):
     #TODO: make backend selector code
     _op2['backend'] = backend.VoidBackend()
     IdentityMap = Map(Set(0), Set(0), 1, [], 'identity')

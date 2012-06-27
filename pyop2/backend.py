@@ -8,11 +8,13 @@ class ParLoopCall(object):
         assert ParLoopCall.check(kernel, it_space, *args)
         self._kernel = kernel
         self._it_space = it_space
-        self._args = *args
+        self._args = args
         pass
 
+    @staticmethod
     def check(kernel, it_space, *args):
-        return false
+        #TODO
+        return True
 
 class Backend(object):
     """
@@ -31,7 +33,7 @@ class Backend(object):
         raise NotImplemented()    
 
     def handle_par_loop_call(self, kernel, it_space, *args):
-        self._handle_par_loop_call(ParLoopCall(kernel, it_space, *args)
+        self._handle_par_loop_call(ParLoopCall(kernel, it_space, args))
 
     def _handle_par_loop_call(self, parloop):
         raise NotImplemented()
