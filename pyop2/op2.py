@@ -200,7 +200,6 @@ class Mat(DataCarrier):
         self._maps = None
         self._access = None
         Mat._globalcount += 1
-        _op2['backend'].handle_kernel_declaration(self)
 
     def __call__(self, maps, access):
         assert access in self._modes, \
