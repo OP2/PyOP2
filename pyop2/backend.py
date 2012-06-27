@@ -8,7 +8,7 @@ class Backend(object):
         raise NotImplemented()
 
     def handle_kernel_declaration(self, kernel):
-        raise NotIMplemented()
+        raise NotImplemented()
     
     def handle_datacarrier_declaration(self, datacarrier):
         raise NotImplemented()
