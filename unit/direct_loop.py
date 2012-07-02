@@ -6,8 +6,8 @@ from pyop2 import op2
 op2.init(backend='opencl')
 
 #max...
-#nelems = 92681
-nelems = 200
+nelems = 92681
+
 
 class DirectLoopTest(unittest.TestCase):
     """
