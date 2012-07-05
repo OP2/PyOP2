@@ -1,4 +1,5 @@
 import sequential as op2
+from sequential import IdentityMap, READ, WRITE, RW, INC, MIN, MAX
 import pyopencl as cl
 import pkg_resources
 import stringtemplate3
