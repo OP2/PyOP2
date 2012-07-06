@@ -87,7 +87,7 @@ class Const(op2.Const, DeviceDataMixin):
 
     def __init__(self, dim, data=None, dtype=None, name=None):
         op2.Const.__init__(self, dim, data, dtype, name)
-        raise NotImplementedError('Matrix data is unsupported yet')
+        raise NotImplementedError('Const data is unsupported yet')
 
 class Global(op2.Global, DeviceDataMixin):
 
