@@ -72,13 +72,12 @@ class IndirectLoopTest(unittest.TestCase):
         op2.par_loop(op2.Kernel(kernel_inc, "kernel_inc"), iterset, u(iterset2unit(0), op2.INC))
         self.assertEqual(u.data[0], nelems)
 
-    @unittest.skip("Not implemented yet")
     def test_global_inc(self):
         iterset = op2.Set(nelems, "iterset")
         indset = op2.Set(nelems, "indset")
 
         x = op2.Dat(indset, 1, numpy.array(range(nelems), dtype=numpy.uint32), numpy.uint32, "x")
-        g = op2.Global(1, 0, numpy.uint32)
+        g = op2.Global(1, 0, numpy.uint32, "g")
 
         u_map = numpy.array(range(nelems), dtype=numpy.uint32)
         random.shuffle(u_map)
