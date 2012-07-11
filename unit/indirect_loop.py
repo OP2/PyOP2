@@ -56,6 +56,23 @@ class IndirectLoopTest(unittest.TestCase):
         op2.par_loop(op2.Kernel(kernel_rw, "kernel_rw"), iterset, x(iterset2indset(0), op2.RW))
         self.assertTrue(sum(x.data) == nelems * (nelems + 1) / 2);
 
+    def test_indirect_inc(self):
+        iterset = op2.Set(nelems, "iterset")
+        unitset = op2.Set(1, "unitset")
+
+        u = op2.Dat(unitset, 1, numpy.array([0], dtype=numpy.uint32), numpy.uint32, "u")
+
+        u_map = numpy.zeros(nelems, dtype=numpy.uint32)
+        iterset2unit = op2.Map(iterset, unitset, 1, u_map, "iterset2unitset")
+
+        # temporary fix until we have the user kernel instrumentation code
+        kernel_inc = "void kernel_inc(__private unsigned int* x) { (*x) = (*x) + 1; }\n"
+        #kernel_inc = "void kernel_inc(unsigned int* x) { (*x) = (*x) + 1; }\n"
+
+        op2.par_loop(op2.Kernel(kernel_inc, "kernel_inc"), iterset, u(iterset2unit(0), op2.INC))
+        self.assertEqual(u.data[0], nelems)
+
+    @unittest.skip("Not implemented yet")
     def test_onecolor_global_inc(self):
         iterset = op2.Set(nelems, "iterset")
         indset = op2.Set(nelems, "indset")
