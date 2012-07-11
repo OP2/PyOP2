@@ -57,7 +57,7 @@ void $parloop._kernel._name$_stub (
 reduction_kernel()::=<<
 __kernel
 void $it._dat._name$_reduction_kernel (
-  __global $it._dat._cl_type$* volatile reduction_result,
+  __global $it._dat._cl_type$* reduction_result,
   __private $it._dat._cl_type$ input_value,
   __local $it._dat._cl_type$* reduction_tmp_array
 )
