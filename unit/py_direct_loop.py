@@ -8,30 +8,30 @@ op2.init(backend='opencl', diags=0)
 #max...
 nelems = 92681
 
-@py2c.kernel_types("unsigned int * -> void")
+@py2c.kernel_types({"x" : "uint"})
 def kernel_wo(x):
     x = 42
 
-@py2c.kernel_types("unsigned int* -> void")
+@py2c.kernel_types({"x" : "uint"})
 def kernel_rw(x):
     x += 1
 
-@py2c.kernel_types("unsigned int* -> unsigned int* -> void")
+@py2c.kernel_types({"x" : "uint", "inc" : "uint"})
 def kernel_global_inc(x, inc):
     x += 1
     inc += x
 
-@py2c.kernel_types("unsigned int* -> unsigned int* -> unsigned int* -> void")
+@py2c.kernel_types({"x" : "uint", "y" : "uint", "inc" : "uint"})
 def kernel_ro_wo_global_inc(x, y, inc):
     y = x + 1
     inc += y
 
-@py2c.kernel_types("unsigned int[] -> unsigned int* -> unsigned int* -> void")
+@py2c.kernel_types({"x" : "uint[]", "y" : "uint", "inc" : "uint"})
 def kernel_multidim(x, y, inc):
     y = (x[0] + x[1]) / 2
     inc += y;
 
-@py2c.kernel_types("unsigned int[] -> unsigned int* -> unsigned int* -> unsigned int[] -> void")
+@py2c.kernel_types({"x" : "uint[]", "y" : "uint", "z" : "uint", "inc" : "uint[]"})
 def kernel_multidim_global_inc(x, y, z, inc):
     y = x[0];
     z = x[1];
