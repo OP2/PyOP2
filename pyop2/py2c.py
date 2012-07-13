@@ -62,9 +62,30 @@ class PythonToCConverter(ast.NodeVisitor):
             return "(int)(" + self.visit(node.args[0]) + ")"
         assert False
 
+    def visit_If(self, node):
+        assert isinstance(node, ast.If)
+
+        code = ("if(" + self.visit(node.test) + ") {"
+                + "\n".join(map(self.visit, node.body))
+                + "}")
+
+        if len(node.orelse) > 0:
+            code += "else " + " else ".join(map(self.visit, node.orelse))
+
+        return code
+
+    def visit_Compare(self, node):
+        assert isinstance(node, ast.Compare)
+        assert len(node.comparators) == 1
+        assert len(node.ops) == 1
+
+        return (self.visit(node.left)
+                + self.getOp(node.ops[0])
+                + self.visit(node.comparators[0]));
+
     def visit_For(self, node):
         assert isinstance(node.iter, ast.Call)
-        assert node.iter.func.id == "range"
+        assert node.iter.func.id == "range" or node.iter.func.id == "xrange"
 
         args = node.iter.args
         assert len(args) > 0 and len(args) <= 3
@@ -91,6 +112,13 @@ class PythonToCConverter(ast.NodeVisitor):
                 + "\n".join(map(self.visit, node.body))
                 + "}")
 
+    def visit_While(self, node):
+        assert isinstance(node, ast.While)
+        assert len(node.orelse) == 0
+        return ("while(" + self.visit(node.test) + ") {"
+                + "\n".join(map(self.visit, node.body))
+                + "}")
+
     def visit_Return(self, node):
         return "return " + (node.value.id if node.value.id != "None" else "") + ";"
 
@@ -105,8 +133,16 @@ class PythonToCConverter(ast.NodeVisitor):
         return str(node.n)
 
     def visit_Name(self, node):
+        if(node.id == "True"):
+            return "true"
+        if(node.id == "False"):
+            return "false"
+
         assert node.id in self.symtable
         return ("*" if self.symtable[node.id][-1] == "*" else "") + node.id
+
+    def visit_Break(self, node):
+        return "break;"
 
     def visit_BinOp(self, node):
         return self.visit(node.left) + self.getOp(node.op) + self.visit(node.right)
@@ -123,6 +159,14 @@ class PythonToCConverter(ast.NodeVisitor):
             return "*"
         if(isinstance(op, ast.Div)):
             return "/"
+        if(isinstance(op, ast.Gt)):
+            return ">"
+        if(isinstance(op, ast.GtE)):
+            return ">="
+        if(isinstance(op, ast.Lt)):
+            return "<"
+        if(isinstance(op, ast.LtE)):
+            return "<="
         assert False
 
 class SymbolTableGenerator(ast.NodeVisitor):
@@ -221,13 +265,39 @@ class SymbolTableGenerator(ast.NodeVisitor):
         assert len(symtable[var]) >= 1, "Could not deduce type of " + var
         return symtable
 
+    def visit_If(self, node, symtable):
+        assert isinstance(node, ast.If)
+        assert len(self.visit(node.test, symtable)) > 0
+
+        symtable = reduce(lambda symtable, node: self.visit(node, symtable), node.body, symtable)
+        symtable = reduce(lambda symtable, node: self.visit(node, symtable), node.orelse, symtable)
+        return symtable
+
+    def visit_Compare(self, node, symtable):
+        assert isinstance(node, ast.Compare)
+        assert len(node.comparators) == 1
+
+        left = self.visit(node.left, symtable)
+        right = self.visit(node.comparators[0], symtable)
+        assert len(intersect(left, right)) > 0
+        return symtable
+
     def visit_For(self, node, symtable):
         assert isinstance(node, ast.For)
         assert isinstance(node.iter, ast.Call)
+        assert isinstance(node.iter.func, ast.Name)
+        assert node.iter.func.id == "range" or node.iter.func.id == "xrange"
         assert len(node.orelse) == 0
         assert isinstance(node.target, ast.Name)
 
         symtable[node.target.id] = ["int"]
+        map(lambda x: self.visit(x, symtable), node.iter.args)
+        return reduce(lambda symtable, node: self.visit(node, symtable), node.body, symtable)
+
+    def visit_While(self, node, symtable):
+        assert isinstance(node, ast.While)
+        assert len(node.orelse) == 0
+        self.visit(node.test, symtable)
         return reduce(lambda symtable, node: self.visit(node, symtable), node.body, symtable)
 
     def visit_Subscript(self, node, symtable):
@@ -240,15 +310,32 @@ class SymbolTableGenerator(ast.NodeVisitor):
 
         return map(lambda x: x[0:-2], intersect(symtable[var], self.arraytypes))
 
+    def visit_Call(self, node, symtable):
+        assert isinstance(node, ast.Call)
+        assert isinstance(node.func, ast.Name)
+
+        if node.func.id == "float":
+            return ["float"]
+        if node.func.id == "int":
+            return ["int"]
+        assert False, "Unknown function: " + node.func.id
+
     def visit_Return(self, node, symtable):
         assert isinstance(node, ast.Return)
         assert isinstance(node.value, ast.Name)
         assert node.value.id == "None"
         return symtable
 
+    def visit_Break(self, node, symtable):
+        assert isinstance(node, ast.Break)
+        return symtable
+
     def visit_Name(self, node, symtable):
         assert isinstance(node, ast.Name)
-        assert node.id in symtable
+        assert node.id in symtable or node.id == "True" or node.id == "False"
+
+        if node.id == "True" or node.id == "False":
+            return ["int"]
 
         return symtable[node.id]
 
