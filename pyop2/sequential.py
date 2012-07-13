@@ -20,6 +20,7 @@
 
 import numpy as np
 import op_lib_core as core
+import py2c
 
 def as_tuple(item, type=None, length=None):
     # Empty list if we get passed None
@@ -85,7 +86,12 @@ class Kernel(object):
     def __init__(self, code, name=None):
         assert not name or isinstance(name, str), "Name must be of type str"
         self._name = name or "kernel_%d" % Kernel._globalcount
-        self._code = code
+
+        if isinstance(code, str):
+            self._code = code
+        else:
+            self._code = py2c.convert(code)
+
         Kernel._globalcount += 1
 
     def compile(self):
