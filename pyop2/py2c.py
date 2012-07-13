@@ -7,7 +7,7 @@ import ast
 def kernel_types(types):
     def decorator(f):
         def __py2c_kernel__(*args):
-            return (types, meta.decompile_func(f))
+            return (types, meta.decompile_func(f), ModifyForPython(f).convert())
         return __py2c_kernel__
     return decorator
 
@@ -167,7 +167,9 @@ class PythonToCConverter(ast.NodeVisitor):
             return "<"
         if(isinstance(op, ast.LtE)):
             return "<="
-        assert False
+        if(isinstance(op, ast.Mod)):
+            return "%"
+        assert False, "Unknown op: " + str(type(op))
 
 class SymbolTableGenerator(ast.NodeVisitor):
     def __init__(self, func):
@@ -178,7 +180,7 @@ class SymbolTableGenerator(ast.NodeVisitor):
 
     def generate(self):
         assert self.func.__name__ == "__py2c_kernel__"
-        types, ast = self.func()
+        types, ast, _ = self.func()
 
         #TODO: Remove ugly hack when kernels automatically select the appropriate address space
         symtable = {}
@@ -362,3 +364,31 @@ class SymbolTableGenerator(ast.NodeVisitor):
 
 def intersect(a, b):
     return list(set(a) & set(b))
+
+class ModifyForPython(ast.NodeTransformer):
+    def __init__(self, func):
+        self.func = func
+        self.args = None
+
+    def convert(self):
+        node = meta.decompile_func(self.func)
+        node = self.visit(node)
+        mod = ast.Module([node])
+        locs = dict()
+        eval(compile(mod, "<unknown>", "exec"), None, locs)
+        assert(len(locs) == 1)
+        return locs.items()[0][1]
+
+    def visit_FunctionDef(self, node):
+        self.args = node.args
+        self.generic_visit(node)
+        return node
+
+    def visit_Return(self, node):
+        args = []
+        for arg in self.args.args:
+            args += [ast.Name(ctx=ast.Load(), id=arg.id)]
+
+        node = ast.copy_location(ast.Return(value=ast.Tuple(ctx=ast.Load(), elts=args)), node)
+        ast.fix_missing_locations(node)
+        return node
