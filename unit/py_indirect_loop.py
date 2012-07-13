@@ -24,7 +24,7 @@ def kernel_rw(x):
 def kernel_inc(x):
     x = x + 1
 
-@py2c.kernel_types({"x": "__local uint", "inc" : "__private uint"})
+@py2c.kernel_types({"x" : "__local uint", "inc" : "__private uint"})
 def kernel_global_inc(x, inc):
     x += 1
     inc += x

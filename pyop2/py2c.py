@@ -35,7 +35,6 @@ class PythonToCConverter(ast.NodeVisitor):
 
             params += [[arg.id, argType]]
 
-
         func = "void " + funcDef.name + "("
         func += reduce(lambda acc, name: acc + (", " if acc != "" else "") + name[1] + " " + name[0], params, "")
         return func + ")"
@@ -44,10 +43,16 @@ class PythonToCConverter(ast.NodeVisitor):
         return self.visit(self.func()[1])
 
     def visit_FunctionDef(self, node):
-        return (self.parseFuncDef(node)
-                + " {"
-                + "\n".join(map(self.visit, node.body))
-                + "}")
+        func = self.parseFuncDef(node) + " {\n"
+
+        for name, argtype in self.symtable.items():
+            if any(map(lambda x: x.id == name, node.args.args)):
+                continue
+            func += argtype + " " + name + ";\n"
+
+        func += "\n".join(map(self.visit, node.body))
+        func += "}"
+        return func
 
     def visit_Call(self, node):
         assert len(node.args) == 1
