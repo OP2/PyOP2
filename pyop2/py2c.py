@@ -69,27 +69,23 @@ class PythonToCConverter(ast.NodeVisitor):
         args = node.iter.args
         assert len(args) > 0 and len(args) <= 3
 
-        start = 0
-        step = 1
+        start = "0"
+        step = "1"
 
         if(len(args) == 1):
-            end = args[0].n
+            end = self.visit(args[0])
         else:
-            end = args[1].n
+            end = self.visit(args[1])
 
         if(len(args) >= 2):
-            start = args[0].n
+            start = self.visit(args[0])
         if(len(args) == 3):
-            step = args[2].n
-
-        end = str(end)
-        start = str(start)
-        step = str(step)
+            step = self.visit(args[2])
 
         var = node.target.id
 
         return ("for(" + var + " = " + start + ";"
-                + var + (" < " if int(step) >= 0 else " > ") + end + ";"
+                + step + " >= 0 ? " + var + " < " + end + " : " + var + " > " + end + ";"
                 + var + " += " + step + ")"
                 + " {"
                 + "\n".join(map(self.visit, node.body))
