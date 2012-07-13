@@ -63,36 +63,37 @@ class PythonToCConverter(ast.NodeVisitor):
         assert False
 
     def visit_For(self, node):
-        if(isinstance(node.iter, ast.Call) and node.iter.func.id == "range"):
-            args = node.iter.args
-            assert len(args) > 0 and len(args) <= 3
+        assert isinstance(node.iter, ast.Call)
+        assert node.iter.func.id == "range"
 
-            start = 0
-            step = 1
+        args = node.iter.args
+        assert len(args) > 0 and len(args) <= 3
 
-            if(len(args) == 1):
-                end = args[0].n
-            else:
-                end = args[1].n
+        start = 0
+        step = 1
 
-            if(len(args) >= 2):
-                start = args[0].n
-            if(len(args) == 3):
-                step = args[2].n
+        if(len(args) == 1):
+            end = args[0].n
+        else:
+            end = args[1].n
 
-            end = str(end)
-            start = str(start)
-            step = str(step)
+        if(len(args) >= 2):
+            start = args[0].n
+        if(len(args) == 3):
+            step = args[2].n
 
-            var = node.target.id
-            varType = self.symtable[var]
+        end = str(end)
+        start = str(start)
+        step = str(step)
 
-            return ("for(" + varType + " " + var + " = " + start + ";"
-                    + var + (" < " if int(step) >= 0 else " > ") + end + ";"
-                    + var + " += " + step + ")"
-                    + " {"
-                    + "\n".join(map(self.visit, node.body))
-                    + "}")
+        var = node.target.id
+
+        return ("for(" + var + " = " + start + ";"
+                + var + (" < " if int(step) >= 0 else " > ") + end + ";"
+                + var + " += " + step + ")"
+                + " {"
+                + "\n".join(map(self.visit, node.body))
+                + "}")
 
     def visit_Return(self, node):
         return "return " + (node.value.id if node.value.id != "None" else "") + ";"
@@ -223,6 +224,15 @@ class SymbolTableGenerator(ast.NodeVisitor):
         symtable[var] = intersect(symtable[var], valueTypes)
         assert len(symtable[var]) >= 1, "Could not deduce type of " + var
         return symtable
+
+    def visit_For(self, node, symtable):
+        assert isinstance(node, ast.For)
+        assert isinstance(node.iter, ast.Call)
+        assert len(node.orelse) == 0
+        assert isinstance(node.target, ast.Name)
+
+        symtable[node.target.id] = ["int"]
+        return reduce(lambda symtable, node: self.visit(node, symtable), node.body, symtable)
 
     def visit_Subscript(self, node, symtable):
         assert isinstance(node, ast.Subscript)
