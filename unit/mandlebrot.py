@@ -5,12 +5,16 @@ from pyop2 import op2, py2c
 # Initialise OP2
 op2.init(backend='opencl', diags=0)
 
-@py2c.kernel_types({"idx" : "uint"})
+@py2c.pykernel(["idx"],
+               {"bailout, max_iterations, i" : "uint",
+                "x, y" : "int",
+                "idx" : "uint*",
+                "cr, ci, zi, zr, zi2, zr2, temp" : "float"})
 def mandlebrot(idx):
     bailout = 16
     max_iterations = 8
-    x = idx % 120 - 60
-    y = idx / 120 - 60
+    x = idx[0] % 120 - 60
+    y = idx[0] / 120 - 60
     cr = float(y)/40.0 - 0.5
     ci = float(x)/40.0
     zi = 0.0
@@ -23,10 +27,10 @@ def mandlebrot(idx):
         zr = zr2 - zi2 + cr
         zi = temp + temp + ci
         if zi2 + zr2 > bailout:
-            idx = i
+            idx[0] = i
             return
         elif i > max_iterations:
-            idx = i
+            idx[0] = i
             return
         i += 1
 
@@ -50,14 +54,23 @@ class MandlebrotTest(unittest.TestCase):
         s = ""
         i = 0
 
-        f = mandlebrot()[2]
+        f = mandlebrot[3]
         for i in range(len(x.data)):
-            val = f(i)[0]
-            s += ("\033[%d;%dm%s\033[0m" % (val // 8, 30 + (val % 8), str(val)))
+            #Print out new lines every 120 chars
             if i > 0 and i % 120 == 0:
                 print s
                 s = ""
-            assert(int(x.data[i][0]) == val)
+
+            #Run the function in python
+            val = [i]
+            f(val)
+
+            #Append to the string
+            s += ("\033[%d;%dm%s\033[0m" % (val[0] // 8, 30 + (val[0] % 8), str(val[0])))
+
+            #Check that opencl matches python
+            #NOTE: Uses floating point so maybe a few errors sometimes???
+            assert(int(x.data[i][0]) == val[0])
 
 suite = unittest.TestLoader().loadTestsFromTestCase(MandlebrotTest)
 unittest.TextTestRunner(verbosity=0).run(suite)

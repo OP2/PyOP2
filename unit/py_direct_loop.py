@@ -8,35 +8,41 @@ op2.init(backend='opencl', diags=0)
 #max...
 nelems = 92681
 
-@py2c.kernel_types({"x" : "uint"})
+@py2c.pykernel(["x"],
+               {"x" : "uint*"})
 def kernel_wo(x):
-    x = 42
+    x[0] = 42
 
-@py2c.kernel_types({"x" : "uint"})
+@py2c.pykernel(["x"],
+               {"x" : "uint*"})
 def kernel_rw(x):
-    x += 1
+    x[0] += 1
 
-@py2c.kernel_types({"x" : "uint", "inc" : "uint"})
+@py2c.pykernel(["x", "inc"],
+               {"x, inc" : "uint*"})
 def kernel_global_inc(x, inc):
-    x += 1
-    inc += x
+    x[0] += 1
+    inc[0] += x[0]
 
-@py2c.kernel_types({"x" : "uint", "y" : "uint", "inc" : "uint"})
+@py2c.pykernel(["x", "y", "inc"],
+               {"x, y, inc" : "uint*"})
 def kernel_ro_wo_global_inc(x, y, inc):
-    y = x + 1
-    inc += y
+    y[0] = x[0] + 1
+    inc[0] += y[0]
 
-@py2c.kernel_types({"x" : "uint[]", "y" : "uint", "inc" : "uint"})
+@py2c.pykernel(["x", "y", "inc"],
+               {"x, y, inc" : "uint*"})
 def kernel_multidim(x, y, inc):
-    y = (x[0] + x[1]) / 2
-    inc += y;
+    y[0] = (x[0] + x[1]) / 2
+    inc[0] += y[0];
 
-@py2c.kernel_types({"x" : "uint[]", "y" : "uint", "z" : "uint", "inc" : "uint[]"})
+@py2c.pykernel(["x", "y", "z", "inc"],
+               {"x, y, z, inc" : "uint*"})
 def kernel_multidim_global_inc(x, y, z, inc):
-    y = x[0];
-    z = x[1];
-    inc[0] += y;
-    inc[1] += z;
+    y[0] = x[0];
+    z[0] = x[1];
+    inc[0] += y[0];
+    inc[1] += z[0];
 
 
 class DirectLoopTest(unittest.TestCase):

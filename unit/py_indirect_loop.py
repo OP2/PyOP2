@@ -12,22 +12,27 @@ def _seed():
 #max...
 nelems = 92681
 
-@py2c.kernel_types({"x" : "__local uint"})
+@py2c.pykernel(["x"],
+               {"x" : "__local uint*"})
 def kernel_wo(x):
-    x = 42
+    x[0] = 42
 
-@py2c.kernel_types({"x" : "__local uint"})
+@py2c.pykernel(["x"],
+               {"x" : "__local uint*"})
 def kernel_rw(x):
-    x += 1
+    x[0] += 1
 
-@py2c.kernel_types({"x" : "__private uint"})
+@py2c.pykernel(["x"],
+               {"x" : "__private uint*"})
 def kernel_inc(x):
-    x = x + 1
+    x[0] = x[0] + 1
 
-@py2c.kernel_types({"x" : "__local uint", "inc" : "__private uint"})
+@py2c.pykernel(["x", "inc"],
+               {"x" : "__local uint*",
+                "inc" : "__private uint*"})
 def kernel_global_inc(x, inc):
-    x += 1
-    inc += x
+    x[0] += 1
+    inc[0] += x[0]
 
 class IndirectLoopTest(unittest.TestCase):
     """
