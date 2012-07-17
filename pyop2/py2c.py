@@ -724,13 +724,69 @@ class Walker(GenericASTTraversal, object):
             if n == "call_function" and len(n) == 3:
                if n[0] == "expr" and n[2] == "CALL_FUNCTION_1":
                    if n[0].data[0] == "LOAD_GLOBAL":
-                       if n[0].data[0].pattr == "float" or n[0].data[0].pattr == "int":
+                       typemods = ["float", "int", "double"]
+                       if n[0].data[0].pattr in typemods:
                            self.write("(%s)" % n[0].data[0].pattr)
                            n[0].data[0].pattr = ""
             if n == "LOAD_GLOBAL" and (n.pattr == "True" or n.pattr == "False"):
                 n.pattr = n.pattr.lower()
             self.preorder(node[0])
         self.prec = p
+        self.prune()
+
+    def n_forstmt(self, node):
+        assert node[1] == "expr" and node[1][0] == "call_function" and node[1][0][0] == "expr" and node[1][0][0][0] == "LOAD_GLOBAL" and node[1][0][0][0].pattr == "range", "Only range is supported in for statements"
+
+        args = len(node[1][0]) - 2
+        assert args >= 1 and args <= 3, "Wrong amount of arguments to for loop range"
+
+        step = None
+        start = None
+        if args == 1:
+            end = node[1][0][1]
+        else:
+            start = node[1][0][1]
+            end   = node[1][0][2]
+            if args == 3:
+                step = node[1][0][3]
+
+        self.write("for(")
+        self.preorder(node[3])
+        if start is None:
+            self.write(" = 0")
+        else:
+            self.write(" = ")
+            self.preorder(start)
+
+        self.write("; ")
+
+        if step is None:
+            self.preorder(node[3])
+            self.write(" < ")
+            self.preorder(end)
+            self.write("; ")
+            self.preorder(node[3])
+            self.write(" += 1")
+        else:
+            self.write("(")
+            self.preorder(step)
+            self.write(" >= 0) ? ")
+            self.preorder(node[3])
+            self.write(" < ")
+            self.preorder(end)
+            self.write(" : ")
+            self.preorder(node[3])
+            self.write(" > ")
+            self.preorder(end)
+            self.write("; ")
+            self.preorder(node[3])
+            self.write(" += ")
+            self.preorder(step)
+        self.write(") {\n")
+        self.indentMore()
+        self.preorder(node[4])
+        self.indentLess()
+        self.write("}")
         self.prune()
 
     def n_binary_expr(self, node):
@@ -742,6 +798,11 @@ class Walker(GenericASTTraversal, object):
         self.preorder(node[1])
         self.prec += 1
         self.prune()
+
+    def n_compare(self, node):
+        if(node[2].pattr == "is"):
+            node[2].pattr = "=="
+        self.default(node)
 
     def n_LOAD_CONST(self, node):
         data = node.pattr; datatype = type(data)
