@@ -23,8 +23,8 @@ import numpy as np
 from exceptions import *
 from utils import *
 import runtime_base
-from runtime_base import READ, WRITE, RW, INC, MIN, MAX, IterationSpace,\
-                         DataCarrier, IterationIndex, i, IdentityMap, Kernel
+from runtime_base import READ, WRITE, RW, INC, MIN, MAX, IterationSpace, Set, Map,\
+                         DataCarrier, IterationIndex, i, IdentityMap, Kernel, Sparsity
 
 class LazyComputation(object):
     """Interface for lazy computation."""
@@ -71,11 +71,32 @@ class Const(runtime_base.Const):
         _force(set([self]), set())
         return self._data
 
+    class Dummy(LazyComputation):
+        def __init__(self, cst, value):
+            self._cst = cst
+            self._value = value
+            self._reads = set()
+            self._writes = set([self._cst])
+
+        def reads(self):
+            return self._reads
+
+        def writes(self):
+            return self._writes
+
+        def _compute(self):
+            self._cst._data_setter(self._value)
+
+        @property
+        def dotname(self):
+            return self._cst._name + '_write_' + str(hash(self))
+
     @data.setter
     def data(self, value):
-        _force(set(), set([self]))
-        self._data = verify_reshape(value, self.dtype, self.dim)
+        _trace.append(Const.Dummy(self, value))
 
+    def _data_setter(self, value):
+        self._data = verify_reshape(value, self.dtype, self.dim)
 
 
 class Global(runtime_base.Global):
@@ -225,10 +246,6 @@ def _trace2dag(tr):
         r = read_info[dat]
         del read_info[dat]
         return r
-
-    #def reduce_reads():
-    #    for d, conts in read_info.iteritems():
-    #        read_info[d] = [c for c in conts if c.ancestors.isdisjoint(conts)]
 
     def set_write(dat, pl):
         write_info[dat] = pl

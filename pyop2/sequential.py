@@ -34,11 +34,16 @@
 """OP2 sequential backend."""
 
 import numpy as np
+import os
 
+from exceptions import *
 import op_lib_core as core
-from pyop2.utils import OP2_INC, OP2_LIB
-from lazy import READ, WRITE, RW, INC, MIN, MAX,\
-                 Mat, Global, IdentityMap, IterationSpace, Kernel
+from pyop2.exceptions import MatTypeError, DatTypeError
+from pyop2.utils import OP2_INC, OP2_LIB, validate_type, as_tuple
+import lazy
+from lazy import READ, WRITE, RW, INC, MIN, MAX, IdentityMap,\
+                 IterationSpace, Kernel,\
+                 Set, Dat, Mat, Global, Const, Map, Sparsity
 
 
 class ParLoop(lazy.ParLoop):
