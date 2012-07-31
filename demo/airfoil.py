@@ -72,6 +72,8 @@ with h5py.File('new_grid.h5', 'r') as file:
     alpha = op2.Const.fromhdf5(file, "alpha")
     qinf  = op2.Const.fromhdf5(file, "qinf")
 
+rms = op2.Global(1, 0.0, np.double, "rms")
+
 # Main time-marching loop
 
 niter = 1000
@@ -115,7 +117,7 @@ for i in range(1, niter+1):
                      p_bound(op2.IdentityMap, op2.READ))
 
         # Update flow field
-        rms = op2.Global(1, 0.0, np.double, "rms")
+        rms.data = [0.0]
         op2.par_loop(update, cells,
                      p_qold(op2.IdentityMap, op2.READ),
                      p_q   (op2.IdentityMap, op2.WRITE),
@@ -124,5 +126,4 @@ for i in range(1, niter+1):
                      rms(op2.INC))
     # Print iteration history
     if i%100 == 0:
-        rms = sqrt(rms.data/cells.size)
-        print " %d  %10.5e " % (i, rms)
+        print " %d  %10.5e " % (i, sqrt(rms.data/cells.size))
