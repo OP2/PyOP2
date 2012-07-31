@@ -148,6 +148,7 @@ def _depends_on(rreads, rwrites, creads, cwrites):
 def _force(reads, writes):
     global _trace
 
+
     for cont in reversed(_trace):
         if _depends_on(reads, writes, cont.reads(), cont.writes()):
             cont._evaluate = True
@@ -170,6 +171,7 @@ class _Node(object):
         self._cont = cont
         self.parents = set()
         self.children = set()
+        self._descendants = None
 
     @property
     def ancestors(self):
@@ -181,11 +183,12 @@ class _Node(object):
 
     @property
     def descendants(self):
-        des = set()
-        des.update(self.children)
-        for p in self.children:
-            des.update(p.descendants)
-        return des
+        if not self._descendants:
+            self._descendants = set()
+            self._descendants.update(self.children)
+            for p in self.children:
+                self._descendants.update(p.descendants)
+        return self._descendants
 
     @property
     def dotname(self):
@@ -200,6 +203,10 @@ class _FakeNode(_Node):
     def dotname(self):
         return self._name
 
+    @property
+    def descendants(self):
+        return set()
+
 def _trace2dag(tr):
     bottom = _FakeNode("bottom")
     top = _FakeNode("top")
@@ -209,19 +216,19 @@ def _trace2dag(tr):
 
     def add_read(dat, pl):
         if not read_info.has_key(dat):
-            read_info[dat] = set()
-        read_info[dat].add(pl)
+            read_info[dat] = list()
+        read_info[dat].append(pl)
 
     def get_reads(dat):
         if not read_info.has_key(dat):
-            read_info[dat] = set()
+            read_info[dat] = list()
         r = read_info[dat]
         del read_info[dat]
         return r
 
-    def reduce_reads():
-        for d, conts in read_info.iteritems():
-            read_info[d] = set(c for c in conts if c.ancestors.isdisjoint(conts))
+    #def reduce_reads():
+    #    for d, conts in read_info.iteritems():
+    #        read_info[d] = [c for c in conts if c.ancestors.isdisjoint(conts)]
 
     def set_write(dat, pl):
         write_info[dat] = pl
@@ -251,13 +258,14 @@ def _trace2dag(tr):
             set_write(d, nodes[i])
             add_read(d, nodes[i])
 
-        for c in filter(lambda d: d.ancestors.isdisjoint(newdescendants), newdescendants):
+        ndes = newdescendants.copy()
+        for c in newdescendants:
+            ndes.difference_update(c.descendants)
+
+        for c in ndes:
             #print nodes[i].dotname + ' -> ' + c.dotname
             c.parents.add(nodes[i])
             nodes[i].children.add(c)
-
-        if i % 10:
-            reduce_reads()
 
     for c in nodes:
         if not c.parents:
