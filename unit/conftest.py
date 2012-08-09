@@ -104,10 +104,20 @@ def pytest_generate_tests(metafunc):
         # Restrict to set of backends specified on the class level
         if hasattr(metafunc.cls, 'backends'):
             backend = backend.intersection(set(metafunc.cls.backends))
+
+        selected_backends = backend.difference(skip_backends)
         # If there are no selected backends left, skip the test
-        if not backend.difference(skip_backends):
+        if not selected_backends:
             pytest.skip()
-        metafunc.parametrize("backend", (b for b in backend if not b in skip_backends), indirect=True)
+        # Otherwise, parametrize the backend
+        metafunc.parametrize("backend", selected_backends, indirect=True)
+
+        # If we only run OpenCL, run for all possible devices
+        # Requires tests methods to take the ctx_factory, device or platform
+        # arguments, see http://documen.tician.de/pyopencl/tools.html#testing
+        if selected_backends == set(['opencl']):
+            from pyopencl.tools import pytest_generate_tests_for_pyopencl
+            pytest_generate_tests_for_pyopencl(metafunc)
 
 def op2_init(backend):
     # We need to clean up the previous backend first, because the teardown
