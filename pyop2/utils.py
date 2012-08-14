@@ -68,7 +68,7 @@ class validate_base:
 
     def __init__(self, *checks):
         self._checks = checks
-        
+
     def __call__(self, f):
         def wrapper(f, *args, **kwargs):
             self.nargs = f.func_code.co_argcount
