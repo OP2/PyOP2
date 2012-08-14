@@ -43,7 +43,11 @@ from pyop2.utils import OP2_INC, OP2_LIB
 # Data API
 
 class Access(object):
-    """OP2 access type."""
+    """OP2 access type. In an :py:class:`Arg`, this describes how the :py:class:`DataCarrier` will be accessed.
+
+    Permissable values are:
+    "READ", "WRITE", "RW", "INC", "MIN", "MAX"
+"""
 
     _modes = ["READ", "WRITE", "RW", "INC", "MIN", "MAX"]
 
@@ -67,6 +71,10 @@ MAX   = Access("MAX")
 # Data API
 
 class Arg(object):
+    """An argument to a :func:`par_loop`.
+
+    .. warning:: User code should not directly instantiate Arg. Instead, use the call syntax on the :class:`DataCarrier`.
+    """
     def __init__(self, data=None, map=None, idx=None, access=None):
         self._dat = data
         self._map = map
@@ -83,7 +91,7 @@ class Arg(object):
 
     @property
     def data(self):
-        """Data carrier: Dat, Mat, Const or Global."""
+        """Data carrier: :class:`Dat`, :class:`Mat`, :class:`Const` or :class:`Global`."""
         return self._dat
 
     @property
@@ -211,26 +219,26 @@ class Set(object):
 
 class IterationSpace(object):
     """OP2 iteration space type."""
-    
+
     @validate_type(('iterset', Set, SetTypeError))
     def __init__(self, iterset, extents=()):
         self._iterset = iterset
         self._extents = as_tuple(extents, int)
-    
+
     @property
     def iterset(self):
         """Set this IterationSpace is defined on."""
         return self._iterset
-    
+
     @property
     def extents(self):
         """Extents of the IterationSpace."""
         return self._extents
-    
+
     @property
     def name(self):
         return self._iterset.name
-    
+
     @property
     def size(self):
         return self._iterset.size
@@ -238,10 +246,10 @@ class IterationSpace(object):
     @property
     def _extent_ranges(self):
         return [e for e in self.extents]
-    
+
     def __str__(self):
         return "OP2 Iteration Space: %s with extents %s" % self._extents
-    
+
     def __repr__(self):
         return "IterationSpace(%r, %r)" % (self._iterset, self._extents)
 
@@ -287,7 +295,7 @@ class DataCarrier(object):
         return np.prod(self.dim)
 
 class Dat(DataCarrier):
-    """OP2 vector data. A Dat holds a value for every member of a set."""
+    """OP2 vector data. A ``Dat`` holds a value for every member of a :class:`Set`."""
 
     _globalcount = 0
     _modes = [READ, WRITE, RW, INC]
@@ -478,7 +486,7 @@ def i(index):
     return IterationIndex(index)
 
 class Map(object):
-    """OP2 map, a relation between two Sets."""
+    """OP2 map, a relation between two :class:`Set` objects."""
 
     _globalcount = 0
     _arg_type = Arg
@@ -559,7 +567,7 @@ class Map(object):
 IdentityMap = Map(Set(0), Set(0), 1, [], 'identity')
 
 class Sparsity(object):
-    """OP2 Sparsity, a matrix structure derived from the union of the outer product of pairs of maps"""
+    """OP2 Sparsity, a matrix structure derived from the union of the outer product of pairs of :class:`Map` objects."""
 
     _globalcount = 0
 
@@ -614,7 +622,7 @@ class Sparsity(object):
 
 class Mat(DataCarrier):
     """OP2 matrix data. A Mat is defined on a sparsity pattern and holds a value
-    for each element in the sparsity."""
+    for each element in the :class:`Sparsity`."""
 
     _globalcount = 0
     _modes = [WRITE, INC]
@@ -704,7 +712,7 @@ class Kernel(object):
 
     @property
     def code(self):
-        """Code of this kernel routine"""
+        """String containing the code for this kernel routine."""
         return self._code
 
     def compile(self):
