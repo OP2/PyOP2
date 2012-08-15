@@ -45,26 +45,15 @@ def pytest_addoption(parser):
 def pytest_collection_modifyitems(items):
     """Group test collection by backend instead of iterating through backends
     per test."""
-    def cmp(item1, item2):
-        def get_backend_param(item):
-            try:
-                return item.callspec.getparam("backend")
-            # AttributeError if no callspec, ValueError if no backend parameter
-            except:
-                # If a test does not take the backend parameter, make sure it
-                # is run before tests that take a backend
-                return '_nobackend'
-
-        param1 = get_backend_param(item1)
-        param2 = get_backend_param(item2)
-
-        # Group tests by backend
-        if param1 < param2:
-            return -1
-        elif param1 > param2:
-            return 1
-        return 0
-    items.sort(cmp=cmp)
+    def get_backend_param(item):
+        try:
+            return item.callspec.getparam("backend")
+        # AttributeError if no callspec, ValueError if no backend parameter
+        except (AttributeError, ValueError):
+            # If a test does not take the backend parameter, make sure it
+            # is run before tests that take a backend
+            return '_nobackend'
+    items.sort(key=get_backend_param)
 
 def pytest_funcarg__skip_cuda(request):
     return None
