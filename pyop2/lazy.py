@@ -158,7 +158,7 @@ def _force(reads, writes):
             cont._evaluate = False
 
     nt = list()
-    _trace2dag(filter(lambda c: c.evaluate, _trace))
+    #_trace2dag(filter(c for c in _trace if c.evaluate))
     for cont in _trace:
         if cont.evaluate:
             cont._compute()
