@@ -129,10 +129,10 @@ class Global(runtime_base.Global):
 
     @data.setter
     def data(self, value):
-        _trace.append(Global.Dummy(self, value))
+        _trace.append(Global.Dummy(self, verify_reshape(value, self.dtype, self.dim)))
 
     def _data_setter(self, value):
-        self._data = verify_reshape(value, self.dtype, self.dim)
+        self._data = value
 
 
 class Mat(runtime_base.Mat):
