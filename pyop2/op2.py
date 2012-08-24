@@ -86,9 +86,6 @@ class Map(base.Map):
 class Sparsity(base.Sparsity):
     __metaclass__ = backends._BackendSelector
 
-class Access(sequential.Access):
-    __metaclass__ = backends.BackendSelector
-
 def par_loop(kernel, it_space, *args):
     """Invocation of an OP2 kernel
 
