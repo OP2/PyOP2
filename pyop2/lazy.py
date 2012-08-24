@@ -135,6 +135,14 @@ class Global(runtime_base.Global):
         self._data = verify_reshape(value, self.dtype, self.dim)
 
 
+class Mat(runtime_base.Mat):
+
+    @property
+    def values(self):
+        _force(set([self]), set())
+        return self._c_handle.values
+
+
 class ParLoop(LazyComputation):
     """OP2 parallel loop."""
 
