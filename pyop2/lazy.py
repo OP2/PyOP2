@@ -93,10 +93,10 @@ class Const(runtime_base.Const):
 
     @data.setter
     def data(self, value):
-        _trace.append(Const.Dummy(self, value))
+        _trace.append(Const.Dummy(self, verify_reshape(value, self.dtype, self.dim)))
 
     def _data_setter(self, value):
-        self._data = verify_reshape(value, self.dtype, self.dim)
+        self._data = value
 
 
 class Global(runtime_base.Global):
