@@ -1,22 +1,37 @@
-# This file is part of PyOP2.
+# This file is part of PyOP2
 #
-# PyOP2 is free software: you can redistribute it and/or modify it under the
-# terms of the GNU General Public License as published by the Free Software
-# Foundation, either version 3 of the License, or (at your option) any later
-# version.
+# PyOP2 is Copyright (c) 2012, Imperial College London and
+# others. Please see the AUTHORS file in the main source directory for
+# a full list of copyright holders.  All rights reserved.
 #
-# PyOP2 is distributed in the hope that it will be useful, but WITHOUT ANY
-# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-# A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
 #
-# You should have received a copy of the GNU General Public License along with
-# PyOP2.  If not, see <http://www.gnu.org/licenses>
+#     * Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in the
+#       documentation and/or other materials provided with the distribution.
+#     * The name of Imperial College London or that of other
+#       contributors may not be used to endorse or promote products
+#       derived from this software without specific prior written
+#       permission.
 #
-# Copyright (c) 2011, Graham Markall <grm08@doc.ic.ac.uk> and others. Please see
-# the AUTHORS file in the main source directory for a full list of copyright
-# holders.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTERS
+# ''AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+# COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+# INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+# STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
+# OF THE POSSIBILITY OF SUCH DAMAGE.
 
-"""OP2 sequential backend."""
+"""OP2 abstract lazy backend."""
 
 import numpy as np
 
@@ -27,27 +42,50 @@ from runtime_base import READ, WRITE, RW, INC, MIN, MAX, IterationSpace, Set, Ma
                          DataCarrier, IterationIndex, i, IdentityMap, Kernel, Sparsity
 
 class LazyComputation(object):
-    """Interface for lazy computation."""
+    """Lazy Continuation type."""
 
     def reads(self):
-        """Return computation's read dependencies."""
+        """Return read dependencies."""
         assert False
 
     def writes(self):
-        """Return computation's write dependencies."""
+        """Return write dependencies."""
         assert False
 
     def _compute(self):
-        """Called when the computation must proceed."""
+        """Execute delayed computation."""
         assert False
 
     @property
     def evaluate(self):
+        """Set by trace management."""
         return not not (self._evaluate)
 
     @property
     def dotname(self):
-        return "dummy"
+        assert False
+
+
+class Dummy(LazyComputation):
+    def __init__(self, cst, value, dotname):
+        self._cst = cst
+        self._value = value
+        self._reads = set()
+        self._writes = set([self._cst])
+        self._dotname = dotname
+
+    def reads(self):
+        return self._reads
+
+    def writes(self):
+        return self._writes
+
+    def _compute(self):
+        self._cst._data_setter(self._value)
+
+    @property
+    def dotname(self):
+        return self._dotname
 
 
 class Dat(runtime_base.Dat):
@@ -55,7 +93,6 @@ class Dat(runtime_base.Dat):
     @property
     def data(self):
         """Data array."""
-        #force computation
         _force(set([self]), set())
 
         if len(self._data) is 0:
@@ -71,29 +108,12 @@ class Const(runtime_base.Const):
         _force(set([self]), set())
         return self._data
 
-    class Dummy(LazyComputation):
-        def __init__(self, cst, value):
-            self._cst = cst
-            self._value = value
-            self._reads = set()
-            self._writes = set([self._cst])
-
-        def reads(self):
-            return self._reads
-
-        def writes(self):
-            return self._writes
-
-        def _compute(self):
-            self._cst._data_setter(self._value)
-
-        @property
-        def dotname(self):
-            return self._cst._name + '_write_' + str(hash(self))
-
     @data.setter
     def data(self, value):
-        _trace.append(Const.Dummy(self, verify_reshape(value, self.dtype, self.dim)))
+        # call reshape to ensure type and shape error are returned immedialty
+        _trace.append(Dummy(self,
+                            verify_reshape(value, self.dtype, self.dim),
+                            self._cst._name + '_write_' + str(hash(self))))
 
     def _data_setter(self, value):
         self._data = value
@@ -107,29 +127,12 @@ class Global(runtime_base.Global):
         _force(set([self]), set())
         return self._data
 
-    class Dummy(LazyComputation):
-        def __init__(self, gbl, value):
-            self._gbl = gbl
-            self._value = value
-            self._reads = set()
-            self._writes = set([self._gbl])
-
-        def reads(self):
-            return self._reads
-
-        def writes(self):
-            return self._writes
-
-        def _compute(self):
-            self._gbl._data_setter(self._value)
-
-        @property
-        def dotname(self):
-            return self._gbl._name + '_write_' + str(hash(self))
-
     @data.setter
     def data(self, value):
-        _trace.append(Global.Dummy(self, verify_reshape(value, self.dtype, self.dim)))
+        # call reshape to ensure type and shape error are returned immedialty
+        _trace.append(Dummy(self,
+                            verify_reshape(value, self.dtype, self.dim),
+                            self._gbl._name + '_write_' + str(hash(self))))
 
     def _data_setter(self, value):
         self._data = value
@@ -168,8 +171,8 @@ class ParLoop(LazyComputation):
     def dotname(self):
         return self._kernel._name + str(hash(self))
 
-# delayed trace managment
 
+# delayed trace managment
 def _depends_on(rreads, rwrites, creads, cwrites):
     return not not ([d for d in rreads if d in cwrites] or \
                     [d for d in rwrites if d in creads] or \
@@ -177,7 +180,6 @@ def _depends_on(rreads, rwrites, creads, cwrites):
 
 def _force(reads, writes):
     global _trace
-
 
     for cont in reversed(_trace):
         if _depends_on(reads, writes, cont.reads(), cont.writes()):
@@ -196,6 +198,7 @@ def _force(reads, writes):
             nt.append(cont)
     _trace = nt
 
+# DAG construction
 class _Node(object):
     def __init__(self, cont=None):
         self._cont = cont
