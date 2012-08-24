@@ -150,8 +150,9 @@ class ParLoop(LazyComputation):
         self._kernel = kernel
         self._it_space = it_space
         self._args = args
+        self._consts = Const._defs.copy()
 
-        self._reads = set(arg.data for arg in self._args if arg.access in [READ, RW, INC, MIN, MAX]).union(Const._defs.copy())
+        self._reads = set(arg.data for arg in self._args if arg.access in [READ, RW, INC, MIN, MAX]).union(self._consts)
         self._writes = set(arg.data for arg in self._args if arg.access in [WRITE, RW, INC, MIN, MAX])
 
         global _trace

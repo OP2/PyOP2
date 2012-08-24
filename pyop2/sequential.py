@@ -284,7 +284,7 @@ class ParLoop(lazy.ParLoop):
                 for map in maps:
                     _args.append(map.values)
 
-        for c in sorted(Const._defs):
+        for c in sorted(self._consts):
             _args.append(c._data)
 
         self._fun(*_args)
