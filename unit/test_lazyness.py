@@ -3,15 +3,7 @@ import numpy
 
 from pyop2 import op2
 
-def setup_module(module):
-    # Initialise OP2
-    op2.init(backend='sequential', diags=0)
-
-def teardown_module(module):
-    op2.exit()
-
-def _seed():
-    return 0.02041724
+backends = ['sequential']
 
 #max...
 nelems = 92681
@@ -21,7 +13,7 @@ class TestLazyness:
     Lazyness
     """
 
-    def test_stable(self):
+    def test_stable(self, backend):
         """Test accessing a dependency is stable."""
         iterset = op2.Set(nelems, "iterset")
 
@@ -40,7 +32,7 @@ count(unsigned int* x)
         assert(a.data[0] == nelems)
         assert(a.data[0] == nelems)
 
-    def test_const(self):
+    def test_const(self, backend):
         """Test constant dependencies."""
         iterset = op2.Set(nelems, "iterset")
 
@@ -66,15 +58,25 @@ count(unsigned int* x)
         op2.par_loop(op2.Kernel(kernel_count, "count"), iterset, b(op2.INC))
 
         d.data = [1]
-
-        assert(b._data[0] == nelems)
-        assert(a._data[0] == 0)
-
         c.data = [1]
+        assert(a._data[0] == 0)
+        assert(b._data[0] == 0)
 
+        #force second par_loop
+        assert(d.data[0] == 1)
+        assert(a._data[0] == 0)
+        assert(b._data[0] == nelems)
+
+        #force first par_loop
+        assert(c.data[0] == 1)
         assert(a._data[0] == nelems)
+        assert(b._data[0] == nelems)
 
-    def test_reorder(self):
+        # ??? FIX ???
+        c.remove_from_namespace()
+        d.remove_from_namespace()
+
+    def test_reorder(self, backend):
         """Test two independant computations."""
         iterset = op2.Set(nelems, "iterset")
 
@@ -97,7 +99,7 @@ count(unsigned int* x)
         assert(a._data[0] == 0)
         assert(a.data[0] == nelems)
 
-    def test_cascade(self):
+    def test_cascade(self, backend):
         iterset = op2.Set(nelems, "iterset")
 
         a = op2.Dat(iterset, 1, numpy.zeros(nelems), numpy.uint32, "a")
