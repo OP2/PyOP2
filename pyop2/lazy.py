@@ -44,13 +44,18 @@ from runtime_base import READ, WRITE, RW, INC, MIN, MAX, IterationSpace, Set, Ma
 class LazyComputation(object):
     """Lazy Continuation type."""
 
+    def __init__(self, reads, writes, dotname="anonymous"):
+        self._reads = reads
+        self._writes = writes
+        self._dotname = dotname
+
     def reads(self):
         """Return read dependencies."""
-        assert False
+        return self._reads
 
     def writes(self):
         """Return write dependencies."""
-        assert False
+        return self._writes
 
     def _compute(self):
         """Execute delayed computation."""
@@ -63,29 +68,19 @@ class LazyComputation(object):
 
     @property
     def dotname(self):
-        assert False
+        return self._dotname
 
 
-class Dummy(LazyComputation):
-    def __init__(self, datacarrier, value, dotname):
+class LazySetter(LazyComputation):
+    def __init__(self, datacarrier, value):
+        super(LazySetter, self).__init__(set(),
+                                         set([datacarrier]),
+                                         "_setter_%s_#%d" % (datacarrier.name, id(self)))
         self._datacarrier = datacarrier
         self._value = value
-        self._reads = set()
-        self._writes = set([self._cst])
-        self._dotname = dotname
-
-    def reads(self):
-        return self._reads
-
-    def writes(self):
-        return self._writes
 
     def _compute(self):
-        self.datacarrier._data_setter(self._value)
-
-    @property
-    def dotname(self):
-        return self._dotname
+        self._datacarrier._data_setter(self._value)
 
 
 class Dat(runtime_base.Dat):
@@ -112,9 +107,8 @@ class Const(runtime_base.Const):
     def data(self, value):
         global _trace
         # call reshape to ensure type and shape error are returned immedialty
-        _trace.append(Dummy(self,
-                            verify_reshape(value, self.dtype, self.dim),
-                            self._cst._name + '_write_' + str(hash(self))))
+        _trace.append(LazySetter(self,
+                                 verify_reshape(value, self.dtype, self.dim)))
 
     def _data_setter(self, value):
         self._data = value
@@ -132,9 +126,8 @@ class Global(runtime_base.Global):
     def data(self, value):
         global _trace
         # call reshape to ensure type and shape error are returned immedialty
-        _trace.append(Dummy(self,
-                            verify_reshape(value, self.dtype, self.dim),
-                            self._gbl._name + '_write_' + str(hash(self))))
+        _trace.append(LazySetter(self,
+                                 verify_reshape(value, self.dtype, self.dim)))
 
     def _data_setter(self, value):
         self._data = value
@@ -157,21 +150,15 @@ class ParLoop(LazyComputation):
         self._args = args
         self._consts = Const._defs.copy()
 
-        self._reads = set(arg.data for arg in self._args if arg.access in [READ, RW, INC, MIN, MAX]).union(self._consts)
-        self._writes = set(arg.data for arg in self._args if arg.access in [WRITE, RW, INC, MIN, MAX])
+        reads = set(arg.data for arg in self._args if arg.access in [READ, RW, INC, MIN, MAX]).union(self._consts)
+        writes = set(arg.data for arg in self._args if arg.access in [WRITE, RW, INC, MIN, MAX])
+
+        super(ParLoop, self).__init__(reads,
+                                         writes,
+                                         self._kernel._name + str(hash(self)))
 
         global _trace
         _trace.append(self)
-
-    def reads(self):
-        return self._reads
-
-    def writes(self):
-        return self._writes
-
-    @property
-    def dotname(self):
-        return self._kernel._name + str(hash(self))
 
 
 # delayed trace managment
