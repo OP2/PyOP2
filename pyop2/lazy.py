@@ -67,8 +67,8 @@ class LazyComputation(object):
 
 
 class Dummy(LazyComputation):
-    def __init__(self, cst, value, dotname):
-        self._cst = cst
+    def __init__(self, datacarrier, value, dotname):
+        self._datacarrier = datacarrier
         self._value = value
         self._reads = set()
         self._writes = set([self._cst])
@@ -81,7 +81,7 @@ class Dummy(LazyComputation):
         return self._writes
 
     def _compute(self):
-        self._cst._data_setter(self._value)
+        self.datacarrier._data_setter(self._value)
 
     @property
     def dotname(self):
@@ -110,6 +110,7 @@ class Const(runtime_base.Const):
 
     @data.setter
     def data(self, value):
+        global _trace
         # call reshape to ensure type and shape error are returned immedialty
         _trace.append(Dummy(self,
                             verify_reshape(value, self.dtype, self.dim),
@@ -129,6 +130,7 @@ class Global(runtime_base.Global):
 
     @data.setter
     def data(self, value):
+        global _trace
         # call reshape to ensure type and shape error are returned immedialty
         _trace.append(Dummy(self,
                             verify_reshape(value, self.dtype, self.dim),
