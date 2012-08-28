@@ -883,6 +883,7 @@ class ParLoopCall(object):
                                'op2const': sorted(list(Const._defs),
                                                   key=lambda c: c._name)
                               }).encode("ascii")
+        dump_gen_code(self.src)
         _kernel_stub_cache[self._gencode_key] = src
         return src
 
