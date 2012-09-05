@@ -473,6 +473,12 @@ class OpPlan():
             e = s + self._parloop._it_set.size
             cl.enqueue_copy(_queue, self._loc_map_buffers[i], self._core_plan.loc_map[s:e], is_blocking=True).wait()
 
+        self._idx_map_buffers = [None] * len(self._parloop._actual_args)
+        for i, arg in enumerate(self._parloop._actual_args):
+            if arg._is_vmap:
+                self._idx_map_buffers[i] = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=int(arg.map.dim_arr.nbytes))
+                cl.enqueue_copy(_queue, self._idx_map_buffers[i], arg.map.dim_arr, is_blocking=True).wait()
+
         self._ind_sizes_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.ind_sizes.nbytes)
         cl.enqueue_copy(_queue, self._ind_sizes_buffer, self._core_plan.ind_sizes, is_blocking=True).wait()
 
@@ -943,6 +949,10 @@ class ParLoopCall(object):
             for i in range(plan.nuinds):
                 kernel.append_arg(plan._loc_map_buffers[i])
 
+            for i, arg in enumerate(self._actual_args):
+                if arg._is_vmap:
+                    kernel.append_arg(plan._idx_map_buffers[i])
+
             for m in self._unique_matrix:
                 kernel.append_arg(m._dev_array)
                 m._upload_array()
@@ -1043,7 +1053,7 @@ def _setup():
     _pref_work_group_count = _queue.device.max_compute_units
     _max_local_memory = _queue.device.local_mem_size
     _address_bits = _queue.device.address_bits
-    _max_work_group_size = 1 #_queue.device.max_work_group_size
+    _max_work_group_size = _queue.device.max_work_group_size
     _has_dpfloat = 'cl_khr_fp64' in _queue.device.extensions or 'cl_amd_fp64' in _queue.device.extensions
     if not _has_dpfloat:
         warnings.warn('device does not support double precision floating point computation, expect undefined behavior for double')

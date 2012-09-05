@@ -42,6 +42,10 @@
   mapping_array_{{ arg.data.name }}_at_{{ arg.idx }}_via_{{ arg.map.name }}
 {%- endmacro -%}
 
+{%- macro mapping_idx_array_name(arg) -%}
+  mapping_idx_array_{{ arg.data.name }}_via_{{ arg.map.name }}
+{%- endmacro -%}
+
 {%- macro global_reduc_local_name(arg) -%}
   {{ arg.data.name }}_gbl_reduc_local
 {%- endmacro -%}
@@ -119,7 +123,18 @@ void {{ arg.data.name }}_reduction_kernel (
 
 {%- macro populate_vec_map(arg) -%}
 // populate vec map
-{%- if(arg._is_indirect_reduction) -%}
+{%- if(arg._is_vmap) %}
+{% if(arg._is_indirect_reduction) -%}
+  UNKNOWN, IS THIS POSSIBLE;
+{%- else -%}
+  {
+    int dim = {{ mapping_idx_array_name(arg) }}[i_1 + shared_memory_offset + 1] - {{ mapping_idx_array_name(arg) }}[i_1 + shared_memory_offset];
+    for(int idx = 0; idx < dim; ++idx)
+      {{ dat_vec_name(arg) }}[idx] = &{{ shared_indirection_mapping_memory_name(arg) }}[mapping_ptrs_{{ arg.data.name }}_via_{{ arg.map.name }}[idx][i_1 + shared_memory_offset] * {{ arg.data.cdim }}];
+    {{ dat_vec_name(arg) }}[dim] = 0;
+  }
+{%- endif -%}
+{%- elif(arg._is_indirect_reduction) -%}
 {%- for arg in arg._i_gen_vec %}
   {{ dat_vec_name(arg) }}[{{ arg.idx }}] = {{ reduc_arg_local_name(arg) }};
 {% endfor -%}
@@ -189,6 +204,9 @@ void {{ parloop._kernel.name }}_stub(
   {% for arg in parloop._args %}
   {% if(arg._is_indirect) %}__global short* {{ mapping_array_name(arg) }},{% endif %}
   {%- endfor -%}
+  {% for arg in parloop._args %}
+  {% if(arg._is_vmap and arg.idx == 0) %}__global int* {{ mapping_idx_array_name(arg) }},{% endif %}
+  {%- endfor -%}
   {% for mat in parloop._unique_matrix %}
   __global {{ mat._cl_type }}* {{ mat.name }},
   __global int* {{ mat.name }}_rowptr,
@@ -244,6 +262,16 @@ void {{ parloop._kernel.name }}_stub(
   {% endfor %}
 {% endif %}
 
+{% for it in parloop._actual_args if it._is_vmap %}
+  __global short* __local mapping_ptrs_{{ it.data.name }}_via_{{ it.map.name }}[{{ it.map.dim }}];
+  if(get_local_id(0) == 0) {
+    {%- for it2 in it._i_gen_vec %}
+    mapping_ptrs_{{ it.data.name }}_via_{{ it.map.name }}[{{ it2.idx }}] = {{ mapping_array_name(it2) }};
+    {%- endfor %}
+  }
+  {%- endfor %}
+  barrier(CLK_LOCAL_MEM_FENCE);
+
   // shared indirection mappings
 {%- for dm in parloop._dat_map_pairs %}
   __global int* __local {{ shared_indirection_mapping_name(dm) }};
@@ -252,10 +280,10 @@ void {{ parloop._kernel.name }}_stub(
   const int {{ shared_indirection_mapping_idx_name(dm) }} = {{ loop.index0 }};
 {%- endfor %}
 {% for dm in parloop._nonreduc_vec_dat_map_pairs %}
-  __local {{ dm.data._cl_type }}* {{ dat_vec_name(dm) }}[{{ dm.map.dim }}];
+  __local {{ dm.data._cl_type }}* {{ dat_vec_name(dm) }}[{{ dm.map.dim + 1}}];
 {%- endfor %}
 {% for dm in parloop._reduc_vec_dat_map_pairs %}
-  {{ dm.data._cl_type }}* {{ dat_vec_name(dm) }}[{{ dm.map.dim }}];
+  {{ dm.data._cl_type }}* {{ dat_vec_name(dm) }}[{{ dm.map.dim + 1}}];
 {%- endfor %}
 {% for dm in parloop._nonreduc_itspace_dat_map_pairs %}
   __local {{ dm.data._cl_type }}* {{ dat_vec_name(dm) }}[{{ dm.map.dim }}];

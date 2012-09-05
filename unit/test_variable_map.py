@@ -68,7 +68,7 @@ class TestVariableMap:
 
         kernel_sum = """
 void kernel_sum(unsigned int* nodes[1], unsigned int *edge)
-{ *edge = 0; unsigned int i = -1; while(nodes[++i] != NULL) *edge += nodes[i][0]; }
+{ *edge = 0; unsigned int i = -1; while(nodes[++i] != 0) *edge += nodes[i][0]; }
 """
 
         op2.par_loop(op2.Kernel(kernel_sum, "kernel_sum"), edges, \
@@ -107,7 +107,7 @@ void kernel_sum(unsigned int* nodes[1], unsigned int *edge)
 
         kernel_sum = """
 void kernel_sum(unsigned int* nodes[1], unsigned int *edge)
-{ *edge = 0; unsigned int i = -1; while(nodes[++i] != NULL) *edge += nodes[i][0]; }
+{ *edge = 0; unsigned int i = -1; while(nodes[++i] != 0) *edge += nodes[i][0]; }
 """
 
         op2.par_loop(op2.Kernel(kernel_sum, "kernel_sum"), edges, \
