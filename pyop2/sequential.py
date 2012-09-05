@@ -60,6 +60,9 @@ def par_loop(kernel, it_space, *args):
     def c_map_name(arg):
         return c_arg_name(arg) + "_map"
 
+    def c_len_name(arg):
+        return c_arg_name(arg) + "_len"
+
     def c_wrapper_arg(arg):
         val = "PyObject *_%(name)s" % {'name' : c_arg_name(arg) }
         if arg._is_indirect or arg._is_mat:
@@ -67,6 +70,8 @@ def par_loop(kernel, it_space, *args):
             maps = as_tuple(arg.map, Map)
             if len(maps) is 2:
                 val += ", PyObject *_%(name)s" % {'name' : c_map_name(arg)+'2'}
+        if arg._is_vmap:
+            val += ", PyObject *_%(name)s" % {'name' : c_len_name(arg)}
         return val
 
     def c_wrapper_dec(arg):
@@ -86,16 +91,26 @@ def par_loop(kernel, it_space, *args):
             val += ";\n%(type)s *%(vec_name)s[%(dim)s]" % \
                    {'type' : arg.ctype,
                     'vec_name' : c_vec_name(arg),
-                    'dim' : arg.map.dim}
+                    'dim' : arg.map.dim + 1 if arg._is_vmap else arg.map.dim}
+        if arg._is_vmap:
+            val += ";\nint *%(name)s = (int *)(((PyArrayObject *)_%(name)s)->data)" % \
+                   {'name' : c_len_name(arg)}
         return val
 
     def c_ind_data(arg, idx):
-        return "%(name)s + %(map_name)s[i * %(map_dim)s + %(idx)s] * %(dim)s" % \
-                {'name' : c_arg_name(arg),
-                 'map_name' : c_map_name(arg),
-                 'map_dim' : arg.map.dim,
-                 'idx' : idx,
-                 'dim' : arg.data.cdim}
+        if arg._is_vmap:
+            return "%(name)s + %(map_name)s[%(idx)s] * %(dim)s" % \
+                   {'name' : c_arg_name(arg),
+                    'map_name' : c_map_name(arg),
+                    'idx' : idx,
+                    'dim' : arg.data.cdim}
+        else:
+            return "%(name)s + %(map_name)s[i * %(map_dim)s + %(idx)s] * %(dim)s" % \
+                   {'name' : c_arg_name(arg),
+                    'map_name' : c_map_name(arg),
+                    'map_dim' : arg.map.dim,
+                    'idx' : idx,
+                    'dim' : arg.data.cdim}
 
     def c_kernel_arg(arg):
         if arg._uses_itspace:
@@ -116,11 +131,22 @@ def par_loop(kernel, it_space, *args):
 
     def c_vec_init(arg):
         val = []
-        for i in range(arg.map._dim):
-            val.append("%(vec_name)s[%(idx)s] = %(data)s" %
-                       {'vec_name' : c_vec_name(arg),
-                        'idx' : i,
-                        'data' : c_ind_data(arg, i)} )
+        if arg.map.is_vmap:
+            val.append("""{
+                            int idx = 0;
+                            for(int j = %(len_name)s[i]; j < %(len_name)s[i + 1]; ++j)
+                              %(vec_name)s[idx++] = %(data)s;
+                            %(vec_name)s[idx] = NULL;
+                          }""" %
+                       {'len_name' : c_len_name(arg),
+                        'vec_name' : c_vec_name(arg),
+                        'data'     : c_ind_data(arg, "j")})
+        else:
+            for i in range(arg.map._dim):
+                val.append("%(vec_name)s[%(idx)s] = %(data)s" %
+                           {'vec_name' : c_vec_name(arg),
+                            'idx'      : i,
+                            'data'     : c_ind_data(arg, i)} )
         return ";\n".join(val)
 
     def c_addto(arg):
@@ -280,6 +306,8 @@ def par_loop(kernel, it_space, *args):
             maps = as_tuple(arg.map, Map)
             for map in maps:
                 _args.append(map.values)
+            if arg._is_vmap:
+                _args.append(arg.map.dim_arr)
 
     for c in sorted(Const._defs):
         _args.append(c.data)

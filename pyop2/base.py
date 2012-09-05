@@ -132,6 +132,10 @@ class Arg(object):
         return self._is_indirect and self._idx is None
 
     @property
+    def _is_vmap(self):
+        return self._is_indirect and self._map.is_vmap
+
+    @property
     def _is_mat(self):
         return isinstance(self._dat, Mat)
 
@@ -524,14 +528,26 @@ class Map(object):
     _globalcount = 0
     _arg_type = Arg
 
-    @validate_type(('iterset', Set, SetTypeError), ('dataset', Set, SetTypeError), \
-            ('dim', int, DimTypeError), ('name', str, NameTypeError))
+    @validate_type(('iterset', Set, SetTypeError), ('dataset', Set, SetTypeError),
+                   ('name', str, NameTypeError))
     def __init__(self, iterset, dataset, dim, values=None, name=None):
         self._iterset = iterset
         self._dataset = dataset
-        self._dim = dim
-        self._values = verify_reshape(values, np.int32, (iterset.size, dim), \
-                                      allow_none=True)
+        if isinstance(dim, int):
+            self._dim = dim
+            self._dim_arr = None
+            self._values = verify_reshape(values, np.int32, (iterset.size, dim),
+                                          allow_none=True)
+        else:
+            # We need a box shape so just reshape to a normal array
+            self._values = np.asarray(values, dtype=np.int32)
+            self._dim_arr = np.asarray(dim, dtype=np.int32)
+
+            #Work out the maximum dimension in the variable arity map
+            self._dim = 0
+            for i in range(len(dim) - 1):
+                self._dim = max(self._dim, dim[i + 1] - dim[i])
+
         self._name = name or "map_%d" % Map._globalcount
         self._lib_handle = None
         Map._globalcount += 1
@@ -570,9 +586,18 @@ class Map(object):
         return self._dim
 
     @property
+    def dim_arr(self):
+        """Dimension array for a variable arity map."""
+        return self._dim_arr
+
+    @property
     def values(self):
         """Mapping array."""
         return self._values
+
+    @property
+    def is_vmap(self):
+        return self._dim_arr is not None
 
     @property
     def name(self):

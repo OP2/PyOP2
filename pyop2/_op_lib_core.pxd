@@ -91,6 +91,8 @@ cdef extern from "op_lib_core.h":
 
     op_map op_decl_map_core(op_set, op_set, int, int *, char *)
 
+    op_map op_decl_vmap_core(op_set, op_set, int *, int *, char *)
+
     op_sparsity op_decl_sparsity_core(op_map *, op_map *, int, int *, int,
                                       char *)
 

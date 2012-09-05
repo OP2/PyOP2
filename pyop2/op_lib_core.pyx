@@ -212,14 +212,24 @@ cdef class op_map:
         cdef op_set frm = map.iterset._c_handle
         cdef op_set to = map.dataset._c_handle
         cdef int dim = map.dim
+        cdef np.ndarray dim_arr = map.dim_arr
         cdef np.ndarray values = map.values
         cdef char * name = map.name
-        if values.size == 0:
-            self._handle = core.op_decl_map_core(frm._handle, to._handle,
-                                                 dim, NULL, name)
+        if map.is_vmap:
+            if values.size == 0:
+                self._handle = core.op_decl_vmap_core(frm._handle, to._handle,
+                                                      NULL, NULL, name)
+            else:
+                self._handle = core.op_decl_vmap_core(frm._handle, to._handle,
+                                                      <int *>np.PyArray_DATA(dim_arr),
+                                                      <int *>np.PyArray_DATA(values), name)
         else:
-            self._handle = core.op_decl_map_core(frm._handle, to._handle, dim,
-                                                 <int *>np.PyArray_DATA(values), name)
+            if values.size == 0:
+                self._handle = core.op_decl_map_core(frm._handle, to._handle,
+                                                     dim, NULL, name)
+            else:
+                self._handle = core.op_decl_map_core(frm._handle, to._handle, dim,
+                                                     <int *>np.PyArray_DATA(values), name)
 
 cdef class op_sparsity:
     cdef core.op_sparsity _handle
