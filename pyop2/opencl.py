@@ -416,7 +416,7 @@ class OpPlanCache():
         try:
             plan = self._cache[parloop._plan_key]
         except KeyError:
-            cp = core.op_plan(parloop._kernel, parloop._it_set, *parloop._args, **kargs)
+            cp = core.op_plan(parloop._kernel1, parloop._it_set, *parloop._args, **kargs)
             plan = OpPlan(parloop, cp)
             self._cache[parloop._plan_key] = plan
 
@@ -436,11 +436,11 @@ class OpPlan():
         self.load()
 
     def load(self):
-        self.nuinds = sum(map(lambda a: a._is_indirect, self._parloop._args))
-        _ind_desc = [-1] * len(self._parloop._args)
+        self.nuinds = sum(map(lambda a: a._is_indirect, self._parloop._unique_args))
+        _ind_desc = [-1] * len(self._parloop._unique_args)
         _d = {}
         _c = 0
-        for i, arg in enumerate(self._parloop._args):
+        for i, arg in enumerate(self._parloop._unique_args):
             if arg._is_indirect:
                 if _d.has_key((arg.data, arg.map)):
                     _ind_desc[i] = _d[(arg.data, arg.map)]
@@ -551,7 +551,9 @@ class ParLoopCall(object):
     """Invocation of an OP2 OpenCL kernel with an access descriptor"""
 
     def __init__(self, kernel, it_space, *args):
-        self._kernel = kernel
+        self._kernel1 = kernel
+        self._kernel2 = None
+
         if isinstance(it_space, op2.IterationSpace):
             self._it_set = it_space._iterset
             self._it_space = it_space
@@ -559,21 +561,42 @@ class ParLoopCall(object):
             self._it_set = it_space
             self._it_space = False
 
-        self._actual_args = list(args)
+        self._actual_args1 = list(args)
+        self._actual_args2 = None
 
-        self._args = list()
-        for a in self._actual_args:
+        self._args1 = self.gen_args(self._actual_args1)
+        self._args2 = None
+
+        self._actual_args = list(self._actual_args1)
+        self._args = list(self._args1)
+        self.sort_args()
+
+    def add_kernel(self, kernel, *args):
+        self._kernel2 = kernel
+
+        self._actual_args2 = list(args)
+        self._args2 = self.gen_args(self._actual_args2)
+
+        self._actual_args = self._actual_args1 + self._actual_args2
+        self._args = self._args1 + self._args2
+        self.sort_args()
+
+    def gen_args(self, actual_args):
+        args = list()
+        for a in actual_args:
             if a._is_vec_map:
                 for i in range(a.map._dim):
-                    self._args.append(Arg(a.data, a.map, i, a.access))
+                    args.append(Arg(a.data, a.map, i, a.access))
             elif a._is_mat:
                 pass
             elif a._uses_itspace:
                 for i in range(it_space.extents[a.idx.index]):
                     self._args.append(Arg(a.data, a.map, i, a.access))
             else:
-                self._args.append(a)
+                args.append(a)
+        return args
 
+    def sort_args(self):
         # sort args - keep actual args unchanged
         # order globals r, globals reduc, direct, indirect
         gbls = self._global_non_reduction_args +\
@@ -681,7 +704,9 @@ class ParLoopCall(object):
                      sorted(list(Const._defs), key=lambda c: c.name))
 
         itspace = (self._it_space.extents,) if self._it_space else ((None,))
-        return (self._kernel.md5,) + itspace + tuple(argdesc) + tuple(consts)
+
+        dig2 = self._kernel2.md5 if self._kernel2 else None
+        return (self._kernel1.md5, dig2) + itspace + tuple(argdesc) + tuple(consts)
 
     # generic
     @property
@@ -693,12 +718,24 @@ class ParLoopCall(object):
         return uniquify(a for a in self._args if a._is_global and not a._is_global_reduction)
 
     @property
+    def _unique_args(self):
+        return uniquify(self._args)
+
+    @property
     def _unique_dats(self):
         return uniquify(a.data for a in self._args if a._is_dat)
 
     @property
     def _indirect_reduc_args(self):
         return uniquify(a for a in self._args if a._is_indirect_reduction)
+
+    @property
+    def _indirect_reduc_args1(self):
+        return uniquify(a for a in self._args1 if a._is_indirect_reduction)
+
+    @property
+    def _indirect_reduc_args2(self):
+        return uniquify(a for a in self._args2 if a._is_indirect_reduction)
 
     @property
     def _direct_args(self):
@@ -738,6 +775,14 @@ class ParLoopCall(object):
         return [a for a in self._args if a._is_indirect]
 
     @property
+    def _indirect_args1(self):
+        return [a for a in self._args1 if a._is_indirect]
+
+    @property
+    def _indirect_args2(self):
+        return [a for a in self._args2 if a._is_indirect]
+
+    @property
     def _vec_map_args(self):
         return [a for a in self._actual_args if a._is_vec_map]
 
@@ -766,8 +811,34 @@ class ParLoopCall(object):
         return uniquify(DatMapPair(a.data, a.map) for a in self._indirect_args if a.access in [READ, RW])
 
     @property
+    def _read_dat_map_pairs1(self):
+        return uniquify(DatMapPair(a.data, a.map) for a in self._indirect_args1 if a.access in [READ, RW])
+
+    @property
+    def _read_dat_map_pairs2(self):
+        return uniquify(DatMapPair(a.data, a.map) for a in self._indirect_args2 if a not in self._indirect_args1 and a.access in [READ, RW])
+
+    @property
     def _written_dat_map_pairs(self):
         return uniquify(DatMapPair(a.data, a.map) for a in self._indirect_args if a.access in [WRITE, RW])
+
+    @property
+    def _written_dat_map_pairs1(self):
+        pairs = uniquify(a for a in self._indirect_args1 if a.access in [WRITE, RW])
+        newpairs = []
+        for pair in pairs:
+            write = True
+            for aux in self._indirect_args2:
+                if pair == aux and aux.access == READ:
+                    write = False
+                    break
+            if write:
+                newpairs.append(DatMapPair(pair.data, pair.map))
+        return newpairs
+
+    @property
+    def _written_dat_map_pairs2(self):
+        return uniquify(DatMapPair(a.data, a.map) for a in self._indirect_args2 if a.access in [WRITE, RW])
 
     @property
     def _indirect_reduc_dat_map_pairs(self):
@@ -775,7 +846,7 @@ class ParLoopCall(object):
 
     def dump_gen_code(self, src):
         if cfg['dump-gencode']:
-            path = cfg['dump-gencode-path'] % {"kernel": self._kernel._name,
+            path = cfg['dump-gencode-path'] % {"kernel": self._kernel1._name,
                                                "time": time.strftime('%Y-%m-%d@%H:%M:%S')}
 
             if not os.path.exists(path):
@@ -794,7 +865,7 @@ class ParLoopCall(object):
         #TODO FIX: something weird here
         #available_local_memory
         warnings.warn('temporary fix to available local memory computation (-512)')
-        available_local_memory = _max_local_memory - 512
+        available_local_memory = _max_local_memory - 1024
         # 16bytes local mem used for global / local indices and sizes
         available_local_memory -= 16
         # (4/8)ptr size per dat passed as argument (dat)
@@ -855,10 +926,13 @@ class ParLoopCall(object):
             return {'partition_size': self._i_partition_size()}
 
     def codegen(self, conf):
-        def instrument_user_kernel():
+        def instrument_user_kernel(kernel, actual_args):
+            if not kernel:
+                return ""
+
             inst = []
 
-            for arg in self._actual_args:
+            for arg in actual_args:
                 i = None
                 if self.is_direct():
                     if (arg._is_direct and arg.data._is_scalar) or\
@@ -880,26 +954,78 @@ class ParLoopCall(object):
                 for i in self._it_space.extents:
                     inst.append(("__private", None))
 
-            return self._kernel.instrument(inst, sorted(list(Const._defs), key=lambda c: c._name))
+            return kernel.instrument(inst, sorted(list(Const._defs), key=lambda c: c._name))
 
         # check cache
         if _kernel_stub_cache.has_key(self._gencode_key):
             return _kernel_stub_cache[self._gencode_key]
 
         #do codegen
-        user_kernel = instrument_user_kernel()
+        user_kernel1 = instrument_user_kernel(self._kernel1, self._actual_args1)
+        user_kernel2 = instrument_user_kernel(self._kernel2, self._actual_args2)
         template = _jinja2_direct_loop if self.is_direct()\
                                        else _jinja2_indirect_loop
 
         src = template.render({'parloop': self,
-                               'user_kernel': user_kernel,
+                               'user_kernel1': user_kernel1,
+                               'user_kernel2': user_kernel2,
                                'launch': conf,
                                'codegen': {'amd': _AMD_fixes},
                                'op2const': sorted(list(Const._defs),
                                                   key=lambda c: c._name)
                               }).encode("ascii")
         _kernel_stub_cache[self._gencode_key] = src
+        #print src
         return src
+
+    def generate_flags(self, plan):
+        def getpartno(n):
+            return n // plan._core_plan.part_size
+
+        for i, arg in enumerate(self._args):
+            if arg._is_indirect:
+                dats = {}
+                flags = np.ones(self._it_set.size, dtype=np.uint32)
+
+                for arg in self._indirect_args:
+                    dats[arg._dat] = [[[0, None] for i in range(2)] for i in range(arg._dat.dataset.size)]
+
+                for i in range(self._it_set.size):
+                    for arg in self._indirect_args1:
+                        elem = list(dats[arg._dat][arg._map._values[i][arg._idx]][0])
+                        elem[0] = max(elem[0], i)
+
+                        if elem[1] == None:
+                            elem[1] = arg._access
+                        elif elem[1] == READ and arg._access != READ:
+                            elem[1] = arg._access
+
+                        dats[arg._dat][arg._map._values[i][arg._idx]][0] = elem
+
+                for i in range(self._it_set.size):
+                    for arg in self._indirect_args2:
+                        elem = list(dats[arg._dat][arg._map._values[i][arg._idx]][1])
+                        elem[0] = max(elem[0], i)
+
+                        if elem[1] == None:
+                            elem[1] = arg._access
+                        elif elem[1] == READ and arg._access != READ:
+                            elem[1] = arg._access
+
+                        dats[arg._dat][arg._map._values[i][arg._idx]][1] = elem
+
+                for key, value in dats.iteritems():
+                    for v in value:
+                        l0 = v[0]
+                        l1 = v[1]
+                        if(l0[1] == READ and l1[1] != READ):
+                            if(getpartno(l0[0]) > getpartno(l1[0])):
+                                flags[l1[0]] = False
+                        if(l0[1] != READ):
+                            if(getpartno(l0[0]) > getpartno(l1[0])):
+                                flags[l1[0]] = False
+        print flags
+        return flags
 
     def compute(self):
         def compile_kernel(src, name):
@@ -917,7 +1043,7 @@ class ParLoopCall(object):
         conf['warpsize'] = _warpsize
 
         source = self.codegen(conf)
-        kernel = compile_kernel(source, self._kernel._name)
+        kernel = compile_kernel(source, self._kernel1._name)
 
         for a in self._unique_dats:
             kernel.append_arg(a._buffer)
@@ -935,7 +1061,7 @@ class ParLoopCall(object):
         if self.is_direct():
             kernel.append_arg(np.int32(self._it_set.size))
 
-            cl.enqueue_nd_range_kernel(_queue, kernel, (conf['thread_count'],), (conf['work_group_size'],), g_times_l=False).wait()
+            cl.enqueue_nd_range_kernel(_queue, kernel, (int(conf['thread_count']),), (int(conf['work_group_size']),), g_times_l=False).wait()
         else:
             for i in range(plan.ninds):
                 kernel.append_arg(plan._ind_map_buffers[i])
@@ -951,6 +1077,12 @@ class ParLoopCall(object):
 
             for m in self._matrix_entry_maps:
                 kernel.append_arg(m._buffer)
+
+            if self._kernel2:
+                flags = self.generate_flags(plan)
+                _flags_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=flags.nbytes)
+                cl.enqueue_copy(_queue, _flags_buffer, flags, is_blocking=True).wait()
+                kernel.append_arg(_flags_buffer)
 
             kernel.append_arg(plan._ind_sizes_buffer)
             kernel.append_arg(plan._ind_offs_buffer)
@@ -1006,6 +1138,11 @@ cl.Kernel = CLKernel
 
 def par_loop(kernel, it_space, *args):
     ParLoopCall(kernel, it_space, *args).compute()
+
+def par_loop2(kernel1, kernel2, it_space, args1, args2):
+    loop = ParLoopCall(kernel1, it_space, *args1)
+    loop.add_kernel(kernel2, *args2)
+    loop.compute()
 
 # backend interface:
 def empty_plan_cache():

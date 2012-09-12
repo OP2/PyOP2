@@ -66,7 +66,7 @@ reduction_tmp_array[lid] = max(reduction_tmp_array[lid], reduction_tmp_array[lid
 {%- endmacro -%}
 
 {%- macro kernel_call() -%}
-{{ parloop._kernel.name }}(
+{{ parloop._kernel1.name }}(
 {%- filter trim|replace("\n", ", ") -%}
 {%- for arg in parloop._actual_args -%}
 {{ kernel_call_arg(arg) }}
@@ -104,7 +104,7 @@ void {{ arg.data.name }}_reduction_kernel (
 {%- macro kernel_stub() -%}
 __kernel
 __attribute__((reqd_work_group_size({{ launch.work_group_size }}, 1, 1)))
-void {{ parloop._kernel.name }}_stub (
+void {{ parloop._kernel1.name }}_stub (
   {% filter trim|replace("\n", ",\n") -%}
   {%- for dat in parloop._unique_dats -%}
   __global {{ dat._cl_type }} *{{ dat.name }}
@@ -187,6 +187,7 @@ void {{ parloop._kernel.name }}_stub (
 {{ reduction_kernel(arg) }}
 {% endfor %}
 
-{{- user_kernel }}
+{{- user_kernel1 }}
+{{  user_kernel2 }}
 
 {{- kernel_stub() }}

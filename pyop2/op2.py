@@ -121,6 +121,11 @@ def par_loop(kernel, it_space, *args):
     """
     return backends._BackendSelector._backend.par_loop(kernel, it_space, *args)
 
+def par_loop2(kernel1, kernel2, it_space, args1, args2):
+    """Executes two kernels at the same time"""
+    return backends._BackendSelector._backend.par_loop2(kernel1, kernel2,
+                                                        it_space, args1, args2)
+
 def solve(M, b, x):
     """Solve a the matrix equation.
 

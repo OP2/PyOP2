@@ -98,6 +98,15 @@ class Arg(object):
         return "Arg(%r, %r, %r, %r)" % \
                    (self._dat, self._map, self._idx, self._access)
 
+    def __hash__(self):
+        return self._map.__hash__() ^ self._idx.__hash__()
+
+    def __eq__(self, other):
+        return (isinstance(other, self.__class__)
+                and (self._dat == other._dat)
+                and (self._map == other._map)
+                and (self._idx == other._idx))
+
     @property
     def data(self):
         """Data carrier: :class:`Dat`, :class:`Mat`, :class:`Const` or :class:`Global`."""

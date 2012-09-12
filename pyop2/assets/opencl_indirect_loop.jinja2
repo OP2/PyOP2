@@ -170,7 +170,7 @@ for (i_1 = 0; i_1 < {{ arg.data.cdim }}; ++i_1)
 {%- macro kernel_stub() -%}
 __kernel
 __attribute__((reqd_work_group_size({{ launch.work_group_size }}, 1, 1)))
-void {{ parloop._kernel.name }}_stub(
+void {{ parloop._kernel1.name }}_stub(
   {%- for arg in parloop._unique_dats %}
   __global {{ arg._cl_type }}* {{ arg.name }},
   {%- endfor -%}
@@ -186,7 +186,7 @@ void {{ parloop._kernel.name }}_stub(
   {% for dm in parloop._dat_map_pairs %}
   __global int* {{ shared_indirection_mapping_arg_name(dm) }},
   {%- endfor -%}
-  {% for arg in parloop._args %}
+  {% for arg in parloop._unique_args %}
   {% if(arg._is_indirect) %}__global short* {{ mapping_array_name(arg) }},{% endif %}
   {%- endfor -%}
   {% for mat in parloop._unique_matrix %}
@@ -197,7 +197,9 @@ void {{ parloop._kernel.name }}_stub(
   {% for matem in parloop._matrix_entry_maps %}
   __global int* {{ matem.name }},
   {%- endfor -%}
-
+  {% if parloop._kernel2 -%}
+  __global int* p_flags,
+  {%- endif %}
   __global int* p_ind_sizes,
   __global int* p_ind_offsets,
   __global int* p_blk_map,
@@ -285,9 +287,9 @@ void {{ parloop._kernel.name }}_stub(
   }
   barrier(CLK_LOCAL_MEM_FENCE);
 
-{% if(parloop._read_dat_map_pairs) -%}
+{% if(parloop._read_dat_map_pairs1) -%}
   // staging in of indirect dats
-  {% for dm in parloop._read_dat_map_pairs %}
+  {% for dm in parloop._read_dat_map_pairs1 %}
   {{ stagingin(dm) }}
   {% endfor %}
   barrier(CLK_LOCAL_MEM_FENCE);
@@ -308,21 +310,21 @@ void {{ parloop._kernel.name }}_stub(
   {% endfor %}
 {% endif %}
 
-{%- if(parloop._indirect_reduc_args) %}
+{%- if(parloop._indirect_reduc_args1) %}
   for (i_1 = get_local_id(0); i_1 < active_threads_count_ceiling; i_1 += get_local_size(0)) {
     color_2 = -1;
     if (i_1 < active_threads_count) {
-      {% for arg in parloop._indirect_reduc_args %}
+      {% for arg in parloop._indirect_reduc_args1 %}
       {{ staged_arg_local_variable_zeroing(arg) | indent(6) }}
       {%- endfor %}
 
-      {{ kernel_call() | indent(6) }}
+      {{ kernel_call(parloop._kernel1, parloop._actual_args1) | indent(6) }}
       color_2 = p_thrcol[i_1 + shared_memory_offset];
     }
     for (color_1 = 0; color_1 < colors_count; ++color_1) {
       // should there be a if + barrier pattern for each indirect reduction argument ?
       if (color_2 == color_1) {
-        {% for arg in parloop._indirect_reduc_args %}
+        {% for arg in parloop._indirect_reduc_args1 %}
         {{ color_reduction(arg) | indent(8) }}
     {% endfor %}
       }
@@ -331,22 +333,69 @@ void {{ parloop._kernel.name }}_stub(
   }
 {%- else %}
   for (i_1 = get_local_id(0); i_1 < active_threads_count; i_1 += get_local_size(0)) {
-    {{ kernel_call() | indent(6) }}
+    {{ kernel_call(parloop._kernel1, parloop._actual_args1) | indent(4) }}
   }
 {%- endif %}
 
-{%- if(parloop._indirect_reduc_dat_map_pairs) %}
-  {% for dm in parloop._indirect_reduc_dat_map_pairs %}
+{%- if(parloop._indirect_reduc_dat_map_pairs1) %}
+  {% for dm in parloop._indirect_reduc_dat_map_pairs1 %}
   {{ work_group_reduction(dm) | indent(2) }}
   {%- endfor %}
 {%- endif %}
 
-{%- if(parloop._written_dat_map_pairs) %}
+{%- if(parloop._written_dat_map_pairs1) %}
   // staging out indirect dats
   barrier(CLK_LOCAL_MEM_FENCE);
-  {% for dm in parloop._written_dat_map_pairs %}
+  {% for dm in parloop._written_dat_map_pairs1 %}
   {{ stagingout(dm) | indent(2) }}
   {%- endfor %}
+{%- endif %}
+
+{% if(parloop._kernel2) %}
+{% if(parloop._read_dat_map_pairs2) -%}
+  // staging in of indirect dats
+  {% for dm in parloop._read_dat_map_pairs2 %}
+  {{ stagingin(dm) }}
+  {% endfor %}
+  barrier(CLK_LOCAL_MEM_FENCE);
+{% endif %}
+
+{%- if(parloop._indirect_reduc_args2) %}
+  for (i_1 = get_local_id(0); i_1 < active_threads_count_ceiling; i_1 += get_local_size(0)) {
+    color_2 = -1;
+    if (i_1 < active_threads_count && p_flags[i_1]) {
+      {% for arg in parloop._indirect_reduc_args2 %}
+      {{ staged_arg_local_variable_zeroing(arg) | indent(6) }}
+      {%- endfor %}
+
+      {{ kernel_call(parloop._kernel2, parloop._actual_args2) | indent(6) }}
+      color_2 = p_thrcol[i_1 + shared_memory_offset];
+    }
+    for (color_1 = 0; color_1 < colors_count; ++color_1) {
+      // should there be a if + barrier pattern for each indirect reduction argument ?
+      if (color_2 == color_1) {
+        {% for arg in parloop._indirect_reduc_args2 %}
+        {{ color_reduction(arg) | indent(8) }}
+    {% endfor %}
+      }
+      barrier(CLK_LOCAL_MEM_FENCE);
+    }
+  }
+{%- else %}
+  for (i_1 = get_local_id(0); i_1 < active_threads_count; i_1 += get_local_size(0)) {
+    if (p_flags[i_1 + shared_memory_offset]) {
+      {{ kernel_call(parloop._kernel2, parloop._actual_args2) | indent(6) }}
+    }
+  }
+{%- endif %}
+
+{%- if(parloop._written_dat_map_pairs2) %}
+  // staging out indirect dats
+  barrier(CLK_LOCAL_MEM_FENCE);
+  {% for dm in parloop._written_dat_map_pairs2 %}
+  {{ stagingout(dm) | indent(2) }}
+  {%- endfor %}
+{%- endif %}
 {%- endif %}
 
 {%- if(parloop._global_reduction_args) %}
@@ -371,7 +420,7 @@ for (int i{{ loop.index0 }}=0; i{{ loop.index0 }}<{{ dim }}; ++i{{ loop.index0 }
 {%- endfor %}
   {{ arg.data.name }}_entry[i0][i1] = {{ arg.data._cl_type_zero }};
 {% endfor %}
-{{ parloop._kernel.name }}(
+{{ parloop._kernel1.name }}(
   {% filter trim|replace("\n", ",\n") -%}
   {%- for arg in parloop._actual_args %}
   {{ kernel_call_arg(arg) }}
@@ -408,21 +457,23 @@ for (int i{{ loop.index0 }}=0; i{{ loop.index0 }}<{{ dim }}; ++i{{ loop.index0 }
 {%- endfor -%}
 {%- endmacro -%}
 
-{%- macro kernel_call() -%}
-{% for arg in parloop._actual_args if(arg._is_vec_map or arg._uses_itspace) %}
-  {{ populate_vec_map(arg) }}
-{% endfor %}
+{%- macro kernel_call(kernel, actual_args) -%}
+{% if kernel %}
+{%- for arg in actual_args if(arg._is_vec_map or arg._uses_itspace) %}
+{{ populate_vec_map(arg) }}
+{%- endfor %}
 {% if(parloop._it_space) %}
-{{ matrix_kernel_call() }}
+{{ matrix_kernel_call(kernel, actual_args) }}
 {% else %}
-{{ parloop._kernel.name }}(
+{{ kernel.name }}(
   {% filter trim|replace("\n", ",\n") -%}
-  {%- for arg in parloop._actual_args -%}
+  {%- for arg in actual_args -%}
   {{ kernel_call_arg(arg) }}
   {% endfor -%}
   {{ kernel_call_const_args() }}
   {%- endfilter %}
 );
+{% endif %}
 {% endif %}
 {%- endmacro -%}
 
@@ -546,5 +597,6 @@ void matrix_set(__global double* mat_array, __global int* mat_rowptr, __global i
 // Matrix support code
 {{ matrix_support() }}
 {% endif %}
-{{ user_kernel }}
+{{ user_kernel1 }}
+{{ user_kernel2 }}
 {{ kernel_stub() }}
