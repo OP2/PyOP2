@@ -65,15 +65,17 @@ reduction_tmp_array[lid] = max(reduction_tmp_array[lid], reduction_tmp_array[lid
 {% endfor -%}
 {%- endmacro -%}
 
-{%- macro kernel_call() -%}
-{{ parloop._kernel1.name }}(
+{%- macro kernel_call(kernel, actual_args) -%}
+{%- if kernel %}
+{{ kernel.name }}(
 {%- filter trim|replace("\n", ", ") -%}
-{%- for arg in parloop._actual_args -%}
+{%- for arg in actual_args -%}
 {{ kernel_call_arg(arg) }}
 {% endfor -%}
 {{ kernel_call_const_args() }}
 {%- endfilter -%}
 );
+{% endif %}
 {%- endmacro -%}
 
 {%- macro reduction_kernel(arg) -%}
@@ -165,7 +167,8 @@ void {{ parloop._kernel1.name }}_stub (
     {% for arg in parloop._direct_non_scalar_read_args -%}
     {{ stagein(arg) }}
     {% endfor %}
-    {{ kernel_call() }}
+    {{ kernel_call(parloop._kernel1, parloop._actual_args1) }}
+    {{ kernel_call(parloop._kernel2, parloop._actual_args2) }}
     {% for arg in parloop._direct_non_scalar_written_args %}
       {{ stageout(arg) }}
     {%- endfor %}

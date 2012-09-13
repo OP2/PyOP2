@@ -995,7 +995,7 @@ class ParLoopCall(object):
                                                   key=lambda c: c._name)
                               }).encode("ascii")
         _kernel_stub_cache[self._gencode_key] = src
-        print src
+        #print src
         return src
 
     def generate_flags(self, plan):
@@ -1127,10 +1127,13 @@ class ParLoopCall(object):
                 kernel.append_arg(m._buffer)
 
             if self._kernel2:
+                start = time.clock()
                 loop, flags = self.generate_flags(plan)
                 _flags_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=flags.nbytes)
                 cl.enqueue_copy(_queue, _flags_buffer, flags, is_blocking=True).wait()
                 kernel.append_arg(_flags_buffer)
+                end = time.clock()
+                print("Took %0.03f" % (end - start))
 
             kernel.append_arg(plan._ind_sizes_buffer)
             kernel.append_arg(plan._ind_offs_buffer)
@@ -1161,7 +1164,7 @@ class ParLoopCall(object):
         for i, a in enumerate(self._global_reduction_args):
             a.data._post_kernel_reduction_task(conf['work_group_count'], a.access)
 
-        if self._kernel2 and loop is not None:
+        if self._kernel2 and not self.is_direct() and loop is not None:
             loop.compute()
 
     def is_direct(self):
