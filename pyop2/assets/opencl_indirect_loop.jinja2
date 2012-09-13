@@ -318,7 +318,7 @@ void {{ parloop._kernel1.name }}_stub(
       {{ staged_arg_local_variable_zeroing(arg) | indent(6) }}
       {%- endfor %}
 
-      {{ kernel_call(parloop._kernel1, parloop._actual_args1) | indent(6) }}
+      {{ kernel_call(parloop._kernel1, parloop._actual_args1, parloop._matrix_args1) | indent(6) }}
       color_2 = p_thrcol[i_1 + shared_memory_offset];
     }
     for (color_1 = 0; color_1 < colors_count; ++color_1) {
@@ -333,7 +333,7 @@ void {{ parloop._kernel1.name }}_stub(
   }
 {%- else %}
   for (i_1 = get_local_id(0); i_1 < active_threads_count; i_1 += get_local_size(0)) {
-    {{ kernel_call(parloop._kernel1, parloop._actual_args1) | indent(4) }}
+    {{ kernel_call(parloop._kernel1, parloop._actual_args1, parloop._matrix_args1) | indent(4) }}
   }
 {%- endif %}
 
@@ -353,9 +353,18 @@ void {{ parloop._kernel1.name }}_stub(
 
 {% if(parloop._kernel2) %}
 {% if(parloop._read_dat_map_pairs2) -%}
+  barrier(CLK_GLOBAL_MEM_FENCE);
   // staging in of indirect dats
   {% for dm in parloop._read_dat_map_pairs2 %}
   {{ stagingin(dm) }}
+  {% endfor %}
+  barrier(CLK_LOCAL_MEM_FENCE);
+{% endif %}
+
+{%- if(parloop._indirect_reduc_dat_map_pairs) %}
+  // zeroing local memory for indirect reduction
+  {% for dm in parloop._indirect_reduc_dat_map_pairs %}
+  {{ shared_memory_reduc_zeroing(dm) | indent(2) }}
   {% endfor %}
   barrier(CLK_LOCAL_MEM_FENCE);
 {% endif %}
@@ -368,7 +377,7 @@ void {{ parloop._kernel1.name }}_stub(
       {{ staged_arg_local_variable_zeroing(arg) | indent(6) }}
       {%- endfor %}
 
-      {{ kernel_call(parloop._kernel2, parloop._actual_args2) | indent(6) }}
+      {{ kernel_call(parloop._kernel2, parloop._actual_args2, parloop._matrix_args2) | indent(6) }}
       color_2 = p_thrcol[i_1 + shared_memory_offset];
     }
     for (color_1 = 0; color_1 < colors_count; ++color_1) {
@@ -384,9 +393,15 @@ void {{ parloop._kernel1.name }}_stub(
 {%- else %}
   for (i_1 = get_local_id(0); i_1 < active_threads_count; i_1 += get_local_size(0)) {
     if (p_flags[i_1 + shared_memory_offset]) {
-      {{ kernel_call(parloop._kernel2, parloop._actual_args2) | indent(6) }}
+      {{ kernel_call(parloop._kernel2, parloop._actual_args2, parloop._matrix_args2) | indent(6) }}
     }
   }
+{%- endif %}
+
+{%- if(parloop._indirect_reduc_dat_map_pairs2) %}
+  {% for dm in parloop._indirect_reduc_dat_map_pairs2 %}
+  {{ work_group_reduction(dm) | indent(2) }}
+  {%- endfor %}
 {%- endif %}
 
 {%- if(parloop._written_dat_map_pairs2) %}
@@ -409,20 +424,20 @@ void {{ parloop._kernel1.name }}_stub(
 {%- endmacro -%}
 
 {#- rewrite: do recursive template -#}
-{%- macro matrix_kernel_call() -%}
+{%- macro matrix_kernel_call(kernel, actual_args, matrix_args) -%}
 // IterationSpace index loops ({{ parloop._it_space._extent_ranges }})
 {%- for it in parloop._it_space._extent_ranges %}
 for (int idx_{{ loop.index0 }} = 0; idx_{{ loop.index0 }} < {{ it }}; ++idx_{{ loop.index0 }}) {
 {%- endfor %}
-{% for arg in parloop._matrix_args %}
+{% for arg in matrix_args %}
 {% for dim in arg.data.sparsity.dims %}
 for (int i{{ loop.index0 }}=0; i{{ loop.index0 }}<{{ dim }}; ++i{{ loop.index0 }})
 {%- endfor %}
   {{ arg.data.name }}_entry[i0][i1] = {{ arg.data._cl_type_zero }};
 {% endfor %}
-{{ parloop._kernel1.name }}(
+{{ kernel.name }}(
   {% filter trim|replace("\n", ",\n") -%}
-  {%- for arg in parloop._actual_args %}
+  {%- for arg in actual_args %}
   {{ kernel_call_arg(arg) }}
   {%- endfor -%}
   {{- kernel_call_const_args() -}}
@@ -457,13 +472,13 @@ for (int i{{ loop.index0 }}=0; i{{ loop.index0 }}<{{ dim }}; ++i{{ loop.index0 }
 {%- endfor -%}
 {%- endmacro -%}
 
-{%- macro kernel_call(kernel, actual_args) -%}
+{%- macro kernel_call(kernel, actual_args, matrix_args) -%}
 {% if kernel %}
 {%- for arg in actual_args if(arg._is_vec_map or arg._uses_itspace) %}
 {{ populate_vec_map(arg) }}
 {%- endfor %}
 {% if(parloop._it_space) %}
-{{ matrix_kernel_call(kernel, actual_args) }}
+{{ matrix_kernel_call(kernel, actual_args, matrix_args) }}
 {% else %}
 {{ kernel.name }}(
   {% filter trim|replace("\n", ",\n") -%}
