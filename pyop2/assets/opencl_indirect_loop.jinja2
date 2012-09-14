@@ -352,19 +352,19 @@ void {{ parloop._kernel1.name }}_stub(
 {%- endif %}
 
 {% if(parloop._kernel2) %}
+{%- if(parloop._indirect_reduc_dat_map_pairs) %}
+  // zeroing local memory for indirect reduction
+  {% for dm in parloop._indirect_reduc_dat_map_pairs %}
+  {{ shared_memory_reduc_zeroing(dm) | indent(2) }}
+  {% endfor %}
+  barrier(CLK_LOCAL_MEM_FENCE);
+{% endif %}
+
 {% if(parloop._read_dat_map_pairs2) -%}
   barrier(CLK_GLOBAL_MEM_FENCE);
   // staging in of indirect dats
   {% for dm in parloop._read_dat_map_pairs2 %}
   {{ stagingin(dm) }}
-  {% endfor %}
-  barrier(CLK_LOCAL_MEM_FENCE);
-{% endif %}
-
-{%- if(parloop._indirect_reduc_dat_map_pairs) %}
-  // zeroing local memory for indirect reduction
-  {% for dm in parloop._indirect_reduc_dat_map_pairs %}
-  {{ shared_memory_reduc_zeroing(dm) | indent(2) }}
   {% endfor %}
   barrier(CLK_LOCAL_MEM_FENCE);
 {% endif %}

@@ -897,7 +897,7 @@ class ParLoopCall(object):
         #TODO FIX: something weird here
         #available_local_memory
         warnings.warn('temporary fix to available local memory computation (-512)')
-        available_local_memory = _max_local_memory - 768
+        available_local_memory = _max_local_memory - 512
         # 16bytes local mem used for global / local indices and sizes
         available_local_memory -= 16
         # (4/8)ptr size per dat passed as argument (dat)
@@ -1017,13 +1017,16 @@ class ParLoopCall(object):
         flags = np.ones(self._it_set.size, dtype=np.uint32)
         newset = []
 
+        indirect_args1 = self._indirect_args1
+        indirect_args2 = self._indirect_args2
+
         for i, arg in enumerate(self._args):
             if arg._is_indirect:
                 for arg in self._indirect_args:
                     dats[arg._dat] = [[[0, None, []] for i in range(2)] for i in range(arg._dat.dataset.size)]
 
                 for i in range(self._it_set.size):
-                    for arg in self._indirect_args1:
+                    for arg in indirect_args1:
                         elem = list(dats[arg._dat][arg._map._values[i][arg._idx]][0])
                         elem[0] = max(elem[0], i)
 
@@ -1034,8 +1037,7 @@ class ParLoopCall(object):
 
                         dats[arg._dat][arg._map._values[i][arg._idx]][0] = elem
 
-                for i in range(self._it_set.size):
-                    for arg in self._indirect_args2:
+                    for arg in indirect_args2:
                         elem = list(dats[arg._dat][arg._map._values[i][arg._idx]][1])
                         elem[0] = max(elem[0], i)
                         elem[2].append(i)
