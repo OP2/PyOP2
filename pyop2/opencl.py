@@ -414,8 +414,6 @@ class OpPlanCache():
 
     def get_plan(self, parloop, **kargs):
         try:
-            #TODO: Fix plan caching
-            raise KeyError
             plan = self._cache[parloop._plan_key]
         except KeyError:
             cp = core.op_plan(parloop._kernel1, parloop._it_set, *parloop._args, **kargs)
@@ -495,6 +493,19 @@ class OpPlan():
 
         self._thrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.thrcol.nbytes)
         cl.enqueue_copy(_queue, self._thrcol_buffer, self._core_plan.thrcol, is_blocking=True).wait()
+
+        if self._parloop._kernel2:
+            if _debug:
+                start = time.clock()
+            self._loop2, flags = self._parloop.generate_flags(self)
+            self._flags_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=flags.nbytes)
+            cl.enqueue_copy(_queue, self._flags_buffer, flags, is_blocking=True).wait()
+            if _debug:
+                end = time.clock()
+                print("Took %0.03f" % (end - start))
+        else:
+            self._loop2 = None
+            self._flags_buffer = None
 
         if _debug:
             print 'plan ind_map ' + str(self._core_plan.ind_map)
@@ -995,7 +1006,6 @@ class ParLoopCall(object):
                                                   key=lambda c: c._name)
                               }).encode("ascii")
         _kernel_stub_cache[self._gencode_key] = src
-        #print src
         return src
 
     def generate_flags(self, plan):
@@ -1126,14 +1136,8 @@ class ParLoopCall(object):
             for m in self._matrix_entry_maps:
                 kernel.append_arg(m._buffer)
 
-            if self._kernel2:
-                start = time.clock()
-                loop, flags = self.generate_flags(plan)
-                _flags_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=flags.nbytes)
-                cl.enqueue_copy(_queue, _flags_buffer, flags, is_blocking=True).wait()
-                kernel.append_arg(_flags_buffer)
-                end = time.clock()
-                print("Took %0.03f" % (end - start))
+            if plan._flags_buffer:
+                kernel.append_arg(plan._flags_buffer)
 
             kernel.append_arg(plan._ind_sizes_buffer)
             kernel.append_arg(plan._ind_offs_buffer)
@@ -1164,8 +1168,8 @@ class ParLoopCall(object):
         for i, a in enumerate(self._global_reduction_args):
             a.data._post_kernel_reduction_task(conf['work_group_count'], a.access)
 
-        if self._kernel2 and not self.is_direct() and loop is not None:
-            loop.compute()
+        if not self.is_direct() and plan._loop2:
+            plan._loop2.compute()
 
     def is_direct(self):
         return all(map(lambda a: a._is_direct or isinstance(a.data, Global), self._args))
