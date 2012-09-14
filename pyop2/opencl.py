@@ -603,8 +603,8 @@ class ParLoopCall(object):
             elif a._is_mat:
                 pass
             elif a._uses_itspace:
-                for i in range(it_space.extents[a.idx.index]):
-                    self._args.append(Arg(a.data, a.map, i, a.access))
+                for i in range(self._it_space.extents[a.idx.index]):
+                    args.append(Arg(a.data, a.map, i, a.access))
             else:
                 args.append(a)
         return args
@@ -770,6 +770,7 @@ class ParLoopCall(object):
     def _matrix_args(self):
         return [a for a in self._actual_args if a._is_mat]
 
+    @property
     def _matrix_args1(self):
         return [a for a in self._actual_args1 if a._is_mat]
 
