@@ -540,13 +540,18 @@ class Map(object):
                                           allow_none=True)
         else:
             # We need a box shape so just reshape to a normal array
-            self._values = np.asarray(values, dtype=np.int32)
-            self._dim_arr = np.asarray(dim, dtype=np.int32)
+            try:
+                self._values = np.asarray(values, dtype=np.int32)
+                self._dim_arr = np.asarray(dim, dtype=np.int32)
+            except ValueError:
+                raise DimTypeError("Invalid arguments passed")
 
             #Work out the maximum dimension in the variable arity map
             self._dim = 0
             for i in range(len(dim) - 1):
                 self._dim = max(self._dim, dim[i + 1] - dim[i])
+                if dim[i + 1] - dim[i] <= 0:
+                    raise DataValueError("Invalid data: All dimensions should be > 0")
 
         self._name = name or "map_%d" % Map._globalcount
         self._lib_handle = None

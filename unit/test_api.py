@@ -575,8 +575,8 @@ class TestMapAPI:
             op2.Map(set, set, 'illegaldim', [])
 
     def test_map_illegal_dim_tuple(self, backend, set):
-        "Map dim should not be a tuple."
-        with pytest.raises(exceptions.DimTypeError):
+        "Map dim should not be a tuple with a 0 dimension."
+        with pytest.raises(exceptions.DataValueError):
             op2.Map(set, set, (2,2), [])
 
     def test_map_illegal_name(self, backend, set):
