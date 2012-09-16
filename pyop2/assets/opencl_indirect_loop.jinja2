@@ -281,9 +281,11 @@ void {{ parloop._kernel.name }}_stub(
 {%- endfor %}
 {% for dm in parloop._nonreduc_vec_dat_map_pairs %}
   __local {{ dm.data._cl_type }}* {{ dat_vec_name(dm) }}[{{ dm.map.dim + 1}}];
+  {{ dat_vec_name(dm) }}[{{ dm.map.dim }}] = 0;
 {%- endfor %}
 {% for dm in parloop._reduc_vec_dat_map_pairs %}
   {{ dm.data._cl_type }}* {{ dat_vec_name(dm) }}[{{ dm.map.dim + 1}}];
+  {{ dat_vec_name(dm) }}[{{ dm.map.dim }}] = 0;
 {%- endfor %}
 {% for dm in parloop._nonreduc_itspace_dat_map_pairs %}
   __local {{ dm.data._cl_type }}* {{ dat_vec_name(dm) }}[{{ dm.map.dim }}];
