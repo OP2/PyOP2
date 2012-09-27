@@ -327,7 +327,7 @@ class TestSparsityAPI:
         m2 = op2.Map(s, s2, 1, 0)
         with pytest.raises(RuntimeError):
             op2.Sparsity(((m, m), (m, m2)), 1)
-        
+
 class TestMatAPI:
     """
     Mat API unit tests
