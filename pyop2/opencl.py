@@ -1079,6 +1079,7 @@ def _setup():
     global _AMD_fixes
     global _plan_cache
     global _reduction_task_cache
+    global _use_matrix_coloring
 
     _ctx = cl.create_some_context()
     _queue = cl.CommandQueue(_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
@@ -1090,6 +1091,9 @@ def _setup():
     if not _has_dpfloat:
         warnings.warn('device does not support double precision floating point computation, expect undefined behavior for double')
 
+    if not 'cl_khr_int64_base_atomics' in _queue.device.extensions:
+        _use_matrix_coloring = True
+
     if _queue.device.type == cl.device_type.CPU:
         _warpsize = 1
     elif _queue.device.type == cl.device_type.GPU:
@@ -1100,6 +1104,7 @@ def _setup():
     _plan_cache = OpPlanCache()
     _reduction_task_cache = dict()
 
+_use_matrix_coloring = False
 _debug = False
 _ctx = None
 _queue = None
