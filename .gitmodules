@@ -1,3 +1,3 @@
-[submodule ".site"]
-  path = .site
-  url = git@github.com:OP2/PyOP2.git
+[submodule "doc/sphinx/build/html"]
+	path = doc/sphinx/build/html
+	url = git@github.com:OP2/PyOP2.git
