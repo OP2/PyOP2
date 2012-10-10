@@ -53,6 +53,7 @@ import os
 import re
 import time
 import md5
+import itertools
 
 class Kernel(op2.Kernel):
     """OP2 OpenCL kernel type."""
@@ -534,6 +535,89 @@ class OpPlan():
         self._ind_offs_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.ind_offs.nbytes)
         cl.enqueue_copy(_queue, self._ind_offs_buffer, self._core_plan.ind_offs, is_blocking=True).wait()
 
+        #always do custom coloring for now to test wo matrices yet
+        if _use_matrix_coloring: # and any(arg._is_mat for arg in self._parloop._actual_args):
+            # recompute coloring based on matrix and indirect reduction arguments
+
+            # dict of key:indirect reduction arg, value list of map-index tuples referencing that map
+            irs = dict() # list of indirect reductions
+            work = dict()
+            for arg in self._parloop._args:
+                if arg._is_indirect_reduction:
+                    if not irs.has_key(arg.data):
+                        irs[arg.data] = list()
+                        work[arg.data] = np.zeros(arg.data.cdim * arg.data.dataset.size, dtype=np.uint32)
+                    irs[arg.data].append((arg.map, arg.idx))
+
+            # intra partition coloring
+            tcolors = np.empty(self._parloop._it_space.size, dtype=np.int32)
+            tcolors.fill(-1)
+
+            tidx = 0
+            for p in range(self._core_plan.nblocks):
+                base_color = 0
+                color_starvation = True
+                while color_starvation:
+                    color_starvation = False
+
+                    # zero out working array:
+                    for dat, paths in irs.iteritems():
+                        work[dat] = np.zeros(dat.cdim * dat.dataset.size, dtype=np.uint32)
+
+                    for t in (v for v in range(tidx, tidx + self._core_plan.nelems[p]) if tcolors[v]==-1):
+                        mask = 0
+                        for dat, paths in irs.iteritems():
+                            for m, i in paths:
+                                mask |= work[dat][m.values[t][i]]
+
+                        # can we ensure we get a 32bit int in python to avoid testing this ?
+                        if mask == 0xffffffff:
+                            color_starvation = True
+                            tcolors[t] = -1
+                        else:
+                            c = 0
+                            while mask & 0x1:
+                                mask = mask >> 1
+                                c += 1
+                            tcolors[t] = base_color + c
+
+                            mask = 1 << c
+
+                            for dat, paths in irs.iteritems():
+                                for m, i in paths:
+                                    work[dat][m.values[t][i]] |= mask
+
+                    base_color += 32
+
+                tidx += self._core_plan.nelems[p]
+
+            # compute color count per partitions
+            partition_color_count = np.zeros(self._core_plan.nblocks, dtype=np.uint32)
+            tidx = 0
+            for p in range(self._core_plan.nblocks):
+                partition_color_count[p] = max(tcolors[tidx:(tidx + self._core_plan.nelems[p])]) + 1
+                tidx += self._core_plan.nelems[p]
+
+            # upload stuffs on device
+            self._nthrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.nthrcol.nbytes)
+            cl.enqueue_copy(_queue, self._nthrcol_buffer, partition_color_count, is_blocking=True).wait()
+
+            self._thrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.thrcol.nbytes)
+            cl.enqueue_copy(_queue, self._thrcol_buffer, tcolors, is_blocking=True).wait()
+
+            # DEBUG
+            print 'our thrcolors    : ' + str(tcolors)
+            print 'their thrcolors  : ' + str(self._core_plan.thrcol)
+
+            print 'our nthrcolors   : " ' + str(partition_color_count)
+            print 'their nthrcolors : " ' + str(self._core_plan.nthrcol)
+        else:
+            self._nthrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.nthrcol.nbytes)
+            cl.enqueue_copy(_queue, self._nthrcol_buffer, self._core_plan.nthrcol, is_blocking=True).wait()
+
+            self._thrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.thrcol.nbytes)
+            cl.enqueue_copy(_queue, self._thrcol_buffer, self._core_plan.thrcol, is_blocking=True).wait()
+
         self._blkmap_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.blkmap.nbytes)
         cl.enqueue_copy(_queue, self._blkmap_buffer, self._core_plan.blkmap, is_blocking=True).wait()
 
@@ -542,12 +626,6 @@ class OpPlan():
 
         self._nelems_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.nelems.nbytes)
         cl.enqueue_copy(_queue, self._nelems_buffer, self._core_plan.nelems, is_blocking=True).wait()
-
-        self._nthrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.nthrcol.nbytes)
-        cl.enqueue_copy(_queue, self._nthrcol_buffer, self._core_plan.nthrcol, is_blocking=True).wait()
-
-        self._thrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.thrcol.nbytes)
-        cl.enqueue_copy(_queue, self._thrcol_buffer, self._core_plan.thrcol, is_blocking=True).wait()
 
         if _debug:
             print 'plan ind_map ' + str(self._core_plan.ind_map)
