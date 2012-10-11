@@ -562,7 +562,7 @@ class OpPlan():
 
                     # zero out working array:
                     for dat, paths in irs.iteritems():
-                        work[dat] = np.zeros(dat.cdim * dat.dataset.size, dtype=np.uint32)
+                        work[dat].fill(0)
 
                     for t in (v for v in range(tidx, tidx + self._core_plan.nelems[p]) if tcolors[v]==-1):
                         mask = 0
@@ -598,19 +598,77 @@ class OpPlan():
                 partition_color_count[p] = max(tcolors[tidx:(tidx + self._core_plan.nelems[p])]) + 1
                 tidx += self._core_plan.nelems[p]
 
+            # partition coloring
+            pcolors = np.empty(self._core_plan.nblocks, dtype=np.int32)
+            pcolors.fill(-1)
+
+            base_color = 0
+            color_starvation = True
+            while color_starvation:
+                color_starvation = False
+
+                for dat, paths in irs.iteritems():
+                    work[dat].fill(0)
+
+                tidx = 0
+                for p in range(self._core_plan.nblocks):
+                    if pcolors[p] == -1:
+                        mask = 0
+                        for t in (v for v in range(tidx, tidx + self._core_plan.nelems[p]) if tcolors[v]==-1):
+                            for dat, paths in irs.iteritems():
+                                for m, i in paths:
+                                    mask |= work[dat][m.values[t][i]]
+
+                        if mask == 0xffffffff:
+                            color_starvation = True
+                            pcolors[p] = -1
+                        else:
+                            c = 0
+                            while mask & 0x1:
+                                mask = 1 << c
+                                c += 1
+
+                            pcolors[p] = base_color + c
+
+                        for dat, paths in irs.iteritems():
+                            for m, i in paths:
+                                work[dat][m.values[t][i]] |= mask
+
+                    tidx += self._core_plan.nelems[p]
+                base_color += 32
+
+            # using mergesort to get a stable sort, not sure that is actually necessary ?
+            blkmap = np.argsort(pcolors, kind='mergesort')
+
             # upload stuffs on device
-            self._nthrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.nthrcol.nbytes)
+            self._nthrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=partition_color_count.nbytes)
             cl.enqueue_copy(_queue, self._nthrcol_buffer, partition_color_count, is_blocking=True).wait()
 
-            self._thrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.thrcol.nbytes)
+            self._thrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=tcolors.nbytes)
             cl.enqueue_copy(_queue, self._thrcol_buffer, tcolors, is_blocking=True).wait()
 
+            self._blkmap_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=blkmap.size * np.uint32(0).nbytes)
+            cl.enqueue_copy(_queue, self._blkmap_buffer, blkmap.astype(np.uint32), is_blocking=True).wait()
+
+            self._ncolors = max(pcolors) + 1
+            self._ncolblk = np.bincount(pcolors)
+
             # DEBUG
+            print 'part size        : ' + str(self._parloop._i_partition_size())
             print 'our thrcolors    : ' + str(tcolors)
             print 'their thrcolors  : ' + str(self._core_plan.thrcol)
 
-            print 'our nthrcolors   : " ' + str(partition_color_count)
-            print 'their nthrcolors : " ' + str(self._core_plan.nthrcol)
+            print 'our nthrcolors   : ' + str(partition_color_count)
+            print 'their nthrcolors : ' + str(self._core_plan.nthrcol)
+
+            print 'our blkmap       : ' + str(blkmap)
+            print 'their blkmap     : ' + str(self._core_plan.blkmap)
+
+            print 'our ncolblk      : ' + str(self._ncolblk)
+            print 'their ncolblk    : ' + str(self._core_plan.ncolblk)
+
+            print 'our ncolors      : ' + str(self._ncolors)
+            print 'their ncolors    : ' + str(self._core_plan.ncolors)
         else:
             self._nthrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.nthrcol.nbytes)
             cl.enqueue_copy(_queue, self._nthrcol_buffer, self._core_plan.nthrcol, is_blocking=True).wait()
@@ -618,14 +676,21 @@ class OpPlan():
             self._thrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.thrcol.nbytes)
             cl.enqueue_copy(_queue, self._thrcol_buffer, self._core_plan.thrcol, is_blocking=True).wait()
 
-        self._blkmap_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.blkmap.nbytes)
-        cl.enqueue_copy(_queue, self._blkmap_buffer, self._core_plan.blkmap, is_blocking=True).wait()
+            self._blkmap_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.blkmap.nbytes)
+            cl.enqueue_copy(_queue, self._blkmap_buffer, self._core_plan.blkmap, is_blocking=True).wait()
+
+            self._ncolors = self._core_plan.ncolors
+            self._ncolblk = self._core_plan.ncolblk
 
         self._offset_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.offset.nbytes)
         cl.enqueue_copy(_queue, self._offset_buffer, self._core_plan.offset, is_blocking=True).wait()
 
         self._nelems_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.nelems.nbytes)
         cl.enqueue_copy(_queue, self._nelems_buffer, self._core_plan.nelems, is_blocking=True).wait()
+
+        #DEBUG
+        print 'offset : ' + str(self._core_plan.offset)
+        print 'nelems : ' + str(self._core_plan.nelems)
 
         if _debug:
             print 'plan ind_map ' + str(self._core_plan.ind_map)
@@ -656,11 +721,11 @@ class OpPlan():
 
     @property
     def ncolors(self):
-        return self._core_plan.ncolors
+        return self._ncolors
 
     @property
     def ncolblk(self):
-        return self._core_plan.ncolblk
+        return self._ncolblk
 
     @property
     def nblocks(self):
@@ -1089,6 +1154,7 @@ class ParLoop(op2.ParLoop):
 
             block_offset = 0
             for i in range(plan.ncolors):
+                print 'launching color %d on %d blocks' % (i, plan.ncolblk[i])
                 blocks_per_grid = int(plan.ncolblk[i])
                 threads_per_block = min(_max_work_group_size, conf['partition_size'])
                 thread_count = threads_per_block * blocks_per_grid
