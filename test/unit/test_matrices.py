@@ -582,7 +582,8 @@ void zero_mat(double local_mat[1][1], int i, int j)
 
     @pytest.mark.xfail("'cuda' in config.option.__dict__['backend']")
     def test_solve(self, backend, mat, b, x, f):
-        op2.solve(mat, b, x)
+        solver = op2.Solver()
+        solver.solve(mat, x, b)
         eps = 1.e-12
         assert all(abs(x.data-f.data)<eps)
 
@@ -674,7 +675,8 @@ void zero_mat(double local_mat[1][1], int i, int j)
 
     @pytest.mark.xfail("'cuda' in config.option.__dict__['backend']")
     def test_vector_solve(self, backend, vecmat, b_vec, x_vec, f_vec):
-        op2.solve(vecmat, b_vec, x_vec)
+        solver = op2.Solver()
+        solver.solve(vecmat, x_vec, b_vec)
         eps = 1.e-12
         diff = abs(x_vec.data-f_vec.data)<eps
         assert diff.all()

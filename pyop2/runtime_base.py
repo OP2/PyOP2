@@ -184,3 +184,6 @@ class Mat(base.Mat):
 class ParLoop(base.ParLoop):
     def compute(self):
         raise RuntimeError('Must select a backend')
+
+class Solver(base.Solver):
+    pass
