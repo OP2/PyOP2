@@ -1,0 +1,17 @@
+#!/usr/bin/make -f
+
+ifneq (,$(DEB_MAINTAINER_MODE))
+  # Enable stuff not policy compliant (eg. unsuitable for build daemons)
+  DEB_COPYRIGHT_CHECK_STRICT = yes
+endif
+
+include /usr/share/cdbs/1/rules/debhelper.mk
+include /usr/share/cdbs/1/class/python-distutils.mk
+include /usr/share/cdbs/1/rules/utils.mk
+
+DEB_COMPRESS_EXCLUDE := .py .pdf .ufl
+
+USCAN_DESTDIR := $(CURDIR)
+
+get-orig-source:
+	uscan --force-download --verbose --destdir $(USCAN_DESTDIR)
