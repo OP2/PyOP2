@@ -10,5 +10,5 @@ Homepage: http://op2.github.com/PyOP2/
 
 Package: python-pyop2
 Architecture: any
-Depends: python-ufl (>=1.0.0-2), python-yaml (>= 3.09), ${shlibs:Depends}, ${python:Depends}, ${misc:Depends}
+Depends: python-ufl (>=1.0.0-2~), python-yaml (>= 3.09), ${shlibs:Depends}, ${python:Depends}, ${misc:Depends}
 Description: Python implementation of the OP2 DSL.
