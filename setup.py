@@ -6,14 +6,19 @@ import os, sys
 
 try:
     OP2_DIR = os.environ['OP2_DIR']
+    OP2_INC = OP2_DIR + '/c/include'
+    OP2_LIB = OP2_DIR + '/c/lib'
 except KeyError:
-    sys.exit("""Error: Could not find OP2 library.
+  try:
+    OP2_PREFIX = os.environ['OP2_PREFIX']
+    OP2_INC = OP2_PREFIX + '/include'
+    OP2_LIB = OP2_PREFIX + '/lib'
+  except KeyError:
+    sys.exit("""Error: Could not find the OP2 library.
 
 Set the environment variable OP2_DIR to point to the op2 subdirectory
-of your OP2 source tree""")
-
-OP2_INC = OP2_DIR + '/c/include'
-OP2_LIB = OP2_DIR + '/c/lib'
+of your OP2 source tree or OP_PREFIX to point to the location of an OP2 
+install.""")
 
 os.environ['CC'] = 'mpicc'
 os.environ['CXX'] = 'mpicxx'
