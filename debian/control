@@ -2,7 +2,7 @@ Source: python-pyop2
 Section: python
 Priority: extra
 Maintainer: Graham Markall <graham.markall08@imperial.ac.uk>
-Build-Depends: debhelper (>= 8.0.0), cdbs (>= 0.4.90~), python-all (>= 2.6.6-3~), cython (>= 0.13), mpi-default-dev
+Build-Depends: debhelper (>= 8.0.0), cdbs (>= 0.4.90~), python-all (>= 2.6.6-3~), cython (>= 0.13), mpi-default-dev, libop2-dev
 Standards-Version: 3.9.2
 Homepage: http://op2.github.com/PyOP2/
 #Vcs-Git: git://git.debian.org/collab-maint/python-pyop2.git
