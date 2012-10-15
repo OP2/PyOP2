@@ -16,4 +16,5 @@ Depends: python-ufl (>= 1.0.0-2~), python-yaml (>= 3.09),
  ${python:Depends},
  ${misc:Depends}
 Recommends: python-pycparser (>= 2.07)
+Suggests: triangle-bin, gmsh
 Description: Python implementation of the OP2 DSL.
