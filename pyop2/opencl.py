@@ -537,17 +537,26 @@ class OpPlan():
 
         #always do custom coloring for now to test wo matrices yet
         if _use_matrix_coloring: # and any(arg._is_mat for arg in self._parloop._actual_args):
+            def mat_indices_tuples(arg, idx):
+                for i in range(arg.map[0].dim):
+                    for j in range(arg.map[1].dim):
+                        yield (map[0].values[idx][i], map[1].values[idx][j])
+
             # recompute coloring based on matrix and indirect reduction arguments
 
             # dict of key:indirect reduction arg, value list of map-index tuples referencing that map
             irs = dict() # list of indirect reductions
             work = dict()
+            mat_work = dict()
             for arg in self._parloop._args:
                 if arg._is_indirect_reduction:
                     if not irs.has_key(arg.data):
                         irs[arg.data] = list()
                         work[arg.data] = np.zeros(arg.data.cdim * arg.data.dataset.size, dtype=np.uint32)
                     irs[arg.data].append((arg.map, arg.idx))
+                elif arg._is_mat:
+                    if not mat_work.has_key(arg):
+                        mat_work[arg] = dict()
 
             # intra partition coloring
             tcolors = np.empty(self._parloop._it_space.size, dtype=np.int32)
@@ -563,12 +572,18 @@ class OpPlan():
                     # zero out working array:
                     for dat, paths in irs.iteritems():
                         work[dat].fill(0)
+                    for arg, w in mat_work.iteritems():
+                        mat_work[arg] = dict()
 
                     for t in (v for v in range(tidx, tidx + self._core_plan.nelems[p]) if tcolors[v]==-1):
                         mask = 0
                         for dat, paths in irs.iteritems():
                             for m, i in paths:
                                 mask |= work[dat][m.values[t][i]]
+                        for arg, w in mat_work.iteritems():
+                            for tu in mat_indices_tuples(arg, t):
+                                if mat_work[arg].has_key(tu):
+                                    mask |= mat_work[arg][tu]
 
                         # can we ensure we get a 32bit int in python to avoid testing this ?
                         if mask == 0xffffffff:
@@ -586,6 +601,10 @@ class OpPlan():
                             for dat, paths in irs.iteritems():
                                 for m, i in paths:
                                     work[dat][m.values[t][i]] |= mask
+                            for arg, w in mat_work.iteritems():
+                                for tu in mat_indices_tuples(arg, t):
+                                    if mat_work[arg].has_key(tu):
+                                        mat_work[arg][tu] |= mask
 
                     base_color += 32
 
@@ -609,6 +628,8 @@ class OpPlan():
 
                 for dat, paths in irs.iteritems():
                     work[dat].fill(0)
+                for arg, w in mat_work.iteritems():
+                    mat_work[arg] = dict()
 
                 tidx = 0
                 for p in range(self._core_plan.nblocks):
@@ -618,6 +639,10 @@ class OpPlan():
                             for dat, paths in irs.iteritems():
                                 for m, i in paths:
                                     mask |= work[dat][m.values[t][i]]
+                            for arg, w in mat_work.iteritems():
+                                for tu in mat_indices_tuples(arg, t):
+                                    if mat_work[arg].has_key(tu):
+                                        mask |= mat_work[arg][tu]
 
                         if mask == 0xffffffff:
                             color_starvation = True
@@ -633,6 +658,10 @@ class OpPlan():
                         for dat, paths in irs.iteritems():
                             for m, i in paths:
                                 work[dat][m.values[t][i]] |= mask
+                        for arg, w in mat_work.iteritems():
+                            for tu in mat_indices_tuples(arg, t):
+                                if mat_work[arg].has_key(tu):
+                                    mat_work[arg][tu] |= mask
 
                     tidx += self._core_plan.nelems[p]
                 base_color += 32
