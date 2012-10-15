@@ -535,19 +535,21 @@ class OpPlan():
         self._ind_offs_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.ind_offs.nbytes)
         cl.enqueue_copy(_queue, self._ind_offs_buffer, self._core_plan.ind_offs, is_blocking=True).wait()
 
-        #always do custom coloring for now to test wo matrices yet
-        if _use_matrix_coloring: # and any(arg._is_mat for arg in self._parloop._actual_args):
+        if _use_matrix_coloring and any(arg._is_mat for arg in self._parloop._actual_args):
+            # recompute coloring based on matrix and indirect reduction arguments
+
             def mat_indices_tuples(arg, idx):
+                # return the (row, col) indice tuple list that are accessed for elem
+                # idx of the iteration set
                 for i in range(arg.map[0].dim):
                     for j in range(arg.map[1].dim):
                         yield (map[0].values[idx][i], map[1].values[idx][j])
 
-            # recompute coloring based on matrix and indirect reduction arguments
+            irs = dict() # key: indirect reduction dats, value [(map, idx)]
+            work = dict() # key: indirect reduction dats, value: color mask
+            mat_work = dict() # key: mats, value: color mask
 
-            # dict of key:indirect reduction arg, value list of map-index tuples referencing that map
-            irs = dict() # list of indirect reductions
-            work = dict()
-            mat_work = dict()
+            # fill in/init irs, work, mat_work
             for arg in self._parloop._args:
                 if arg._is_indirect_reduction:
                     if not irs.has_key(arg.data):
@@ -562,7 +564,7 @@ class OpPlan():
             tcolors = np.empty(self._parloop._it_space.size, dtype=np.int32)
             tcolors.fill(-1)
 
-            tidx = 0
+            tidx = 0 # idx of the first thread of the current partition
             for p in range(self._core_plan.nblocks):
                 base_color = 0
                 color_starvation = True
@@ -575,6 +577,7 @@ class OpPlan():
                     for arg, w in mat_work.iteritems():
                         mat_work[arg] = dict()
 
+                    # color partition threads
                     for t in (v for v in range(tidx, tidx + self._core_plan.nelems[p]) if tcolors[v]==-1):
                         mask = 0
                         for dat, paths in irs.iteritems():
@@ -590,6 +593,7 @@ class OpPlan():
                             color_starvation = True
                             tcolors[t] = -1
                         else:
+                            # find first available color
                             c = 0
                             while mask & 0x1:
                                 mask = mask >> 1
@@ -666,6 +670,7 @@ class OpPlan():
                     tidx += self._core_plan.nelems[p]
                 base_color += 32
 
+            # recompute blkmap (potentialy more color than before).
             # using mergesort to get a stable sort, not sure that is actually necessary ?
             blkmap = np.argsort(pcolors, kind='mergesort')
 
@@ -679,26 +684,11 @@ class OpPlan():
             self._blkmap_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=blkmap.size * np.uint32(0).nbytes)
             cl.enqueue_copy(_queue, self._blkmap_buffer, blkmap.astype(np.uint32), is_blocking=True).wait()
 
+            # recompute ncolors and ncolblk
             self._ncolors = max(pcolors) + 1
             self._ncolblk = np.bincount(pcolors)
-
-            # DEBUG
-            print 'part size        : ' + str(self._parloop._i_partition_size())
-            print 'our thrcolors    : ' + str(tcolors)
-            print 'their thrcolors  : ' + str(self._core_plan.thrcol)
-
-            print 'our nthrcolors   : ' + str(partition_color_count)
-            print 'their nthrcolors : ' + str(self._core_plan.nthrcol)
-
-            print 'our blkmap       : ' + str(blkmap)
-            print 'their blkmap     : ' + str(self._core_plan.blkmap)
-
-            print 'our ncolblk      : ' + str(self._ncolblk)
-            print 'their ncolblk    : ' + str(self._core_plan.ncolblk)
-
-            print 'our ncolors      : ' + str(self._ncolors)
-            print 'their ncolors    : ' + str(self._core_plan.ncolors)
         else:
+            # use unmodified op2-common coloring
             self._nthrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.nthrcol.nbytes)
             cl.enqueue_copy(_queue, self._nthrcol_buffer, self._core_plan.nthrcol, is_blocking=True).wait()
 
@@ -717,10 +707,6 @@ class OpPlan():
         self._nelems_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.nelems.nbytes)
         cl.enqueue_copy(_queue, self._nelems_buffer, self._core_plan.nelems, is_blocking=True).wait()
 
-        #DEBUG
-        print 'offset : ' + str(self._core_plan.offset)
-        print 'nelems : ' + str(self._core_plan.nelems)
-
         if _debug:
             print 'plan ind_map ' + str(self._core_plan.ind_map)
             print 'plan loc_map ' + str(self._core_plan.loc_map)
@@ -729,16 +715,16 @@ class OpPlan():
             print 'ninds %d' % self.ninds
             print '_off ' + str(_off)
             for i in range(self.ninds):
-                print 'ind_map[' + str(i) + '] = ' + str(self.ind_map[s:e])
+                print 'ind_map[' + str(i) + '] = ' + str(self._core_plan.ind_map[s:e])
             for i in range(self.nuinds):
-                print 'loc_map[' + str(i) + '] = ' + str(self.loc_map[s:e])
-            print 'ind_sizes :' + str(self.ind_sizes)
-            print 'ind_offs :' + str(self.ind_offs)
-            print 'blk_map :' + str(self.blkmap)
-            print 'offset :' + str(self.offset)
-            print 'nelems :' + str(self.nelems)
-            print 'nthrcol :' + str(self.nthrcol)
-            print 'thrcol :' + str(self.thrcol)
+                print 'loc_map[' + str(i) + '] = ' + str(self._core_plan.loc_map[s:e])
+            print 'ind_sizes :' + str(self._core_plan.ind_sizes)
+            print 'ind_offs :' + str(self._core_plan.ind_offs)
+            print 'blk_map :' + str(self._core_plan.blkmap)
+            print 'offset :' + str(self._core_plan.offset)
+            print 'nelems :' + str(self._core_plan.nelems)
+            print 'nthrcol :' + str(self._core_plan.nthrcol)
+            print 'thrcol :' + str(self._core_plan.thrcol)
 
     @property
     def nshared(self):
