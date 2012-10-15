@@ -156,6 +156,13 @@ class Sparsity(base.Sparsity):
             _sparsity_cache[key] = self._lib_handle
         return self._lib_handle
 
+    def build_sparsity_pattern(self):
+        rmult, cmult = self._dims
+        s_diag  = [ set() for i in xrange(self._nrows) ]
+        s_odiag = [ set() for i in xrange(self._nrows) ]
+
+
+
 class Mat(base.Mat):
     """OP2 matrix data. A Mat is defined on a sparsity pattern and holds a value
     for each element in the :class:`Sparsity`."""
@@ -186,4 +193,6 @@ class ParLoop(base.ParLoop):
         raise RuntimeError('Must select a backend')
 
 class Solver(base.Solver):
-    pass
+
+    def __init__(self):
+        super(Solver, self).__init__()
