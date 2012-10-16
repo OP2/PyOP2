@@ -4,21 +4,19 @@ from Cython.Distutils import build_ext
 import numpy as np
 import os, sys
 
-try:
-    OP2_DIR = os.environ['OP2_DIR']
-    OP2_INC = OP2_DIR + '/c/include'
-    OP2_LIB = OP2_DIR + '/c/lib'
-except KeyError:
-    try:
-        OP2_PREFIX = os.environ['OP2_PREFIX']
-        OP2_INC = OP2_PREFIX + '/include'
-        OP2_LIB = OP2_PREFIX + '/lib'
-    except KeyError:
-        sys.exit("""Error: Could not find the OP2 library.
+if 'OP2_PREFIX' in os.environ:
+    OP2_PREFIX = os.environ['OP2_PREFIX']
+elif "OP2_DIR" in os.environ:
+    OP2_PREFIX = os.path.join(os.environ['OP2_DIR'], 'c')
+else:
+    sys.exit("""Error: Could not find the OP2 library.
 
 Set the environment variable OP2_DIR to point to the op2 subdirectory
 of your OP2 source tree or OP2_PREFIX to point to the location of an OP2
 install.""")
+
+OP2_INC = os.path.join(OP2_PREFIX, 'include')
+OP2_LIB = os.path.join(OP2_PREFIX, 'lib')
 
 os.environ['CC'] = 'mpicc'
 os.environ['CXX'] = 'mpicxx'

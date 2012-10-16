@@ -235,13 +235,10 @@ def parse_args(*args, **kwargs):
     The only recognised options are `group` and `description`."""
     return vars(parser(*args, **kwargs).parse_args())
 
-try:
-    OP2_DIR = os.environ['OP2_DIR']
-except KeyError:
-    sys.exit("""Error: Could not find OP2 library.
+if 'OP2_DIR' in os.environ:
+    OP2_PREFIX = os.path.join(os.environ['OP2_DIR'], 'c')
+else:
+    OP2_PREFIX = '/usr'
 
-Set the environment variable OP2_DIR to point to the op2 subdirectory
-of your OP2 source tree""")
-
-OP2_INC = OP2_DIR + '/c/include'
-OP2_LIB = OP2_DIR + '/c/lib'
+OP2_INC = os.path.join(OP2_PREFIX, 'include')
+OP2_LIB = os.path.join(OP2_PREFIX, 'lib')
