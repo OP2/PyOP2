@@ -12,9 +12,7 @@ Package: python-pyop2
 Architecture: any
 Depends: python-ufl (>= 1.0.0-2~), python-yaml (>= 3.09),
  python-pyopencl (>= 0.92), python-ply (>= 3.3), python-mako (>= 0.3.6),
- python-jinja2 (>= 2.5.5), python-h5py (>= 1.3.1), ${shlibs:Depends},
- ${python:Depends},
- ${misc:Depends}
-Recommends: python-pycparser (>= 2.07)
+ python-jinja2 (>= 2.5.5), python-h5py (>= 1.3.1), python-pycparser (>= 2.07),
+ ${shlibs:Depends}, ${python:Depends}, ${misc:Depends}
 Suggests: triangle-bin, gmsh
 Description: Python implementation of the OP2 DSL.
