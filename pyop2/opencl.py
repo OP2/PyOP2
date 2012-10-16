@@ -53,6 +53,7 @@ import os
 import re
 import time
 import md5
+import itertools
 
 class Kernel(op2.Kernel):
     """OP2 OpenCL kernel type."""
@@ -534,20 +535,177 @@ class OpPlan():
         self._ind_offs_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.ind_offs.nbytes)
         cl.enqueue_copy(_queue, self._ind_offs_buffer, self._core_plan.ind_offs, is_blocking=True).wait()
 
-        self._blkmap_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.blkmap.nbytes)
-        cl.enqueue_copy(_queue, self._blkmap_buffer, self._core_plan.blkmap, is_blocking=True).wait()
+        if _use_matrix_coloring and any(arg._is_mat for arg in self._parloop._actual_args):
+            # recompute coloring based on matrix and indirect reduction arguments
+
+            def mat_indices_tuples(arg, idx):
+                # return the (row, col) indice tuple list that are accessed for elem
+                # idx of the iteration set
+                for i in range(arg.map[0].dim):
+                    for j in range(arg.map[1].dim):
+                        yield (map[0].values[idx][i], map[1].values[idx][j])
+
+            irs = dict() # key: indirect reduction dats, value [(map, idx)]
+            work = dict() # key: indirect reduction dats, value: color mask
+            mat_work = dict() # key: mats, value: color mask
+
+            # fill in/init irs, work, mat_work
+            for arg in self._parloop._args:
+                if arg._is_indirect_reduction:
+                    if not irs.has_key(arg.data):
+                        irs[arg.data] = list()
+                        work[arg.data] = np.zeros(arg.data.cdim * arg.data.dataset.size, dtype=np.uint32)
+                    irs[arg.data].append((arg.map, arg.idx))
+                elif arg._is_mat:
+                    if not mat_work.has_key(arg):
+                        mat_work[arg] = dict()
+
+            # intra partition coloring
+            tcolors = np.empty(self._parloop._it_space.size, dtype=np.int32)
+            tcolors.fill(-1)
+
+            tidx = 0 # idx of the first thread of the current partition
+            for p in range(self._core_plan.nblocks):
+                base_color = 0
+                color_starvation = True
+                while color_starvation:
+                    color_starvation = False
+
+                    # zero out working array:
+                    for dat, paths in irs.iteritems():
+                        work[dat].fill(0)
+                    for arg, w in mat_work.iteritems():
+                        mat_work[arg] = dict()
+
+                    # color partition threads
+                    for t in (v for v in range(tidx, tidx + self._core_plan.nelems[p]) if tcolors[v]==-1):
+                        mask = 0
+                        for dat, paths in irs.iteritems():
+                            for m, i in paths:
+                                mask |= work[dat][m.values[t][i]]
+                        for arg, w in mat_work.iteritems():
+                            for tu in mat_indices_tuples(arg, t):
+                                if mat_work[arg].has_key(tu):
+                                    mask |= mat_work[arg][tu]
+
+                        # can we ensure we get a 32bit int in python to avoid testing this ?
+                        if mask == 0xffffffff:
+                            color_starvation = True
+                            tcolors[t] = -1
+                        else:
+                            # find first available color
+                            c = 0
+                            while mask & 0x1:
+                                mask = mask >> 1
+                                c += 1
+                            tcolors[t] = base_color + c
+
+                            mask = 1 << c
+
+                            for dat, paths in irs.iteritems():
+                                for m, i in paths:
+                                    work[dat][m.values[t][i]] |= mask
+                            for arg, w in mat_work.iteritems():
+                                for tu in mat_indices_tuples(arg, t):
+                                    if mat_work[arg].has_key(tu):
+                                        mat_work[arg][tu] |= mask
+
+                    base_color += 32
+
+                tidx += self._core_plan.nelems[p]
+
+            # compute color count per partitions
+            partition_color_count = np.zeros(self._core_plan.nblocks, dtype=np.uint32)
+            tidx = 0
+            for p in range(self._core_plan.nblocks):
+                partition_color_count[p] = max(tcolors[tidx:(tidx + self._core_plan.nelems[p])]) + 1
+                tidx += self._core_plan.nelems[p]
+
+            # partition coloring
+            pcolors = np.empty(self._core_plan.nblocks, dtype=np.int32)
+            pcolors.fill(-1)
+
+            base_color = 0
+            color_starvation = True
+            while color_starvation:
+                color_starvation = False
+
+                for dat, paths in irs.iteritems():
+                    work[dat].fill(0)
+                for arg, w in mat_work.iteritems():
+                    mat_work[arg] = dict()
+
+                tidx = 0
+                for p in range(self._core_plan.nblocks):
+                    if pcolors[p] == -1:
+                        mask = 0
+                        for t in (v for v in range(tidx, tidx + self._core_plan.nelems[p]) if tcolors[v]==-1):
+                            for dat, paths in irs.iteritems():
+                                for m, i in paths:
+                                    mask |= work[dat][m.values[t][i]]
+                            for arg, w in mat_work.iteritems():
+                                for tu in mat_indices_tuples(arg, t):
+                                    if mat_work[arg].has_key(tu):
+                                        mask |= mat_work[arg][tu]
+
+                        if mask == 0xffffffff:
+                            color_starvation = True
+                            pcolors[p] = -1
+                        else:
+                            c = 0
+                            while mask & 0x1:
+                                mask = 1 << c
+                                c += 1
+
+                            pcolors[p] = base_color + c
+
+                        for dat, paths in irs.iteritems():
+                            for m, i in paths:
+                                work[dat][m.values[t][i]] |= mask
+                        for arg, w in mat_work.iteritems():
+                            for tu in mat_indices_tuples(arg, t):
+                                if mat_work[arg].has_key(tu):
+                                    mat_work[arg][tu] |= mask
+
+                    tidx += self._core_plan.nelems[p]
+                base_color += 32
+
+            # recompute blkmap (potentialy more color than before).
+            # using mergesort to get a stable sort, not sure that is actually necessary ?
+            blkmap = np.argsort(pcolors, kind='mergesort')
+
+            # upload stuffs on device
+            self._nthrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=partition_color_count.nbytes)
+            cl.enqueue_copy(_queue, self._nthrcol_buffer, partition_color_count, is_blocking=True).wait()
+
+            self._thrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=tcolors.nbytes)
+            cl.enqueue_copy(_queue, self._thrcol_buffer, tcolors, is_blocking=True).wait()
+
+            self._blkmap_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=blkmap.size * np.uint32(0).nbytes)
+            cl.enqueue_copy(_queue, self._blkmap_buffer, blkmap.astype(np.uint32), is_blocking=True).wait()
+
+            # recompute ncolors and ncolblk
+            self._ncolors = max(pcolors) + 1
+            self._ncolblk = np.bincount(pcolors)
+        else:
+            # use unmodified op2-common coloring
+            self._nthrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.nthrcol.nbytes)
+            cl.enqueue_copy(_queue, self._nthrcol_buffer, self._core_plan.nthrcol, is_blocking=True).wait()
+
+            self._thrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.thrcol.nbytes)
+            cl.enqueue_copy(_queue, self._thrcol_buffer, self._core_plan.thrcol, is_blocking=True).wait()
+
+            self._blkmap_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.blkmap.nbytes)
+            cl.enqueue_copy(_queue, self._blkmap_buffer, self._core_plan.blkmap, is_blocking=True).wait()
+
+            self._ncolors = self._core_plan.ncolors
+            self._ncolblk = self._core_plan.ncolblk
 
         self._offset_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.offset.nbytes)
         cl.enqueue_copy(_queue, self._offset_buffer, self._core_plan.offset, is_blocking=True).wait()
 
         self._nelems_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.nelems.nbytes)
         cl.enqueue_copy(_queue, self._nelems_buffer, self._core_plan.nelems, is_blocking=True).wait()
-
-        self._nthrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.nthrcol.nbytes)
-        cl.enqueue_copy(_queue, self._nthrcol_buffer, self._core_plan.nthrcol, is_blocking=True).wait()
-
-        self._thrcol_buffer = cl.Buffer(_ctx, cl.mem_flags.READ_ONLY, size=self._core_plan.thrcol.nbytes)
-        cl.enqueue_copy(_queue, self._thrcol_buffer, self._core_plan.thrcol, is_blocking=True).wait()
 
         if _debug:
             print 'plan ind_map ' + str(self._core_plan.ind_map)
@@ -557,16 +715,16 @@ class OpPlan():
             print 'ninds %d' % self.ninds
             print '_off ' + str(_off)
             for i in range(self.ninds):
-                print 'ind_map[' + str(i) + '] = ' + str(self.ind_map[s:e])
+                print 'ind_map[' + str(i) + '] = ' + str(self._core_plan.ind_map[s:e])
             for i in range(self.nuinds):
-                print 'loc_map[' + str(i) + '] = ' + str(self.loc_map[s:e])
-            print 'ind_sizes :' + str(self.ind_sizes)
-            print 'ind_offs :' + str(self.ind_offs)
-            print 'blk_map :' + str(self.blkmap)
-            print 'offset :' + str(self.offset)
-            print 'nelems :' + str(self.nelems)
-            print 'nthrcol :' + str(self.nthrcol)
-            print 'thrcol :' + str(self.thrcol)
+                print 'loc_map[' + str(i) + '] = ' + str(self._core_plan.loc_map[s:e])
+            print 'ind_sizes :' + str(self._core_plan.ind_sizes)
+            print 'ind_offs :' + str(self._core_plan.ind_offs)
+            print 'blk_map :' + str(self._core_plan.blkmap)
+            print 'offset :' + str(self._core_plan.offset)
+            print 'nelems :' + str(self._core_plan.nelems)
+            print 'nthrcol :' + str(self._core_plan.nthrcol)
+            print 'thrcol :' + str(self._core_plan.thrcol)
 
     @property
     def nshared(self):
@@ -578,11 +736,11 @@ class OpPlan():
 
     @property
     def ncolors(self):
-        return self._core_plan.ncolors
+        return self._ncolors
 
     @property
     def ncolblk(self):
-        return self._core_plan.ncolblk
+        return self._ncolblk
 
     @property
     def nblocks(self):
@@ -957,6 +1115,7 @@ class ParLoop(op2.ParLoop):
 
             block_offset = 0
             for i in range(plan.ncolors):
+                print 'launching color %d on %d blocks' % (i, plan.ncolblk[i])
                 blocks_per_grid = int(plan.ncolblk[i])
                 threads_per_block = min(_max_work_group_size, conf['partition_size'])
                 thread_count = threads_per_block * blocks_per_grid
@@ -1025,6 +1184,7 @@ def _setup():
     global _AMD_fixes
     global _plan_cache
     global _reduction_task_cache
+    global _use_matrix_coloring
 
     _ctx = cl.create_some_context()
     _queue = cl.CommandQueue(_ctx, properties=cl.command_queue_properties.PROFILING_ENABLE)
@@ -1036,6 +1196,9 @@ def _setup():
     if not _has_dpfloat:
         warnings.warn('device does not support double precision floating point computation, expect undefined behavior for double')
 
+    if not 'cl_khr_int64_base_atomics' in _queue.device.extensions:
+        _use_matrix_coloring = True
+
     if _queue.device.type == cl.device_type.CPU:
         _warpsize = 1
     elif _queue.device.type == cl.device_type.GPU:
@@ -1046,6 +1209,7 @@ def _setup():
     _plan_cache = OpPlanCache()
     _reduction_task_cache = dict()
 
+_use_matrix_coloring = False
 _debug = False
 _ctx = None
 _queue = None
