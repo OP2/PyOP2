@@ -57,10 +57,9 @@ class TestSparsity:
         elem_node = op2.Map(elements, nodes, 3, [0, 4, 3, 0, 1, 4, \
                                                  1, 2, 4, 2, 3, 4])
         sparsity = op2.Sparsity((elem_node, elem_node), 1)
-        sparsity.build_sparsity_pattern()
-        assert all(sparsity._rowptr == [0, 4, 8, 12, 16, 21])
-        assert all(sparsity._colidx == [ 0, 1, 3, 4, 0, 1, 2, 4, 1, 2, \
-                                         3, 4, 0, 2, 3, 4, 0, 1, 2, 3, 4 ])
+        assert sparsity._rowptr == [0, 4, 8, 12, 16, 21]
+        assert sparsity._colidx == [ 0, 1, 3, 4, 0, 1, 2, 4, 1, 2, \
+                                     3, 4, 0, 2, 3, 4, 0, 1, 2, 3, 4 ]
 
 class TestMatrices:
     """

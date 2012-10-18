@@ -40,21 +40,21 @@ class KspSolver(object):
     def __init__(self):
         self._ksp = PETSc.KSP()
         self._ksp.create(PETSc.COMM_WORLD)
-        pc = self._ksp.getPC()
+        self._pc = self._ksp.getPC()
 
-    def set_parameters(object):
+    def set_parameters(self, parameters):
         self._ksp.setType(parameters['linear_solver'])
         self._pc.setType(parameters['preconditioner'])
         self._ksp.rtol = parameters['relative_tolerance']
         self._ksp.atol = parameters['absolute_tolerance']
-        self._ksp._divtol = parameters['divergence_tolerance']
+        self._ksp.divtol = parameters['divergence_tolerance']
         self._ksp.max_it = parameters['maximum_iterations']
 
     def solve(self, A, x, b):
-        m = A._lib_handle
-        px = Vec()
+        m = A._handle
+        px = PETSc.Vec()
         px.createWithArray(b.data)
-        pb = Vec()
+        pb = PETSc.Vec()
         pb.createWithArray(x.data)
         self._ksp.setOperators(m)
         self._ksp.solve(pb, px)

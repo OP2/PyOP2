@@ -197,8 +197,8 @@ class Sparsity(base.Sparsity):
             colidx[rowptr[row]:rowptr[row+1]] = entries
 
         self._total_nz = rowptr[self._nrows]
-        self._rowptr = np.asarray(rowptr, np.uint32)
-        self._colidx = np.asarray(colidx, np.uint32)
+        self._rowptr = rowptr
+        self._colidx = colidx
         self._d_nnz = d_nnz
 
     @property
@@ -221,10 +221,15 @@ class Mat(base.Mat):
 
     def __init__(self, *args, **kwargs):
         super(Mat, self).__init__(*args, **kwargs)
+        self._handle = None
+
+    def _init(self):
         mat = PETSc.Mat()
-        mat.createAIJ((self._sparsity.nrows, self._sparsity.ncols), \
-                       self._sparsity.d_nnz, PETSc.COMM_WORLD)
-        mat.setPreallocationCSR((self._sparsity.rowptr, self._sparsity.colidx, None))
+        mat.create()
+        mat.setType(PETSc.Mat.Type.SEQAIJ)
+        mat.setSizes([self.sparsity.nrows, self.sparsity._ncols])
+        mat.setPreallocationCSR((self.sparsity.rowptr, self.sparsity.colidx, None))
+        self._handle = mat
 
     def zero(self):
         """Zero the matrix."""
@@ -244,10 +249,10 @@ class Mat(base.Mat):
         return self._c_handle.values
 
     @property
-    def _c_handle(self):
-        if self._lib_handle is None:
-            self._lib_handle = core.op_mat(self)
-        return self._lib_handle
+    def handle(self):
+        if self._handle is None:
+            self._init()
+        return self._handle
 
 class ParLoop(base.ParLoop):
     def compute(self):
