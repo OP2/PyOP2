@@ -161,7 +161,38 @@ class Sparsity(base.Sparsity):
         s_diag  = [ set() for i in xrange(self._nrows) ]
         s_odiag = [ set() for i in xrange(self._nrows) ]
 
+        lsize = self._nrows
+        for rowmap, colmap in zip(self._rmaps, self._cmaps):
+            #FIXME: exec_size will need adding for MPI support
+            rsize = rowmap.iterset.size
+            for e in xrange(rsize):
+                for i in xrange(rowmap.dim):
+                    for r in xrange(rmult):
+                        row = rmult * rowmap.values[e][i] + r
+                        if row < lsize:
+                            for c in xrange(cmult):
+                                for d in xrange(colmap.dim):
+                                    entry = cmult * colmap.values[e][d] + c
+                                    if entry < lsize:
+                                        s_diag[row].add(entry)
+                                    else:
+                                        s_odiag[row].add(entry)
 
+        d_nnz = [0]*(cmult * self._nrows)
+        o_nnz = [0]*(cmult * self._nrows)
+        rowptr = [0]*(self._nrows+1)
+        for row in xrange(self._nrows):
+            d_nnz[row] = len(s_diag[row])
+            o_nnz[row] = len(s_odiag[row])
+            rowptr[row+1] = rowptr[row] + d_nnz[row] + o_nnz[row]
+        colidx = [0]*rowptr[self._nrows]
+        for row in xrange(self._nrows):
+            entries = list(s_diag[row]) + list(s_odiag[row])
+            colidx[rowptr[row]:rowptr[row+1]] = entries
+
+        self._total_nz = rowptr[self._nrows]
+        self._rowptr = np.asarray(rowptr, np.uint32)
+        self._colidx = np.asarray(colidx, np.uint32)
 
 class Mat(base.Mat):
     """OP2 matrix data. A Mat is defined on a sparsity pattern and holds a value
