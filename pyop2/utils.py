@@ -159,6 +159,25 @@ class validate_range(validate_base):
             raise exception("%s:%d %s must be within range %s" \
                     % (self.file, self.line, arg, range))
 
+def one_time(func):
+    """This decorator runs the function only once - the return value is
+    memoised and returned on subsequent calls."""
+    def wrap(self):
+        try:
+            value = self._memoize[func.__name__]
+        except (KeyError, AttributeError):
+            value = func(self)
+            try:
+                cache = self._memoize
+            except AttributeError:
+                cache = self._memoize = dict()
+            cache[func.__name__] = value
+        return value
+
+    wrap.__name__ = func.__name__
+    wrap.__doc__ = func.__doc__
+    return wrap
+
 def verify_reshape(data, dtype, shape, allow_none=False):
     """Verify data is of type dtype and try to reshaped to shape."""
 

@@ -680,6 +680,16 @@ class Sparsity(object):
         return self._dims
 
     @property
+    def nrows(self):
+        """The number of rows in the ``Sparsity``."""
+        return self._nrows
+
+    @property
+    def ncols(self):
+        """The number of columns in the ``Sparsity``."""
+        return self._ncols
+
+    @property
     def name(self):
         """A user-defined label."""
         return self._name
@@ -757,6 +767,7 @@ class Mat(DataCarrier):
             matrix has more than around 10000 degrees of freedom.
 
         """
+        raise NotImplementedError("Abstract base Mat does not implement values()")
         return self._c_handle.values
 
     @property

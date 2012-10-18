@@ -43,6 +43,7 @@ from base import DataCarrier, IterationIndex, i, IdentityMap, Kernel
 from base import _parloop_cache, _empty_parloop_cache, _parloop_cache_size
 import op_lib_core as core
 from pyop2.utils import OP2_INC, OP2_LIB
+from la_petsc import PETSc
 
 # Data API
 
@@ -148,6 +149,10 @@ def _empty_sparsity_cache():
 class Sparsity(base.Sparsity):
     """OP2 Sparsity, a matrix structure derived from the union of the outer product of pairs of :class:`Map` objects."""
 
+    def __init__(self, *args, **kwargs):
+        super(Sparsity, self).__init__(*args, **kwargs)
+        self._build_sparsity_pattern()
+
     @property
     def _c_handle(self):
         if self._lib_handle is None:
@@ -156,7 +161,8 @@ class Sparsity(base.Sparsity):
             _sparsity_cache[key] = self._lib_handle
         return self._lib_handle
 
-    def build_sparsity_pattern(self):
+    @one_time
+    def _build_sparsity_pattern(self):
         rmult, cmult = self._dims
         s_diag  = [ set() for i in xrange(self._nrows) ]
         s_odiag = [ set() for i in xrange(self._nrows) ]
@@ -193,12 +199,32 @@ class Sparsity(base.Sparsity):
         self._total_nz = rowptr[self._nrows]
         self._rowptr = np.asarray(rowptr, np.uint32)
         self._colidx = np.asarray(colidx, np.uint32)
+        self._d_nnz = d_nnz
+
+    @property
+    def rowptr(self):
+        return self._rowptr
+
+    @property
+    def colidx(self):
+        return self._colidx
+
+    @property
+    def d_nnz(self):
+        return self._d_nnz
 
 class Mat(base.Mat):
     """OP2 matrix data. A Mat is defined on a sparsity pattern and holds a value
     for each element in the :class:`Sparsity`."""
 
     _arg_type = Arg
+
+    def __init__(self, *args, **kwargs):
+        super(Mat, self).__init__(*args, **kwargs)
+        mat = PETSc.Mat()
+        mat.createAIJ((self._sparsity.nrows, self._sparsity.ncols), \
+                       self._sparsity.d_nnz, PETSc.COMM_WORLD)
+        mat.setPreallocationCSR((self._sparsity.rowptr, self._sparsity.colidx, None))
 
     def zero(self):
         """Zero the matrix."""
@@ -212,6 +238,10 @@ class Mat(base.Mat):
 
     def _assemble(self):
         self._c_handle.assemble()
+
+    @property
+    def values(self):
+        return self._c_handle.values
 
     @property
     def _c_handle(self):
