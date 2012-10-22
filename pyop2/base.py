@@ -768,7 +768,6 @@ class Mat(DataCarrier):
 
         """
         raise NotImplementedError("Abstract base Mat does not implement values()")
-        return self._c_handle.values
 
     @property
     def dtype(self):

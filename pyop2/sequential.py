@@ -389,16 +389,11 @@ def solve(M, b, x):
 def _setup():
     pass
 
-use_petsc4py = True
-
 class Solver(rt.Solver):
 
     def __init__(self):
         super(Solver, self).__init__()
-        if use_petsc4py:
-            self._ksp_solver = KspSolver()
-        else:
-            self._ksp_solver = core.ksp_solver()
+        self._ksp_solver = KspSolver()
 
     def solve(self, A, x, b):
         #self.check_parameters()

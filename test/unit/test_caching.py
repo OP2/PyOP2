@@ -504,6 +504,7 @@ void kernel_swap(unsigned int* x[2])
         op2.par_loop(k, iterset, g(op2.INC))
         assert op2._parloop_cache_size() == 2
 
+@pytest.mark.xfail
 class TestSparsityCache:
 
     def pytest_funcarg__s1(cls, request):
