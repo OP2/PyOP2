@@ -34,6 +34,9 @@
 import petsc4py
 petsc4py.init()
 from petsc4py import PETSc
+# Override PETSc's Mat class with our enhanced one
+import petsc_extensions
+PETSc.Mat = petsc_extensions.Mat
 
 class KspSolver(object):
 

@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-#
 # This file is part of PyOP2
 #
 # PyOP2 is Copyright (c) 2012, Imperial College London and
@@ -33,39 +31,15 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
 # OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from distutils.core import setup
-from Cython.Distutils import build_ext, Extension
-import os, sys
-import petsc
-import petsc4py
+import numpy as np
+cimport numpy as np
+from petsc4py.PETSc cimport Mat as PETScMat
 
-try:
-    OP2_DIR = os.environ['OP2_DIR']
-except KeyError:
-    sys.exit("""Error: Could not find OP2 library.
+cdef class Mat(PETScMat):
 
-Set the environment variable OP2_DIR to point to the op2 subdirectory
-of your OP2 source tree""")
-
-OP2_INC = OP2_DIR + '/c/include'
-OP2_LIB = OP2_DIR + '/c/lib'
-PETSC4PY_INC = petsc4py.get_include()
-PETSC_INC = petsc.get_petsc_dir()+'/include'
-
-os.environ['CC'] = 'mpicc'
-os.environ['CXX'] = 'mpicxx'
-setup(name='PyOP2',
-      version='0.1',
-      description='Python interface to OP2',
-      author='...',
-      packages=['pyop2'],
-      cmdclass = {'build_ext' : build_ext},
-      ext_modules=[Extension('pyop2.op_lib_core', ['pyop2/op_lib_core.pyx'],
-                             pyrex_include_dirs=['pyop2'],
-                             include_dirs=[OP2_INC],
-                             library_dirs=[OP2_LIB],
-                             runtime_library_dirs=[OP2_LIB],
-                             libraries=["op2_seq"]),
-                   Extension('pyop2.petsc_extensions', ['pyop2/petsc_extensions.pyx'],
-                             include_dirs=[PETSC4PY_INC, PETSC_INC])
-                  ])
+    @property
+    def values(self):
+        M, N = self.size
+        rows = np.arange(M, dtype=np.int32)
+        cols = np.arange(N, dtype=np.int32)
+        return self.getValues(rows, cols)
