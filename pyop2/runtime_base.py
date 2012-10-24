@@ -151,15 +151,8 @@ class Sparsity(base.Sparsity):
 
     def __init__(self, *args, **kwargs):
         super(Sparsity, self).__init__(*args, **kwargs)
+        # TODO: we really want to cache this
         self._build_sparsity_pattern()
-
-    @property
-    def _c_handle(self):
-        if self._lib_handle is None:
-            key = (self._rmaps, self._cmaps, self._dims)
-            self._lib_handle = _sparsity_cache.get(key) or core.op_sparsity(self)
-            _sparsity_cache[key] = self._lib_handle
-        return self._lib_handle
 
     @one_time
     def _build_sparsity_pattern(self):
@@ -213,6 +206,10 @@ class Sparsity(base.Sparsity):
     def d_nnz(self):
         return self._d_nnz
 
+    @property
+    def total_nnz(self):
+        return self._total_nnz
+
 class Mat(base.Mat):
     """OP2 matrix data. A Mat is defined on a sparsity pattern and holds a value
     for each element in the :class:`Sparsity`."""
@@ -233,20 +230,24 @@ class Mat(base.Mat):
 
     def zero(self):
         """Zero the matrix."""
-        self._c_handle.zero()
+        self.handle.zeroEntries()
 
     def zero_rows(self, rows, diag_val):
         """Zeroes the specified rows of the matrix, with the exception of the
         diagonal entry, which is set to diag_val. May be used for applying
         strong boundary conditions."""
-        self._c_handle.zero_rows(rows, diag_val)
+        self.handle.zeroRows(rows, diag_val)
 
     def _assemble(self):
-        self._c_handle.assemble()
+        self.handle.assemble()
+
+    @property
+    def array(self):
+        raise NotImplementedError("values is not implemented yet")
 
     @property
     def values(self):
-        return self._c_handle.values
+        raise NotImplementedError("values is not implemented yet")
 
     @property
     def handle(self):
