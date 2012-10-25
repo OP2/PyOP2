@@ -881,8 +881,12 @@ class ParLoop(object):
 
         return key
 
-_DEFAULT_SOLVER_PARAMETERS = {'linear_solver':  'cg',
-                              'preconditioner': 'jacobi'}
+_DEFAULT_SOLVER_PARAMETERS = {'linear_solver':      'cg',
+                              'preconditioner':     'jacobi',
+                              'relative_tolerance': 1.0e-7,
+                              'absolute_tolerance': 1.0e-50,
+                              'divergence_tolerance': 1.0e+4,
+                              'maximum_iterations': 1000 }
 
 class Solver(object):
     """OP2 Solver object. The :class:`Solver` holds a set of parameters that are
