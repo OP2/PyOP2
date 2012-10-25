@@ -1,6 +1,5 @@
 from distutils.core import setup
 from distutils.extension import Extension
-from Cython.Distutils import build_ext
 import numpy as np
 import os, sys
 
@@ -26,8 +25,7 @@ setup(name='pyop2',
       packages=['pyop2','pyop2_utils'],
       package_dir={'pyop2':'pyop2','pyop2_utils':'pyop2_utils'},
       package_data={'pyop2': ['assets/*', 'mat_utils.*']},
-      cmdclass = {'build_ext' : build_ext},
-      ext_modules=[Extension('pyop2.op_lib_core', ['pyop2/op_lib_core.pyx'],
+      ext_modules=[Extension('pyop2.op_lib_core', ['pyop2/op_lib_core.c'],
                    pyrex_include_dirs=['pyop2'],
                    include_dirs=[OP2_INC] + [np.get_include()],
                    library_dirs=[OP2_LIB],
