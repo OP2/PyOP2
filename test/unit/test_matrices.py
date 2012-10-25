@@ -82,18 +82,18 @@ class TestMatrices:
         return op2.Map(elements, nodes, 3, elem_node_map, "elem_node")
 
     def pytest_funcarg__mat(cls, request):
-        elem_node = request.getfuncargvalue('elem_node')
-        sparsity = op2.Sparsity((elem_node, elem_node), 1, "sparsity")
-        return request.cached_setup(
-                setup=lambda: op2.Mat(sparsity, valuetype, "mat"),
-                scope='module')
+        def setup():
+            elem_node = request.getfuncargvalue('elem_node')
+            sparsity = op2.Sparsity((elem_node, elem_node), 1, "sparsity")
+            return op2.Mat(sparsity, valuetype, "mat")
+        return request.cached_setup(setup=setup, scope='module')
 
     def pytest_funcarg__vecmat(cls, request):
-        elem_node = request.getfuncargvalue('elem_node')
-        sparsity = op2.Sparsity((elem_node, elem_node), 2, "sparsity")
-        return request.cached_setup(
-                setup=lambda: op2.Mat(sparsity, valuetype, "mat"),
-                scope='module')
+        def setup():
+            elem_node = request.getfuncargvalue('elem_node')
+            sparsity = op2.Sparsity((elem_node, elem_node), 2, "sparsity")
+            return op2.Mat(sparsity, valuetype, "mat")
+        return request.cached_setup(setup=setup, scope='module')
 
     def pytest_funcarg__coords(cls, request):
         nodes = request.getfuncargvalue('nodes')
@@ -113,27 +113,27 @@ class TestMatrices:
         return op2.Dat(nodes, 2, f_vals, valuetype, "f")
 
     def pytest_funcarg__b(cls, request):
-        nodes = request.getfuncargvalue('nodes')
-        b_vals = numpy.asarray([0.0]*NUM_NODES, dtype=valuetype)
-        return request.cached_setup(
-                setup=lambda: op2.Dat(nodes, 1, b_vals, valuetype, "b"),
-                scope='module')
+        def setup():
+            nodes = request.getfuncargvalue('nodes')
+            b_vals = numpy.zeros(NUM_NODES, dtype=valuetype)
+            return op2.Dat(nodes, 1, b_vals, valuetype, "b")
+        return request.cached_setup(setup=setup, scope='module')
 
     def pytest_funcarg__b_vec(cls, request):
-        nodes = request.getfuncargvalue('nodes')
-        b_vals = numpy.asarray([0.0]*NUM_NODES*2, dtype=valuetype)
-        return request.cached_setup(
-                setup=lambda: op2.Dat(nodes, 2, b_vals, valuetype, "b"),
-                scope='module')
+        def setup():
+            nodes = request.getfuncargvalue('nodes')
+            b_vals = numpy.zeros(NUM_NODES*2, dtype=valuetype)
+            return op2.Dat(nodes, 2, b_vals, valuetype, "b")
+        return request.cached_setup(setup=setup, scope='module')
 
     def pytest_funcarg__x(cls, request):
         nodes = request.getfuncargvalue('nodes')
-        x_vals = numpy.asarray([0.0]*NUM_NODES, dtype=valuetype)
+        x_vals = numpy.zeros(NUM_NODES, dtype=valuetype)
         return op2.Dat(nodes, 1, x_vals, valuetype, "x")
 
     def pytest_funcarg__x_vec(cls, request):
         nodes = request.getfuncargvalue('nodes')
-        x_vals = numpy.asarray([0.0]*NUM_NODES*2, dtype=valuetype)
+        x_vals = numpy.zeros(NUM_NODES*2, dtype=valuetype)
         return op2.Dat(nodes, 2, x_vals, valuetype, "x")
 
     def pytest_funcarg__mass(cls, request):
@@ -572,21 +572,21 @@ void zero_mat(double local_mat[1][1], int i, int j)
         kernel = op2.Kernel(zero_mat_code, "zero_mat")
         op2.par_loop(kernel, set(1,1), mat((map[op2.i[0]], map[op2.i[1]]), op2.WRITE))
 
-        expected_matrix = numpy.asarray([[0.0]*nelems]*nelems, dtype=numpy.float64)
+        expected_matrix = numpy.zeros((nelems,nelems), dtype=numpy.float64)
         eps = 1.e-12
         assert (abs(mat.values-expected_matrix)<eps).all()
 
     @pytest.mark.xfail("'cuda' in config.option.__dict__['backend']")
-    def test_assemble(self, backend, mass, mat, coords, elements, elem_node,
-                      expected_matrix):
+    def test_assemble_mat(self, backend, mass, mat, coords, elements, elem_node,
+                          expected_matrix):
         op2.par_loop(mass, elements(3,3),
                      mat((elem_node[op2.i[0]], elem_node[op2.i[1]]), op2.INC),
                      coords(elem_node, op2.READ))
         eps=1.e-6
         assert (abs(mat.values-expected_matrix)<eps).all()
 
-    def test_rhs(self, backend, rhs, elements, b, coords, f, elem_node,
-                     expected_rhs):
+    def test_assemble_rhs(self, backend, rhs, elements, b, coords, f, elem_node,
+                          expected_rhs):
         op2.par_loop(rhs, elements,
                      b(elem_node, op2.INC),
                      coords(elem_node, op2.READ),
@@ -595,7 +595,6 @@ void zero_mat(double local_mat[1][1], int i, int j)
         eps = 1.e-12
         assert all(abs(b.data-expected_rhs)<eps)
 
-    @pytest.mark.skipif
     @pytest.mark.xfail("'cuda' in config.option.__dict__['backend']")
     def test_solve(self, backend, mat, b, x, f):
         solver = op2.Solver()
@@ -607,7 +606,7 @@ void zero_mat(double local_mat[1][1], int i, int j)
     def test_zero_matrix(self, backend, mat):
         """Test that the matrix is zeroed correctly."""
         mat.zero()
-        expected_matrix = numpy.asarray([[0.0]*4]*4, dtype=valuetype)
+        expected_matrix = numpy.zeros((4,4), dtype=valuetype)
         eps=1.e-14
         assert (abs(mat.values-expected_matrix)<eps).all()
 
@@ -689,7 +688,6 @@ void zero_mat(double local_mat[1][1], int i, int j)
         eps=1.e-6
         assert (abs(mat.values-expected_matrix)<eps).all()
 
-    @pytest.mark.skipif
     @pytest.mark.xfail("'cuda' in config.option.__dict__['backend']")
     def test_vector_solve(self, backend, vecmat, b_vec, x_vec, f_vec):
         solver = op2.Solver()
@@ -701,7 +699,7 @@ void zero_mat(double local_mat[1][1], int i, int j)
     def test_zero_vector_matrix(self, backend, vecmat):
         """Test that the matrix is zeroed correctly."""
         vecmat.zero()
-        expected_matrix = numpy.asarray([[0.0]*8]*8, dtype=valuetype)
+        expected_matrix = numpy.zeros((8,8), dtype=valuetype)
         eps=1.e-14
         assert (abs(vecmat.values-expected_matrix)<eps).all()
 
