@@ -534,7 +534,7 @@ class ParLoop(op2.ParLoop):
                     seen.add(key)
             else:
                 self.__unique_args.append(arg)
-                    
+
     def _get_arg_list(self, propname, arglist_name, keep=None):
         attr = getattr(self, propname, None)
         if attr:
@@ -572,7 +572,7 @@ class ParLoop(op2.ParLoop):
             # We reduce over one dimension of the Global at a time
             rmax = max(a.dtype.itemsize for a in reduction)
         return max(smax, rmax)
-        
+
     @property
     def _stub_name(self):
         return "__%s_stub" % self.kernel.name

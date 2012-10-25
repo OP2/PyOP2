@@ -457,7 +457,7 @@ further ARGS."""
 
     cdef core.op_plan *_handle(self):
         return &core.OP_plans[self.idx]
-        
+
     @property
     def ninds(self):
         """Return the number of unique indirect arguments"""
