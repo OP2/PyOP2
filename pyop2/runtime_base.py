@@ -154,13 +154,13 @@ class Sparsity(base.Sparsity):
         # TODO: we really want to cache this
         self._build_sparsity_pattern()
 
+    # FIXME: this will not work with MPI
     @one_time
     def _build_sparsity_pattern(self):
         rmult, cmult = self._dims
-        s_diag  = [ set() for i in xrange(self._nrows) ]
-        s_odiag = [ set() for i in xrange(self._nrows) ]
+        lsize = self._nrows*rmult
+        s  = [ set() for i in xrange(lsize) ]
 
-        lsize = self._nrows
         for rowmap, colmap in zip(self._rmaps, self._cmaps):
             #FIXME: exec_size will need adding for MPI support
             rsize = rowmap.iterset.size
@@ -168,28 +168,18 @@ class Sparsity(base.Sparsity):
                 for i in xrange(rowmap.dim):
                     for r in xrange(rmult):
                         row = rmult * rowmap.values[e][i] + r
-                        if row < lsize:
-                            for c in xrange(cmult):
-                                for d in xrange(colmap.dim):
-                                    entry = cmult * colmap.values[e][d] + c
-                                    if entry < lsize:
-                                        s_diag[row].add(entry)
-                                    else:
-                                        s_odiag[row].add(entry)
+                        for c in xrange(cmult):
+                            for d in xrange(colmap.dim):
+                                s[row].add(cmult * colmap.values[e][d] + c)
 
-        d_nnz = [0]*(cmult * self._nrows)
-        o_nnz = [0]*(cmult * self._nrows)
-        rowptr = [0]*(self._nrows+1)
-        for row in xrange(self._nrows):
-            d_nnz[row] = len(s_diag[row])
-            o_nnz[row] = len(s_odiag[row])
-            rowptr[row+1] = rowptr[row] + d_nnz[row] + o_nnz[row]
-        colidx = [0]*rowptr[self._nrows]
-        for row in xrange(self._nrows):
-            entries = list(s_diag[row]) + list(s_odiag[row])
-            colidx[rowptr[row]:rowptr[row+1]] = entries
+        d_nnz = np.array([len(r) for r in s], dtype=PETSc.IntType)
+        rowptr = np.zeros(lsize+1, dtype=PETSc.IntType)
+        rowptr[1:] = np.cumsum(d_nnz)
+        colidx = np.zeros(rowptr[-1], PETSc.IntType)
+        for row in xrange(lsize):
+            colidx[rowptr[row]:rowptr[row+1]] = list(s[row])
 
-        self._total_nz = rowptr[self._nrows]
+        self._total_nz = rowptr[-1]
         self._rowptr = rowptr
         self._colidx = colidx
         self._d_nnz = d_nnz
@@ -207,8 +197,8 @@ class Sparsity(base.Sparsity):
         return self._d_nnz
 
     @property
-    def total_nnz(self):
-        return self._total_nnz
+    def total_nz(self):
+        return self._total_nz
 
 class Mat(base.Mat):
     """OP2 matrix data. A Mat is defined on a sparsity pattern and holds a value
@@ -224,7 +214,11 @@ class Mat(base.Mat):
         mat = PETSc.Mat()
         mat.create()
         mat.setType(PETSc.Mat.Type.SEQAIJ)
-        mat.setSizes([self.sparsity.nrows, self.sparsity._ncols])
+        rdim, cdim = self.sparsity.dims
+        # We're not currently building a blocked matrix, so need to scale the
+        # number of rows and columns by the sparsity dimensions
+        # FIXME: This needs to change if we want to do blocked sparse
+        mat.setSizes([self.sparsity.nrows*rdim, self.sparsity.ncols*cdim])
         mat.setPreallocationCSR((self.sparsity.rowptr, self.sparsity.colidx, None))
         self._handle = mat
 
@@ -247,7 +241,7 @@ class Mat(base.Mat):
 
     @property
     def values(self):
-        raise NotImplementedError("values is not implemented yet")
+        return self.handle.values
 
     @property
     def handle(self):
