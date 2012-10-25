@@ -57,9 +57,9 @@ class TestSparsity:
         elem_node = op2.Map(elements, nodes, 3, [0, 4, 3, 0, 1, 4, \
                                                  1, 2, 4, 2, 3, 4])
         sparsity = op2.Sparsity((elem_node, elem_node), 1)
-        assert sparsity._rowptr == [0, 4, 8, 12, 16, 21]
-        assert sparsity._colidx == [ 0, 1, 3, 4, 0, 1, 2, 4, 1, 2, \
-                                     3, 4, 0, 2, 3, 4, 0, 1, 2, 3, 4 ]
+        assert all(sparsity.rowptr == [ 0, 4, 8, 12, 16, 21 ])
+        assert all(sparsity.colidx == [ 0, 1, 3, 4, 0, 1, 2, 4, 1, 2, \
+                                        3, 4, 0, 2, 3, 4, 0, 1, 2, 3, 4 ])
 
 class TestMatrices:
     """
@@ -556,7 +556,6 @@ void zero_vec_dat(double *dat)
                               [0.08333333, 0.16666667], [0.58333333, 1.16666667]],
                               dtype=valuetype)
 
-    @pytest.mark.skipif
     @pytest.mark.xfail("'cuda' in config.option.__dict__['backend']")
     def test_minimal_zero_mat(self, backend):
         zero_mat_code = """
@@ -577,7 +576,6 @@ void zero_mat(double local_mat[1][1], int i, int j)
         eps = 1.e-12
         assert (abs(mat.values-expected_matrix)<eps).all()
 
-    @pytest.mark.skipif
     @pytest.mark.xfail("'cuda' in config.option.__dict__['backend']")
     def test_assemble(self, backend, mass, mat, coords, elements, elem_node,
                       expected_matrix):
@@ -605,7 +603,6 @@ void zero_mat(double local_mat[1][1], int i, int j)
         eps = 1.e-12
         assert all(abs(x.data-f.data)<eps)
 
-    @pytest.mark.skipif
     @pytest.mark.xfail("'cuda' in config.option.__dict__['backend']")
     def test_zero_matrix(self, backend, mat):
         """Test that the matrix is zeroed correctly."""
@@ -620,7 +617,6 @@ void zero_mat(double local_mat[1][1], int i, int j)
                      b(op2.IdentityMap, op2.WRITE))
         assert all(map(lambda x: x==0.0, b.data))
 
-    @pytest.mark.skipif
     @pytest.mark.xfail("'cuda' in config.option.__dict__['backend']")
     def test_assemble_ffc(self, backend, mass_ffc, mat, coords, elements,
                           elem_node, expected_matrix):
@@ -631,7 +627,6 @@ void zero_mat(double local_mat[1][1], int i, int j)
         eps=1.e-6
         assert (abs(mat.values-expected_matrix)<eps).all()
 
-    @pytest.mark.skipif
     @pytest.mark.xfail("'cuda' in config.option.__dict__['backend']")
     def test_assemble_vec_mass(self, backend, mass_vector_ffc, vecmat, coords,
                                elements, elem_node, expected_vector_matrix):
@@ -687,7 +682,6 @@ void zero_mat(double local_mat[1][1], int i, int j)
         diff = abs((b_vec.data-expected_vec_rhs)<eps)
         assert diff.all()
 
-    @pytest.mark.skipif
     @pytest.mark.xfail("'cuda' in config.option.__dict__['backend']")
     def test_zero_rows(self, backend, mat, expected_matrix):
         expected_matrix[0] = [12.0, 0.0, 0.0, 0.0]
@@ -701,10 +695,8 @@ void zero_mat(double local_mat[1][1], int i, int j)
         solver = op2.Solver()
         solver.solve(vecmat, x_vec, b_vec)
         eps = 1.e-12
-        diff = abs(x_vec.data-f_vec.data)<eps
-        assert diff.all()
+        assert (abs(x_vec.data-f_vec.data)<eps).all()
 
-    @pytest.mark.skipif
     @pytest.mark.xfail("'cuda' in config.option.__dict__['backend']")
     def test_zero_vector_matrix(self, backend, vecmat):
         """Test that the matrix is zeroed correctly."""
