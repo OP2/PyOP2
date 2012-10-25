@@ -54,11 +54,11 @@ class KspSolver(object):
         self._ksp.max_it = parameters['maximum_iterations']
 
     def solve(self, A, x, b):
-        m = A._handle
+        m = A.handle
         px = PETSc.Vec()
-        px.createWithArray(b.data)
+        px.createWithArray(x.data)
         pb = PETSc.Vec()
-        pb.createWithArray(x.data)
+        pb.createWithArray(b.data)
         self._ksp.setOperators(m)
         self._ksp.solve(pb, px)
 
