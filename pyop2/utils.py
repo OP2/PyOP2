@@ -35,8 +35,6 @@
 
 from __future__ import division
 
-import os
-import sys
 import numpy as np
 from decorator import decorator
 import argparse
@@ -234,11 +232,3 @@ def parse_args(*args, **kwargs):
     ARGS and KWARGS are passed into the parser instantiation.
     The only recognised options are `group` and `description`."""
     return vars(parser(*args, **kwargs).parse_args())
-
-if 'OP2_DIR' in os.environ:
-    OP2_PREFIX = os.path.join(os.environ['OP2_DIR'], 'c')
-else:
-    OP2_PREFIX = '/usr'
-
-OP2_INC = os.path.join(OP2_PREFIX, 'include')
-OP2_LIB = os.path.join(OP2_PREFIX, 'lib')

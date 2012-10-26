@@ -42,7 +42,7 @@ from base import READ, WRITE, RW, INC, MIN, MAX, IterationSpace
 from base import DataCarrier, IterationIndex, i, IdentityMap, Kernel
 from base import _parloop_cache, _empty_parloop_cache, _parloop_cache_size
 import op_lib_core as core
-from pyop2.utils import OP2_INC, OP2_LIB
+from paths import OP2_INC, OP2_LIB
 
 # Data API
 

@@ -3,19 +3,15 @@ from distutils.extension import Extension
 import numpy as np
 import os, sys
 
-if 'OP2_PREFIX' in os.environ:
-    OP2_PREFIX = os.environ['OP2_PREFIX']
-elif "OP2_DIR" in os.environ:
-    OP2_PREFIX = os.path.join(os.environ['OP2_DIR'], 'c')
-else:
-    sys.exit("""Error: Could not find the OP2 library.
+# Get OP2 include and library paths
+execfile('pyop2/paths.py')
+print """Using the OP2 library installed in %s
 
-Set the environment variable OP2_DIR to point to the op2 subdirectory
-of your OP2 source tree or OP2_PREFIX to point to the location of an OP2
-install.""")
-
-OP2_INC = os.path.join(OP2_PREFIX, 'include')
-OP2_LIB = os.path.join(OP2_PREFIX, 'lib')
+If this is incorrect or you want to use a different OP2 installation,
+set the environment variable OP2_DIR to point to the op2 subdirectory
+of your OP2 source tree or OP2_PREFIX to point to the location of an
+OP2 install.
+""" % OP2_PREFIX
 
 os.environ['CC'] = 'mpicc'
 os.environ['CXX'] = 'mpicxx'
