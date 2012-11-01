@@ -178,7 +178,7 @@ class DeviceDataMixin(op2.DeviceDataMixin):
         if self.state is DeviceDataMixin.HOST:
             self._device_data.set(self._maybe_to_soa(self._data),
                                   queue=_queue)
-        self.state = DeviceDataMixin.BOTH
+            self.state = DeviceDataMixin.BOTH
 
     def _from_device(self):
         flag = self._data.flags['WRITEABLE']
@@ -244,7 +244,7 @@ class Mat(op2.Mat, DeviceDataMixin):
                                 self._sparsity._c_handle.total_nz,
                                 self.dtype))
         return getattr(self, '__dev_array')
-        
+
     @property
     def _dev_colidx(self):
         if not hasattr(self, '__dev_colidx'):
@@ -476,7 +476,7 @@ class ParLoop(op2.ParLoop):
         if cfg['dump-gencode']:
             path = cfg['dump-gencode-path'] % {"kernel": self.kernel.name,
                                                "time": time.strftime('%Y-%m-%d@%H:%M:%S')}
-            
+
             if not os.path.exists(path):
                 with open(path, "w") as f:
                     f.write(self._src)
@@ -606,7 +606,7 @@ class ParLoop(op2.ParLoop):
             return prg.__getattr__(self._stub_name)
 
         conf = self.launch_configuration()
-        
+
         if self._is_indirect:
             self._plan = Plan(self.kernel, self._it_space.iterset,
                               *self._unwound_args,
@@ -618,7 +618,7 @@ class ParLoop(op2.ParLoop):
                                           conf['partition_size'])
             conf['work_group_count'] = self._plan.nblocks
         conf['warpsize'] = _warpsize
-            
+
         self.codegen(conf)
         kernel = compile_kernel()
 
