@@ -35,8 +35,6 @@
 
 from __future__ import division
 
-import os
-import sys
 import numpy as np
 from decorator import decorator
 import argparse
@@ -234,14 +232,3 @@ def parse_args(*args, **kwargs):
     ARGS and KWARGS are passed into the parser instantiation.
     The only recognised options are `group` and `description`."""
     return vars(parser(*args, **kwargs).parse_args())
-
-try:
-    OP2_DIR = os.environ['OP2_DIR']
-except KeyError:
-    sys.exit("""Error: Could not find OP2 library.
-
-Set the environment variable OP2_DIR to point to the op2 subdirectory
-of your OP2 source tree""")
-
-OP2_INC = OP2_DIR + '/c/include'
-OP2_LIB = OP2_DIR + '/c/lib'

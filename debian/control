@@ -1,0 +1,19 @@
+Source: python-pyop2
+Section: python
+Priority: extra
+Maintainer: Graham Markall <graham.markall08@imperial.ac.uk>
+Build-Depends: debhelper (>= 8.0.0), cdbs (>= 0.4.90~), python-all (>= 2.6.6-3~), cython (>= 0.13), mpi-default-dev, libop2-dev, python-numpy, python-dev
+Standards-Version: 3.9.2
+Homepage: http://op2.github.com/PyOP2/
+#Vcs-Git: git://git.debian.org/collab-maint/python-pyop2.git
+#Vcs-Browser: http://git.debian.org/?p=collab-maint/python-pyop2.git;a=summary
+
+Package: python-pyop2
+Architecture: any
+Depends: python-ufl (>= 1.0.0-2~), python-yaml (>= 3.09), 
+ python-pyopencl (>= 2012.1), python-ply (>= 3.3), python-mako (>= 0.3.6),
+ python-jinja2 (>= 2.5.5), python-h5py (>= 1.3.1), python-pycparser (>= 2.07),
+ python-instant (>= 1.0.0), python-pycuda (>= 2012.1)
+ ${shlibs:Depends}, ${python:Depends}, ${misc:Depends}
+Suggests: triangle-bin, gmsh
+Description: Python implementation of the OP2 DSL.

@@ -33,14 +33,15 @@
 
 """OP2 sequential backend."""
 
+import os
 import numpy as np
 
 from exceptions import *
 from utils import *
 import op_lib_core as core
-from pyop2.utils import OP2_INC, OP2_LIB
 import runtime_base as rt
 from runtime_base import *
+from paths import OP2_INC, OP2_LIB
 
 # Parallel loop API
 
