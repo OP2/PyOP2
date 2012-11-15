@@ -52,6 +52,13 @@ def par_loop(kernel, it_space, *args):
 
 class Dat(Dat):
 
+    _kernel_type = Kernel
+
+    def zero(self):
+        """Zero the data in this :class:`Dat`"""
+        ParLoop(self._zero_kernel, self.dataset,
+                self(IdentityMap, WRITE)).compute()
+
     def __iadd__(self, other):
         """Pointwise addition of fields."""
         self._data += as_type(other.data, self.dtype)

@@ -209,7 +209,12 @@ class Dat(op2.Dat, DeviceDataMixin):
     """OP2 OpenCL vector data type."""
 
     _arg_type = Arg
+    _kernel_type = Kernel
 
+    def zero(self):
+        """Zero the data in this :class:`Dat`"""
+        ParLoop(self._zero_kernel, self.dataset,
+                self(IdentityMap, WRITE)).compute()
 
     @property
     def norm(self):
