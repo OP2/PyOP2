@@ -384,20 +384,17 @@ class Dat(DataCarrier):
         """The L2-norm on the flattened vector."""
         raise NotImplementedError("Norm is not implemented.")
 
-    @property
-    def _zero_kernel(self):
-        if not hasattr(self, '__zero_kernel'):
+    def zero(self):
+        """Zero the data associated with this :class:`Dat`"""
+        if not hasattr(self, '_zero_kernel'):
             k = """void zero(%(t)s *dat) {
                 for (int n = 0; n < %(dim)s; ++n) {
                     dat[n] = (%(t)s)0;
                 }
             }""" % { 't': self.ctype, 'dim' : self.cdim }
-            setattr(self, '__zero_kernel', self._kernel_type(k, 'zero'))
-        return getattr(self, '__zero_kernel')
-
-    def zero(self):
-        """Zero the data associated with this :class:`Dat`"""
-        pass
+            self._zero_kernel = self._kernel_type(k, 'zero')
+        self._par_loop(self._zero_kernel, self.dataset,
+                       self(IdentityMap, WRITE)).compute()
 
     def __str__(self):
         return "OP2 Dat: %s on (%s) with dim %s and datatype %s" \
