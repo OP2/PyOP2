@@ -50,39 +50,6 @@ def par_loop(kernel, it_space, *args):
     """Invocation of an OP2 kernel with an access descriptor"""
     ParLoop(kernel, it_space, *args).compute()
 
-class Dat(Dat):
-
-    def __iadd__(self, other):
-        """Pointwise addition of fields."""
-        self._data += as_type(other.data, self.dtype)
-        return self
-
-    def __isub__(self, other):
-        """Pointwise subtraction of fields."""
-        self._data -= as_type(other.data, self.dtype)
-        return self
-
-    def __imul__(self, other):
-        """Pointwise multiplication or scaling of fields."""
-        if np.isscalar(other):
-            self._data *= as_type(other, self.dtype)
-        else:
-            self._data *= as_type(other.data, self.dtype)
-        return self
-
-    def __idiv__(self, other):
-        """Pointwise division or scaling of fields."""
-        if np.isscalar(other):
-            self._data /= as_type(other, self.dtype)
-        else:
-            self._data /= as_type(other.data, self.dtype)
-        return self
-
-    @property
-    def norm(self):
-        """The L2-norm on the flattened vector."""
-        return np.linalg.norm(self._data)
-
 class ParLoop(rt.ParLoop):
     def compute(self):
         _fun = self.generate_code()
@@ -388,6 +355,42 @@ class ParLoop(rt.ParLoop):
 
         rt._parloop_cache[key] = _fun
         return _fun
+
+class Dat(Dat):
+
+    _kernel_type = Kernel
+    _par_loop = ParLoop
+
+    def __iadd__(self, other):
+        """Pointwise addition of fields."""
+        self._data += as_type(other.data, self.dtype)
+        return self
+
+    def __isub__(self, other):
+        """Pointwise subtraction of fields."""
+        self._data -= as_type(other.data, self.dtype)
+        return self
+
+    def __imul__(self, other):
+        """Pointwise multiplication or scaling of fields."""
+        if np.isscalar(other):
+            self._data *= as_type(other, self.dtype)
+        else:
+            self._data *= as_type(other.data, self.dtype)
+        return self
+
+    def __idiv__(self, other):
+        """Pointwise division or scaling of fields."""
+        if np.isscalar(other):
+            self._data /= as_type(other, self.dtype)
+        else:
+            self._data /= as_type(other.data, self.dtype)
+        return self
+
+    @property
+    def norm(self):
+        """The L2-norm on the flattened vector."""
+        return np.linalg.norm(self._data)
 
 def _setup():
     pass

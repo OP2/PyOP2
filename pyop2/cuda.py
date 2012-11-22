@@ -135,14 +135,6 @@ class DeviceDataMixin(op2.DeviceDataMixin):
             self._data = self._maybe_to_aos(self._data)
             self.state = DeviceDataMixin.BOTH
 
-class Dat(DeviceDataMixin, op2.Dat):
-    _arg_type = Arg
-
-    @property
-    def norm(self):
-        """The L2-norm on the flattened vector."""
-        return np.sqrt(gpuarray.dot(self.array, self.array).get())
-
 class Sparsity(op2.Sparsity):
     @property
     def rowptr(self):
@@ -797,6 +789,16 @@ class ParLoop(op2.ParLoop):
                     arg.data._assemble(rowmap=arg.map[0], colmap=arg.map[1])
         if self._has_soa:
             op2stride.remove_from_namespace()
+
+class Dat(DeviceDataMixin, op2.Dat):
+    _arg_type = Arg
+    _kernel_type = Kernel
+    _par_loop = ParLoop
+
+    @property
+    def norm(self):
+        """The L2-norm on the flattened vector."""
+        return np.sqrt(gpuarray.dot(self.array, self.array).get())
 
 _device = None
 _context = None

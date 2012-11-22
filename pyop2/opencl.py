@@ -205,17 +205,6 @@ class DeviceDataMixin(op2.DeviceDataMixin):
     def _cl_type_max(self):
         return DeviceDataMixin.CL_TYPES[self.dtype].max
 
-class Dat(op2.Dat, DeviceDataMixin):
-    """OP2 OpenCL vector data type."""
-
-    _arg_type = Arg
-
-
-    @property
-    def norm(self):
-        """The L2-norm on the flattened vector."""
-        return np.sqrt(array.dot(self.array, self.array).get())
-
 class Sparsity(op2.Sparsity):
     @property
     def colidx(self):
@@ -701,6 +690,18 @@ class ParLoop(op2.ParLoop):
 
         if self._has_soa:
             op2stride.remove_from_namespace()
+
+class Dat(op2.Dat, DeviceDataMixin):
+    """OP2 OpenCL vector data type."""
+
+    _arg_type = Arg
+    _kernel_type = Kernel
+    _par_loop = ParLoop
+
+    @property
+    def norm(self):
+        """The L2-norm on the flattened vector."""
+        return np.sqrt(array.dot(self.array, self.array).get())
 
 #Monkey patch pyopencl.Kernel for convenience
 _original_clKernel = cl.Kernel
