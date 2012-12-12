@@ -668,17 +668,42 @@ class Sparsity(object):
                 print isinstance(maps, tuple)
                 rowblocks.append(_make_object('SparsityBlock', maps, dims[i][j]))
 
+        self._name = name or "sparsity_%d" % Sparsity._globalcount
+        self._lib_handle = None
+        Sparsity._globalcount += 1
 
     @property
     def blockdims(self):
         return (len(self._blocks), len(self._blocks[0]))
 
+    @property
+    def dims(self):
+        if self.blockdims == (1,1):
+            return self._blocks[0][0].dims
+        else:
+            raise SparsityTypeError("Cannot get dims of blocked sparsity.")
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def maps(self):
+        """A list of pairs (rmap, cmap) where each pair of
+        :class:`Map` objects will later be used to assemble into this
+        matrix. The iterset of each of the maps in a pair must be the
+        same, while the dataset of all the maps which appear first
+        must be common, this will form the row :class:`Set` of the
+        sparsity. Similarly, the dataset of all the maps which appear
+        second must be common and will form the column :class:`Set` of
+        the ``Sparsity``."""
+        if self.blockdims == (1,1):
+            return self._blocks[0][0].maps
+        else:
+            raise SparsityTypeError("Cannot get maps of blocked sparsity.")
+
     def __getitem__(self, block):
-        print block
-        print self._blocks
-        ret =  self._blocks[block[0]][block[1]]
-        print "returning ", ret
-        return ret
+        return self._blocks[block[0]][block[1]]
 
 class SparsityBlock(object):
 
@@ -710,9 +735,9 @@ class SparsityBlock(object):
         self._ncols = self._cmaps[0].dataset.size
 
         self._dims = as_tuple(dims, int, 2)
-        self._name = name or "global_%d" % Sparsity._globalcount
+        self._name = name or "sparsityblock_%d" % Sparsity._globalcount
         self._lib_handle = None
-        Sparsity._globalcount += 1
+        SparsityBlock._globalcount += 1
 
     #FIXME: Unused?
     @property
@@ -767,6 +792,8 @@ class Mat(DataCarrier):
     _globalcount = 0
     _modes = [WRITE, INC]
 
+    @validate_type(('sparsity', Sparsity, SparsityTypeError), \
+                   ('name', str, NameTypeError))
     def __init__(self, sparsity, dtype=None, name=None):
         self._sparsity = sparsity
         self._datatype = np.dtype(dtype)
@@ -786,6 +813,14 @@ class Mat(DataCarrier):
             return self._blocks[0][0](*args)
         else:
             raise MatTypeError("Can't call blocked matrix directly.")
+
+    @property
+    def dtype(self):
+        return self._blocks[0][0].dtype
+
+    @property
+    def sparsity(self):
+        return self._sparsity
 
 class MatBlock(DataCarrier):
     """OP2 matrix data. A ``Mat`` is defined on a sparsity pattern and holds a value

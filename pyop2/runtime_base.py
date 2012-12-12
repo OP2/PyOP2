@@ -191,8 +191,8 @@ class SparsityBlock(base.SparsityBlock):
 
 class Mat(base.Mat):
 
-    def __init__(self, *args):
-        super(Mat, self).__init__(*args)
+    def __init__(self, *args, **kwargs):
+        super(Mat, self).__init__(*args, **kwargs)
 
     @property
     def handle(self):
