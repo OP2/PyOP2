@@ -139,6 +139,14 @@ def _empty_sparsity_cache():
     _sparsity_cache.clear()
 
 class Sparsity(base.Sparsity):
+
+    def __init__(self, *args):
+        super(Sparsity, self).__init__(*args)
+
+    def __getitem__(self, *args):
+        return super(Sparsity, self).__getitem__(*args)
+
+class SparsityBlock(base.SparsityBlock):
     """OP2 Sparsity, a matrix structure derived from the union of the outer product of pairs of :class:`Map` objects."""
 
     @validate_type(('maps', (Map, tuple), MapTypeError), \
@@ -148,14 +156,14 @@ class Sparsity(base.Sparsity):
         cached = _sparsity_cache.get(key)
         if cached is not None:
             return cached
-        return super(Sparsity, cls).__new__(cls, maps, dims, name)
+        return super(SparsityBlock, cls).__new__(cls, maps, dims, name)
 
     @validate_type(('maps', (Map, tuple), MapTypeError), \
                    ('dims', (int, tuple), TypeError))
     def __init__(self, maps, dims, name=None):
         if getattr(self, '_cached', False):
             return
-        super(Sparsity, self).__init__(maps, dims, name)
+        super(SparsityBlock, self).__init__(maps, dims, name)
         key = (maps, as_tuple(dims, int, 2))
         self._cached = True
         core.build_sparsity(self)
@@ -182,11 +190,23 @@ class Sparsity(base.Sparsity):
         return int(self._total_nz)
 
 class Mat(base.Mat):
+
+    def __init__(self, *args):
+        super(Mat, self).__init__(*args)
+
+    @property
+    def handle(self):
+        if self._sparsity.blockdims == (1,1):
+            return self._blocks[0][0].handle
+        else:
+            raise NotImplementedError("Solve of block matrix TBC.")
+
+class MatBlock(base.MatBlock):
     """OP2 matrix data. A Mat is defined on a sparsity pattern and holds a value
     for each element in the :class:`Sparsity`."""
 
     def __init__(self, *args, **kwargs):
-        super(Mat, self).__init__(*args, **kwargs)
+        super(MatBlock, self).__init__(*args, **kwargs)
         self._handle = None
 
     def _init(self):

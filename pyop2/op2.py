@@ -91,6 +91,9 @@ class Dat(base.Dat):
 class Mat(base.Mat):
     __metaclass__ = backends._BackendSelector
 
+class MatBlock(base.MatBlock):
+    __metaclass__ = backends._BackendSelector
+
 class Const(base.Const):
     __metaclass__ = backends._BackendSelector
 
@@ -101,6 +104,9 @@ class Map(base.Map):
     __metaclass__ = backends._BackendSelector
 
 class Sparsity(base.Sparsity):
+    __metaclass__ = backends._BackendSelector
+
+class SparsityBlock(base.SparsityBlock):
     __metaclass__ = backends._BackendSelector
 
 class Solver(base.Solver):
