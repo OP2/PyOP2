@@ -143,7 +143,7 @@ class Arg(object):
 
     @property
     def _is_mat(self):
-        return isinstance(self._dat, Mat)
+        return isinstance(self._dat, MatBlock)
 
     @property
     def _is_global(self):
@@ -849,12 +849,71 @@ class Sparsity(object):
 
     _globalcount = 0
 
-    @validate_type(('maps', (Map, tuple), MapTypeError), \
-                   ('dims', (int, tuple), TypeError))
+    @validate_type(('maps', (tuple,list), MapTypeError), \
+                   ('dims', (int, tuple, list), TypeError),
+                   ('name', (str), TypeError))
     def __init__(self, maps, dims, name=None):
         assert not name or isinstance(name, str), "Name must be of type str"
 
         maps = (maps,maps) if isinstance(maps, Map) else maps
+        # If no blocks are given, make a single block
+        blocks = [[maps]] if isinstance(maps, tuple)        else maps
+        dims   = [[dims]] if isinstance(dims, (int, tuple)) else dims
+
+        self._blocks = []
+        for i, row in enumerate(blocks):
+            rowblocks = []
+            self._blocks.append(rowblocks)
+            for j, maps in enumerate(row):
+                print type(maps), maps, dims[i][j]
+                print isinstance(maps, tuple)
+                rowblocks.append(_make_object('SparsityBlock', maps, dims[i][j]))
+
+        self._name = name or "sparsity_%d" % Sparsity._globalcount
+        Sparsity._globalcount += 1
+
+    @property
+    def blockdims(self):
+        return (len(self._blocks), len(self._blocks[0]))
+
+    @property
+    def dims(self):
+        if self.blockdims == (1,1):
+            return self._blocks[0][0].dims
+        else:
+            raise SparsityTypeError("Cannot get dims of blocked sparsity.")
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def maps(self):
+        """A list of pairs (rmap, cmap) where each pair of
+        :class:`Map` objects will later be used to assemble into this
+        matrix. The iterset of each of the maps in a pair must be the
+        same, while the dataset of all the maps which appear first
+        must be common, this will form the row :class:`Set` of the
+        sparsity. Similarly, the dataset of all the maps which appear
+        second must be common and will form the column :class:`Set` of
+        the ``Sparsity``."""
+        if self.blockdims == (1,1):
+            return self._blocks[0][0].maps
+        else:
+            raise SparsityTypeError("Cannot get maps of blocked sparsity.")
+
+    def __getitem__(self, block):
+        return self._blocks[block[0]][block[1]]
+
+class SparsityBlock(object):
+
+    _globalcount = 0
+
+    @validate_type(('maps', (Map,tuple,list), MapTypeError), \
+                   ('dims', (int, tuple), TypeError),
+                   ('name', (str), TypeError))
+    def __init__(self, maps, dims, name=None):
+        # A 2-tuple of maps (map,map) is converted to ((map,map))
         lmaps = (maps,) if isinstance(maps[0], Map) else maps
         self._rmaps, self._cmaps = map (lambda x : as_tuple(x, Map), zip(*lmaps))
 
@@ -876,13 +935,8 @@ class Sparsity(object):
         self._ncols = self._cmaps[0].dataset.size
 
         self._dims = as_tuple(dims, int, 2)
-        self._name = name or "sparsity_%d" % Sparsity._globalcount
-        self._lib_handle = None
-        Sparsity._globalcount += 1
-
-    @property
-    def _nmaps(self):
-        return len(self._rmaps)
+        self._name = name or "sparsityblock_%d" % SparsityBlock._globalcount
+        SparsityBlock._globalcount += 1
 
     @property
     def maps(self):
@@ -927,6 +981,41 @@ class Sparsity(object):
                (self._rmaps, self._cmaps, self._dims, self._name)
 
 class Mat(DataCarrier):
+
+    _globalcount = 0
+    _modes = [WRITE, INC]
+
+    @validate_type(('sparsity', Sparsity, SparsityTypeError), \
+                   ('name', str, NameTypeError))
+    def __init__(self, sparsity, dtype=None, name=None):
+        self._sparsity = sparsity
+        self._datatype = np.dtype(dtype)
+        self._name = name or "mat_%d" % Mat._globalcount
+        self._blocks = []
+        print type(sparsity)
+        for i in xrange(sparsity.blockdims[0]):
+            row = []
+            self._blocks.append(row)
+            for j in xrange(sparsity.blockdims[1]):
+                s = sparsity[i,j]
+                print "sparsity", s
+                row.append(_make_object('MatBlock',sparsity=s))
+
+    def __call__(self, *args):
+        if self._sparsity.blockdims == (1,1):
+            return self._blocks[0][0](*args)
+        else:
+            raise MatTypeError("Can't call blocked matrix directly.")
+
+    @property
+    def dtype(self):
+        return self._blocks[0][0].dtype
+
+    @property
+    def sparsity(self):
+        return self._sparsity
+
+class MatBlock(DataCarrier):
     """OP2 matrix data. A ``Mat`` is defined on a sparsity pattern and holds a value
     for each element in the :class:`Sparsity`.
 
@@ -945,13 +1034,12 @@ class Mat(DataCarrier):
     _globalcount = 0
     _modes = [WRITE, INC]
 
-    @validate_type(('sparsity', Sparsity, SparsityTypeError), \
+    @validate_type(('sparsity', SparsityBlock, SparsityTypeError), \
                    ('name', str, NameTypeError))
     def __init__(self, sparsity, dtype=None, name=None):
         self._sparsity = sparsity
         self._datatype = np.dtype(dtype)
-        self._name = name or "mat_%d" % Mat._globalcount
-        self._lib_handle = None
+        self._name = name or "matblock_%d" % MatBlock._globalcount
         Mat._globalcount += 1
 
     @validate_in(('access', _modes, ModeValueError))

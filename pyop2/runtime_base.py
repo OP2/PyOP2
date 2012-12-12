@@ -319,17 +319,48 @@ _sparsity_cache = dict()
 def _empty_sparsity_cache():
     _sparsity_cache.clear()
 
+def tupleit(t):
+    return tuple(map(tupleit, t)) if isinstance(t, (list, tuple)) else t
+
 class Sparsity(base.Sparsity):
+
+    @validate_type(('maps', (Map, tuple), MapTypeError), \
+                   ('dims', (int, tuple), TypeError))
+    def __new__(cls, maps, dims, name=None):
+        # FIXME:  check as_tuple is doing as intended - should leave dims that
+        # are already tuples alone
+        key = (tupleit(maps), as_tuple(dims, int, 2))
+        cached = _sparsity_cache.get(key)
+        if cached is not None:
+            return cached
+        return super(Sparsity, cls).__new__(cls, maps, dims, name)
+
+    @validate_type(('maps', (Map, tuple), MapTypeError), \
+                   ('dims', (int, tuple), TypeError))
+    def __init__(self, maps, dims, name=None):
+        super(Sparsity, self).__init__(maps, dims, name)
+        key = (maps, as_tuple(dims, int, 2))
+        self._cached = True
+        _sparsity_cache[key] = self
+
+    def __getitem__(self, *args):
+        return super(Sparsity, self).__getitem__(*args)
+
+_sparsity_block_cache = dict()
+def _empty_sparsity_block_cache():
+    _sparsity_block_cache.clear()
+
+class SparsityBlock(base.SparsityBlock):
     """OP2 Sparsity, a matrix structure derived from the union of the outer product of pairs of :class:`Map` objects."""
 
     @validate_type(('maps', (Map, tuple), MapTypeError), \
                    ('dims', (int, tuple), TypeError))
     def __new__(cls, maps, dims, name=None):
         key = (maps, as_tuple(dims, int, 2))
-        cached = _sparsity_cache.get(key)
+        cached = _sparsity_block_cache.get(key)
         if cached is not None:
             return cached
-        return super(Sparsity, cls).__new__(cls, maps, dims, name)
+        return super(SparsityBlock, cls).__new__(cls, maps, dims, name)
 
     @validate_type(('maps', (Map, tuple), MapTypeError), \
                    ('dims', (int, tuple), TypeError))
@@ -340,11 +371,11 @@ class Sparsity(base.Sparsity):
             for n in as_tuple(m, Map):
                 if len(n.values) == 0:
                     raise MapValueError("Unpopulated map values when trying to build sparsity.")
-        super(Sparsity, self).__init__(maps, dims, name)
+        super(SparsityBlock, self).__init__(maps, dims, name)
         key = (maps, as_tuple(dims, int, 2))
         self._cached = True
         core.build_sparsity(self, parallel=PYOP2_COMM.size > 1)
-        _sparsity_cache[key] = self
+        _sparsity_block_cache[key] = self
 
     def __del__(self):
         core.free_sparsity(self)
@@ -374,11 +405,23 @@ class Sparsity(base.Sparsity):
         return int(self._o_nz)
 
 class Mat(base.Mat):
+
+    def __init__(self, *args, **kwargs):
+        super(Mat, self).__init__(*args, **kwargs)
+
+    @property
+    def handle(self):
+        if self._sparsity.blockdims == (1,1):
+            return self._blocks[0][0].handle
+        else:
+            raise NotImplementedError("Solve of block matrix TBC.")
+
+class MatBlock(base.MatBlock):
     """OP2 matrix data. A Mat is defined on a sparsity pattern and holds a value
     for each element in the :class:`Sparsity`."""
 
     def __init__(self, *args, **kwargs):
-        super(Mat, self).__init__(*args, **kwargs)
+        super(MatBlock, self).__init__(*args, **kwargs)
         self._handle = None
 
     def _init(self):

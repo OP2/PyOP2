@@ -130,8 +130,8 @@ class validate_type(validate_base):
 
     def check_arg(self, arg, argtype, exception):
         if not isinstance(arg, argtype):
-            raise exception("%s:%d Parameter %s must be of type %r" \
-                    % (self.file, self.line, arg, argtype))
+            raise exception("%s:%d Parameter %s of type %s must be of type %r" \
+                    % (self.file, self.line, arg, type(arg), argtype))
 
 class validate_in(validate_base):
     """Decorator to validate argument is in a set of valid argument values
