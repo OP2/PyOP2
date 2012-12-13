@@ -143,22 +143,26 @@ def tupleit(t):
 
 class Sparsity(base.Sparsity):
 
-    @validate_type(('maps', (Map, tuple), MapTypeError), \
-                   ('dims', (int, tuple), TypeError))
+    @validate_type(('maps', (Map, tuple, list), MapTypeError), \
+                   ('dims', (int, tuple, list), TypeError))
     def __new__(cls, maps, dims, name=None):
-        # FIXME:  check as_tuple is doing as intended - should leave dims that
-        # are already tuples alone
-        key = (tupleit(maps), as_tuple(dims, int, 2))
+        # FIXME:  tuplit should not distinguish dim from (dim,dim) and
+        # (dim,dim) from [[(dim,dim)]], [[dim]], etc.
+        dims = dims if isinstance(dims, (tuple, list)) else (dims,dims)
+        key = (tupleit(maps), tupleit(dims))
         cached = _sparsity_cache.get(key)
         if cached is not None:
             return cached
         return super(Sparsity, cls).__new__(cls, maps, dims, name)
 
-    @validate_type(('maps', (Map, tuple), MapTypeError), \
-                   ('dims', (int, tuple), TypeError))
+    @validate_type(('maps', (Map, tuple, list), MapTypeError), \
+                   ('dims', (int, tuple, list), TypeError))
     def __init__(self, maps, dims, name=None):
         super(Sparsity, self).__init__(maps, dims, name)
-        key = (maps, as_tuple(dims, int, 2))
+        # FIXME:  tuplit should not distinguish dim from (dim,dim) and
+        # (dim,dim) from [[(dim,dim)]], [[dim]], etc.
+        dims = dims if isinstance(dims, (tuple, list)) else (dims,dims)
+        key = (tupleit(maps), tupleit(dims))
         self._cached = True
         _sparsity_cache[key] = self
 
