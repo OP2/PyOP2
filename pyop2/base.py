@@ -827,6 +827,21 @@ class Map(object):
 IdentityMap = Map(Set(0), Set(0), 1, [], 'identity')
 """The identity map.  Used to indicate direct access to a :class:`Dat`."""
 
+"""Decorator that only allows a method to be used on a single block Mat or
+Sparisty. The class it is used within must define blockdims, that returns
+a tuple of the block dimensions of the Mat or Sparsity."""
+class single_block(object):
+    def __call__(self, f):
+        print "called"
+        def wrapper(f, *args, **kwargs):
+            print "wrapper"
+            self = args[0]
+            if self.blockdims != (1,1):
+                raise NotImplementedError("Method for single-block object called on multi-block object")
+            return f(*args, **kwargs)
+        print "decorator"
+        return decorator(wrapper, f)
+
 class Sparsity(object):
     """OP2 Sparsity, a matrix structure derived from the union of the outer
     product of pairs of :class:`Map` objects.
@@ -849,7 +864,7 @@ class Sparsity(object):
 
     _globalcount = 0
 
-    @validate_type(('maps', (tuple,list), MapTypeError), \
+    @validate_type(('maps', (Map, tuple, list), MapTypeError), \
                    ('dims', (int, tuple, list), TypeError),
                    ('name', (str), TypeError))
     def __init__(self, maps, dims, name=None):
@@ -865,8 +880,6 @@ class Sparsity(object):
             rowblocks = []
             self._blocks.append(rowblocks)
             for j, maps in enumerate(row):
-                print type(maps), maps, dims[i][j]
-                print isinstance(maps, tuple)
                 rowblocks.append(_make_object('SparsityBlock', maps, dims[i][j]))
 
         self._name = name or "sparsity_%d" % Sparsity._globalcount
@@ -877,11 +890,9 @@ class Sparsity(object):
         return (len(self._blocks), len(self._blocks[0]))
 
     @property
+    @single_block()
     def dims(self):
-        if self.blockdims == (1,1):
-            return self._blocks[0][0].dims
-        else:
-            raise SparsityTypeError("Cannot get dims of blocked sparsity.")
+        return self._blocks[0][0].dims
 
     @property
     def name(self):

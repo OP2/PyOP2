@@ -339,6 +339,14 @@ class TestSparsityAPI:
         with pytest.raises(RuntimeError):
             op2.Sparsity(((m, m), (m, md)), 1)
 
+    def test_dims_on_block_not_allowed(self, backend):
+        s = op2.Set(1)
+        s2 = op2.Set(2)
+        m = op2.Map(s, s, 1, 0)
+        sp = op2.Sparsity([[(m,m)], [(m,m)]], [[1],[1]])
+        with pytest.raises(NotImplementedError):
+            sp.dims
+
 class TestMatAPI:
     """
     Mat API unit tests
