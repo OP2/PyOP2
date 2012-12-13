@@ -216,6 +216,21 @@ class SparsityBlock(op2.SparsityBlock):
                                     self._rowptr))
         return getattr(self, '__dev_rowptr')
 
+class Mat(op2.Mat):
+    @property
+    def _colidx(self):
+        if self._sparsity.blockdims == (1,1):
+            return self._blocks[0][0]._colidx
+        else:
+            raise NotImplementedError("Can't get _colidx of blocked Mat directly.")
+
+    @property
+    def _rowptr(self):
+        if self._sparsity.blockdims == (1,1):
+            return self._blocks[0][0]._rowptr
+        else:
+            raise NotImplementedError("Can't get _rowptr of blocked Mat directly.")
+
 class MatBlock(op2.MatBlock, DeviceDataMixin):
     """OP2 OpenCL matrix data type."""
 
