@@ -170,25 +170,19 @@ class Sparsity(base.Sparsity):
         return super(Sparsity, self).__getitem__(*args)
 
     @property
+    @single_block
     def _rowptr(self):
-        if self.blockdims == (1,1):
-            return self._blocks[0][0]._rowptr
-        else:
-            raise SparsityTypeError("Cannot directly get rowptr of blocked Sparsity.")
+        return self._blocks[0][0]._rowptr
 
     @property
+    @single_block
     def _colidx(self):
-        if self.blockdims == (1,1):
-            return self._blocks[0][0]._colidx
-        else:
-            raise SparsityTypeError("Cannot directly get colidx of blocked Sparsity.")
+        return self._blocks[0][0]._colidx
 
     @property
+    @single_block
     def total_nz(self):
-        if self.blockdims == (1,1):
-            return self._blocks[0][0].total_nz
-        else:
-            raise SparsityTypeError("Cannot directly get total_nz of blocked Sparsity.")
+        return self._blocks[0][0].total_nz
 
 _sparsity_block_cache = dict()
 def _empty_sparsity_block_cache():
@@ -243,25 +237,23 @@ class Mat(base.Mat):
         super(Mat, self).__init__(*args, **kwargs)
 
     @property
+    def blockdims(self):
+        return self._sparsity.blockdims
+
+    @property
+    @single_block
     def handle(self):
-        if self._sparsity.blockdims == (1,1):
-            return self._blocks[0][0].handle
-        else:
-            raise NotImplementedError("Solve of block matrix TBC.")
+        return self._blocks[0][0].handle
 
     @property
+    @single_block
     def values(self):
-        if self._sparsity.blockdims == (1,1):
-            return self._blocks[0][0].values
-        else:
-            raise NotImpementedError("Getting values of block matrix TBC.")
+        return self._blocks[0][0].values
 
     @property
+    @single_block
     def array(self):
-        if self._sparsity.blockdims == (1,1):
-            return self._blocks[0][0].array
-        else:
-            raise NotImpementedError("Getting array of block matrix not allowed.")
+        return self._blocks[0][0].array
 
     def zero(self):
         ii, jj = self._sparsity.blockdims
@@ -269,11 +261,9 @@ class Mat(base.Mat):
             for j in xrange(jj):
                 self._blocks[i][j].zero()
 
+    @single_block
     def zero_rows(self, *args):
-        if self._sparsity.blockdims == (1,1):
-            return self._blocks[0][0].zero_rows(*args)
-        else:
-            raise NotImpementedError("Zeroing rows of block matrix directly not allowed.")
+        return self._blocks[0][0].zero_rows(*args)
 
 
 class MatBlock(base.MatBlock):
