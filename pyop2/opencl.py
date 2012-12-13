@@ -216,18 +216,6 @@ class SparsityBlock(op2.SparsityBlock):
                                     self._rowptr))
         return getattr(self, '__dev_rowptr')
 
-# FIXME: Should be in device.py?
-class Mat(op2.Mat):
-    @property
-    @single_block
-    def _colidx(self):
-        return self._blocks[0][0]._colidx
-
-    @property
-    @single_block
-    def _rowptr(self):
-        return self._blocks[0][0]._rowptr
-
 class MatBlock(op2.MatBlock, DeviceDataMixin):
     """OP2 OpenCL matrix data type."""
 
