@@ -267,6 +267,17 @@ class Map(op2.Map):
     def _from_device(self):
         raise RuntimeError("Abstract device class can't do this")
 
+class Mat(op2.Mat):
+    @property
+    @single_block
+    def _colidx(self):
+        return self._blocks[0][0]._colidx
+
+    @property
+    @single_block
+    def _rowptr(self):
+        return self._blocks[0][0]._rowptr
+
 class MatBlock(op2.MatBlock):
     def __init__(self, datasets, dtype=None, name=None):
         op2.MatBlock.__init__(self, datasets, dtype, name)

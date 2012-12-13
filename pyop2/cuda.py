@@ -171,18 +171,7 @@ class SparsityBlock(op2.SparsityBlock):
                     gpuarray.to_gpu(self._colidx))
         return getattr(self, '__colidx')
 
-# FIXME: Should be in device.py?
 class Mat(op2.Mat):
-    @property
-    @single_block
-    def _colidx(self):
-        return self._blocks[0][0]._colidx
-
-    @property
-    @single_block
-    def _rowptr(self):
-        return self._blocks[0][0]._rowptr
-
     @property
     @single_block
     def _csrdata(self):
