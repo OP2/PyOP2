@@ -239,7 +239,7 @@ cdef class Plan:
         for i, ra in enumerate(race_args.iterkeys()):
             if isinstance(ra, op2.Dat):
                 s = ra.dataset.size
-            elif isinstance(ra, op2.Mat):
+            elif isinstance(ra, (op2.Mat, op2.MatBlock)):
                 s = ra.sparsity.maps[0][0].dataset.size
 
             pcds[i] = numpy.empty((s,), dtype=numpy.uint32)

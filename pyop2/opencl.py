@@ -199,7 +199,7 @@ class Dat(op2.Dat, DeviceDataMixin):
         """The L2-norm on the flattened vector."""
         return np.sqrt(array.dot(self.array, self.array).get())
 
-class Sparsity(op2.Sparsity):
+class SparsityBlock(op2.SparsityBlock):
     @property
     def colidx(self):
         if not hasattr(self, '__dev_colidx'):
@@ -216,7 +216,22 @@ class Sparsity(op2.Sparsity):
                                     self._rowptr))
         return getattr(self, '__dev_rowptr')
 
-class Mat(op2.Mat, DeviceDataMixin):
+class Mat(op2.Mat):
+    @property
+    def _colidx(self):
+        if self._sparsity.blockdims == (1,1):
+            return self._blocks[0][0]._colidx
+        else:
+            raise NotImplementedError("Can't get _colidx of blocked Mat directly.")
+
+    @property
+    def _rowptr(self):
+        if self._sparsity.blockdims == (1,1):
+            return self._blocks[0][0]._rowptr
+        else:
+            raise NotImplementedError("Can't get _rowptr of blocked Mat directly.")
+
+class MatBlock(op2.MatBlock, DeviceDataMixin):
     """OP2 OpenCL matrix data type."""
 
     def _allocate_device(self):

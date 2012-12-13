@@ -347,16 +347,16 @@ class Sparsity(base.Sparsity):
         return super(Sparsity, self).__getitem__(*args)
 
     @property
-    def rowptr(self):
+    def _rowptr(self):
         if self.blockdims == (1,1):
-            return self._blocks[0][0].rowptr
+            return self._blocks[0][0]._rowptr
         else:
             raise SparsityTypeError("Cannot directly get rowptr of blocked Sparsity.")
 
     @property
-    def colidx(self):
+    def _colidx(self):
         if self.blockdims == (1,1):
-            return self._blocks[0][0].colidx
+            return self._blocks[0][0]._colidx
         else:
             raise SparsityTypeError("Cannot directly get colidx of blocked Sparsity.")
 
