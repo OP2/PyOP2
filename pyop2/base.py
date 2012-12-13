@@ -827,21 +827,6 @@ class Map(object):
 IdentityMap = Map(Set(0), Set(0), 1, [], 'identity')
 """The identity map.  Used to indicate direct access to a :class:`Dat`."""
 
-"""Decorator that only allows a method to be used on a single block Mat or
-Sparisty. The class it is used within must define blockdims, that returns
-a tuple of the block dimensions of the Mat or Sparsity."""
-class single_block(object):
-    def __call__(self, f):
-        print "called"
-        def wrapper(f, *args, **kwargs):
-            print "wrapper"
-            self = args[0]
-            if self.blockdims != (1,1):
-                raise NotImplementedError("Method for single-block object called on multi-block object")
-            return f(*args, **kwargs)
-        print "decorator"
-        return decorator(wrapper, f)
-
 class Sparsity(object):
     """OP2 Sparsity, a matrix structure derived from the union of the outer
     product of pairs of :class:`Map` objects.
@@ -890,7 +875,7 @@ class Sparsity(object):
         return (len(self._blocks), len(self._blocks[0]))
 
     @property
-    @single_block()
+    @single_block
     def dims(self):
         return self._blocks[0][0].dims
 
@@ -899,6 +884,7 @@ class Sparsity(object):
         return self._name
 
     @property
+    @single_block
     def maps(self):
         """A list of pairs (rmap, cmap) where each pair of
         :class:`Map` objects will later be used to assemble into this
@@ -908,10 +894,7 @@ class Sparsity(object):
         sparsity. Similarly, the dataset of all the maps which appear
         second must be common and will form the column :class:`Set` of
         the ``Sparsity``."""
-        if self.blockdims == (1,1):
-            return self._blocks[0][0].maps
-        else:
-            raise SparsityTypeError("Cannot get maps of blocked sparsity.")
+        return self._blocks[0][0].maps
 
     def __getitem__(self, block):
         return self._blocks[block[0]][block[1]]
@@ -1012,11 +995,9 @@ class Mat(DataCarrier):
                 print "sparsity is currently", s
                 row.append(_make_object('MatBlock',s))
 
+    @single_block
     def __call__(self, *args):
-        if self._sparsity.blockdims == (1,1):
-            return self._blocks[0][0](*args)
-        else:
-            raise MatTypeError("Can't call blocked matrix directly.")
+        return self._blocks[0][0](*args)
 
     @property
     def dtype(self):

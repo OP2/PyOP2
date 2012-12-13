@@ -175,25 +175,19 @@ class SparsityBlock(op2.SparsityBlock):
 # FIXME: Should be in device.py?
 class Mat(op2.Mat):
     @property
+    @single_block
     def _colidx(self):
-        if self._sparsity.blockdims == (1,1):
-            return self._blocks[0][0]._colidx
-        else:
-            raise NotImplementedError("Can't get _colidx of blocked Mat directly.")
+        return self._blocks[0][0]._colidx
 
     @property
+    @single_block
     def _rowptr(self):
-        if self._sparsity.blockdims == (1,1):
-            return self._blocks[0][0]._rowptr
-        else:
-            raise NotImplementedError("Can't get _rowptr of blocked Mat directly.")
+        return self._blocks[0][0]._rowptr
 
     @property
+    @single_block
     def _csrdata(self):
-        if self._sparsity.blockdims == (1,1):
-            return self._blocks[0][0]._csrdata
-        else:
-            raise NotImplementedError("Can't get _csrdata of blocked Mat directly.")
+        return self._blocks[0][0]._csrdata
 
 class MatBlock(DeviceDataMixin, op2.MatBlock):
     _lma2csr_cache = dict()

@@ -160,6 +160,17 @@ class validate_range(validate_base):
             raise exception("%s:%d %s must be within range %s" \
                     % (self.file, self.line, arg, range))
 
+def single_block(f):
+    """Decorator that only allows a method to be used on a single block Mat or
+    Sparisty. The class it is used within must define blockdims, that returns
+    a tuple of the block dimensions of the Mat or Sparsity."""
+    def wrapper(*args, **kwargs):
+        self = args[0]
+        if self.blockdims != (1,1):
+            raise NotImplementedError("Method for single-block object called on multi-block object")
+        return f(*args, **kwargs)
+    return wrapper
+
 def verify_reshape(data, dtype, shape, allow_none=False):
     """Verify data is of type dtype and try to reshaped to shape."""
 
