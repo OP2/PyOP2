@@ -229,7 +229,6 @@ class MatBlock(DeviceDataMixin, op2.MatBlock):
         return getattr(self, '__csrdata')
 
     def _assemble(self, rowmap, colmap):
-        print "In assemble"
         mod, sfun, vfun = MatBlock._lma2csr_cache.get(self.dtype,
                                                  (None, None, None))
         if mod is None:

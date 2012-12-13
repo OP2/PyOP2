@@ -386,7 +386,6 @@ class Plan(core.op_plan):
 
         cds_work = dict()
         for cd in cds.iterkeys():
-            print "type of cd is", type(cd)
             if isinstance(cd, Dat):
                 s = cd.dataset.size
             elif isinstance(cd, MatBlock):

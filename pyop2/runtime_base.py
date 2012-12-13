@@ -166,9 +166,6 @@ class Sparsity(base.Sparsity):
         self._cached = True
         _sparsity_cache[key] = self
 
-    def __getitem__(self, *args):
-        return super(Sparsity, self).__getitem__(*args)
-
     @property
     @single_block
     def _rowptr(self):
