@@ -667,7 +667,6 @@ class Sparsity(object):
                 rowblocks.append(_make_object('SparsityBlock', maps, dims[i][j]))
 
         self._name = name or "sparsity_%d" % Sparsity._globalcount
-        self._lib_handle = None
         Sparsity._globalcount += 1
 
     @property
@@ -730,13 +729,7 @@ class SparsityBlock(object):
 
         self._dims = as_tuple(dims, int, 2)
         self._name = name or "sparsityblock_%d" % Sparsity._globalcount
-        self._lib_handle = None
         SparsityBlock._globalcount += 1
-
-    #FIXME: Unused?
-    @property
-    def _nmaps(self):
-        return len(self._rmaps)
 
     @property
     def maps(self):
@@ -779,7 +772,6 @@ class SparsityBlock(object):
     def __repr__(self):
         return "Sparsity(%s,%s,%s,%s)" % \
                (self._rmaps, self._cmaps, self._dims, self._name)
-
 
 class Mat(DataCarrier):
 
@@ -839,7 +831,6 @@ class MatBlock(DataCarrier):
         self._sparsity = sparsity
         self._datatype = np.dtype(dtype)
         self._name = name or "matblock_%d" % Mat._globalcount
-        self._lib_handle = None
         Mat._globalcount += 1
 
     @validate_in(('access', _modes, ModeValueError))
