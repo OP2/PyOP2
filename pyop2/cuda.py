@@ -156,7 +156,7 @@ class Dat(DeviceDataMixin, op2.Dat):
         """The L2-norm on the flattened vector."""
         return np.sqrt(gpuarray.dot(self.array, self.array).get())
 
-class Sparsity(op2.Sparsity):
+class SparsityBlock(op2.SparsityBlock):
     @property
     def rowptr(self):
         if not hasattr(self, '__rowptr'):
@@ -246,6 +246,7 @@ class MatBlock(DeviceDataMixin, op2.MatBlock):
         return getattr(self, '__csrdata')
 
     def _assemble(self, rowmap, colmap):
+        print "In assemble"
         mod, sfun, vfun = MatBlock._lma2csr_cache.get(self.dtype,
                                                  (None, None, None))
         if mod is None:
