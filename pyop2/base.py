@@ -990,9 +990,7 @@ class Mat(DataCarrier):
             row = []
             self._blocks.append(row)
             for j in xrange(sparsity.blockdims[1]):
-                s = sparsity[i,j]
-                print "sparsity is currently", s
-                row.append(_make_object('MatBlock',s))
+                row.append(_make_object('MatBlock',sparsity[i,j],dtype))
 
     @single_block
     def __call__(self, *args):
@@ -1000,7 +998,7 @@ class Mat(DataCarrier):
 
     @property
     def dtype(self):
-        return self._blocks[0][0].dtype
+        return self._datatype
 
     @property
     def sparsity(self):
