@@ -179,6 +179,13 @@ class Sparsity(base.Sparsity):
         else:
             raise SparsityTypeError("Cannot directly get colidx of blocked Sparsity.")
 
+    @property
+    def total_nz(self):
+        if self.blockdims == (1,1):
+            return self._blocks[0][0].total_nz
+        else:
+            raise SparsityTypeError("Cannot directly get total_nz of blocked Sparsity.")
+
 _sparsity_block_cache = dict()
 def _empty_sparsity_block_cache():
     _sparsity_block_cache.clear()
