@@ -827,7 +827,7 @@ class MatBlock(DataCarrier):
     def __init__(self, sparsity, dtype=None, name=None):
         self._sparsity = sparsity
         self._datatype = np.dtype(dtype)
-        self._name = name or "matblock_%d" % Mat._globalcount
+        self._name = name or "matblock_%d" % MatBlock._globalcount
         Mat._globalcount += 1
 
     @validate_in(('access', _modes, ModeValueError))
