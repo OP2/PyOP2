@@ -216,6 +216,7 @@ class SparsityBlock(op2.SparsityBlock):
                                     self._rowptr))
         return getattr(self, '__dev_rowptr')
 
+# FIXME: Should be in device.py?
 class Mat(op2.Mat):
     @property
     def _colidx(self):

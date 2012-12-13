@@ -343,9 +343,6 @@ class Sparsity(base.Sparsity):
         self._cached = True
         _sparsity_cache[key] = self
 
-    def __getitem__(self, *args):
-        return super(Sparsity, self).__getitem__(*args)
-
     @property
     def _rowptr(self):
         if self.blockdims == (1,1):
@@ -359,6 +356,13 @@ class Sparsity(base.Sparsity):
             return self._blocks[0][0]._colidx
         else:
             raise SparsityTypeError("Cannot directly get colidx of blocked Sparsity.")
+
+    @property
+    def total_nz(self):
+        if self.blockdims == (1,1):
+            return self._blocks[0][0].total_nz
+        else:
+            raise SparsityTypeError("Cannot directly get total_nz of blocked Sparsity.")
 
 _sparsity_block_cache = dict()
 def _empty_sparsity_block_cache():

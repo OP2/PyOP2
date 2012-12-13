@@ -157,7 +157,7 @@ class Dat(DeviceDataMixin, op2.Dat):
         """The L2-norm on the flattened vector."""
         return np.sqrt(gpuarray.dot(self.array, self.array).get())
 
-class Sparsity(op2.Sparsity):
+class SparsityBlock(op2.SparsityBlock):
     @property
     def rowptr(self):
         if not hasattr(self, '__rowptr'):
@@ -172,7 +172,30 @@ class Sparsity(op2.Sparsity):
                     gpuarray.to_gpu(self._colidx))
         return getattr(self, '__colidx')
 
-class Mat(DeviceDataMixin, op2.Mat):
+# FIXME: Should be in device.py?
+class Mat(op2.Mat):
+    @property
+    def _colidx(self):
+        if self._sparsity.blockdims == (1,1):
+            return self._blocks[0][0]._colidx
+        else:
+            raise NotImplementedError("Can't get _colidx of blocked Mat directly.")
+
+    @property
+    def _rowptr(self):
+        if self._sparsity.blockdims == (1,1):
+            return self._blocks[0][0]._rowptr
+        else:
+            raise NotImplementedError("Can't get _rowptr of blocked Mat directly.")
+
+    @property
+    def _csrdata(self):
+        if self._sparsity.blockdims == (1,1):
+            return self._blocks[0][0]._csrdata
+        else:
+            raise NotImplementedError("Can't get _csrdata of blocked Mat directly.")
+
+class MatBlock(DeviceDataMixin, op2.MatBlock):
     _lma2csr_cache = dict()
 
     @property
@@ -224,7 +247,7 @@ class Mat(DeviceDataMixin, op2.Mat):
         return getattr(self, '__csrdata')
 
     def _assemble(self, rowmap, colmap):
-        mod, sfun, vfun = Mat._lma2csr_cache.get(self.dtype,
+        mod, sfun, vfun = MatBlock._lma2csr_cache.get(self.dtype,
                                                  (None, None, None))
         if mod is None:
             d = {'type' : self.ctype}
@@ -236,7 +259,7 @@ class Mat(DeviceDataMixin, op2.Mat):
             vfun = mod.get_function('__lma_to_csr_vector')
             sfun.prepare('PPPPPiPii')
             vfun.prepare('PPPPPiiPiii')
-            Mat._lma2csr_cache[self.dtype] = mod, sfun, vfun
+            MatBlock._lma2csr_cache[self.dtype] = mod, sfun, vfun
 
         assert rowmap.iterset is colmap.iterset
         nelems = rowmap.iterset.size
