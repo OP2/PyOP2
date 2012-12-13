@@ -977,7 +977,6 @@ class SparsityBlock(object):
 class Mat(DataCarrier):
 
     _globalcount = 0
-    _modes = [WRITE, INC]
 
     @validate_type(('sparsity', Sparsity, SparsityTypeError), \
                    ('name', str, NameTypeError))
