@@ -267,11 +267,10 @@ class Map(op2.Map):
     def _from_device(self):
         raise RuntimeError("Abstract device class can't do this")
 
-class Mat(op2.Mat):
+class MatBlock(op2.MatBlock):
     def __init__(self, datasets, dtype=None, name=None):
-        op2.Mat.__init__(self, datasets, dtype, name)
+        op2.MatBlock.__init__(self, datasets, dtype, name)
         self.state = DeviceDataMixin.DEVICE_UNALLOCATED
-
 
 _plan_cache = dict()
 
@@ -376,9 +375,10 @@ class Plan(core.op_plan):
 
         cds_work = dict()
         for cd in cds.iterkeys():
+            print "type of cd is", type(cd)
             if isinstance(cd, Dat):
                 s = cd.dataset.size
-            elif isinstance(cd, Mat):
+            elif isinstance(cd, MatBlock):
                 s = cd.sparsity.maps[0][0].dataset.size
             cds_work[cd] = numpy.empty((s,), dtype=numpy.uint32)
 

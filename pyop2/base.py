@@ -805,8 +805,8 @@ class Mat(DataCarrier):
             self._blocks.append(row)
             for j in xrange(sparsity.blockdims[1]):
                 s = sparsity[i,j]
-                print "sparsity", s
-                row.append(_make_object('MatBlock',sparsity=s))
+                print "sparsity is currently", s
+                row.append(_make_object('MatBlock',s))
 
     def __call__(self, *args):
         if self._sparsity.blockdims == (1,1):
