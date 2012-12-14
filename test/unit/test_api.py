@@ -446,6 +446,17 @@ class TestMatAPI:
         with pytest.raises(exceptions.MapValueError):
             m((wrongmap[0], wrongmap[1]), op2.INC)
 
+    def test_mat_illegal_maps_for_block(self, backend, sparsity):
+        s = op2.Set(1)
+        s2 = op2.Set(2)
+        s3 = op2.Set(3)
+        m1 = op2.Map(s, s, 1, 0)
+        m2 = op2.Map(s, s2, 1, 0)
+        sp = op2.Sparsity([[(m1,m1),(m1,m2)],[(m2,m1),(m2,m2)]], \
+                          [[(2,2),  (2,1)  ],[(1,2),  (1,1  )]])
+        m = op2.Mat(sparsity)
+        with pytest.raises(exceptions.MapValueError):
+            m[0,0]((m2[0],m2[0]), op2.INC)
 
 class TestConstAPI:
     """

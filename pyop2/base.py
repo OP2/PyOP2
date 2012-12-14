@@ -796,7 +796,6 @@ class Mat(DataCarrier):
         self._datatype = np.dtype(dtype)
         self._name = name or "mat_%d" % Mat._globalcount
         self._blocks = []
-        print type(sparsity)
         for i in xrange(sparsity.blockdims[0]):
             row = []
             self._blocks.append(row)
@@ -814,6 +813,9 @@ class Mat(DataCarrier):
     @property
     def sparsity(self):
         return self._sparsity
+
+    def __getitem__(self, block):
+        return self._blocks[block[0]][block[1]]
 
 class MatBlock(DataCarrier):
     """OP2 matrix data. A ``Mat`` is defined on a sparsity pattern and holds a value
