@@ -345,6 +345,71 @@ class TestSparsityAPI:
         with pytest.raises(NotImplementedError):
             sp.dims
 
+    def test_sparsity_blockdims(self, backend):
+        s = op2.Set(1)
+        s2 = op2.Set(2)
+        m = op2.Map(s, s, 1, 0)
+        sp = op2.Sparsity([[(m,m),(m,m)],[(m,m),(m,m)]], [[1,1],[1,1]])
+        assert sp.blockdims == (2,2)
+        sp = op2.Sparsity([[(m,m)],[(m,m)]], [[1],[1]])
+        assert sp.blockdims == (2,1)
+        sp = op2.Sparsity([[(m,m),(m,m)]], [[1,1]])
+        assert sp.blockdims == (1,2)
+
+    def test_sparsity_illegal_block_configuration(self, backend):
+        s = op2.Set(1)
+        s2 = op2.Set(2)
+        m = op2.Map(s, s, 1, 0)
+        with pytest.raises(ValueError):
+            sp = op2.Sparsity([[(m,m)],[(m,m),(m,m)]], [[1],[1,1]])
+
+    def test_sparsity_maps_and_dims_not_matching(self, backend):
+        s = op2.Set(1)
+        s2 = op2.Set(2)
+        m = op2.Map(s, s, 1, 0)
+        with pytest.raises(ValueError):
+            sp = op2.Sparsity([[(m,m),(m,m)],[(m,m),(m,m)]], [[1],[1,1]])
+        with pytest.raises(ValueError):
+            sp = op2.Sparsity([[(m,m),(m,m)],[(m,m),(m,m)]], [[1,1]])
+
+    def test_sparsity_dim_of_blocks_assignment(self, backend):
+        s = op2.Set(1)
+        s2 = op2.Set(2)
+        m = op2.Map(s, s, 1, 0)
+        sp = op2.Sparsity([[(m,m),(m,m)],[(m,m),(m,m)]], \
+                          [[(2,2),(2,1)],[(1,2),(1,1)]])
+        assert sp[0,0].dims == (2,2) and sp[0,1].dims == (2,1) \
+           and sp[1,0].dims == (1,2) and sp[1,1].dims == (1,1)
+
+    def test_sparsity_maps_of_blocks_assignment(self, backend):
+        s = op2.Set(1)
+        s2 = op2.Set(2)
+        s3 = op2.Set(3)
+        m1 = op2.Map(s, s, 1, 0)
+        m2 = op2.Map(s, s2, 1, 0)
+        sp = op2.Sparsity([[(m1,m1),(m1,m2)],[(m2,m1),(m2,m2)]], \
+                          [[(2,2),  (2,1)  ],[(1,2),  (1,1  )]])
+        assert sp[0,0].maps == [(m1,m1)]
+        assert sp[0,1].maps == [(m1,m2)]
+        assert sp[1,0].maps == [(m2,m1)]
+        assert sp[1,1].maps == [(m2,m2)]
+
+    def test_sparsity_unmatching_rowmaps(self, backend):
+        s = op2.Set(1)
+        s2 = op2.Set(2)
+        m1 = op2.Map(s, s, 1, 0)
+        m2 = op2.Map(s2, s, 1, [0,0])
+        with pytest.raises(ValueError):
+            sp = op2.Sparsity([[(m1,m1),(m2,m2)]],[[1,1]])
+
+    def test_sparsity_unmatching_colmaps(self, backend):
+        s = op2.Set(1)
+        s2 = op2.Set(2)
+        m1 = op2.Map(s, s, 1, 0)
+        m2 = op2.Map(s2, s, 1, [0,0])
+        with pytest.raises(ValueError):
+            sp = op2.Sparsity([[(m1,m1)],[(m2,m2)]],[[1],[1]])
+
 class TestMatAPI:
     """
     Mat API unit tests

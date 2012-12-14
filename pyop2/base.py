@@ -659,12 +659,24 @@ class Sparsity(object):
         blocks = [[maps]] if isinstance(maps, tuple)        else maps
         dims   = [[dims]] if isinstance(dims, (int, tuple)) else dims
 
+        if not all([len(row) == len(blocks[0]) for row in blocks]):
+            raise ValueError("All rows must have an equal number of blocks")
+        if not all([len(sprow) == len(dimrow) for sprow, dimrow in zip(blocks, dims)]) \
+               or  len(blocks) != len(dims):
+            raise ValueError("Shape of dims does not match the shape of maps.")
+
         self._blocks = []
         for i, row in enumerate(blocks):
             rowblocks = []
             self._blocks.append(rowblocks)
             for j, maps in enumerate(row):
                 rowblocks.append(_make_object('SparsityBlock', maps, dims[i][j]))
+
+        if not all([ all( [ block._rmaps==row[0]._rmaps for block in row ] ) for row in self._blocks ]):
+            raise ValueError("All blocks in a row must have the same row maps.")
+        transposed = [[row[i] for row in self._blocks] for i in range(len(self._blocks[0]))]
+        if not all([ all( [ block._cmaps==row[0]._cmaps for block in row ] ) for row in transposed ]):
+            raise ValueError("All blocks in a column must have the same column maps.")
 
         self._name = name or "sparsity_%d" % Sparsity._globalcount
         Sparsity._globalcount += 1
