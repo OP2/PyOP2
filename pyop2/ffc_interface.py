@@ -34,10 +34,11 @@
 """Provides the interface to FFC for compiling a form, and transforms the FFC-
 generated code in order to make it suitable for passing to the backends."""
 
-from ufl import Form
+from ufl import Form, Argument, MixedElement
 from ufl.algorithms import as_form
 from ufl.algorithms.signature import compute_form_signature
 from ufl.algorithms.formtransformations import PartExtracter
+from ufl.algorithms.transformer import Transformer
 from ffc import default_parameters, compile_form as ffc_compile_form
 from ffc import constants
 from ffc.log import set_level, ERROR
@@ -48,34 +49,22 @@ from op2 import Kernel
 
 _form_cache = {}
 
-class ElementPartExtracter(PartExtracter):
+class MixedArgumentFlattener(Transformer):
+    """Converts Arguments that are on MixedElements that are restricted by a
+    FixedIndex into Arguments on a non-mixed element."""
+
+    expr = Transformer.reuse_if_possible
+    terminal = Transformer.reuse_if_possible
 
     def indexed(self, x):
-        expression, index = x.operands()
-        part, provides = self.visit(expression)
-
-        if isinstance(part,Zero):
-            # The expression doesn't directly provide anything we want
-            part, provides = (zero(x), set())
-            if isinstance(expression, Argument):
-                # But we may be able to break the Argument to provide something
-                # that we want
-                e = expression.element()
-                if isinstance(e, MixedElement) and index.free_indices == ():
-                    i = index.evaluate(None, None, None, None) - 1
-                    c = expression.count()
-                    part = Argument(e.sub_elements[i], c)
-                    provides = set((part,))
-
-        return (part, provides)
-
-def split_mixed_form(form):
-    elements = extract_unique_sub_elements( extract_unique_elements(form) )
-    args = []
-    for e in aelements:
-        args.append(Argument(e,
-    e = ElementPartExtracter()
-
+        a, i = x.operands()
+        if isinstance(a, Argument):
+            ele = a.element()
+            if isinstance(ele, MixedElement) and i.free_indices() == ():
+                ele_idx = i.evaluate(None, None, None, None)[0] - 1
+                c = a.count()
+                x = Argument(ele.sub_elements()[ele_idx], c)
+        return x
 
 def compile_form(form, name):
     """Compile a form using FFC and return an OP2 kernel"""
