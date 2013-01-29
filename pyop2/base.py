@@ -40,6 +40,8 @@ from utils import *
 from backends import _make_object
 from mpi4py import MPI
 
+MPI_COMM = MPI.COMM_WORLD
+_halo_comm_seen = False
 # Data API
 
 class Access(object):
@@ -219,7 +221,7 @@ class Arg(object):
             # instead, to allow overlapping comp and comms.  We may
             # need to pack into a temporary buffer though.
             # FIXME: Need to use correct communicator
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, self.data._data, op=op)
+            MPI_COMM.Allreduce(MPI.IN_PLACE, self.data._data, op=op)
 
     def reduction_end(self):
         assert self._is_global, \
@@ -338,10 +340,21 @@ class Halo(object):
     To send/receive no set elements to/from a process, pass an empty
     list in that position.
     """
-    def __init__(self, sends, receives, comm=MPI.COMM_WORLD):
+    def __init__(self, sends, receives, comm=MPI_COMM, gnn2unn=None):
         self._sends = tuple(np.asarray(x, dtype=np.int32) for x in sends)
         self._receives = tuple(np.asarray(x, dtype=np.int32) for x in receives)
-        self._comm = comm
+        if type(comm) is int:
+            self._comm = MPI.Comm.f2py(comm)
+        else:
+            self._comm = comm
+        global _halo_comm_seen
+        global MPI_COMM
+        if _halo_comm_seen:
+            assert self._comm == MPI_COMM, "Halo communicator not MPI_COMM"
+        else:
+            _halo_comm_seen = True
+            MPI_COMM = self._comm
+        self._global_to_petsc_numbering = gnn2unn
         rank = self._comm.rank
         size = self._comm.size
 
@@ -539,8 +552,8 @@ class Dat(DataCarrier):
         self._lib_handle = None
         self._dirty = False
         # FIXME: Use correct communicator
-        self._send_reqs = [None]*MPI.COMM_WORLD.size
-        self._recv_reqs = [None]*MPI.COMM_WORLD.size
+        self._send_reqs = [None]*MPI_COMM.size
+        self._recv_reqs = [None]*MPI_COMM.size
         # so that we can tag halo exchanges for each Dat uniquely
         # FIXME: This requires that Dats are declared /in the same
         # order/ on all MPI processes and hence have the same id, we
