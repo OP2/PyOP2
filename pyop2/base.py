@@ -596,6 +596,7 @@ class Dat(DataCarrier):
         if len(self._data) is 0:
             raise RuntimeError("Illegal access: No data associated with this Dat!")
         maybe_setflags(self._data, write=True)
+        self.dirty = True
         return self._data
 
     @property
