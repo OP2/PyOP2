@@ -593,8 +593,8 @@ class Dat(DataCarrier):
     @property
     def data(self):
         """Numpy array containing the data values."""
-        if len(self._data) is 0:
-            raise RuntimeError("Illegal access: No data associated with this Dat!")
+        if self.dataset.total_size > 0 and self._data.size == 0:
+            raise RuntimeError("Illegal access: no data associated with this Dat!")
         maybe_setflags(self._data, write=True)
         self.dirty = True
         return self._data
@@ -602,8 +602,8 @@ class Dat(DataCarrier):
     @property
     def data_ro(self):
         """Numpy array containing the data values.  Read-only"""
-        if len(self._data) is 0:
-            raise RuntimeError("Illegal access: No data associated with this Dat!")
+        if self.dataset.total_size > 0 and self._data.size == 0:
+            raise RuntimeError("Illegal access: no data associated with this Dat!")
         maybe_setflags(self._data, write=False)
         return self._data
 
