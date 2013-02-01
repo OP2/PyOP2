@@ -193,8 +193,8 @@ class Arg(object):
         assert self._is_dat, "Doing halo exchanges only makes sense for Dats"
         assert not self._in_flight, \
             "Halo exchange already in flight for Arg %s" % self
-        if self.access in [READ, RW] and self.data.dirty:
-            self.data.dirty = False
+        if self.access in [READ, RW] and self.data.needs_halo_update:
+            self.data.needs_halo_update = False
             self._in_flight = True
             self.data.halo_exchange_begin()
 
@@ -554,7 +554,7 @@ class Dat(DataCarrier):
         # Are these data to be treated as SoA on the device?
         self._soa = bool(soa)
         self._lib_handle = None
-        self._dirty = False
+        self._needs_halo_update = False
         # FIXME: Use correct communicator
         self._send_reqs = [None]*MPI_COMM.size
         self._send_buf = [None]*MPI_COMM.size
@@ -596,7 +596,7 @@ class Dat(DataCarrier):
         if self.dataset.total_size > 0 and self._data.size == 0:
             raise RuntimeError("Illegal access: no data associated with this Dat!")
         maybe_setflags(self._data, write=True)
-        self.dirty = True
+        self.needs_halo_update = True
         return self._data
 
     @property
@@ -613,13 +613,13 @@ class Dat(DataCarrier):
         return self._dim
 
     @property
-    def dirty(self):
+    def needs_halo_update(self):
         '''Has this Dat been written to since the last halo exchange?'''
-        return self._dirty
+        return self._needs_halo_update
 
-    @dirty.setter
-    def dirty(self, val):
-        self._dirty = val
+    @needs_halo_update.setter
+    def needs_halo_update(self, val):
+        self._needs_halo_update = val
 
     @property
     def norm(self):
@@ -1181,10 +1181,10 @@ class ParLoop(object):
             if arg._is_global_reduction:
                 arg.reduction_end()
 
-    def update_dirty_status(self):
+    def maybe_set_halo_update_needed(self):
         for arg in self.args:
             if arg._is_dat and arg.access in [INC, WRITE, RW]:
-                arg.data.dirty = True
+                arg.data.needs_halo_update = True
 
     def check_args(self):
         iterset = self._it_space._iterset

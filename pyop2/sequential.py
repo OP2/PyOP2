@@ -92,7 +92,7 @@ class ParLoop(rt.ParLoop):
             _args[1] = self.it_space.exec_size
             _fun(*_args)
         self.reduction_end()
-        self.update_dirty_status()
+        self.maybe_set_halo_update_needed()
         for arg in self.args:
             if arg._is_mat:
                 arg.data._assemble()
