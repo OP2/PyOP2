@@ -46,7 +46,7 @@ import op_lib_core as core
 from mpi4py import MPI
 from petsc4py import PETSc
 
-MPI_COMM = MPI.COMM_WORLD
+PYOP2_COMM = MPI.COMM_WORLD
 _halo_comm_seen = False
 
 # Data API
@@ -91,7 +91,7 @@ class Arg(base.Arg):
             # executing over the halo region, which occurs after we've
             # called this reduction, we don't subsequently overwrite
             # the result.
-            MPI_COMM.Allreduce(self.data._data, self.data._buf, op=op)
+            PYOP2_COMM.Allreduce(self.data._data, self.data._buf, op=op)
 
     def reduction_end(self):
         assert self._is_global, \
@@ -134,19 +134,19 @@ class Set(base.Set):
         return self._lib_handle
 
 class Halo(base.Halo):
-    def __init__(self, sends, receives, comm=MPI_COMM, gnn2unn=None):
+    def __init__(self, sends, receives, comm=PYOP2_COMM, gnn2unn=None):
         base.Halo.__init__(self, sends, receives, gnn2unn)
         if type(comm) is int:
             self._comm = MPI.Comm.f2py(comm)
         else:
             self._comm = comm
         global _halo_comm_seen
-        global MPI_COMM
+        global PYOP2_COMM
         if _halo_comm_seen:
-            assert self._comm == MPI_COMM, "Halo communicator not MPI_COMM"
+            assert self._comm == PYOP2_COMM, "Halo communicator not PYOP2_COMM"
         else:
             _halo_comm_seen = True
-            MPI_COMM = self._comm
+            PYOP2_COMM = self._comm
         rank = self._comm.rank
         size = self._comm.size
 
@@ -187,10 +187,10 @@ class Dat(base.Dat):
     def __init__(self, dataset, dim, data=None, dtype=None, name=None,
                  soa=None, uid=None):
         base.Dat.__init__(self, dataset, dim, data, dtype, name, soa, uid)
-        self._send_reqs = [None]*MPI_COMM.size
-        self._send_buf = [None]*MPI_COMM.size
-        self._recv_reqs = [None]*MPI_COMM.size
-        self._recv_buf = [None]*MPI_COMM.size
+        self._send_reqs = [None]*PYOP2_COMM.size
+        self._send_buf = [None]*PYOP2_COMM.size
+        self._recv_reqs = [None]*PYOP2_COMM.size
+        self._recv_buf = [None]*PYOP2_COMM.size
 
     def __iadd__(self, other):
         """Pointwise addition of fields."""
@@ -247,11 +247,11 @@ class Dat(base.Dat):
             return
         MPI.Request.Waitall(self._recv_reqs)
         MPI.Request.Waitall(self._send_reqs)
-        self._send_buf = [None]*MPI_COMM.size
+        self._send_buf = [None]*PYOP2_COMM.size
         for source, buf in enumerate(self._recv_buf):
             if buf is not None:
                 self._data[halo.receives[source]] = buf
-        self._recv_buf = [None]*MPI_COMM.size
+        self._recv_buf = [None]*PYOP2_COMM.size
 
     @property
     def norm(self):
@@ -368,7 +368,7 @@ class Mat(base.Mat):
         if not self.dtype == PETSc.ScalarType:
             raise RuntimeError("Can only create a matrix of type %s, %s is not supported" \
                     % (PETSc.ScalarType, self.dtype))
-        c = MPI_COMM
+        c = PYOP2_COMM
         if c.size == 1:
             mat = PETSc.Mat()
             row_lg = PETSc.LGMap()
