@@ -388,6 +388,7 @@ class Mat(base.Mat):
             mat = PETSc.Mat()
             row_lg = PETSc.LGMap()
             col_lg = PETSc.LGMap()
+            # FIXME: probably not right for vector fields
             row_lg.create(indices=self.sparsity.maps[0][0].dataset.halo.global_to_petsc_numbering)
             col_lg.create(indices=self.sparsity.maps[0][1].dataset.halo.global_to_petsc_numbering)
             rdim, cdim = self.sparsity.dims
