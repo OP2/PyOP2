@@ -217,18 +217,22 @@ class Arg(object):
                 op = MPI.MIN
             elif self.access is MAX:
                 op = MPI.MAX
-            # If the MPI support MPI-3, this could be MPI_Iallreduce
-            # instead, to allow overlapping comp and comms.  We may
-            # need to pack into a temporary buffer though.
-            # FIXME: Need to use correct communicator
-            MPI_COMM.Allreduce(MPI.IN_PLACE, self.data._data, op=op)
+            # If the MPI supports MPI-3, this could be MPI_Iallreduce
+            # instead, to allow overlapping comp and comms.
+            # We must reduce into a temporary buffer so that when
+            # executing over the halo region, which occurs after we've
+            # called this reduction, we don't subsequently overwrite
+            # the result.
+            MPI_COMM.Allreduce(self.data._data, self.data._buf, op=op)
 
     def reduction_end(self):
         assert self._is_global, \
             "Doing global reduction only makes sense for Globals"
         if self.access is not READ and self._in_flight:
             self._in_flight = False
-            # no-op until we support asynchronous collectives (MPI-3)
+            # Must have a copy here, because otherwise we just grab a
+            # pointer.
+            self.data._data = np.copy(self.data._buf)
 
 class Set(object):
     """OP2 set.
@@ -758,6 +762,7 @@ class Global(DataCarrier):
     def __init__(self, dim, data=None, dtype=None, name=None):
         self._dim = as_tuple(dim, int)
         self._data = verify_reshape(data, dtype, self._dim, allow_none=True)
+        self._buf = np.empty_like(self._data)
         self._name = name or "global_%d" % Global._globalcount
         Global._globalcount += 1
 
