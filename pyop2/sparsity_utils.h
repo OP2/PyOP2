@@ -9,8 +9,9 @@ extern "C" {
 
 void build_sparsity_pattern ( int rmult, int cmult, int nrows, int nmaps,
                               op_map * rowmaps, op_map * colmaps,
-                              int ** d_nnz, int ** o_nnz,
-                              int ** rowptr, int ** colidx );
+                              int ** nnz, int ** o_nnz,
+                              int ** rowptr, int ** colidx,
+                              int ** o_rowptr, int ** o_colidx );
 
 #ifdef __cplusplus
 }

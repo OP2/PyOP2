@@ -526,7 +526,7 @@ device's "block" address plus an offset which is
 
 def free_sparsity(object sparsity):
     cdef np.ndarray tmp
-    for attr in ['_rowptr', '_colidx', '_d_nnz', '_o_nnz']:
+    for attr in ['_rowptr', '_colidx', '_nnz', '_o_nnz']:
         try:
             tmp = getattr(sparsity, attr)
             free(<void *>np.PyArray_DATA(tmp))
@@ -540,7 +540,7 @@ def build_sparsity(object sparsity):
     cdef int lsize = nrows*rmult
     cdef op_map rmap, cmap
     cdef int nmaps = len(sparsity._rmaps)
-    cdef int *d_nnz, *o_nnz, *rowptr, *colidx
+    cdef int *nnz, *o_nnz, *rowptr, *colidx, *o_rowptr, *o_colidx
 
     cdef core.op_map *rmaps = <core.op_map *>malloc(nmaps * sizeof(core.op_map))
     if rmaps is NULL:
@@ -557,9 +557,9 @@ def build_sparsity(object sparsity):
             cmaps[i] = cmap._handle
 
         core.build_sparsity_pattern(rmult, cmult, nrows, nmaps,
-                                    rmaps, cmaps,
-                                    &d_nnz, &o_nnz, &rowptr, &colidx)
-        sparsity._d_nnz = data_to_numpy_array_with_spec(d_nnz, lsize,
+                                    rmaps, cmaps, &nnz, &o_nnz,
+                                    &rowptr, &colidx, &o_rowptr, &o_colidx)
+        sparsity._nnz = data_to_numpy_array_with_spec(nnz, lsize,
                                                         np.NPY_INT32)
         sparsity._o_nnz = data_to_numpy_array_with_spec(o_nnz, lsize,
                                                         np.NPY_INT32)
@@ -567,6 +567,11 @@ def build_sparsity(object sparsity):
                                                          np.NPY_INT32)
         sparsity._colidx = data_to_numpy_array_with_spec(colidx,
                                                          rowptr[lsize],
+                                                         np.NPY_INT32)
+        sparsity._o_rowptr = data_to_numpy_array_with_spec(o_rowptr, lsize+1,
+                                                         np.NPY_INT32)
+        sparsity._o_colidx = data_to_numpy_array_with_spec(o_colidx,
+                                                         o_rowptr[lsize],
                                                          np.NPY_INT32)
     finally:
         free(rmaps)

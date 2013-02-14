@@ -344,7 +344,6 @@ class Sparsity(base.Sparsity):
         key = (maps, as_tuple(dims, int, 2))
         self._cached = True
         core.build_sparsity(self)
-        self._total_nz = self._rowptr[-1]
         _sparsity_cache[key] = self
 
     def __del__(self):
@@ -359,12 +358,20 @@ class Sparsity(base.Sparsity):
         return self._colidx
 
     @property
-    def d_nnz(self):
-        return self._d_nnz
+    def nnz(self):
+        return self._nnz
 
     @property
-    def total_nz(self):
-        return int(self._total_nz)
+    def o_nnz(self):
+        return self._o_nnz
+
+    @property
+    def nz(self):
+        return int(self._rowptr[-1])
+
+    @property
+    def o_nz(self):
+        return int(self._o_rowptr[-1])
 
 class Mat(base.Mat):
     """OP2 matrix data. A Mat is defined on a sparsity pattern and holds a value
@@ -386,7 +393,7 @@ class Mat(base.Mat):
             rdim, cdim = self.sparsity.dims
             row_lg.create(indices=np.arange(self.sparsity.nrows * rdim, dtype=PETSc.IntType))
             col_lg.create(indices=np.arange(self.sparsity.ncols * cdim, dtype=PETSc.IntType))
-            self._array = np.zeros(self.sparsity.total_nz, dtype=PETSc.RealType)
+            self._array = np.zeros(self.sparsity.nz, dtype=PETSc.RealType)
             # We're not currently building a blocked matrix, so need to scale the
             # number of rows and columns by the sparsity dimensions
             # FIXME: This needs to change if we want to do blocked sparse
