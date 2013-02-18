@@ -409,10 +409,12 @@ class Mat(base.Mat):
             row_lg.create(indices=self.sparsity.maps[0][0].dataset.halo.global_to_petsc_numbering)
             col_lg.create(indices=self.sparsity.maps[0][1].dataset.halo.global_to_petsc_numbering)
             rdim, cdim = self.sparsity.dims
-            mat.createAIJ(size=((self.sparsity.nrows*rdim, None),
-                                (self.sparsity.ncols*cdim, None)),
-                          # FIXME: this is wrong
-                          nnz=(100, 100))
+            self._array = np.zeros(self.sparsity.nz, dtype=PETSc.RealType)
+            self._o_array = np.zeros(self.sparsity.o_nz, dtype=PETSc.RealType)
+            mat.createAIJWithArrays(((self.sparsity.nrows*rdim, None),
+                                     (self.sparsity.ncols*cdim, None)),
+                                    (self.sparsity._rowptr, self.sparsity._colidx, self._array,
+                                     self.sparsity._o_rowptr, self.sparsity._o_colidx, self._o_array))
             mat.setLGMap(rmap=row_lg, cmap=col_lg)
             mat.setOption(mat.Option.IGNORE_OFF_PROC_ENTRIES, True)
             mat.setOption(mat.Option.IGNORE_ZERO_ENTRIES, True)

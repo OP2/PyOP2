@@ -164,6 +164,7 @@ cdef class op_set:
         cdef int size = set.size
         cdef char * name = set.name
         self._handle = core.op_decl_set_core(size, name)
+        self._handle.exec_size = set.exec_size
 
     @property
     def size(self):
@@ -538,8 +539,9 @@ def build_sparsity(object sparsity):
     rmult, cmult = sparsity._dims
     cdef int nrows = sparsity._nrows
     cdef int lsize = nrows*rmult
-    cdef op_map rmap, cmap
     cdef int nmaps = len(sparsity._rmaps)
+    cdef op_map rmap, cmap
+    cdef np.ndarray[int, ndim=1] rlgmap, clgmap
     cdef int *nnz, *o_nnz, *rowptr, *colidx, *o_rowptr, *o_colidx
 
     cdef core.op_map *rmaps = <core.op_map *>malloc(nmaps * sizeof(core.op_map))
@@ -548,6 +550,12 @@ def build_sparsity(object sparsity):
     cdef core.op_map *cmaps = <core.op_map *>malloc(nmaps * sizeof(core.op_map))
     if cmaps is NULL:
         raise MemoryError("Unable to allocate space for cmaps")
+    cdef int **rlgmaps = <int **>malloc(nmaps * sizeof(int*))
+    if rlgmaps is NULL:
+        raise MemoryError("Unable to allocate space for rlgmaps")
+    cdef int **clgmaps = <int **>malloc(nmaps * sizeof(int*))
+    if clgmaps is NULL:
+        raise MemoryError("Unable to allocate space for clgmaps")
 
     try:
         for i in range(nmaps):
@@ -555,9 +563,14 @@ def build_sparsity(object sparsity):
             cmap = sparsity._cmaps[i]._c_handle
             rmaps[i] = rmap._handle
             cmaps[i] = cmap._handle
+            rlgmap = sparsity._rmaps[i].dataset.halo.global_to_petsc_numbering
+            clgmap = sparsity._cmaps[i].dataset.halo.global_to_petsc_numbering
+            rlgmaps[i] = <int*>rlgmap.data
+            clgmaps[i] = <int*>clgmap.data
 
         core.build_sparsity_pattern(rmult, cmult, nrows, nmaps,
-                                    rmaps, cmaps, &nnz, &o_nnz,
+                                    rmaps, cmaps, rlgmaps, clgmaps,
+                                    &nnz, &o_nnz,
                                     &rowptr, &colidx, &o_rowptr, &o_colidx)
         sparsity._nnz = data_to_numpy_array_with_spec(nnz, lsize,
                                                         np.NPY_INT32)

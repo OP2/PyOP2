@@ -4,6 +4,7 @@
 
 void build_sparsity_pattern ( int rmult, int cmult, int nrows, int nmaps,
                               op_map * rowmaps, op_map * colmaps,
+                              int ** row_lgmap, int ** col_lgmap,
                               int ** _nnz, int ** _o_nnz,
                               int ** _rowptr, int ** _colidx,
                               int ** _o_rowptr, int ** _o_colidx )
@@ -18,20 +19,21 @@ void build_sparsity_pattern ( int rmult, int cmult, int nrows, int nmaps,
   for ( int m = 0; m < nmaps; m++ ) {
     op_map rowmap = rowmaps[m];
     op_map colmap = colmaps[m];
-    int rsize = rowmap->from->size + rowmap->from->exec_size;
+    int rsize = rowmap->from->exec_size;
     for ( int e = 0; e < rsize; ++e ) {
       for ( int i = 0; i < rowmap->dim; ++i ) {
         for ( int r = 0; r < rmult; r++ ) {
           int row = rmult * rowmap->map[i + e*rowmap->dim] + r;
           // NOTE: this hides errors due to invalid map entries
           if ( row < lsize ) { // ignore values inside the MPI halo region
-            for ( int c = 0; c < cmult; c++ ) {
-              for ( int d = 0; d < colmap->dim; d++ ) {
+            for ( int d = 0; d < colmap->dim; d++ ) {
+              for ( int c = 0; c < cmult; c++ ) {
                 int entry = cmult * colmap->map[d + e * colmap->dim] + c;
                 if ( entry < lsize ) {
                   s_diag[row].insert(entry);
                 } else {
-                  s_odiag[row].insert(entry);
+                  // Off-processor entries are expected to be in global indices
+                  s_odiag[row].insert(col_lgmap[m][entry]);
                 }
               }
             }
