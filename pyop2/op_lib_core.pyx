@@ -563,10 +563,11 @@ def build_sparsity(object sparsity):
             cmap = sparsity._cmaps[i]._c_handle
             rmaps[i] = rmap._handle
             cmaps[i] = cmap._handle
-            rlgmap = sparsity._rmaps[i].dataset.halo.global_to_petsc_numbering
-            clgmap = sparsity._cmaps[i].dataset.halo.global_to_petsc_numbering
-            rlgmaps[i] = <int*>rlgmap.data
-            clgmaps[i] = <int*>clgmap.data
+            if sparsity._rmaps[i].dataset.halo and sparsity._cmaps[i].dataset.halo:
+                rlgmap = sparsity._rmaps[i].dataset.halo.global_to_petsc_numbering
+                clgmap = sparsity._cmaps[i].dataset.halo.global_to_petsc_numbering
+                rlgmaps[i] = <int*>rlgmap.data
+                clgmaps[i] = <int*>clgmap.data
 
         core.build_sparsity_pattern(rmult, cmult, nrows, nmaps,
                                     rmaps, cmaps, rlgmaps, clgmaps,
