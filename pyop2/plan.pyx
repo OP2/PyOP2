@@ -156,7 +156,7 @@ cdef class Plan:
         sizes = dict()
 
         for pi in range(self._nblocks):
-            start = pi * ps
+            start = self._offset[pi]
             end = start + self._nelems[pi]
 
             for dat,map in d.iterkeys():
@@ -271,7 +271,6 @@ cdef class Plan:
                 flat_race_args[i].mip[j].idx = idx
 
         # type constraining a few variables
-        cdef int _tid
         cdef int _p
         cdef unsigned int _base_color
         cdef int _t
@@ -288,10 +287,9 @@ cdef class Plan:
         # create direct reference to numpy array storage
         cdef int * thrcol = <int *> numpy.PyArray_DATA(self._thrcol)
         cdef int * nelems = <int *> numpy.PyArray_DATA(self._nelems)
-
+        cdef int * offset = <int *> numpy.PyArray_DATA(self._offset)
 
         if tc:
-            _tid = 0
             for _p in range(self._nblocks):
                 _base_color = 0
                 terminated = False
@@ -304,7 +302,7 @@ cdef class Plan:
                             flat_race_args[_rai].tmp[_i] = 0
 
                     # color threads
-                    for _t in range(_tid, _tid + nelems[_p]):
+                    for _t in range(offset[_p], offset[_p] + nelems[_p]):
                         if thrcol[_t] == -1:
                             _mask = 0
 
@@ -326,13 +324,10 @@ cdef class Plan:
                                         flat_race_args[_rai].tmp[flat_race_args[_rai].mip[_mi].map_base[_t * flat_race_args[_rai].mip[_mi].dim + flat_race_args[_rai].mip[_mi].idx]] |= _mask
 
                     _base_color += 32
-                _tid += nelems[_p]
 
             self._nthrcol = numpy.zeros(self._nblocks,dtype=numpy.int32)
-            _tid = 0
             for _p in range(self._nblocks):
-                self._nthrcol[_p] = max(self._thrcol[_tid:(_tid + nelems[_p])]) + 1
-                _tid += nelems[_p]
+                self._nthrcol[_p] = max(self._thrcol[offset[_p]:(offset[_p] + nelems[_p])]) + 1
 
         # partition coloring
         pcolors = numpy.empty(self._nblocks, dtype=numpy.int32)
@@ -350,11 +345,10 @@ cdef class Plan:
                 for _i in range(flat_race_args[_rai].size):
                     flat_race_args[_rai].tmp[_i] = 0
 
-            _tid = 0
             for _p in range(self._nblocks):
                 if _pcolors[_p] == -1:
                     _mask = 0
-                    for _t in range(_tid, _tid + nelems[_p]):
+                    for _t in range(offset[_p], offset[_p] + nelems[_p]):
                         for _rai in range(n_race_args):
                             for _mi in range(flat_race_args[_rai].count):
                                 _mask |= flat_race_args[_rai].tmp[flat_race_args[_rai].mip[_mi].map_base[_t * flat_race_args[_rai].mip[_mi].dim + flat_race_args[_rai].mip[_mi].idx]]
@@ -369,12 +363,10 @@ cdef class Plan:
                         _pcolors[_p] = _base_color + _color
 
                         _mask = 1 << _color
-                        for _t in range(_tid, _tid + nelems[_p]):
+                        for _t in range(offset[_p], offset[_p] + nelems[_p]):
                             for _rai in range(n_race_args):
                                 for _mi in range(flat_race_args[_rai].count):
                                     flat_race_args[_rai].tmp[flat_race_args[_rai].mip[_mi].map_base[_t * flat_race_args[_rai].mip[_mi].dim + flat_race_args[_rai].mip[_mi].idx]] |= _mask
-                _tid += nelems[_p]
-
             _base_color += 32
 
         # memory free
