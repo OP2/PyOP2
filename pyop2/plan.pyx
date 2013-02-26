@@ -38,6 +38,7 @@ Cython implementation of the Plan construction.
 import base
 from utils import align
 import math
+import itertools
 import numpy
 cimport numpy
 from libc.stdlib cimport malloc, free
@@ -105,9 +106,26 @@ cdef class Plan:
         self._compute_coloring(iset, ps, mc, tc, args)
 
     def _compute_partition_info(self, iset, ps, mc, args):
-        self._nblocks = int(math.ceil(iset.size / float(ps)))
-        self._nelems = numpy.array([min(ps, iset.size - i * ps) for i in range(self._nblocks)],
-                                  dtype=numpy.int32)
+        def nelems_iter(len):
+            if len:
+                acc = 0
+                while acc < len:
+                    yield min(ps, len - acc)
+                    acc += ps
+
+        self._nelems = numpy.fromiter(itertools.chain(nelems_iter(iset._core_size),
+                                                      nelems_iter(iset.size - iset._core_size),
+                                                      nelems_iter(iset._ieh_size - iset._size)),
+                                      dtype=numpy.int32)
+        self._nblocks = self._nelems.size
+
+        def offset_iter():
+            _offset = 0
+            for nelems in self._nelems:
+                yield _offset
+                _offset += nelems
+
+        self._offset = numpy.fromiter(offset_iter(), dtype=numpy.int32)
 
     def _compute_staging_info(self, iset, ps, mc, args):
         """Constructs:
@@ -195,13 +213,6 @@ cdef class Plan:
                     yield _off[(dat,map)]
                     _off[(dat,map)] += sizes[(dat,map,pi)]
         self._ind_offs = numpy.fromiter(off_iter(), dtype=numpy.int32)
-
-        def offset_iter():
-            _offset = 0
-            for pi in range(self._nblocks):
-                yield _offset
-                _offset += self._nelems[pi]
-        self._offset = numpy.fromiter(offset_iter(), dtype=numpy.int32)
 
         # max shared memory required by work groups
         nshareds = [0] * self._nblocks
