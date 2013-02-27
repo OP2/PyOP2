@@ -82,7 +82,7 @@ def par_loop(kernel, it_space, *args):
 class ParLoop(device.ParLoop):
     def compute(self):
         _fun = self.generate_code()
-        _args = list()
+        _args = [None, None]
         for arg in self.args:
             if arg._is_mat:
                 _args.append(arg.data.handle.handle)
@@ -100,9 +100,23 @@ class ParLoop(device.ParLoop):
         for c in Const._definitions():
             _args.append(c.data)
 
-        part_size = 1024  #TODO: compute partition size
+        #TODO: compute partition size
+        plan = self._get_plan(1024)
+        _args.append(plan.blkmap)
+        _args.append(plan.offset)
+        _args.append(plan.nelems)
 
-        # Create a plan, for colored execution
+
+        boffset = 0
+        for c in range(plan.ncolors):
+            nblocks = plan.ncolblk[c]
+            _args[0] = boffset
+            _args[1] = nblocks
+            _fun(*_args)
+            boffset += nblocks
+
+
+    def _get_plan(self, part_size):
         if [arg for arg in self.args if arg._is_indirect or arg._is_mat]:
             plan = device.Plan(self._kernel, self._it_space.iterset,
                                *self._unwound_args,
@@ -113,8 +127,9 @@ class ParLoop(device.ParLoop):
 
         else:
             # Create a fake plan for direct loops.
+            # TODO:
             # Make the fake plan according to the number of cores available
-            # to OpenMP
+            # to OpenMP instead of the partition size
             class FakePlan:
                 def __init__(self, iset, part_size):
                     nblocks = int(math.ceil(iset.size / float(part_size)))
@@ -123,16 +138,11 @@ class ParLoop(device.ParLoop):
                     self.blkmap = np.arange(nblocks, dtype=np.int32)
                     self.nelems = np.array([min(part_size, iset.size - i * part_size) for i in range(nblocks)],
                                            dtype=np.int32)
+                    self.offset = np.arange(0, iset.size, part_size, dtype=np.int32)
 
             plan = FakePlan(self._it_space.iterset, part_size)
-
-        _args.append(part_size)
-        _args.append(plan.ncolors)
-        _args.append(plan.blkmap)
-        _args.append(plan.ncolblk)
-        _args.append(plan.nelems)
-
-        _fun(*_args)
+        return plan
+        
 
     def generate_code(self):
 
@@ -396,12 +406,18 @@ class ParLoop(device.ParLoop):
             _const_args = ''
         _const_inits = ';\n'.join([c_const_init(c) for c in Const._definitions()])
         wrapper = """
-            void wrap_%(kernel_name)s__(%(wrapper_args)s %(const_args)s, PyObject* _part_size, PyObject* _ncolors, PyObject* _blkmap, PyObject* _ncolblk, PyObject* _nelems) {
+            void wrap_%(kernel_name)s__(
+              PyObject* _boffset,
+              PyObject* _nblocks,
+              %(wrapper_args)s %(const_args)s,
+              PyObject* _blkmap,
+              PyObject* _offset,
+              PyObject* _nelems) {
 
-            int part_size = (int)PyInt_AsLong(_part_size);
-            int ncolors = (int)PyInt_AsLong(_ncolors);
+            int boffset = (int)PyInt_AsLong(_boffset);
+            int nblocks = (int)PyInt_AsLong(_nblocks);
             int* blkmap = (int *)(((PyArrayObject *)_blkmap)->data);
-            int* ncolblk = (int *)(((PyArrayObject *)_ncolblk)->data);
+            int* offset = (int *)(((PyArrayObject *)_offset)->data);
             int* nelems = (int *)(((PyArrayObject *)_nelems)->data);
 
             %(wrapper_decs)s;
@@ -421,35 +437,26 @@ class ParLoop(device.ParLoop):
             {
               int tid = omp_get_thread_num();
               %(reduction_inits)s;
-            }
 
-            int boffset = 0;
-            for ( int __col  = 0; __col < ncolors; __col++ ) {
-              int nblocks = ncolblk[__col];
-
-              #pragma omp parallel default(shared)
-              {
-                int tid = omp_get_thread_num();
-
-                #pragma omp for schedule(static)
-                for ( int __b = boffset; __b < (boffset + nblocks); __b++ ) {
-                  int bid = blkmap[__b];
-                  int nelem = nelems[bid];
-                  int efirst = bid * part_size;
-                  for (int i = efirst; i < (efirst + nelem); i++ ) {
-                    %(vec_inits)s;
-                    %(itspace_loops)s
-                    %(zero_tmps)s;
-                    %(kernel_name)s(%(kernel_args)s);
-                    %(addtos_vector_field)s;
-                    %(itspace_loop_close)s
-                    %(addtos_scalar_field)s;
-                  }
+              #pragma omp for schedule(static)
+              for ( int __b = boffset; __b < (boffset + nblocks); __b++ ) {
+                int bid = blkmap[__b];
+                int nelem = nelems[bid];
+                int efirst = offset[bid];
+                for (int i = efirst; i < (efirst + nelem); i++ ) {
+                  %(vec_inits)s;
+                  %(itspace_loops)s
+                  %(zero_tmps)s;
+                  %(kernel_name)s(%(kernel_args)s);
+                  %(addtos_vector_field)s;
+                  %(itspace_loop_close)s
+                  %(addtos_scalar_field)s;
                 }
               }
-              %(reduction_finalisations)s
-              boffset += nblocks;
             }
+            %(reduction_finalisations)s
+            boffset += nblocks;
+
             %(assembles)s;
           }"""
 
