@@ -112,6 +112,7 @@ cdef class Plan:
                                                       nelems_iter(iset.size - iset._core_size),
                                                       nelems_iter(iset._ieh_size - iset._size)),
                                       dtype=numpy.int32)
+
         self._nblocks = self._nelems.size
 
         def offset_iter():
@@ -330,6 +331,9 @@ cdef class Plan:
 
         cdef int * _pcolors = <int *> numpy.PyArray_DATA(pcolors)
 
+        cdef int _first_block_owned = int(math.ceil(iset._core_size / float(ps)))
+        cdef int _first_block_halo = int(math.ceil(iset.size / float(ps)))
+
         _base_color = 0
         terminated = False
         while not terminated:
@@ -342,6 +346,19 @@ cdef class Plan:
 
             for _p in range(self._nblocks):
                 if _pcolors[_p] == -1:
+                    if not terminated:
+                        if _p in [_first_block_owned, _first_block_halo]:
+                            # break early to finish coloring of the preivous group (core < owned < halo exec)
+                            break
+                    else:
+                        if _p == _first_block_owned:
+                            self._ncolors_core = max(1, pcolors.max() + 1)
+                            base_color = self._ncolors_core
+
+                        if _p == _first_block_halo:
+                            self._ncolors_owned = max(self._ncolors_core + 1, pcolors.max() + 1)
+                            base_color = self._ncolors_owned
+
                     _mask = 0
                     for _t in range(offset[_p], offset[_p] + nelems[_p]):
                         for _rai in range(n_race_args):
@@ -361,7 +378,8 @@ cdef class Plan:
                         for _t in range(offset[_p], offset[_p] + nelems[_p]):
                             for _rai in range(n_race_args):
                                 for _mi in range(flat_race_args[_rai].count):
-                                    flat_race_args[_rai].tmp[flat_race_args[_rai].mip[_mi].map_base[_t * flat_race_args[_rai].mip[_mi].dim + flat_race_args[_rai].mip[_mi].idx]] |= _mask
+                                    flat_race_args[_rai].tmp[flat_race_args[_rai].mip[_mi].map_base[_t * flat_race_args[_rai].mip[_mi].dim + flat_race_args[_rai].mip[_mi].idx]] |= _mask                        
+
             _base_color += 32
 
         # memory free
@@ -388,10 +406,6 @@ cdef class Plan:
     @property
     def nblocks(self):
         return self._nblocks
-
-    @property
-    def ncolors(self):
-        return self._ncolors
 
     @property
     def ncolblk(self):
@@ -437,14 +451,22 @@ cdef class Plan:
     def thrcol(self):
         return self._thrcol
 
-    #dummy values for now, to make it run with the cuda backend
     @property
     def ncolors_core(self):
-        return self._ncolors
+        try:
+            return self._ncolors_core
+        except AttributeError:
+            return self._ncolors
 
-    #dummy values for now, to make it run with the cuda backend
     @property
     def ncolors_owned(self):
+        try:
+            return self._ncolors_owned
+        except AttributeError:
+            return self._ncolors
+
+    @property
+    def ncolors(self):
         return self._ncolors
 
     #dummy values for now, to make it run with the cuda backend
