@@ -82,7 +82,7 @@ def par_loop(kernel, it_space, *args):
 class ParLoop(device.ParLoop):
     def compute(self):
         _fun = self.generate_code()
-        _args = [self._it_space.size]
+        _args = list()
         for arg in self.args:
             if arg._is_mat:
                 _args.append(arg.data.handle.handle)
@@ -385,10 +385,6 @@ class ParLoop(device.ParLoop):
 
         _zero_tmps = ';\n'.join([c_zero_tmp(arg) for arg in args if arg._is_mat])
 
-        _set_size_wrapper = 'PyObject *_%(set)s_size' % {'set' : self._it_space.name}
-        _set_size_dec = 'int %(set)s_size = (int)PyInt_AsLong(_%(set)s_size);' % {'set' : self._it_space.name}
-        _set_size = '%(set)s_size' % {'set' : self._it_space.name}
-
         _reduction_decs = ';\n'.join([c_reduction_dec(arg) for arg in args if arg._is_global_reduction])
         _reduction_inits = ';\n'.join([c_reduction_init(arg) for arg in args if arg._is_global_reduction])
         _reduction_finalisations = '\n'.join([c_reduction_finalisation(arg) for arg in args if arg._is_global_reduction])
@@ -400,7 +396,7 @@ class ParLoop(device.ParLoop):
             _const_args = ''
         _const_inits = ';\n'.join([c_const_init(c) for c in Const._definitions()])
         wrapper = """
-            void wrap_%(kernel_name)s__(%(set_size_wrapper)s, %(wrapper_args)s %(const_args)s, PyObject* _part_size, PyObject* _ncolors, PyObject* _blkmap, PyObject* _ncolblk, PyObject* _nelems) {
+            void wrap_%(kernel_name)s__(%(wrapper_args)s %(const_args)s, PyObject* _part_size, PyObject* _ncolors, PyObject* _blkmap, PyObject* _ncolblk, PyObject* _nelems) {
 
             int part_size = (int)PyInt_AsLong(_part_size);
             int ncolors = (int)PyInt_AsLong(_ncolors);
@@ -408,7 +404,6 @@ class ParLoop(device.ParLoop):
             int* ncolblk = (int *)(((PyArrayObject *)_ncolblk)->data);
             int* nelems = (int *)(((PyArrayObject *)_nelems)->data);
 
-            %(set_size_dec)s;
             %(wrapper_decs)s;
             %(const_inits)s;
             %(vec_decs)s;
@@ -475,9 +470,6 @@ class ParLoop(device.ParLoop):
                                        'const_args' : _const_args,
                                        'const_inits' : _const_inits,
                                        'tmp_decs' : _tmp_decs,
-                                       'set_size' : _set_size,
-                                       'set_size_dec' : _set_size_dec,
-                                       'set_size_wrapper' : _set_size_wrapper,
                                        'itspace_loops' : _itspace_loops,
                                        'itspace_loop_close' : _itspace_loop_close,
                                        'vec_inits' : _vec_inits,
