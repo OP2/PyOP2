@@ -222,15 +222,26 @@ class ParLoop(device.ParLoop, host.ParLoop):
         _args.append(plan.offset)
         _args.append(plan.nelems)
 
+        if plan.ncolors != plan.ncolors_core or plan.ncolors != plan.ncolors_owned:
+            self.halo_exchange_begin()
 
         boffset = 0
         for c in range(plan.ncolors):
-            nblocks = plan.ncolblk[c]
-            _args[0] = boffset
-            _args[1] = nblocks
-            _fun(*_args)
-            boffset += nblocks
+            if c == plan.ncolors_core:
+                self.halo_exchange_end()
 
+            nblocks = plan.ncolblk[c]
+            if nblocks > 0:
+                _args[0] = boffset
+                _args[1] = nblocks
+                fun(*_args)
+                boffset += nblocks
+
+            if c == plan.ncolors_owned - 1:
+                self.reduction_begin()
+
+        self.reduction_end()
+        self.maybe_set_halo_update_needed()
         for arg in self.args:
             if arg._is_mat:
                 arg.data._assemble()
@@ -254,6 +265,8 @@ class ParLoop(device.ParLoop, host.ParLoop):
                 def __init__(self, iset, part_size):
                     nblocks = int(math.ceil(iset.size / float(part_size)))
                     self.ncolors = 1
+                    self.ncolors_core = 0
+                    self.ncolors_owned = 1
                     self.ncolblk = np.array([nblocks], dtype=np.int32)
                     self.blkmap = np.arange(nblocks, dtype=np.int32)
                     self.nelems = np.array([min(part_size, iset.size - i * part_size) for i in range(nblocks)],
