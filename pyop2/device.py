@@ -345,7 +345,15 @@ class PPlan(_GenericPlan, core.Plan):
     PyOP2's cython plan function.
         Support matrix coloring, selective staging and thread color computation.
     """
-    pass
+
+    def echo(self):
+        print "Python PLAN"
+        print "nblocks: %d" % self.nblocks
+        print "nelems: %s" % self.nelems
+        print "offset: %s" % self.offset
+        print "ncolors / core / owned: %d / %d / %d" % (self.ncolors, self.ncolors_core, self.ncolors_owned)
+        print "blkmap: %s" % self.blkmap
+        print "ncolblk: %s" % self.ncolblk
 
 # _GenericPlan, CPlan, and PPlan are not meant to be instantiated directly.
 # one should instead use Plan. The actual class that is instanciated is defined
