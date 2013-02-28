@@ -115,13 +115,11 @@ class ParLoop(device.ParLoop):
                 self.halo_exchange_end()
 
             nblocks = plan.ncolblk[c]
-            if nblocks == 0:
-                continue
-
-            _args[0] = boffset
-            _args[1] = nblocks
-            _fun(*_args)
-            boffset += nblocks
+            if nblocks > 0:
+                _args[0] = boffset
+                _args[1] = nblocks
+                _fun(*_args)
+                boffset += nblocks
 
             if c == plan.ncolors_owned - 1:
                 self.reduction_begin()
