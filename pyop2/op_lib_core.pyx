@@ -595,4 +595,93 @@ def build_sparsity(object sparsity, bool parallel):
         free(rmaps)
         free(cmaps)
 
+def build_sparsity_mixed(object sparsity, bool parallel):
+    cdef int rmult, cmult
+    cdef int itmaps = sparsity._itmaps
+
+    # New rowmult and colmult
+    cdef int *rowmultl = <int *>malloc(itmaps * sizeof(int))
+    cdef int *colmultl = <int *>malloc(itmaps * sizeof(int))
+    for i in range(itmaps):
+        rowmultl[i] = sparsity._rowmult[i]
+        colmultl[i] = sparsity._colmult[i]
+
+    # Old row and col multipliers
+    cdef int nmaps = len(sparsity._rmaps) # # mixed spaces
+    cdef int *rmultl = <int *>malloc(nmaps * sizeof(int))
+    cdef int *cmultl = <int *>malloc(nmaps * sizeof(int))
+    cdef int k = 0
+    for (rm,cm) in sparsity._dims:
+        rmultl[k] = rm
+        cmultl[k] = cm
+        k += 1
+
+    cdef int *nrowsl =  <int *>malloc(nmaps * sizeof(int))
+    k = 0
+    for nrows in sparsity._nrows:
+        nrowsl[k] = nrows
+        k += 1
+
+    cdef int lsize = 0
+    for i in range(nmaps):
+        lsize += nrowsl[i] * rmultl[i]
+
+    sparsity._lsize = lsize
+
+    # New Offsets for the blocks
+    cdef int *rowoffs = <int *>malloc(itmaps * sizeof(int))
+    cdef int *coloffs = <int *>malloc(itmaps * sizeof(int))
+    for i in range(itmaps):
+        rowoffs[i] = sparsity._rowoffs[i]
+        coloffs[i] = sparsity._coloffs[i]
+
+    cdef op_map rmap, cmap
+    cdef int *d_nnz, *o_nnz, *rowptr, *colidx
+    cdef int d_nz, o_nz
+
+    cdef core.op_map *rmaps = <core.op_map *>malloc(itmaps * sizeof(core.op_map))
+    if rmaps is NULL:
+        raise MemoryError("Unable to allocate space for rmaps")
+
+    cdef core.op_map *cmaps = <core.op_map *>malloc(itmaps * sizeof(core.op_map))
+    if cmaps is NULL:
+        raise MemoryError("Unable to allocate space for cmaps")
+
+    try:
+        for i in range(itmaps):
+            rmap = sparsity._rowmaps[i]._c_handle
+            cmap = sparsity._colmaps[i]._c_handle
+            rmaps[i] = rmap._handle
+            cmaps[i] = cmap._handle
+
+        if parallel:
+            core.build_sparsity_pattern_mixed_mpi(rmult, cmult, nrows, nmaps,
+                                            rmaps, cmaps, &d_nnz, &o_nnz,
+                                            &d_nz, &o_nz)
+            sparsity._d_nnz = data_to_numpy_array_with_spec(d_nnz, lsize,
+                                                            np.NPY_INT32)
+            sparsity._o_nnz = data_to_numpy_array_with_spec(o_nnz, lsize,
+                                                            np.NPY_INT32)
+            sparsity._rowptr = []
+            sparsity._colidx = []
+            sparsity._d_nz = d_nz
+            sparsity._o_nz = o_nz
+        else:
+            core.build_sparsity_pattern_mixed_seq(rowmultl, colmultl, nrowsl, nmaps, itmaps, lsize,
+                                            rmaps, cmaps, rowoffs, coloffs,
+                                            &d_nnz, &rowptr, &colidx, &d_nz)
+            sparsity._d_nnz = data_to_numpy_array_with_spec(d_nnz, lsize,
+                                                            np.NPY_INT32)
+            sparsity._o_nnz = []
+            sparsity._rowptr = data_to_numpy_array_with_spec(rowptr, lsize+1,
+                                                            np.NPY_INT32)
+            sparsity._colidx = data_to_numpy_array_with_spec(colidx,
+                                                            rowptr[lsize],
+                                                            np.NPY_INT32)
+            sparsity._d_nz = d_nz
+            sparsity._o_nz = 0
+    finally:
+        free(rmaps)
+        free(cmaps)
+
 include "plan.pyx"
