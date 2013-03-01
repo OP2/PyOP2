@@ -322,28 +322,51 @@ def _empty_sparsity_cache():
 class Sparsity(base.Sparsity):
     """OP2 Sparsity, a matrix structure derived from the union of the outer product of pairs of :class:`Map` objects."""
 
-    @validate_type(('maps', (Map, tuple), MapTypeError), \
-                   ('dims', (int, tuple), TypeError))
+    #@validate_type(('maps', (Map, tuple), MapTypeError), \
+    #               ('dims', (int, tuple), TypeError))
     def __new__(cls, maps, dims, name=None):
-        key = (maps, as_tuple(dims, int, 2))
+        print "*************"
+        key = 0
+        if isinstance(maps, list):
+            #do the stuff for the mixed spaces
+            if not isinstance(dims, list):
+                raise DimTypeError("The dimension(s) should be given as a list of tuple(s).")
+            key = (frozenset(maps), frozenset(dims))
+        else:
+            #do the stuff for normal spaces
+            key = (maps, as_tuple(dims, int, 2))
         cached = _sparsity_cache.get(key)
         if cached is not None:
             return cached
         return super(Sparsity, cls).__new__(cls, maps, dims, name)
 
-    @validate_type(('maps', (Map, tuple), MapTypeError), \
-                   ('dims', (int, tuple), TypeError))
+    #@validate_type(('maps', (Map, tuple), MapTypeError), \
+    #               ('dims', (int, tuple), TypeError))
     def __init__(self, maps, dims, name=None):
+        print "--------------"
         if getattr(self, '_cached', False):
             return
-        for m in maps:
-            for n in as_tuple(m, Map):
-                if len(n.values) == 0:
-                    raise MapValueError("Unpopulated map values when trying to build sparsity.")
+        if isinstance(maps,list):
+            for ms in maps:
+                for m in ms:
+                    for n in as_tuple(m, Map):
+                        if len(n.values) == 0:
+                            raise MapValueError("Unpopulated map values when trying to build sparsity.")
+        else:
+            for m in maps:
+                    for n in as_tuple(m, Map):
+                        if len(n.values) == 0:
+                            raise MapValueError("Unpopulated map values when trying to build sparsity.")
         super(Sparsity, self).__init__(maps, dims, name)
-        key = (maps, as_tuple(dims, int, 2))
-        self._cached = True
-        core.build_sparsity(self, parallel=PYOP2_COMM.size > 1)
+        key = 0
+        if isinstance(maps, list):
+            key = (frozenset(maps), frozenset(dims))
+            self._cached = True
+            core.build_sparsity_mixed(self, parallel=PYOP2_COMM.size > 1)
+        else:
+            key = (maps, as_tuple(dims, int, 2))
+            self._cached = True
+            core.build_sparsity(self, parallel=PYOP2_COMM.size > 1)
         _sparsity_cache[key] = self
 
     def __del__(self):
