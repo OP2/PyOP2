@@ -99,6 +99,9 @@ cdef class Plan:
 
         assert ps > 0, "partition size must be strictly positive"
 
+        self._need_exec_halo = any(arg._is_indirect_and_not_read or arg._is_mat
+                                   for arg in args)
+
         self._compute_partition_info(iset, ps, mc, args)
         if st:
             self._compute_staging_info(iset, ps, mc, args)
@@ -113,9 +116,13 @@ cdef class Plan:
                     yield min(ps, len - acc)
                     acc += ps
 
-        self._nelems = numpy.fromiter(itertools.chain(nelems_iter(iset._core_size),
-                                                      nelems_iter(iset.size - iset._core_size),
-                                                      nelems_iter(iset._ieh_size - iset._size)),
+        _gen = (nelems_iter(iset._core_size),
+                nelems_iter(iset.size - iset._core_size), )
+
+        if self._need_exec_halo:
+            _gen += (nelems_iter(iset._ieh_size - iset._size), )
+
+        self._nelems = numpy.fromiter(itertools.chain(*_gen),
                                       dtype=numpy.int32)
 
         self._nblocks = self._nelems.size
@@ -255,9 +262,9 @@ cdef class Plan:
         pcds = [None] * n_race_args
         for i, ra in enumerate(race_args.iterkeys()):
             if isinstance(ra, base.Dat):
-                s = ra.dataset.size
+                s = ra.dataset.exec_size if self._need_exec_halo else ra.dataset.size
             elif isinstance(ra, base.Mat):
-                s = ra.sparsity.maps[0][0].dataset.size
+                s = ra.sparsity.maps[0][0].dataset.exec_size if self._need_exec_halo else ra.sparsity.maps[0][0].dataset.size
 
             pcds[i] = numpy.empty((s,), dtype=numpy.uint32)
             flat_race_args[i].size = s
@@ -282,7 +289,7 @@ cdef class Plan:
         cdef int _i
 
         # intra partition coloring
-        self._thrcol = numpy.empty((iset.size, ), dtype=numpy.int32)
+        self._thrcol = numpy.empty((iset.exec_size if self._need_exec_halo else iset.size, ), dtype=numpy.int32)
         self._thrcol.fill(-1)
 
         # create direct reference to numpy array storage
