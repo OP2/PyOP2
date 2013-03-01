@@ -17,6 +17,16 @@ void build_sparsity_pattern_mpi ( int rmult, int cmult, int nrows, int nmaps,
                                   int ** d_nnz, int ** o_nnz,
                                   int * d_nz, int * o_nz );
 
+void build_sparsity_pattern_mixed_seq ( int *rmult, int *cmult, int *nrows, int nmaps, int itmaps, int lsize,
+                                  op_map *rowmaps, op_map *colmaps, int *rowoffs, int *coloffs,
+                                  int ** nnz, int ** rowptr, int ** colidx,
+                                  int * nz );
+
+void build_sparsity_pattern_mixed_mpi ( int rmult, int cmult, int nrows, int nmaps,
+                                  op_map * rowmaps, op_map * colmaps,
+                                  int ** d_nnz, int ** o_nnz,
+                                  int * d_nz, int * o_nz );
+
 #ifdef __cplusplus
 }
 #endif

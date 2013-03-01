@@ -69,8 +69,8 @@ L = inner(v,f)*dx
 
 # Generate code for mass and rhs assembly.
 
-#mass, = compile_form(a, "mass")
-#rhs,  = compile_form(L, "rhs")
+mass, = compile_form(a, "mass")
+rhs,  = compile_form(L, "rhs")
 
 mass="""
 void mass_cell_integral_0_0(    double A[1][1], double *x[2], int j, int k)
@@ -209,23 +209,31 @@ void rhs_cell_integral_0_0(    double A[1], double *x[2], double **w0, int j)
 # Set up simulation data structures
 
 NUM_ELE   = 2
+NUM_EDGES = 5
 NUM_NODES = 4
 valuetype = np.float64
 
 nodes = op2.Set(NUM_NODES, "nodes")
+edges = op2.Set(NUM_EDGES, "edges")
 elements = op2.Set(NUM_ELE, "elements")
 
-elem_node_map = np.asarray([ 0, 1, 3, 2, 3, 1 ], dtype=np.uint32)
-elem_node = op2.Map(elements, nodes, 3, elem_node_map, "elem_node")
+elem_node_map  = np.asarray([ 0, 1, 3, 2, 3, 1 ], dtype=np.uint32)
+elem_node_map2 = np.asarray([ 3, 1, 0, 2, 1, 3 ], dtype=np.uint32)
+edge_node_map  = np.asarray([ 0, 1, 1, 2, 2, 3, 3, 0, 1, 3 ], dtype=np.uint32)
 
-sparsity = op2.Sparsity((elem_node, elem_node), 2, "sparsity")
+elem_node  = op2.Map(elements, nodes, 3, elem_node_map,  "elem_node")
+elem_node1 = op2.Map(elements, nodes, 3, elem_node_map,  "elem_node1")
+elem_node2 = op2.Map(elements, nodes, 3, elem_node_map2, "elem_node2")
+
+edge_node1 = op2.Map(edges, nodes, 2, edge_node_map, "edge_node1")
+
+sparsity = op2.Sparsity(((elem_node, elem_node),(elem_node, elem_node)), 2, "sparsity")
 print "========"
 
-sparsity = op2.Sparsity([((elem_node, elem_node),(elem_node, elem_node)), (elem_node, elem_node)], [2, 2], "sparsity")
+sparsity = op2.Sparsity([((elem_node1, elem_node1),(edge_node1, edge_node1)),(elem_node2, elem_node2)], [2,1], "sparsity")
 print "========"
 
 #from IPython import embed; embed()
-
 
 mat = op2.Mat(sparsity, valuetype, "mat")
 
@@ -233,23 +241,33 @@ coord_vals = np.asarray([ (0.0, 0.0), (2.0, 0.0), (1.0, 1.0), (0.0, 1.5) ],
                            dtype=valuetype)
 coords = op2.Dat(nodes, 2, coord_vals, valuetype, "coords")
 
+pressure_vals = np.asarray([ 0.1, 2.0, 1.0, 0.2 ],
+                           dtype=valuetype)
+pressure = op2.Dat(nodes, 1, pressure_vals, valuetype, "pressure")
+
+# 2 * NUM_NODES is no longer valid here,
+# We need to replace that by the size of the matrix which is the lsize of
+#  the sparsity object
+
 f_vals = np.asarray([(1.0, 2.0)]*4, dtype=valuetype)
-b_vals = np.asarray([0.0]*2*NUM_NODES, dtype=valuetype)
-x_vals = np.asarray([0.0]*2*NUM_NODES, dtype=valuetype)
+b_vals = np.asarray([0.0]*sparsity._lsize, dtype=valuetype)
+x_vals = np.asarray([0.0]*sparsity._lsize, dtype=valuetype)
 f = op2.Dat(nodes, 2, f_vals, valuetype, "f")
 b = op2.Dat(nodes, 2, b_vals, valuetype, "b")
 x = op2.Dat(nodes, 2, x_vals, valuetype, "x")
 
 # Assemble and solve
 
-op2.par_loop(mass, elements(6,6),
-             mat((elem_node[op2.i[0]], elem_node[op2.i[1]]), op2.INC),
-             coords(elem_node, op2.READ))
+op2.par_loop(mass, elements(3,3),
+             mat((elem_node1[op2.i[0]], elem_node1[op2.i[1]]), op2.INC),
+             coords(elem_node1, op2.READ),
+             coords(edge_node1, op2.READ),
+             pressure(elem_node2, op2.READ))
 
-op2.par_loop(rhs, elements(6),
-                     b(elem_node[op2.i[0]], op2.INC),
-                     coords(elem_node, op2.READ),
-                     f(elem_node, op2.READ))
+op2.par_loop(rhs, elements(9),
+                     b(elem_node1[op2.i[0]], op2.INC),
+                     coords(elem_node1, op2.READ),
+                     f(elem_node1, op2.READ))
 
 solver = op2.Solver()
 solver.solve(mat, x, b)
