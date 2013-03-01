@@ -347,13 +347,22 @@ class PPlan(_GenericPlan, core.Plan):
     """
 
     def echo(self):
-        print "Python PLAN"
-        print "nblocks: %d" % self.nblocks
-        print "nelems: %s" % self.nelems
-        print "offset: %s" % self.offset
-        print "ncolors / core / owned: %d / %d / %d" % (self.ncolors, self.ncolors_core, self.ncolors_owned)
-        print "blkmap: %s" % self.blkmap
-        print "ncolblk: %s" % self.ncolblk
+        return """Python PLAN
+nblocks: %(nblocks)d
+nelems: %(nelems)s
+offset: %(offset)s
+ncolors / core / owned: %(ncolors)d / %(ncolors_core)d / %(ncolors_owned)d
+blkmap: %(blkmap)s
+ncolblk: %(ncolblk)s
+""" %{
+        'nblocks' : self.nblocks,
+        'nelems' : self.nelems,
+        'offset' : self.offset,
+        'ncolors' : self.ncolors,
+        'ncolors_core' : self.ncolors_core,
+        'ncolors_owned' : self.ncolors_owned,
+        'blkmap' : self.blkmap,
+        'ncolblk' : self.ncolblk}
 
 # _GenericPlan, CPlan, and PPlan are not meant to be instantiated directly.
 # one should instead use Plan. The actual class that is instanciated is defined
