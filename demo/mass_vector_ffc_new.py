@@ -57,154 +57,27 @@ opt = vars(parser.parse_args())
 op2.init(**opt)
 
 # Set up finite element identity problem
+E = FiniteElement("Lagrange", "triangle", 1)
+V = VectorElement("Lagrange", "triangle", 1)
+W = V * E
 
-E = VectorElement("Lagrange", "triangle", 1)
+v, q = TestFunctions(W)
+u, r = TrialFunctions(W)
+s = TestFunction(W)
+t = TrialFunction(W)
+f = Coefficient(W)
+g = Coefficient(V)
+h = Coefficient(E)
 
-v = TestFunction(E)
-u = TrialFunction(E)
-f = Coefficient(E)
-
-a = inner(v,u)*dx
-L = inner(v,f)*dx
+a = inner(v,u)*dx + inner(q,r)*dx
+#a = inner(s,t)*dx
+L = inner(s,f)*dx
+#L = inner(v,g)*dx + inner(q,h)*dx
 
 # Generate code for mass and rhs assembly.
 
-mass, = compile_form(a, "mass")
-rhs,  = compile_form(L, "rhs")
-
-mass="""
-void mass_cell_integral_0_0(    double A[1][1], double *x[2], int j, int k)
-{
-    // Compute Jacobian of affine map from reference cell
-    const double J_00 = x[1][0] - x[0][0];
-    const double J_01 = x[2][0] - x[0][0];
-    const double J_10 = x[1][1] - x[0][1];
-    const double J_11 = x[2][1] - x[0][1];
-
-    // Compute determinant of Jacobian
-    double detJ = J_00*J_11 - J_01*J_10;
-
-    // Compute inverse of Jacobian
-
-    const double det = fabs(detJ);
-
-    // Cell Volume.
-
-    // Compute circumradius, assuming triangle is embedded in 2D.
-
-
-    // Facet Area.
-
-    // Array of quadrature weights.
-    const double W3[3] = {0.166666666666667, 0.166666666666667, 0.166666666666667};
-    // Quadrature points on the UFC reference element: (0.166666666666667, 0.166666666666667), (0.166666666666667, 0.666666666666667), (0.666666666666667, 0.166666666666667)
-
-    // Value of basis functions at quadrature points.
-    const double FE0_C0[3][6] = \
-    {{0.666666666666667, 0.166666666666667, 0.166666666666667, 0.0, 0.0, 0.0},
-    {0.166666666666667, 0.166666666666667, 0.666666666666667, 0.0, 0.0, 0.0},
-    {0.166666666666667, 0.666666666666667, 0.166666666666667, 0.0, 0.0, 0.0}};
-
-    const double FE0_C1[3][6] = \
-    {{0.0, 0.0, 0.0, 0.666666666666667, 0.166666666666667, 0.166666666666667},
-    {0.0, 0.0, 0.0, 0.166666666666667, 0.166666666666667, 0.666666666666667},
-    {0.0, 0.0, 0.0, 0.166666666666667, 0.666666666666667, 0.166666666666667}};
-
-
-    // Compute element tensor using UFL quadrature representation
-    // Optimisations: ('eliminate zeros', False), ('ignore ones', False), ('ignore zero tables', False), ('optimisation', False), ('remove zero terms', False)
-
-    // Loop quadrature points for integral.
-    // Number of operations to compute element tensor for following IP loop = 648
-    for (unsigned int ip = 0; ip < 3; ip++)
-    {
-
-      // Number of operations for primary indices: 216
-      for (unsigned int r = 0; r < 1; r++)
-      {
-        for (unsigned int s = 0; s < 1; s++)
-        {
-          // Number of operations to compute entry: 6
-          A[r][s] += (((FE0_C0[ip][r*3+j]))*((FE0_C0[ip][s*3+k])) + ((FE0_C1[ip][r*3+j]))*((FE0_C1[ip][s*3+k])))*W3[ip]*det;
-        }// end loop over 's'
-      }// end loop over 'r'
-    }// end loop over 'ip'
-}
-"""
-
-rhs="""
-void rhs_cell_integral_0_0(    double A[1], double *x[2], double **w0, int j)
-{
-    // Compute Jacobian of affine map from reference cell
-    const double J_00 = x[1][0] - x[0][0];
-    const double J_01 = x[2][0] - x[0][0];
-    const double J_10 = x[1][1] - x[0][1];
-    const double J_11 = x[2][1] - x[0][1];
-
-    // Compute determinant of Jacobian
-    double detJ = J_00*J_11 - J_01*J_10;
-
-    // Compute inverse of Jacobian
-
-    const double det = fabs(detJ);
-
-    // Cell Volume.
-
-    // Compute circumradius, assuming triangle is embedded in 2D.
-
-
-    // Facet Area.
-
-    // Array of quadrature weights.
-    const double W3[3] = {0.166666666666667, 0.166666666666667, 0.166666666666667};
-    // Quadrature points on the UFC reference element: (0.166666666666667, 0.166666666666667), (0.166666666666667, 0.666666666666667), (0.666666666666667, 0.166666666666667)
-
-    // Value of basis functions at quadrature points.
-    const double FE0_C0[3][6] = \
-    {{0.666666666666667, 0.166666666666667, 0.166666666666667, 0.0, 0.0, 0.0},
-    {0.166666666666667, 0.166666666666667, 0.666666666666667, 0.0, 0.0, 0.0},
-    {0.166666666666667, 0.666666666666667, 0.166666666666667, 0.0, 0.0, 0.0}};
-
-    const double FE0_C1[3][6] = \
-    {{0.0, 0.0, 0.0, 0.666666666666667, 0.166666666666667, 0.166666666666667},
-    {0.0, 0.0, 0.0, 0.166666666666667, 0.166666666666667, 0.666666666666667},
-    {0.0, 0.0, 0.0, 0.166666666666667, 0.666666666666667, 0.166666666666667}};
-
-
-    // Compute element tensor using UFL quadrature representation
-    // Optimisations: ('eliminate zeros', False), ('ignore ones', False), ('ignore zero tables', False), ('optimisation', False), ('remove zero terms', False)
-
-    // Loop quadrature points for integral.
-    // Number of operations to compute element tensor for following IP loop = 108
-    for (unsigned int ip = 0; ip < 3; ip++)
-    {
-
-      // Coefficient declarations.
-      double F0 = 0.0;
-      double F1 = 0.0;
-
-      // Total number of operations to compute function values = 24
-      for (unsigned int r = 0; r < 3; r++)
-      {
-        for (unsigned int s = 0; s < 2; s++)
-        {
-          F0 += (FE0_C0[ip][3*s+r])*w0[r][s];
-          F1 += (FE0_C1[ip][3*s+r])*w0[r][s];
-        }// end loop over 's'
-      }// end loop over 'r'
-
-      // Number of operations for primary indices: 12
-      for (unsigned int r = 0; r < 2; r++)
-      {
-        // Number of operations to compute entry: 6
-        A[r] += (((FE0_C0[ip][r*3+j]))*F0 + ((FE0_C1[ip][r*3+j]))*F1)*W3[ip]*det;
-      }// end loop over 'r'
-    }// end loop over 'ip'
-}
-
-"""
-
-
+mass = compile_form(a, "mass")
+rhs = compile_form(L, "rhs")
 
 # Set up simulation data structures
 
@@ -227,10 +100,13 @@ elem_node2 = op2.Map(elements, nodes, 3, elem_node_map2, "elem_node2")
 
 edge_node1 = op2.Map(edges, nodes, 2, edge_node_map, "edge_node1")
 
-sparsity = op2.Sparsity(((elem_node, elem_node),(elem_node, elem_node)), 2, "sparsity")
-print "========"
+#sparsity = op2.Sparsity(((elem_node, elem_node),(elem_node, elem_node)), 2, "sparsity")
+#print "========"
 
-sparsity = op2.Sparsity([((elem_node1, elem_node1),(edge_node1, edge_node1)),(elem_node2, elem_node2)], [2,1], "sparsity")
+#sparsity = op2.Sparsity([((elem_node1, elem_node1),(edge_node1, edge_node1)),(elem_node2, elem_node2)], [2,1], "sparsity")
+#print "========"
+
+sparsity = op2.Sparsity([(elem_node1, elem_node1),(elem_node1, elem_node1)], [2,1], "sparsity")
 print "========"
 
 #from IPython import embed; embed()
@@ -241,31 +117,42 @@ coord_vals = np.asarray([ (0.0, 0.0), (2.0, 0.0), (1.0, 1.0), (0.0, 1.5) ],
                            dtype=valuetype)
 coords = op2.Dat(nodes, 2, coord_vals, valuetype, "coords")
 
+velocity_vals = np.asarray([ (1.0, 1.0), (1.0, 1.0), (1.0, 1.0), (1.0, 1.0) ],
+                           dtype=valuetype)
+velocity = op2.Dat(nodes, 2, velocity_vals, valuetype, "velocity")
+
 pressure_vals = np.asarray([ 0.1, 2.0, 1.0, 0.2 ],
                            dtype=valuetype)
 pressure = op2.Dat(nodes, 1, pressure_vals, valuetype, "pressure")
+
+mixed_sets = op2.MultiSet([nodes, nodes], [2,1], "mixed_sets")
+mixed_dats = op2.MultiDat(mixed_sets, [velocity, pressure], "mixed_dats")
+mixed_maps = op2.MultiMap([elem_node1, elem_node1], [2,1], "mixed_maps")
+
+#mixed = [velocity, pressure]
+#print mixed
 
 # 2 * NUM_NODES is no longer valid here,
 # We need to replace that by the size of the matrix which is the lsize of
 #  the sparsity object
 
-f_vals = np.asarray([(1.0, 2.0)]*4, dtype=valuetype)
+dofs = op2.Set(sparsity._lsize, "dofs")
+
 b_vals = np.asarray([0.0]*sparsity._lsize, dtype=valuetype)
 x_vals = np.asarray([0.0]*sparsity._lsize, dtype=valuetype)
-f = op2.Dat(nodes, 2, f_vals, valuetype, "f")
-b = op2.Dat(nodes, 2, b_vals, valuetype, "b")
-x = op2.Dat(nodes, 2, x_vals, valuetype, "x")
+
+b = op2.Dat(mixed_dats, [2,1], b_vals, valuetype, "b")
+x = op2.Dat(mixed_dats, [2,1], x_vals, valuetype, "x")
 
 # Assemble and solve
 
 op2.par_loop(mass, elements(3,3),
-             mat((elem_node1[op2.i[0]], elem_node1[op2.i[1]]), op2.INC),
+             mat(mixed_maps[op2.i[0]], mixed_maps[op2.i[1]], op2.INC), #first the rowmaps then the colmaps
              coords(elem_node1, op2.READ),
-             coords(edge_node1, op2.READ),
-             pressure(elem_node2, op2.READ))
+             mixed_dats(mixed_maps, op2.READ))
 
-op2.par_loop(rhs, elements(9),
-                     b(elem_node1[op2.i[0]], op2.INC),
+op2.par_loop(rhs, elements(3),
+                     b([elem_node1,elem_node1][op2.i[0]], op2.INC),
                      coords(elem_node1, op2.READ),
                      f(elem_node1, op2.READ))
 
