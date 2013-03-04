@@ -347,6 +347,7 @@ class ParLoop(rt.ParLoop):
                                        'addtos_vector_field' : _addtos_vector_field,
                                        'addtos_scalar_field' : _addtos_scalar_field}
 
+        print code_to_compile
         # We need to build with mpicc since that's required by PETSc
         cc = os.environ.get('CC')
         os.environ['CC'] = 'mpicc'
