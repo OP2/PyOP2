@@ -97,6 +97,7 @@ Cleanup of C level datastructures is currently not handled.
 from libc.stdlib cimport malloc, free
 from libc.stdint cimport uintptr_t
 from cpython cimport bool
+import copy
 import base
 import numpy as np
 cimport numpy as np
@@ -597,121 +598,83 @@ def build_sparsity(object sparsity, bool parallel):
 
 def build_sparsity_mixed(object sparsity, bool parallel):
     cdef int rmult, cmult
-    cdef int itmaps = sparsity._itmaps
 
-    # New rowmult and colmult
-    cdef int *rowmultl = <int *>malloc(itmaps * sizeof(int))
-    cdef int *colmultl = <int *>malloc(itmaps * sizeof(int))
-    for i in range(itmaps):
-        rowmultl[i] = sparsity._rowmult[i]
-        colmultl[i] = sparsity._colmult[i]
+    # Row and col multipliers
+    cdef int nmaps = len(sparsity._rmaps)
 
-    # Old row and col multipliers
-    cdef int nmaps = len(sparsity._rmaps) # # mixed spaces
+    print "namps"
+    print nmaps
+
     cdef int *rmultl = <int *>malloc(nmaps * sizeof(int))
     cdef int *cmultl = <int *>malloc(nmaps * sizeof(int))
-    cdef int k = 0
-    for (rm,cm) in sparsity._dims:
-        rmultl[k] = rm
-        cmultl[k] = cm
-        k += 1
 
-    cdef int *nrowsl =  <int *>malloc(nmaps * sizeof(int))
-    k = 0
-    for nrows in sparsity._nrows:
-        nrowsl[k] = nrows
-        k += 1
-
-    cdef int lsize = 0
+    # Compute the multipliers
     for i in range(nmaps):
-        lsize += nrowsl[i] * rmultl[i]
+        rmultl[i] = sparsity._rmult[i]
+        cmultl[i] = sparsity._cmult[i]
 
-    print "lsize"
-    print lsize
+    print "rmultl"
+    for i in range(nmaps):
+        print rmultl[i]
 
-    sparsity._lsize = lsize
+    print "cmultl"
+    for i in range(nmaps):
+        print cmultl[i]
 
-    # New Offsets for the blocks
-    cdef int *rowoffs = <int *>malloc(itmaps * sizeof(int))
-    cdef int *coloffs = <int *>malloc(itmaps * sizeof(int))
-    for i in range(itmaps):
-        rowoffs[i] = sparsity._rowoffs[i]
-        coloffs[i] = sparsity._coloffs[i]
+    # Set the number of rows
+    cdef int *nrowsl =  <int *>malloc(nmaps * sizeof(int))
+    cdef int *ncolsl =  <int *>malloc(nmaps * sizeof(int))
+    for i in range(nmaps):
+        nrowsl[i] = sparsity._nrows[i]
+        ncolsl[i] = sparsity._ncols[i]
 
-    #print "rmultl"
-    #for i in range(nmaps):
-    #    print rmultl[i]
+    #compute the lsize
+    cdef int lsize = 0
+    cdef int *lsizel = <int *>malloc(nmaps * sizeof(int))
+    for i in range(nmaps):
+        lsizel[i] = nrowsl[i] * rmultl[i]
+        if lsizel[i] > lsize:
+            lsize = lsizel[i]
 
-    #cdef int *offs = <int *> malloc(nmaps * sizeof(int))
-    #offs[0] = 0
-    #for i in range(nmaps-1):
-    #    offs[i+1] = offs[i] + nrowsl[i]*rmultl[i]
-
-    #print "offs"
-    #for i in range(nmaps):
-    #    print offs[i]
-
+    print "lsziel"
+    for i in range(nmaps):
+        print lsizel[i]
 
     cdef op_map rmap, cmap
     cdef int *d_nnz, *o_nnz, *rowptr, *colidx
     cdef int d_nz, o_nz
 
-    #print "lengths"
-    #cdef core.op_map **rmaps = <core.op_map **>malloc(nmaps * sizeof(core.op_map*))
-    #for i in range(nmaps):
-    #    print len(sparsity._rmaps[i])
-    #    rmaps[i] = <core.op_map *>malloc(len(sparsity._rmaps[i]) * sizeof(core.op_map))
-
-
-
-
-    #cdef core.op_map **cmaps = <core.op_map **>malloc(nmaps * sizeof(core.op_map*))
-    #for i in range(nmaps):
-    #    cmaps[i] = <core.op_map *>malloc(len(sparsity._cmaps[i]) * sizeof(core.op_map))
-
-    cdef core.op_map *rmaps = <core.op_map *>malloc(itmaps * sizeof(core.op_map))
+    cdef core.op_map *rmaps = <core.op_map *>malloc(nmaps * sizeof(core.op_map))
     if rmaps is NULL:
         raise MemoryError("Unable to allocate space for rmaps")
-
-    cdef core.op_map *cmaps = <core.op_map *>malloc(itmaps * sizeof(core.op_map))
+    cdef core.op_map *cmaps = <core.op_map *>malloc(nmaps * sizeof(core.op_map))
     if cmaps is NULL:
         raise MemoryError("Unable to allocate space for cmaps")
 
-    #cdef int *lengths = <int*>malloc(nmaps * sizeof(int))
-
     try:
-        #print "positions"
-        #for j in range(nmaps):
-        #  lengths[j] = len(sparsity._rmaps[j])
-        #  print len(sparsity._rmaps[j])
-        #  for i in range(len(sparsity._rmaps[j])):
-        #    rmap = sparsity._rmaps[j][i]._c_handle
-        #    cmap = sparsity._cmaps[j][i]._c_handle
-        #    rmaps[j][i] = rmap._handle
-        #    cmaps[j][i] = cmap._handle
-
-        for i in range(itmaps):
-            rmap = sparsity._rowmaps[i]._c_handle
-            cmap = sparsity._colmaps[i]._c_handle
+        for i in range(nmaps):
+            rmap = sparsity._rmaps[i]._c_handle
+            cmap = sparsity._cmaps[i]._c_handle
             rmaps[i] = rmap._handle
             cmaps[i] = cmap._handle
 
         if parallel:
-            core.build_sparsity_pattern_mixed_mpi(rmult, cmult, nrows, nmaps,
+            core.build_sparsity_pattern_mixed_mpi(rmultl, cmultl, nrowsl, nmaps,
                                             rmaps, cmaps, &d_nnz, &o_nnz,
                                             &d_nz, &o_nz)
             sparsity._d_nnz = data_to_numpy_array_with_spec(d_nnz, lsize,
-                                                            np.NPY_INT32)
+                                                             np.NPY_INT32)
             sparsity._o_nnz = data_to_numpy_array_with_spec(o_nnz, lsize,
-                                                            np.NPY_INT32)
+                                                             np.NPY_INT32)
             sparsity._rowptr = []
             sparsity._colidx = []
             sparsity._d_nz = d_nz
             sparsity._o_nz = o_nz
         else:
-            core.build_sparsity_pattern_mixed_seq(rowmultl, colmultl, nrowsl, nmaps, itmaps, lsize,
-                                            rmaps, cmaps, rowoffs, coloffs,
+            core.build_sparsity_pattern_mixed_seq(rmultl, cmultl, nrowsl, nmaps, lsize,
+                                            rmaps, cmaps,
                                             &d_nnz, &rowptr, &colidx, &d_nz)
+
             sparsity._d_nnz = data_to_numpy_array_with_spec(d_nnz, lsize,
                                                             np.NPY_INT32)
             sparsity._o_nnz = []
