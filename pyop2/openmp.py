@@ -309,10 +309,6 @@ class ParLoop(device.ParLoop):
                             % (name, val, row, col, arg.access == rt.WRITE))
             return ';\n'.join(s)
 
-        def c_assemble(arg):
-            name = c_arg_name(arg)
-            return "assemble_mat(%s)" % name
-
         def itspace_loop(i, d):
             return "for (int i_%d=0; i_%d<%d; ++i_%d){" % (i, i, d, i)
 
@@ -408,8 +404,6 @@ class ParLoop(device.ParLoop):
         _addtos_scalar_field = ';\n'.join([c_addto_scalar_field(arg) for arg in args \
                                            if arg._is_mat and arg.data._is_scalar_field])
 
-        _assembles = ';\n'.join([c_assemble(arg) for arg in args if arg._is_mat])
-
         _zero_tmps = ';\n'.join([c_zero_tmp(arg) for arg in args if arg._is_mat])
 
         _reduction_decs = ';\n'.join([c_reduction_dec(arg) for arg in args if arg._is_global_reduction])
@@ -473,8 +467,6 @@ class ParLoop(device.ParLoop):
             }
             %(reduction_finalisations)s
             boffset += nblocks;
-
-            %(assembles)s;
           }"""
 
         if any(arg._is_soa for arg in args):
@@ -502,7 +494,6 @@ class ParLoop(device.ParLoop):
                                        'kernel_args' : _kernel_args,
                                        'addtos_vector_field' : _addtos_vector_field,
                                        'addtos_scalar_field' : _addtos_scalar_field,
-                                       'assembles' : _assembles,
                                        'reduction_decs' : _reduction_decs,
                                        'reduction_inits' : _reduction_inits,
                                        'reduction_finalisations' : _reduction_finalisations}
