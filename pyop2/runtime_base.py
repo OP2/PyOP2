@@ -40,6 +40,7 @@ from exceptions import *
 from utils import *
 import configuration as cfg
 import base
+import copy
 from base import READ, WRITE, RW, INC, MIN, MAX, IterationSpace
 from base import DataCarrier, IterationIndex, i, IdentityMap, Kernel, Global
 from base import _parloop_cache, _empty_parloop_cache, _parloop_cache_size
@@ -364,7 +365,7 @@ class Sparsity(base.Sparsity):
 
     #@validate_type(('maps', (Map, tuple), MapTypeError), \
     #               ('dims', (int, tuple), TypeError))
-    def __new__(cls, maps, dims, name=None):
+    def __new__(cls, maps, dims, name=None, block=None):
         print "*************"
         key = 0
         if isinstance(maps, list):
@@ -378,14 +379,15 @@ class Sparsity(base.Sparsity):
         cached = _sparsity_cache.get(key)
         if cached is not None:
             return cached
-        return super(Sparsity, cls).__new__(cls, maps, dims, name)
+        return super(Sparsity, cls).__new__(cls, maps, dims, name, block)
 
     #@validate_type(('maps', (Map, tuple), MapTypeError), \
     #               ('dims', (int, tuple), TypeError))
-    def __init__(self, maps, dims, name=None):
+    def __init__(self, maps, dims, name=None, block=None):
         print "--------------"
         if getattr(self, '_cached', False):
             return
+
         if isinstance(maps,list):
             for ms in maps:
                 for m in ms:
@@ -397,12 +399,30 @@ class Sparsity(base.Sparsity):
                     for n in as_tuple(m, Map):
                         if len(n.values) == 0:
                             raise MapValueError("Unpopulated map values when trying to build sparsity.")
-        super(Sparsity, self).__init__(maps, dims, name)
+        super(Sparsity, self).__init__(maps, dims, name, block)
         key = 0
+        self.sparsity_list = []
         if isinstance(maps, list):
+            print "--------block--------"
             key = (frozenset(maps), frozenset(dims))
             self._cached = True
-            core.build_sparsity_mixed(self, parallel=PYOP2_COMM.size > 1)
+            if not block:
+              for i in range(self._itmaps):
+                sparsity = Sparsity(zip(self._rowmaps[i],self._colmaps[i]), zip(self._rowmult[i],self._colmult[i]),"block_"+str(i),True)
+                sparsity._nrows = self._nrrows[i]
+                sparsity._ncols = self._nrcols[i]
+                sparsity._rmaps = self._rowmaps[i]
+                sparsity._cmaps = self._colmaps[i]
+                sparsity._rmult = self._rowmult[i]
+                sparsity._cmult = self._colmult[i]
+
+                print "block number = %d" % i
+
+                core.build_sparsity_mixed(sparsity, parallel=PYOP2_COMM.size > 1)
+
+                self.sparsity_list += [sparsity]
+
+              print len(self.sparsity_list)
         else:
             key = (maps, as_tuple(dims, int, 2))
             self._cached = True
@@ -435,6 +455,7 @@ class Sparsity(base.Sparsity):
     @property
     def onz(self):
         return int(self._o_nz)
+
 
 class Mat(base.Mat):
     """OP2 matrix data. A Mat is defined on a sparsity pattern and holds a value

@@ -103,11 +103,15 @@ edge_node1 = op2.Map(edges, nodes, 2, edge_node_map, "edge_node1")
 #sparsity = op2.Sparsity(((elem_node, elem_node),(elem_node, elem_node)), 2, "sparsity")
 #print "========"
 
-#sparsity = op2.Sparsity([((elem_node1, elem_node1),(edge_node1, edge_node1)),(elem_node2, elem_node2)], [2,1], "sparsity")
-#print "========"
-
-sparsity = op2.Sparsity([(elem_node1, elem_node1),(elem_node1, elem_node1)], [2,1], "sparsity")
+sparsity = op2.Sparsity([((elem_node1, elem_node1),(edge_node1, edge_node1)),(elem_node2, elem_node2)], [2,1], "sparsity")
 print "========"
+
+##
+## THE LIST OF BLOCKS WILL BE IN: sparsity.sparsity_list
+##
+
+#sparsity = op2.Sparsity([((elem_node1, elem_node1),(elem_node1, elem_node1)),(elem_node1, elem_node1)], [2,1], "sparsity")
+#print "========"
 
 #from IPython import embed; embed()
 
@@ -125,9 +129,26 @@ pressure_vals = np.asarray([ 0.1, 2.0, 1.0, 0.2 ],
                            dtype=valuetype)
 pressure = op2.Dat(nodes, 1, pressure_vals, valuetype, "pressure")
 
-mixed_sets = op2.MultiSet([nodes, nodes], [2,1], "mixed_sets")
-mixed_dats = op2.MultiDat(mixed_sets, [velocity, pressure], "mixed_dats")
-mixed_maps = op2.MultiMap([elem_node1, elem_node1], [2,1], "mixed_maps")
+fields = op2.MultiDat(velocity, pressure)
+
+nodes_p1 = op2.Set(4)
+nodes_p2 = op2.Set(9)
+nodes_p3 = op2.Set(16)
+nodes_p4 = op2.Set(25)
+
+dat_p1 = op2.Dat(nodes_p1,2,np_arr_p1,dtype=valuetype)
+dat_p2 = op2.Dat(nodes_p2,1)
+dat_p3 = op2.Dat(nodes_p3,1)
+dat_p4 = op2.Dat(nodes_p4,2)
+
+#joined_dats = op2.Dat([dat_p1,dat_p2)
+
+#mixed_sets = op2.Multiset([nodes_p1,nodes_p2,nodes_p3,nodes_p4])
+#mixed_dats = op2.MultiDat(mixed_sets, [2,1,1,2])
+
+#mixed_sets = op2.MultiSet([nodes, nodes], "mixed_sets")
+#mixed_dats = op2.MultiDat(mixed_sets, [velocity, pressure], "mixed_dats")
+#mixed_maps = op2.MultiMap([elem_node1, elem_node1], [2,1], "mixed_maps")
 
 #mixed = [velocity, pressure]
 #print mixed
