@@ -113,8 +113,8 @@ void build_sparsity_pattern_mpi ( int rmult, int cmult, int nrows, int nmaps,
  *  Sequential and MPI
  */
 
-void build_sparsity_pattern_mixed_seq ( int* rmult, int* cmult, int* nrows, int nmaps, int itmaps, int lsize,
-                                  op_map * rowmaps, op_map * colmaps, int *rowoffs, int *coloffs,
+void build_sparsity_pattern_mixed_seq ( int* rmult, int* cmult, int* nrows, int nmaps, int lsize,
+                                  op_map * rowmaps, op_map * colmaps,
                                   int ** _nnz, int ** _rowptr, int ** _colidx,
                                   int * _nz )
 {
@@ -123,7 +123,7 @@ void build_sparsity_pattern_mixed_seq ( int* rmult, int* cmult, int* nrows, int 
   // columns pointed to by the col map
   std::vector< std::set< int > > s_diag(lsize);
 
-  for ( int m = 0; m < itmaps; m++ ) {
+  for ( int m = 0; m < nmaps; m++ ) {
      op_map rowmap = rowmaps[m];
      op_map colmap = colmaps[m];
      int rsize = rowmap->from->size;
@@ -134,10 +134,10 @@ void build_sparsity_pattern_mixed_seq ( int* rmult, int* cmult, int* nrows, int 
      for ( int e = 0; e < rsize; ++e ) {
         for ( int i = 0; i < rowmap->dim; ++i ) {
             for ( int r = 0; r < rmult[m]; r++ ) {
-                int row = r * rowssize + rowmap->map[i + e*rowmap->dim] + rowoffs[m];
+                int row = r * rowssize + rowmap->map[i + e*rowmap->dim];
                 for ( int d = 0; d < colmap->dim; d++ ) {
                     for ( int c = 0; c < cmult[m]; c++ ) {
-                        s_diag[row].insert(c * colssize + colmap->map[d + e * colmap->dim] + coloffs[m]);
+                        s_diag[row].insert(c * colssize + colmap->map[d + e * colmap->dim]);
                     }
                 }
             }
@@ -166,7 +166,7 @@ void build_sparsity_pattern_mixed_seq ( int* rmult, int* cmult, int* nrows, int 
 
 
 
-void build_sparsity_pattern_mixed_mpi ( int rmult, int cmult, int nrows, int nmaps, int lsize,
+void build_sparsity_pattern_mixed_mpi ( int* rmult, int* cmult, int* nrows, int nmaps, int lsize,
                                   op_map * rowmaps, op_map * colmaps,
                                   int ** _d_nnz, int ** _o_nnz,
                                   int * _d_nz, int * _o_nz )
@@ -183,13 +183,13 @@ void build_sparsity_pattern_mixed_mpi ( int rmult, int cmult, int nrows, int nma
     int rsize = rowmap->from->size + rowmap->from->exec_size;
     for ( int e = 0; e < rsize; ++e ) {
       for ( int i = 0; i < rowmap->dim; ++i ) {
-        for ( int r = 0; r < rmult; r++ ) {
-          int row = rmult * rowmap->map[i + e*rowmap->dim] + r;
+        for ( int r = 0; r < rmult[m]; r++ ) {
+          int row = rmult[m] * rowmap->map[i + e*rowmap->dim] + r;
           // NOTE: this hides errors due to invalid map entries
           if ( row < lsize ) { // ignore values inside the MPI halo region
             for ( int d = 0; d < colmap->dim; d++ ) {
-              for ( int c = 0; c < cmult; c++ ) {
-                int entry = cmult * colmap->map[d + e * colmap->dim] + c;
+              for ( int c = 0; c < cmult[m]; c++ ) {
+                int entry = cmult[m] * colmap->map[d + e * colmap->dim] + c;
                 if ( entry < lsize ) {
                   s_diag[row].insert(entry);
                 } else {
