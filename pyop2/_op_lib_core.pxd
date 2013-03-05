@@ -134,7 +134,7 @@ cdef extern from "sparsity_utils.h":
                                       int **, int **, int **, int * )
     void build_sparsity_pattern_mpi ( int, int, int, int, op_map *, op_map *,
                                       int **, int **, int *, int * )
-    void build_sparsity_pattern_mixed_seq ( int*, int*, int*, int, int, int, op_map *, op_map *, int*, int *,
+    void build_sparsity_pattern_mixed_seq ( int*, int*, int*, int, int, op_map *, op_map *,
                                       int **, int **, int **, int * )
-    void build_sparsity_pattern_mixed_mpi ( int, int, int, int, op_map *, op_map *,
+    void build_sparsity_pattern_mixed_mpi ( int*, int*, int*, int, int, op_map *, op_map *,
                                       int **, int **, int *, int * )
