@@ -187,7 +187,7 @@ cdef class Plan:
                 # fills with -1 for debugging
                 # this should be removed and generated code changed
                 # once we switch to python plan only
-                pad = numpy.empty(len(indices(dat,map)) * iset.size - cumsum, dtype=numpy.int32)
+                pad = numpy.empty(len(indices(dat,map)) * (iset._ieh_size if self._need_exec_halo else iset.size) - cumsum, dtype=numpy.int32)
                 pad.fill(-1)
                 yield pad
         t = tuple(ind_iter())
