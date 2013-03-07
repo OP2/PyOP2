@@ -157,6 +157,14 @@ class Dat(DeviceDataMixin, op2.Dat):
         """The L2-norm on the flattened vector."""
         return np.sqrt(gpuarray.dot(self.array, self.array).get())
 
+    def _non_halo_to_cpu(self):
+        _lim = self.dataset.size * self.cdim
+        self._device_data.ravel()[:_lim].get(self._data[:self.dataset.size])
+
+    def _halo_to_gpu(self):
+        _lim = self.dataset.size * self.cdim
+        self._device_data.ravel()[_lim:].set(self._maybe_to_soa(self._data[self.dataset.size:]))
+
 class Sparsity(op2.Sparsity):
     @property
     def rowptr(self):
@@ -680,6 +688,24 @@ class ParLoop(op2.ParLoop):
              'constants' : Const._definitions()}
         self._src = _indirect_loop_template.render(d).encode('ascii')
 
+    def halo_exchange_begin(self):
+        if self.it_space.iterset.halo is None:
+            return
+
+        for arg in self.args:
+            if arg._is_dat and arg.access in [READ, RW]:
+                arg.data._non_halo_to_cpu()
+        super(ParLoop, self).halo_exchange_begin()
+
+    def halo_exchange_end(self):
+        if self.it_space.iterset.halo is None:
+            return
+
+        super(ParLoop, self).halo_exchange_end()
+        for arg in self.args:
+            if arg._is_dat and arg.access in [READ, RW]:
+                arg.data._halo_to_gpu()
+
     def compute(self):
         if self._has_soa:
             op2stride = Const(1, self._it_space.size, name='op2stride',
@@ -755,6 +781,9 @@ class ParLoop(op2.ParLoop):
             arglist.append(self._plan.nthrcol.gpudata)
             arglist.append(self._plan.thrcol.gpudata)
             arglist.append(None) # Number of colours in this block
+
+            self.halo_exchange_begin()
+
             block_offset = 0
             for col in xrange(self._plan.ncolors):
                 # At this point, before we can continue processing in
@@ -762,7 +791,7 @@ class ParLoop(op2.ParLoop):
                 # complete, but at the moment we don't support that
                 # use case, so we just pass through for now.
                 if col == self._plan.ncolors_core:
-                    pass
+                    self.halo_exchange_end()
 
                 blocks = self._plan.ncolblk[col]
                 if blocks > 0:
