@@ -491,13 +491,13 @@ class ParLoop(rt.ParLoop):
                 if arg._rowcol_map:
                     rows = "int row_blk_size[%d] = {" % len(arg._map[0])
                     for i in range(len(arg._map[0])):
-                        rows += " %d" % arg.data.sparsity.dims[i][0]
+                        rows += " %d" % (arg.data.sparsity.dims[i][0] * arg._map[0][i].dim)
                         if i < len(arg._map[0])-1:
                             rows += ","
                     rows += " };\n"
                     cols = "int col_blk_size[%d] = {" % len(arg._map[1])
                     for i in range(len(arg._map[1])):
-                        cols += " %d" % arg.data.sparsity.dims[i][1]
+                        cols += " %d" % (arg.data.sparsity.dims[i][1] * arg._map[1][i].dim)
                         if i < len(arg._map[1])-1:
                             cols += ","
                     cols += " };\n"
