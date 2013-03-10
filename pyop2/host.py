@@ -54,8 +54,45 @@ class Arg(base.Arg):
     def c_vec_name(self):
         return self.c_arg_name() + "_vec"
 
-    def c_map_name(self):
-        return self.c_arg_name() + "_map"
+    def c_map_name(self, i=None, j=None):
+        suffix = ""
+        if j is not None:
+            suffix += "_%s" % j
+        if i is not None:
+            suffix += "_%s" % i
+        return self.c_arg_name() + "_map" + suffix
+
+    def c_wrapper_arg(self):
+        # do the dats within the args
+        if isinstance(self.data, MultiDat):
+            if not isinstance(self.data.dats, list):
+                raise RuntimeError("The data of the MultiDat arg must be a list of OP2 Dats")
+            val = ", ".join(["PyObject *_%s_%s" % (self.c_arg_name(), dat.name) for dat in self.data.dats])
+        else:
+            val = "PyObject *_%s" % self.c_arg_name()
+        # now handle the maps within the arg
+        if self._is_indirect or self._is_mat:
+            if self._rowcol_map:
+                # if the arg is a mat arg and has a list of lists of maps
+                for i in range(len(self.map)):
+                    if not isinstance(self.map[i], list):
+                        raise RuntimeError("The arg requires a list of lists of maps as it's a mixed mat arg")
+                    for j in range(len(self.map[i])):
+                        val += ", PyObject *_%s" % self.c_map_name(i, j)
+            else:
+                if isinstance(self.map, MultiMap):
+                    # if the arg is MultiDat which has a MultiMap
+                    if not isinstance(self.map.maps, list):
+                        raise RuntimeError("The MultiMap must contain a list of maps")
+                    for i in range(len(self.map.maps)):
+                        val += ", PyObject *_%s" % self.c_map_name(i)
+                else:
+                    # old version of the code for regular arg
+                    val += ", PyObject *_%s" % self.c_map_name()
+                    maps = as_tuple(self.map, Map)
+                    if len(maps) is 2:
+                        val += ", PyObject *_%s2" % self.c_map_name()
+        return val
 
     def c_wrapper_arg(self):
         val = "PyObject *_%(name)s" % {'name' : self.c_arg_name() }
@@ -77,16 +114,41 @@ class Arg(base.Arg):
             val = "Mat %(name)s = (Mat)((uintptr_t)PyLong_AsUnsignedLong(_%(name)s))" % \
                  { "name": self.c_arg_name() }
         else:
-            val = "%(type)s *%(name)s = (%(type)s *)(((PyArrayObject *)_%(name)s)->data)" % \
-              {'name' : self.c_arg_name(), 'type' : self.ctype}
+            if self._multimap:
+                val = ';\n'.join(["%(type)s *%(name)s = (%(type)s *)(((PyArrayObject *)_%(name)s)->data)" % \
+                    {'name' : self.c_arg_name() + '_' + dat.name, 'type' : self.ctype} for dat in self.data.dats])
+            else:
+                val = "%(type)s *%(name)s = (%(type)s *)(((PyArrayObject *)_%(name)s)->data)" % \
+                    {'name' : self.c_arg_name(), 'type' : self.ctype}
         if self._is_indirect or self._is_mat:
-            val += ";\nint *%(name)s = (int *)(((PyArrayObject *)_%(name)s)->data)" % \
-                   {'name' : self.c_map_name()}
+            if self._rowcol_map:
+                for i in range(len(self.map)):
+                    for j in range(len(self.map[i])):
+                        val += ";\nint *%(name)s = (int *)(((PyArrayObject *)_%(name)s)->data)" % \
+                                            {'name' : self.c_map_name(i, j)}
+                return val
+            else:
+                if self._multimap:
+                    for i in range(len(self.data.dats)):
+                        val += ";\nint *%(name)s = (int *)(((PyArrayObject *)_%(name)s)->data)" % \
+                                            {'name' : self.c_map_name(i)}
+                else:
+                    val += ";\nint *%(name)s = (int *)(((PyArrayObject *)_%(name)s)->data)" % \
+                        {'name' : self.c_map_name()}
         if self._is_mat:
             val += ";\nint *%(name)s2 = (int *)(((PyArrayObject *)_%(name)s2)->data)" % \
                        {'name' : self.c_map_name()}
         if self._is_vec_map:
-            val += self.c_vec_dec()
+            if self._multimap:
+                val += ";\n".join(["%(type)s *%(vec_name)s[%(dim)s]" % \
+                    {'type' : self.ctype,
+                    'vec_name' : self.c_vec_name() + "_" + str(i),
+                    'dim' : map.dim} for map in self.map.maps])
+            else:
+                val += ";\n%(type)s *%(vec_name)s[%(dim)s]" % \
+                   {'type' : self.ctype,
+                    'vec_name' : self.c_vec_name(),
+                    'dim' : self.map.dim}
         return val
 
     def c_ind_data(self, idx):
@@ -96,6 +158,14 @@ class Arg(base.Arg):
                  'map_dim' : self.map.dim,
                  'idx' : idx,
                  'dim' : self.data.cdim}
+
+    def c_ind_data_multi(self, idx, j):
+        return "%(name)s + %(map_name)s[i * %(map_dim)s + %(idx)s] * %(dim)s" % \
+                {'name' : self.c_arg_name() + '_' + self.data.dats[j].name,
+                 'map_name' : self.c_map_name(j),
+                 'map_dim' : self.map.dim[j],
+                 'idx' : idx,
+                 'dim' : self.data.dats[j].cdim}
 
     def c_kernel_arg_name(self):
         return "p_%s" % self.c_arg_name()
@@ -119,6 +189,9 @@ class Arg(base.Arg):
                          'idx' : idx}
                 else:
                     raise RuntimeError("Don't know how to pass kernel arg %s" % self)
+            elif self._row_map:
+                name = "p_%s" % self.c_arg_name()
+                return name
             else:
                 return self.c_ind_data("i_%d" % self.idx.index)
         elif self._is_indirect:
@@ -136,7 +209,16 @@ class Arg(base.Arg):
 
     def c_vec_init(self):
         val = []
-        for i in range(self.map._dim):
+        if self._multimap:
+            for j in range(len(self.map.maps)):
+                for i in range(self.map.maps[j]._dim):
+                    val.append("%(vec_name)s_%(index)s[%(idx)s] = %(data)s" %
+                       {'vec_name' : self.c_vec_name(),
+                        'idx' : i,
+                        'data' : self.c_ind_data_multi(i, j),
+                        'index' : j})
+        else:
+          for i in range(self.map._dim):
             val.append("%(vec_name)s[%(idx)s] = %(data)s" %
                        {'vec_name' : self.c_vec_name(),
                         'idx' : i,
@@ -158,6 +240,8 @@ class Arg(base.Arg):
              'insert' : self.access == WRITE }
 
     def c_addto_vector_field(self):
+        if self._rowcol_map:
+            return self.c_addto_mixed_mat()
         maps = as_tuple(self.map, Map)
         nrows = maps[0].dim
         ncols = maps[1].dim
@@ -273,6 +357,74 @@ class ParLoop(base.ParLoop):
             tmp = '%(name)s[%%(i)s] = ((%(type)s *)(((PyArrayObject *)_%(name)s)->data))[%%(i)s]' % d
             return ';\n'.join([tmp % {'i' : i} for i in range(c.cdim)])
 
+        def c_mixed_block_loops(args):
+            for arg in args:
+                if arg._rowcol_map:
+                    val = "for(int b_1 = 0; b_1 < %(row_blocks)s; b_1++) { \n \
+                             for(int b_2 = 0; b_2 < %(col_blocks)s; b_2++) { " % \
+                             {'row_blocks' : len(arg._map[0]),
+                              'col_blocks' : len(arg._map[1])}
+                    return val
+                if arg._row_map:
+                    val = "for(int b_1 = 0; b_1 < %(row_blocks)s; b_1++) { " % \
+                            {'row_blocks' : len(arg._map.maps)}
+                    return val
+            return ""
+
+        def c_mixed_block_loops_close(args):
+            for arg in args:
+                if arg._rowcol_map:
+                    val = "}} //end of the block loops"
+                    return val
+                if arg._row_map:
+                    val = "} //end of the block loop"
+                    return val
+            return ""
+
+        def c_local_tensor_blocksizes(args):
+            for arg in args:
+                if arg._rowcol_map:
+                    rows = "int row_blk_size[%d] = {" % len(arg._map[0])
+                    for i in range(len(arg._map[0])):
+                        rows += " %d" % (arg.data.sparsity.dims[i][0] * arg._map[0][i].dim)
+                        if i < len(arg._map[0])-1:
+                            rows += ","
+                    rows += " };\n"
+                    cols = "int col_blk_size[%d] = {" % len(arg._map[1])
+                    for i in range(len(arg._map[1])):
+                        cols += " %d" % (arg.data.sparsity.dims[i][1] * arg._map[1][i].dim)
+                        if i < len(arg._map[1])-1:
+                            cols += ","
+                    cols += " };\n"
+                    return rows+cols
+                if arg._row_map:
+                    rows = "int row_blk_size[%d] = {" % len(arg.data.dats)
+                    for i in range(len(arg.data.dats)):
+                        rows += " %d" % arg.data.dats[i].dim
+                        if i < len(arg.data.dats)-1:
+                            rows += ","
+                    rows += " };\n"
+                    return rows
+            return ""
+
+        def c_zero_tmps(args):
+            for arg in args:
+                if arg._rowcol_map:
+                    name = "p_" + arg.c_arg_name()
+                    t = arg.ctype
+                    return "%(type)s %(name)s[1][1];\n" % { 'type': t, 'name':name }
+                if arg._row_map:
+                    name = "p_" + arg.c_arg_name()
+                    t = arg.ctype
+                    return "%(type)s %(name)s[1][1];\n" % { 'type': t, 'name':name }
+            return ';\n'.join([arg.c_zero_tmp() for arg in args if arg._is_mat])
+
+        def c_addto_mixed_mat(self):
+            return ''
+
+        def c_addto_mixed_vec(self):
+            return ''
+
         _wrapper_args = ', '.join([arg.c_wrapper_arg() for arg in self.args])
 
         _local_tensor_decs = ';\n'.join([arg.c_local_tensor_dec(self._it_space.extents) for arg in self.args if arg._is_mat])
@@ -293,7 +445,14 @@ class ParLoop(base.ParLoop):
         _addtos_scalar_field = ';\n'.join([arg.c_addto_scalar_field() for arg in self.args \
                                            if arg._is_mat and arg.data._is_scalar_field])
 
-        _zero_tmps = ';\n'.join([arg.c_zero_tmp() for arg in self.args if arg._is_mat])
+        _addto_mixed_vec = c_addto_mixed_vec(self.args)
+
+        _mixed_block_loops = c_mixed_block_loops(self.args)
+        _mixed_block_loops_close = c_mixed_block_loops_close(self.args)
+
+        _local_tensor_blocksizes = c_local_tensor_blocksizes(self.args)
+
+        _zero_tmps = c_zero_tmps(self.args)
 
         if len(Const._defs) > 0:
             _const_args = ', '
@@ -316,4 +475,8 @@ class ParLoop(base.ParLoop):
                 'zero_tmps': indent(_zero_tmps, 2 + nloops),
                 'kernel_args': _kernel_args,
                 'addtos_vector_field': indent(_addtos_vector_field, 2 + nloops),
-                'addtos_scalar_field': indent(_addtos_scalar_field, 2)}
+                'addtos_scalar_field': indent(_addtos_scalar_field, 2),
+                'mixed_block_loops' : indent(_mixed_block_loops, 2),
+                'mixed_block_loops_close' : indent(_mixed_block_loops_close, 2),
+                'local_tensor_blocksizes': indent(_local_tensor_blocksizes, 1),
+                'addto_mixed_vec' : indent(_addto_mixed_vec, 2 + nloops)}

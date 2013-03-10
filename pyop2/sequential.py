@@ -58,14 +58,18 @@ class ParLoop(host.ParLoop):
                 int end = (int)PyInt_AsLong(_end);
                 %(wrapper_decs)s;
                 %(local_tensor_decs)s;
+                %(local_tensor_blocksizes)s
                 %(const_inits)s;
                 for ( int i = start; i < end; i++ ) {
                   %(vec_inits)s;
+                  %(mixed_block_loops)s
                   %(itspace_loops)s
                   %(ind)s%(zero_tmps)s;
                   %(ind)s%(kernel_name)s(%(kernel_args)s);
+                  %(ind)s%(addto_mixed_vec)s
                   %(ind)s%(addtos_vector_field)s;
                   %(itspace_loop_close)s
+                  %(mixed_block_loops_close)s
                   %(addtos_scalar_field)s;
                 }
               }
@@ -78,15 +82,31 @@ class ParLoop(host.ParLoop):
             if arg._is_mat:
                 _args.append(arg.data.handle.handle)
             else:
-                _args.append(arg.data._data)
+                if arg._multimap:
+                    for dat in arg.data.dats:
+                        _args.append(dat._data)
+                else:
+                    _args.append(arg.data._data)
 
             if arg._is_dat:
-                maybe_setflags(arg.data._data, write=False)
+                if arg._multimap:
+                    for i in range(len(arg.data.dats)):
+                        maybe_setflags(arg.data.dats[i]._data, write=False)
+                else:
+                    maybe_setflags(arg.data._data, write=False)
 
             if arg._is_indirect or arg._is_mat:
-                maps = as_tuple(arg.map, Map)
-                for map in maps:
-                    _args.append(map.values)
+                if arg._rowcol_map:
+                    for i in range(len(arg.map)):
+                        for map in arg.map[i]:
+                            _args.append(map.values)
+                elif arg._multimap:
+                    for map in arg.map.maps:
+                        _args.append(map.values)
+                else:
+                    maps = as_tuple(arg.map, Map)
+                    for map in maps:
+                        _args.append(map.values)
 
         for c in Const._definitions():
             _args.append(c.data)

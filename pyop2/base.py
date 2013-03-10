@@ -115,6 +115,24 @@ class Arg(object):
     """
 
     def __init__(self, data=None, map=None, idx=None, access=None):
+        # The arg is multimap
+        self._multimap = False
+        # The arg has been created in the backend as being a composed arg of
+        # row maps and col maps like this [ [ rowmaps], [colmaps] ]
+        self._rowcol_map = False
+        self._row_map = False
+        if isinstance(map, list):
+            self._rowcol_map = True
+            for i in range(len(map)):
+                if not isinstance(map[i], list):
+                    self._rowcol_map = False
+        else:
+            if isinstance(map, MultiMap):
+                if idx != None and not self._rowcol_map:
+                    self._row_map = True
+                #TODO: Compose the multimap arg, maybe assign lists to where
+                # single parameters were before
+                self._multimap = True
         self._dat = data
         self._map = map
         self._idx = idx
@@ -162,6 +180,10 @@ class Arg(object):
     @property
     def _is_vec_map(self):
         return self._is_indirect and self._idx is None
+
+    @property
+    def _is_mixed_map(self):
+        return self._is_indirect and self._idx is None and isinstance(self._map, list)
 
     @property
     def _is_mat(self):
@@ -338,6 +360,7 @@ class Set(object):
         self._halo = halo
         if self.halo:
             self.halo.verify(self)
+        self.set_list = []
         Set._globalcount += 1
 
     def __call__(self, *dims):
@@ -403,6 +426,13 @@ class Set(object):
         if self._lib_handle is None:
             self._lib_handle = core.op_set(self)
         return self._lib_handle
+
+class MultiSet(Set):
+    """OP2 multi-set."""
+
+    ##TODO: Maybe a nest would need to be used here
+    def __init__(self, setlist):
+        self._set_list = setlist
 
 class Halo(object):
     """A description of a halo associated with a :class:`Set`.
@@ -645,15 +675,20 @@ class Dat(DataCarrier):
         if data is None:
             data = np.zeros(dataset.total_size*np.prod(dataset.dim))
         self._dataset = dataset
-        self._data = verify_reshape(data, dtype,
-                                    (dataset.total_size,) + dataset.dim,
-                                    allow_none=True)
-        # Are these data to be treated as SoA on the device?
-        self._soa = bool(soa)
-        self._lib_handle = None
-        self._needs_halo_update = False
-        # If the uid is not passed in from outside, assume that Dats
-        # have been declared in the same order everywhere.
+        # Mixed-space case
+        if hasattr(dataset, '_set_list'):
+            #TODO: USE MAT NEST HERE OR SIMILAR
+            self._data = data
+        # Non-mixed space case
+        else:
+            dim = (dataset.total_size,) + dataset.dim
+            self._data = verify_reshape(data, dtype, dim, allow_none=True)
+            # Are these data to be treated as SoA on the device?
+            self._soa = bool(soa)
+            self._lib_handle = None
+            self._needs_halo_update = False
+            # If the uid is not passed in from outside, assume that Dats
+            # have been declared in the same order everywhere.
         if uid is None:
             self._id = Dat._globalcount
             Dat._globalcount += 1
@@ -669,14 +704,21 @@ class Dat(DataCarrier):
 
     @validate_in(('access', _modes, ModeValueError))
     def __call__(self, path, access):
-        if isinstance(path, Map):
-            if path._dataset != self._dataset and path != IdentityMap:
-                raise MapValueError("Dataset of Map does not match Dataset of Dat.")
+        if isinstance(path, MultiMap):
+            #check that the datasets of the maps match the sets of the multi dat
+            for i in range(len(path.maps)):
+                if path.maps[i]._dataset != self.dats[i].dataset and path.maps[i] != IdentityMap:
+                    raise MapValueError("Dataset of MultiMap does not match Dataset of MultiDat.")
             return _make_object('Arg', data=self, map=path, access=access)
         else:
-            path._dat = self
-            path._access = access
-            return path
+            if isinstance(path, Map):
+                if path._dataset != self._dataset and path != IdentityMap:
+                    raise MapValueError("Dataset of Map does not match Dataset of Dat.")
+                return _make_object('Arg', data=self, map=path, access=access)
+            else:
+                path._dat = self
+                path._access = access
+                return path
 
     @property
     def dataset(self):
@@ -851,6 +893,50 @@ class Dat(DataCarrier):
         if self._lib_handle is None:
             self._lib_handle = core.op_dat(self)
         return self._lib_handle
+
+class MultiDat(Dat):
+
+    def __init__(self, dats, name=None):
+        self._name = name or '_'.join(dat.name for dat in dats)
+        self.dats = dats
+        self._data = []
+        self._dataset = []
+        self._soa = any(dat.soa for dat in self.dats)
+        self._needs_halo_update = False
+        for d in self.dats:
+            self._data += [d._data]
+            self._dataset += [d._dataset]
+
+    @property
+    def dim(self):
+        '''The number of values at each member of the dataset.'''
+        dims = []
+        for d in self.dats:
+            dims += [d.dim]
+        return dims
+
+    @property
+    def data(self):
+        '''The number of values at each member of the dataset.'''
+        datas = []
+        for d in self.dats:
+            datas += [d.data]
+        return datas
+
+    @property
+    def soa(self):
+        return self._soa
+
+    @property
+    def dtype(self):
+        """The Python type of the data."""
+        return self._data[0].dtype
+
+    def __repr__(self):
+        return "MultiDat(%r, '%s')" % (self.dats, self._name)
+
+    def __str__(self):
+        return "OP2 MultiDat %s on the dats: %s" % (self._name, self.dats)
 
 class Const(DataCarrier):
     """Data that is constant for any element of any set."""
@@ -1041,6 +1127,7 @@ class Map(object):
                                       allow_none=True)
         self._name = name or "map_%d" % Map._globalcount
         self._lib_handle = None
+        self._multimap = False
         Map._globalcount += 1
 
     @validate_type(('index', (int, IterationIndex), IndexTypeError))
@@ -1123,6 +1210,28 @@ class Map(object):
 IdentityMap = Map(Set(0), Set(0), 1, [], 'identity')
 """The identity map.  Used to indicate direct access to a :class:`Dat`."""
 
+class MultiMap(Map):
+
+    def __init__(self, maps, name=None):
+        self._name = name or '_'.join(map.name for map in maps)
+        self.maps = maps
+        self._lib_handle = None
+
+    @property
+    def dim(self):
+        """Dimension of the mapping: number of dataset elements mapped to per
+        iterset element."""
+        dims = []
+        for m in self.maps:
+            dims += [m.dim]
+        return dims
+
+    def __repr__(self):
+        return "MultiMap(%r, '%s')" % (self.maps, self._name)
+
+    def __str__(self):
+        return "OP2 MultiMap %s on maps: %s %s" % (self._name, self.maps)
+
 _sparsity_cache = dict()
 def _empty_sparsity_cache():
     _sparsity_cache.clear()
@@ -1201,92 +1310,45 @@ class Sparsity(object):
             self._colmult = []
             self._nrrows = []
             self._nrcols = []
+            self._rows_size = 0
+            self._cols_size = 0
+            self.b_sets = []
+            self.x_sets = []
+            self.b_sizes = []
+            self.x_sizes = []
+            self._maps = maps
 
-            k = 0
-            for ms in maps:
-                ms = (ms,ms) if isinstance(ms, Map) else ms
-                lms = (ms,) if isinstance(ms[0], Map) else ms
-                rmaps, cmaps = map (lambda x : as_tuple(x, Map), zip(*lms))
+            for i in range(len(maps)):
+                rmapsi = []
+                cmapsi = []
+                for j in range(len(maps)):
+                    #combine the i and j tuples to compute constirbutions
+                    ms = maps[i]
+                    ms = (ms,ms) if isinstance(ms, Map) else ms
+                    lms = (ms,) if isinstance(ms[0], Map) else ms
+                    rmapsi, cmapsi = map (lambda x : as_tuple(x, Map), zip(*lms))
 
-                # Create the lists of row and col maps which will be used
-                # when constructing the block sparsity matrix
+                    ms = maps[j]
+                    ms = (ms,ms) if isinstance(ms, Map) else ms
+                    lms = (ms,) if isinstance(ms[0], Map) else ms
+                    rmapsj, cmapsj = map (lambda x : as_tuple(x, Map), zip(*lms))
 
-                # Also, create the multipliers and offsets for each row and col map
-
-                # First add the pairs generated by the new addition to the list
-                rowmps = []
-                colmps = []
-                rowmlts = []
-                colmlts = []
-                nrows = []
-                ncols = []
-                for mr in rmaps:
-                    for mc in cmaps:
-                        if mr.iterset is mc.iterset:
-                            rowmps += [mr]
-                            colmps += [mc]
-                            rowmlts += [as_tuple(dims[k],int,2)[0]]
-                            colmlts += [as_tuple(dims[k],int,2)[1]]
-                            nrows += [rmaps[0].dataset.size]
-                            ncols += [cmaps[0].dataset.size]
-
-                if len(rowmps) > 0:
-                    self._rowmaps += [rowmps]
-                    self._colmaps += [colmps]
-                    self._rowmult += [rowmlts]
-                    self._colmult += [colmlts]
-                    self._nrrows += [nrows]
-                    self._nrcols += [ncols]
-
-                # Now add the pairings possible with previous maps
-                # Previous row maps
-                prdims = []
-                prmaps = []
-                cnt = 0
-                for mrr in self._rmaps:
-                  for mr in mrr:
-                    if isinstance(mr, Map):
-                        prmaps += [mr]
-                        prdims += [as_tuple(dims[cnt],int,2)[0]]
-                    else:
-                        for mm in mr:
-                            prmaps += [mm]
-                            prdims += [as_tuple(dims[cnt],int,2)[0]]
-                    cnt += 1
-                # Previous col maps
-                pcdims = []
-                pcmaps = []
-                cnt = 0
-                for mcc in self._cmaps:
-                  for mc in mcc:
-                    if isinstance(mc, Map):
-                        pcmaps += [mc]
-                        pcdims += [as_tuple(dims[cnt],int,2)[1]]
-                    else:
-                        for mm in mc:
-                            pcmaps += [mm]
-                            pcdims += [as_tuple(dims[cnt],int,2)[1]]
-                    cnt += 1
-
-
-                # Take a current row map and try to pair it with a previous col map
-                for mr in rmaps:
                     rowmps = []
                     colmps = []
                     rowmlts = []
                     colmlts = []
                     nrows = []
                     ncols = []
-                    cnt = 0
-                    for mc in pcmaps:
-                        if mr.iterset is mc.iterset:
-                            rowmps += [mr]
-                            colmps += [mc]
-                            rowmlts += [as_tuple(dims[k],int,2)[0]]
-                            colmlts += [pcdims[cnt]]
-                            nrows += [mr.dataset.size]
-                            ncols += [mc.dataset.size]
-                        cnt += 1
+                    for mr in rmapsi:
+                        for mc in cmapsj:
+                            if mr.iterset is mc.iterset:
+                                rowmps += [mr]
+                                colmps += [mc]
+                                rowmlts += [np.prod(rmapsi[0].dataset.dim)]
+                                colmlts += [np.prod(cmapsj[0].dataset.dim)]
+                                nrows += [rmapsi[0].dataset.size]
+                                ncols += [cmapsj[0].dataset.size]
+
                     if len(rowmps) > 0:
                         self._rowmaps += [rowmps]
                         self._colmaps += [colmps]
@@ -1294,59 +1356,51 @@ class Sparsity(object):
                         self._colmult += [colmlts]
                         self._nrrows += [nrows]
                         self._nrcols += [ncols]
-                # Take a previous row map and try to pair it with a current col map
-                rowmps = []
-                colmps = []
-                rowmlts = []
-                colmlts = []
-                nrows = []
-                ncols = []
-                cnt = 0
-                for mr in prmaps:
-                    for mc in cmaps:
-                        if mr.iterset is mc.iterset:
-                            rowmps += [mr]
-                            colmps += [mc]
-                            rowmlts += [prdims[cnt]]
-                            colmlts += [as_tuple(dims[k],int,2)[1]]
-                            nrows += [mr.dataset.size]
-                            ncols += [mc.dataset.size]
-                    cnt += 1
-                if len(rowmps) > 0:
-                    self._rowmaps += [rowmps]
-                    self._colmaps += [colmps]
-                    self._rowmult += [rowmlts]
-                    self._colmult += [colmlts]
-                    self._nrrows += [nrows]
-                    self._nrcols += [ncols]
 
                 # Add to rmaps and cmaps (for reference)
-                self._rmaps += [[rmaps]]
-                self._cmaps += [[cmaps]]
+                row2d = []
+                col2d = []
+                for mr in rmapsi:
+                    row2d += [mr]
+                for mc in cmapsi:
+                    col2d += [mc]
+                self._rmaps += [row2d]
+                self._cmaps += [col2d]
 
                 # Validate the maps
-                assert len(rmaps) == len(cmaps), \
+                assert len(rmapsi) == len(cmapsi), \
                     "Must pass equal number of row and column maps"
 
                 for pair in lms:
                     if pair[0].iterset is not pair[1].iterset:
                         raise RuntimeError("Iterset of both maps in a pair must be the same")
 
-                if not all(m.dataset is rmaps[0].dataset for m in rmaps):
+                if not all(m.dataset is rmapsi[0].dataset for m in rmapsi):
                     raise RuntimeError("Dataset of all row maps must be the same")
 
-                if not all(m.dataset is cmaps[0].dataset for m in cmaps):
+                if not all(m.dataset is cmapsi[0].dataset for m in cmapsi):
                     raise RuntimeError("Dataset of all column maps must be the same")
 
+                #Create list of sets for the b and x arrays
+
+                self.b_sets += [rmapsi[0].dataset]
+                self.x_sets += [cmapsi[0].dataset]
+
                 # All rmaps and cmaps have the same dataset - just use the first.
-                self._nrows += [rmaps[0].dataset.size]
-                self._ncols += [cmaps[0].dataset.size]
+                self._rows_size += rmapsi[0].dataset.size
+                self._cols_size += cmapsi[0].dataset.size
+
+                self._nrows += [rmapsi[0].dataset.size]
+                self._ncols += [cmapsi[0].dataset.size]
 
                 self._dims += [(np.prod(rmapsi[0].dataset.dim),
                                np.prod(cmapsi[0].dataset.dim))]
-                k += 1
-            self._spars = k
+                self.x_sizes += [rmapsi[0].dataset.size * self._dims[i][0]]
+                self.b_sizes += [cmapsi[0].dataset.size * self._dims[i][1]]
+            self._spars = len(maps)
             self._itmaps = len(self._rowmaps)
+            self.b_size = self._rows_size
+            self.x_size = self._cols_size
 
         else:
             maps = (maps,maps) if isinstance(maps, Map) else maps
@@ -1488,6 +1542,24 @@ class Sparsity(object):
         PETSc's MatMPIAIJSetPreallocation_."""
         return int(self._o_nz)
 
+    def getRowMaps(self, itset):
+        res = []
+        for ms in self._rmaps:
+            for rowmap in ms:
+                if rowmap.iterset is itset:
+                    res += [rowmap]
+                    break
+        return res
+
+    def getColMaps(self, itset):
+        res = []
+        for ms in self._cmaps:
+            for colmap in ms:
+                if colmap.iterset is itset:
+                    res += [colmap]
+                    break
+        return res
+
 class Mat(DataCarrier):
     """OP2 matrix data. A ``Mat`` is defined on a sparsity pattern and holds a value
     for each element in the :class:`Sparsity`.
@@ -1515,15 +1587,41 @@ class Mat(DataCarrier):
         self._name = name or "mat_%d" % Mat._globalcount
         self._lib_handle = None
         Mat._globalcount += 1
+        self.mat_list = []
+        for i in range(len(self._sparsity.sparsity_list)):
+            self.mat_list += [_make_object('Mat',
+                                           self._sparsity.sparsity_list[i],
+                                           self._datatype,
+                                           '_'.join([self._name, str(i)]))]
+
+        if self._sparsity.sparsity_list != []:
+            self.createNestedMat()
 
     @validate_in(('access', _modes, ModeValueError))
     def __call__(self, path, access):
         path = as_tuple(path, Arg, 2)
+        if path[0]._multimap:
+            #this means that the two args must be both multimaps
+            if not path[1]._multimap:
+                raise MapValueError("Paths must pe both multimaps!")
+            #create the path_maps for cols and rows
+            path_maps_rows = path[0].map.maps
+            path_maps_cols = path[1].map.maps
+            path_maps = [path_maps_rows, path_maps_cols]
+            path_idxs = [arg.idx for arg in path]
+            #TODO: Introduce the check whether the maps exist
+            return _make_object('Arg', data=self, map=path_maps, access=access, idx=path_idxs)
+
+        if path[1]._multimap:
+            raise MapValueError("The second map is a multimap and the first one isn't!")
         path_maps = [arg.map for arg in path]
         path_idxs = [arg.idx for arg in path]
         if tuple(path_maps) not in self.sparsity.maps:
             raise MapValueError("Path maps not in sparsity maps")
         return _make_object('Arg', data=self, map=path_maps, access=access, idx=path_idxs)
+
+    def createNestedMat(self):
+        raise NotImplementedError("Nested matrices are not supported by this backend.")
 
     @property
     def dims(self):
@@ -1542,6 +1640,10 @@ class Mat(DataCarrier):
     @property
     def _is_vector_field(self):
         return not self._is_scalar_field
+
+    @property
+    def _is_mixed_field(self):
+        return self._sparsity.sparsity_list != []
 
     @property
     def values(self):
@@ -1684,10 +1786,31 @@ class ParLoop(object):
             if arg._is_global or arg._map == IdentityMap:
                 continue
             for j, m in enumerate(arg._map):
-                if m._iterset != iterset:
+                if not isinstance(m, list) and m._name == "MultiMap":
+                    m = m.maps
+                if isinstance(m, list):
+                    k = 0
+                    for ms in m:
+                        if ms._iterset != iterset:
+                            raise MapValueError( \
+                                "Iterset of arg %s map %s doesn't match ParLoop iterset." % (i, j))
+                        else:
+                            if arg._is_mat:
+                                continue
+                            if arg.data._name == "MultiDat":
+                                if ms._dataset != arg.data.dats[k]._dataset:
+                                    raise MapValueError( \
+                                        "Dataset of arg %s map %s doesn't match the set of its Dat." % (i, j))
+                                continue
+                            if ms._dataset != arg.data[k]._dataset:
+                                raise MapValueError( \
+                                    "Dataset of arg %s map %s doesn't match the set of its Dat." % (i, j))
+                        k += 1
+                else:
+                  if m._iterset != iterset:
                     raise MapValueError( \
                         "Iterset of arg %s map %s doesn't match ParLoop iterset." % (i, j))
-                else:
+                  else:
                     if arg._is_mat:
                         continue
                     if m._dataset != arg.data._dataset:
@@ -1750,12 +1873,26 @@ class ParLoop(object):
                     map_dim = None
                 else:
                     map_dim = arg.map.dim
-                key += (arg.data.dim, arg.data.dtype, map_dim, idx, arg.access)
+                if arg.data._name == "MultiDat":
+                    key += (frozenset(arg.data.dim), arg.data.dtype, frozenset(map_dim), idx, arg.access)
+                else:
+                    key += (arg.data.dim, arg.data.dtype, map_dim, idx, arg.access)
             elif arg._is_mat:
                 idxs = (arg.idx[0].__class__, arg.idx[0].index,
                         arg.idx[1].index)
-                map_dims = (arg.map[0].dim, arg.map[1].dim)
-                key += (arg.data.dims, arg.data.dtype, idxs,
+                if isinstance(arg.map[0], list):
+                    dims_1 = []
+                    dims_2 = []
+                    for i in range(len(arg.map[0])):
+                        dims_1 += [arg.map[0][i].dim]
+                        dims_2 += [arg.map[1][i].dim]
+
+                    map_dims = (dims_1[0], dims_2[0])
+                    key += (frozenset(arg.data.dims), arg.data.dtype, idxs,
+                      map_dims, arg.access)
+                else:
+                    map_dims = (arg.map[0].dim, arg.map[1].dim)
+                    key += (arg.data.dims, arg.data.dtype, idxs,
                       map_dims, arg.access)
 
         for c in Const._definitions():
