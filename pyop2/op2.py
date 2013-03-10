@@ -92,10 +92,16 @@ class Kernel(base.Kernel):
 class Set(base.Set):
     __metaclass__ = backends._BackendSelector
 
+class MultiSet(base.Set):
+    __metaclass__ = backends._BackendSelector
+
 class Halo(base.Halo):
     __metaclass__ = backends._BackendSelector
 
 class Dat(base.Dat):
+    __metaclass__ = backends._BackendSelector
+
+class MultiDat:
     __metaclass__ = backends._BackendSelector
 
 class Mat(base.Mat):
@@ -108,6 +114,12 @@ class Global(base.Global):
     __metaclass__ = backends._BackendSelector
 
 class Map(base.Map):
+    __metaclass__ = backends._BackendSelector
+
+class MultiMap(base.Map):
+    __metaclass__ = backends._BackendSelector
+
+class MixedMap(base.Map):
     __metaclass__ = backends._BackendSelector
 
 class Sparsity(base.Sparsity):

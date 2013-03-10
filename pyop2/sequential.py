@@ -54,18 +54,46 @@ class ParLoop(rt.ParLoop):
         _fun = self.generate_code()
         _args = [0, 0]          # start, stop
         for arg in self.args:
+            print " ==== pass args ===="
             if arg._is_mat:
+                print "pass 1"
                 _args.append(arg.data.handle.handle)
             else:
-                _args.append(arg.data._data)
+                print "pass 1.1"
+                if arg._multimap:
+                    for dat in arg.data.dats:
+                        print " -*- " 
+                        _args.append(dat._data)
+                else:
+                    _args.append(arg.data._data)
 
             if arg._is_dat:
-                maybe_setflags(arg.data._data, write=False)
+                print "pass 2"
+                if arg._multimap:
+                    for i in range(len(arg.data.dats)):
+                        maybe_setflags(arg.data.dats[i]._data, write=False)
+                else:
+                    maybe_setflags(arg.data._data, write=False)
 
             if arg._is_indirect or arg._is_mat:
-                maps = as_tuple(arg.map, Map)
-                for map in maps:
-                    _args.append(map.values)
+                print "pass 3"
+                if arg._rowcol_map:
+                    print "pass 3.1"
+                    for i in range(len(arg.map)):
+                        for map in arg.map[i]:
+                            print " -*- "
+                            _args.append(map.values)
+                elif arg._multimap:
+                    print "pass 3.2"
+                    for map in arg.map.maps:
+                        print " -*- "
+                        _args.append(map.values)
+                else:
+                    print "pass 3.3"
+                    maps = as_tuple(arg.map, Map)
+                    for map in maps:
+                        print " -*- "
+                        _args.append(map.values)
 
         for c in Const._definitions():
             _args.append(c.data)
@@ -98,7 +126,6 @@ class ParLoop(rt.ParLoop):
                 arg.data._assemble()
 
     def generate_code(self):
-
         key = self._cache_key
         _fun = rt._parloop_cache.get(key)
 
@@ -115,34 +142,110 @@ class ParLoop(rt.ParLoop):
 
         def c_vec_name(arg):
             return c_arg_name(arg) + "_vec"
+            
+        def c_vec_name_multi(arg,i):
+            return arg.data.dats[i].name + "_vec"
 
-        def c_map_name(arg):
+        def c_map_name(arg, i=None, j=None):
+            if i != None and j != None:
+                if i == 0:
+                    #this is a row map
+                    return c_arg_name(arg) + "_map_r_" + str(j)
+                else:
+                    return c_arg_name(arg) + "_map_c_" + str(j)
+            else:
+                if i != None:
+                    return c_arg_name(arg) + "_map_" + str(i)
             return c_arg_name(arg) + "_map"
 
         def c_wrapper_arg(arg):
-            val = "PyObject *_%(name)s" % {'name' : c_arg_name(arg) }
+            # do the dats within the args
+            val = ""
+            if arg.data._name == "MultiDat":
+                if not isinstance(arg.data.dats, list):
+                    raise RuntimeError("The data of the MultiDat arg must be a list of OP2 Dats")
+                for i in range(len(arg.data.dats)):
+                    val += "PyObject *_%(name)s" % {'name' : c_arg_name(arg) + "_" + arg.data.dats[i].name }
+                    if i != len(arg.data.dats) - 1:
+                        val += ", "
+            else:
+                val = "PyObject *_%(name)s" % {'name' : c_arg_name(arg) }
+            # now handle the maps within the arg
             if arg._is_indirect or arg._is_mat:
-                val += ", PyObject *_%(name)s" % {'name' : c_map_name(arg)}
-                maps = as_tuple(arg.map, Map)
-                if len(maps) is 2:
-                    val += ", PyObject *_%(name)s" % {'name' : c_map_name(arg)+'2'}
+                print arg.map
+                if arg._rowcol_map:
+                    # if the arg is a mat arg and has a list of lists of maps
+                    for i in range(len(arg.map)):
+                        if not isinstance(arg.map[i], list):
+                            raise RuntimeError("The arg requires a list of lists of maps as it's a mixed mat arg")
+                        for j in range(len(arg.map[i])):
+                            val += ", PyObject *_%(name)s" % {'name' : c_map_name(arg, i, j)}
+                else:
+                    if hasattr(arg.map, "_name") and arg.map._name == "MultiMap":
+                        # if the arg is MultiDat which has a MultiMap
+                        if not isinstance(arg.map.maps, list):
+                            raise RuntimeError("The MultiMap must contain a list of maps")
+                        for i in range(len(arg.map.maps)):
+                            val += ", PyObject *_%(name)s" % {'name' : c_map_name(arg, i)}
+                    else:
+                        # old version of the code for regular arg
+                        val += ", PyObject *_%(name)s" % {'name' : c_map_name(arg)}
+                        maps = as_tuple(arg.map, Map)
+                        if len(maps) is 2:
+                            val += ", PyObject *_%(name)s" % {'name' : c_map_name(arg)+'2'}
+            print "----> val is:"
+            print val
             return val
 
         def c_wrapper_dec(arg):
+            print "declare wrapper args"
+            val = ""
             if arg._is_mat:
+                print "branch 1"
                 val = "Mat %(name)s = (Mat)((uintptr_t)PyLong_AsUnsignedLong(_%(name)s))" % \
                      { "name": c_arg_name(arg) }
             else:
-                val = "%(type)s *%(name)s = (%(type)s *)(((PyArrayObject *)_%(name)s)->data)" % \
-                  {'name' : c_arg_name(arg), 'type' : arg.ctype}
+                print "branch 2"
+                if arg._multimap:
+                    for i in range(len(arg.data.dats)):
+                        if i > 0:
+                            val += ";\n"
+                        val += "%(type)s *%(name)s = (%(type)s *)(((PyArrayObject *)_%(name)s)->data)" % \
+                            {'name' : c_arg_name(arg) + '_' + arg.data.dats[i].name, 'type' : arg.ctype}
+                else:
+                    val = "%(type)s *%(name)s = (%(type)s *)(((PyArrayObject *)_%(name)s)->data)" % \
+                        {'name' : c_arg_name(arg), 'type' : arg.ctype}
             if arg._is_indirect or arg._is_mat:
-                val += ";\nint *%(name)s = (int *)(((PyArrayObject *)_%(name)s)->data)" % \
-                       {'name' : c_map_name(arg)}
+                print "branch 3"
+                if arg._rowcol_map:
+                    for i in range(len(arg.map)):
+                        for j in range(len(arg.map[i])):
+                            val += ";\nint *%(name)s = (int *)(((PyArrayObject *)_%(name)s)->data)" % \
+                                                {'name' : c_map_name(arg,i,j)}
+                    return val
+                else:
+                    if arg._multimap:
+                        for i in range(len(arg.data.dats)):
+                            val += ";\nint *%(name)s = (int *)(((PyArrayObject *)_%(name)s)->data)" % \
+                                                {'name' : c_map_name(arg,i)}
+                    else:
+                        val += ";\nint *%(name)s = (int *)(((PyArrayObject *)_%(name)s)->data)" % \
+                            {'name' : c_map_name(arg)}
             if arg._is_mat:
+                print "branch 4"
                 val += ";\nint *%(name)s2 = (int *)(((PyArrayObject *)_%(name)s2)->data)" % \
                            {'name' : c_map_name(arg)}
             if arg._is_vec_map:
-                val += ";\n%(type)s *%(vec_name)s[%(dim)s]" % \
+                print "branch 5"
+                if arg._multimap:
+                    print arg.map
+                    for i in range(len(arg.data.dats)):
+                        val += ";\n%(type)s *%(vec_name)s[%(dim)s]" % \
+                            {'type' : arg.ctype,
+                            'vec_name' : c_vec_name(arg) + "_" + str(i),
+                            'dim' : arg.map.maps[i].dim}
+                else:
+                    val += ";\n%(type)s *%(vec_name)s[%(dim)s]" % \
                        {'type' : arg.ctype,
                         'vec_name' : c_vec_name(arg),
                         'dim' : arg.map.dim}
@@ -155,14 +258,28 @@ class ParLoop(rt.ParLoop):
                      'map_dim' : arg.map.dim,
                      'idx' : idx,
                      'dim' : arg.data.cdim}
+                  
+        def c_ind_data_multi(arg, idx, j):
+            print "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
+            print arg.data
+            return "%(name)s + %(map_name)s[i * %(map_dim)s + %(idx)s] * %(dim)s" % \
+                    {'name' : c_arg_name(arg) + '_' + arg.data.dats[j].name,
+                     'map_name' : c_map_name(arg, j),
+                     'map_dim' : arg.map.dim[0],
+                     'idx' : idx,
+                     'dim' : arg.data.dats[j].cdim}
 
         def c_kernel_arg(arg):
             if arg._uses_itspace:
                 if arg._is_mat:
+                    print "ker 1"
                     name = "p_%s" % c_arg_name(arg)
                     if arg.data._is_vector_field:
+                        print "ker 1.1"
+                        print name
                         return name
                     elif arg.data._is_scalar_field:
+                        print "ker 1.2"
                         idx = ''.join(["[i_%d]" % i for i, _ in enumerate(arg.data.dims)])
                         return "(%(t)s (*)[1])&%(name)s%(idx)s" % \
                             {'t' : arg.ctype,
@@ -170,26 +287,57 @@ class ParLoop(rt.ParLoop):
                              'idx' : idx}
                     else:
                         raise RuntimeError("Don't know how to pass kernel arg %s" % arg)
+                elif arg._row_map:
+                    name = "p_%s" % c_arg_name(arg)
+                    return name
                 else:
+                    print "ker 2"
                     return c_ind_data(arg, "i_%d" % arg.idx.index)
             elif arg._is_indirect:
-                if arg._is_vec_map:
+                print "ker 3"
+                if arg._multimap:
+                    print "3.0"
+                    ker_args = ""
+                    for i in range(len(arg.data.dats)):
+                        ker_args += " " + c_vec_name(arg) + "_" + str(i)
+                        if i < len(arg.data.dats)-1:
+                            ker_args += ","
+                    return ker_args 
+                elif arg._is_vec_map:
+                    print "3.1"
+                    print c_vec_name(arg)
                     return c_vec_name(arg)
+                print "3.2"
+                print c_ind_data(arg,arg.idx)
                 return c_ind_data(arg, arg.idx)
             elif isinstance(arg.data, Global):
+                print "ker 4"
                 return c_arg_name(arg)
             else:
+                print "ker 5"
                 return "%(name)s + i * %(dim)s" % \
                     {'name' : c_arg_name(arg),
                      'dim' : arg.data.cdim}
 
         def c_vec_init(arg):
             val = []
-            for i in range(arg.map._dim):
+            if arg._multimap:
+                for j in range(len(arg.map.maps)):
+                    for i in range(arg.map.maps[j]._dim):
+                        print arg.map.maps[j], arg.map.maps[j]._dim
+                        val.append("%(vec_name)s_%(index)s[%(idx)s] = %(data)s" %
+                           {'vec_name' : c_vec_name(arg),
+                            'idx' : i,
+                            'data' : c_ind_data_multi(arg, i, j),
+                            'index' : j})
+            else:
+              for i in range(arg.map._dim):
                 val.append("%(vec_name)s[%(idx)s] = %(data)s" %
                            {'vec_name' : c_vec_name(arg),
                             'idx' : i,
                             'data' : c_ind_data(arg, i)} )
+            print "vec init"
+            print val
             return ";\n".join(val)
 
         def c_addto_scalar_field(arg):
@@ -207,10 +355,24 @@ class ParLoop(rt.ParLoop):
                  'rows' : "%s + i * %s" % (c_map_name(arg), nrows),
                  'cols' : "%s2 + i * %s" % (c_map_name(arg), ncols),
                  'insert' : arg.access == rt.WRITE }
+                 
+        def c_addto_mixed_mat(arg):
+            return "//THIS IS THE ADD TO MIXED MAT CODE\n"
+            
+        def c_addto_mixed_vec(args):
+            for arg in args:
+                if arg._row_map:
+                    
+                    return "//THIS IS THE ADD TO MIXED VEC CODE\n"
+            return ""
 
         def c_addto_vector_field(arg):
             name = c_arg_name(arg)
+            print name
             p_data = 'p_%s' % name
+            print p_data
+            if arg._rowcol_map:
+                return c_addto_mixed_mat(arg)
             maps = as_tuple(arg.map, Map)
             nrows = maps[0].dim
             ncols = maps[1].dim
@@ -242,6 +404,13 @@ class ParLoop(rt.ParLoop):
 
         def tmp_decl(arg, extents):
             t = arg.data.ctype
+            print t
+            print arg.data._is_scalar_field
+            print arg.data._is_vector_field
+            print arg.data._is_mixed_field
+            if arg.data._is_mixed_field:
+                #dims = ''.join(["[%d]" % d for d in extents])
+                return "" #"%s p_%s%s" % (t, c_arg_name(arg), dims)
             if arg.data._is_scalar_field:
                 dims = ''.join(["[%d]" % d for d in extents])
             elif arg.data._is_vector_field:
@@ -274,30 +443,129 @@ class ParLoop(rt.ParLoop):
                 return '%(name)s = ((%(type)s *)(((PyArrayObject *)_%(name)s)->data))[0]' % d
             tmp = '%(name)s[%%(i)s] = ((%(type)s *)(((PyArrayObject *)_%(name)s)->data))[%%(i)s]' % d
             return ';\n'.join([tmp % {'i' : i} for i in range(c.cdim)])
+            
+        def c_mixed_block_loops(args):
+            for arg in args:
+                if arg._rowcol_map:
+                    print "This is is where we do the block loops"
+                    print arg
+                    val = "for(int b_1 = 0; b_1 < %(row_blocks)s; b_1++){ \n \
+                                for(int b_2 = 0; b_2 < %(col_blocks)s; b_2++){ " % \
+                                    {'row_blocks' : len(arg._map[0]),
+                                        'col_blocks' : len(arg._map[1])}
+                                    
+                    return val
+                if arg._row_map:
+                    print "This is is where we do the block loops"
+                    print arg
+                    val = "for(int b_1 = 0; b_1 < %(row_blocks)s; b_1++){ " % \
+                                    {'row_blocks' : len(arg._map.maps)}
+                                    
+                    return val
+            return ""       
+        def c_mixed_block_loops_close(args):
+            for arg in args:
+                if arg._rowcol_map:
+                    val = "}} //end of the block loops"
+                    return val
+                if arg._row_map:
+                    val = "} //end of the block loop"
+                    return val
+            return ""
+            
+        def c_itspace_loops(args):
+            
+            for arg in args:
+                print arg._row_map
+                if arg._rowcol_map:
+                    _itspace_loops = "for(int i_0 = 0; i_0 < row_blk_size[b_1]; i_0++){\n \
+                            for(int i_1 = 0; i_1 < col_blk_size[b_2]; i_1++) {\n"
+                    return _itspace_loops
+                if arg._row_map:
+                    _itspace_loops = "for(int i_0 = 0; i_0 < row_blk_size[b_1]; i_0++){\n"
+                    return _itspace_loops
+            return '\n'.join([itspace_loop(i,e) for i, e in zip(range(len(self._it_space.extents)), self._it_space.extents)])
+
+        def c_tmp_blocksizes(args):
+            for arg in args:
+                if arg._rowcol_map:
+                    rows = "int row_blk_size[%d] = {" % len(arg._map[0])
+                    for i in range(len(arg._map[0])):
+                        rows += " %d" % arg.data.sparsity.dims[i][0]
+                        if i < len(arg._map[0])-1:
+                            rows += ","
+                    rows += " };\n"
+                    cols = "int col_blk_size[%d] = {" % len(arg._map[1])
+                    for i in range(len(arg._map[1])):
+                        cols += " %d" % arg.data.sparsity.dims[i][1]
+                        if i < len(arg._map[1])-1:
+                            cols += ","
+                    cols += " };\n"
+                    return rows+cols
+                if arg._row_map:
+                    rows = "int row_blk_size[%d] = {" % len(arg.data.dats)
+                    for i in range(len(arg.data.dats)):
+                        rows += " %d" % arg.data.dats[i].dim
+                        if i < len(arg.data.dats)-1:
+                            rows += ","
+                    rows += " };\n"
+                    return rows
+            return ""
+            
+        def c_zero_tmps(args):
+            for arg in args:
+                if arg._rowcol_map:
+                    name = "p_" + c_arg_name(arg)
+                    t = arg.ctype
+                    return "%(type)s %(name)s[1][1];\n" % { 'type': t, 'name':name }
+                if arg._row_map:
+                    name = "p_" + c_arg_name(arg)
+                    t = arg.ctype
+                    return "%(type)s %(name)s[1][1];\n" % { 'type': t, 'name':name }
+            return ';\n'.join([c_zero_tmp(arg) for arg in args if arg._is_mat])
 
         args = self.args
         _wrapper_args = ', '.join([c_wrapper_arg(arg) for arg in args])
 
+        print "====== start tmp decs"
         _tmp_decs = ';\n'.join([tmp_decl(arg, self._it_space.extents) for arg in args if arg._is_mat])
+        print _tmp_decs
+        print "====== start wrapper decs"
         _wrapper_decs = ';\n'.join([c_wrapper_dec(arg) for arg in args])
 
+        print "====== start const decs"
         _const_decs = '\n'.join([const._format_declaration() for const in Const._definitions()]) + '\n'
 
+        print "====== start kernel user args"
         _kernel_user_args = [c_kernel_arg(arg) for arg in args]
+        print "====== start kernel it args"
         _kernel_it_args   = ["i_%d" % d for d in range(len(self._it_space.extents))]
+        print "====== start kernel args"
         _kernel_args = ', '.join(_kernel_user_args + _kernel_it_args)
+
+        print "====== start vec inits"
         _vec_inits = ';\n'.join([c_vec_init(arg) for arg in args \
                                  if not arg._is_mat and arg._is_vec_map])
-
-        _itspace_loops = '\n'.join([itspace_loop(i,e) for i, e in zip(range(len(self._it_space.extents)), self._it_space.extents)])
+        print "====== start itspace loops"
+        _itspace_loops =  c_itspace_loops(args) #'\n'.join([itspace_loop(i,e) for i, e in zip(range(len(self._it_space.extents)), self._it_space.extents)])
+        print _itspace_loops
         _itspace_loop_close = '}'*len(self._it_space.extents)
-
+        print "====== start vec field"
         _addtos_vector_field = ';\n'.join([c_addto_vector_field(arg) for arg in args \
                                            if arg._is_mat and arg.data._is_vector_field])
+        print "====== start scalar field"
         _addtos_scalar_field = ';\n'.join([c_addto_scalar_field(arg) for arg in args \
                                            if arg._is_mat and arg.data._is_scalar_field])
+                                           
+        _addto_mixed_vec = c_addto_mixed_vec(args)
+                                           
+        print "====== start mixed space loops"
+        _mixed_block_loops = c_mixed_block_loops(args)
+        _mixed_block_loops_close = c_mixed_block_loops_close(args)
+        
+        _tmp_blocksizes = c_tmp_blocksizes(args)
 
-        _zero_tmps = ';\n'.join([c_zero_tmp(arg) for arg in args if arg._is_mat])
+        _zero_tmps = c_zero_tmps(args) #';\n'.join([c_zero_tmp(arg) for arg in args if arg._is_mat])
 
         if len(Const._defs) > 0:
             _const_args = ', '
@@ -311,18 +579,24 @@ class ParLoop(rt.ParLoop):
             int end = (int)PyInt_AsLong(_end);
             %(wrapper_decs)s;
             %(tmp_decs)s;
+            %(tmp_blocksizes)s
             %(const_inits)s;
             for ( int i = start; i < end; i++ ) {
             %(vec_inits)s;
+            %(mixed_block_loops)s
             %(itspace_loops)s
             %(zero_tmps)s;
             %(kernel_name)s(%(kernel_args)s);
+            %(addto_mixed_vec)s
             %(addtos_vector_field)s;
             %(itspace_loop_close)s
+            %(mixed_block_loops_close)s
             %(addtos_scalar_field)s;
             }
             }"""
 
+        print "====== start stride"
+        
         if any(arg._is_soa for arg in args):
             kernel_code = """
             #define OP2_STRIDE(a, idx) a[idx]
@@ -333,6 +607,8 @@ class ParLoop(rt.ParLoop):
             kernel_code = """
             inline %(code)s
             """ % {'code' : self._kernel.code }
+            
+        print "====== start code to compile"
         code_to_compile =  wrapper % { 'kernel_name' : self._kernel.name,
                                        'wrapper_args' : _wrapper_args,
                                        'wrapper_decs' : _wrapper_decs,
@@ -345,7 +621,11 @@ class ParLoop(rt.ParLoop):
                                        'zero_tmps' : _zero_tmps,
                                        'kernel_args' : _kernel_args,
                                        'addtos_vector_field' : _addtos_vector_field,
-                                       'addtos_scalar_field' : _addtos_scalar_field}
+                                       'addtos_scalar_field' : _addtos_scalar_field,
+                                       'mixed_block_loops' : _mixed_block_loops,
+                                       'mixed_block_loops_close' : _mixed_block_loops_close,
+                                       'tmp_blocksizes': _tmp_blocksizes,
+                                       'addto_mixed_vec' : _addto_mixed_vec }
 
         print code_to_compile
         # We need to build with mpicc since that's required by PETSc

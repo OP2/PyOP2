@@ -57,6 +57,7 @@ opt = vars(parser.parse_args())
 op2.init(**opt)
 
 # Set up finite element identity problem
+#E = FiniteElement("DG", "triangle", 0)
 E = FiniteElement("Lagrange", "triangle", 1)
 V = VectorElement("Lagrange", "triangle", 1)
 W = V * E
@@ -76,8 +77,11 @@ L = inner(s,f)*dx
 
 # Generate code for mass and rhs assembly.
 
-mass = compile_form(a, "mass")
-rhs = compile_form(L, "rhs")
+mass, = compile_form(a, "mass")
+rhs, = compile_form(L, "rhs")
+
+#from IPython import embed
+#embed()
 
 # Set up simulation data structures
 
@@ -117,6 +121,8 @@ print "========"
 
 mat = op2.Mat(sparsity, valuetype, "mat")
 
+print "====== done with mat creation"
+
 coord_vals = np.asarray([ (0.0, 0.0), (2.0, 0.0), (1.0, 1.0), (0.0, 1.5) ],
                            dtype=valuetype)
 coords = op2.Dat(nodes, 2, coord_vals, valuetype, "coords")
@@ -129,17 +135,15 @@ pressure_vals = np.asarray([ 0.1, 2.0, 1.0, 0.2 ],
                            dtype=valuetype)
 pressure = op2.Dat(nodes, 1, pressure_vals, valuetype, "pressure")
 
-fields = op2.MultiDat(velocity, pressure)
+#nodes_p1 = op2.Set(4)
+#nodes_p2 = op2.Set(9)
+#nodes_p3 = op2.Set(16)
+#nodes_p4 = op2.Set(25)
 
-nodes_p1 = op2.Set(4)
-nodes_p2 = op2.Set(9)
-nodes_p3 = op2.Set(16)
-nodes_p4 = op2.Set(25)
-
-dat_p1 = op2.Dat(nodes_p1,2,np_arr_p1,dtype=valuetype)
-dat_p2 = op2.Dat(nodes_p2,1)
-dat_p3 = op2.Dat(nodes_p3,1)
-dat_p4 = op2.Dat(nodes_p4,2)
+#dat_p1 = op2.Dat(nodes_p1,2,np_arr_p1,dtype=valuetype)
+#dat_p2 = op2.Dat(nodes_p2,1)
+#dat_p3 = op2.Dat(nodes_p3,1)
+#dat_p4 = op2.Dat(nodes_p4,2)
 
 #joined_dats = op2.Dat([dat_p1,dat_p2)
 
@@ -157,36 +161,114 @@ dat_p4 = op2.Dat(nodes_p4,2)
 # We need to replace that by the size of the matrix which is the lsize of
 #  the sparsity object
 
-dofs = op2.Set(sparsity._lsize, "dofs")
+#dofs = op2.Set(sparsity._lsize, "dofs")
 
-b_vals = np.asarray([0.0]*sparsity._lsize, dtype=valuetype)
-x_vals = np.asarray([0.0]*sparsity._lsize, dtype=valuetype)
 
-b = op2.Dat(mixed_dats, [2,1], b_vals, valuetype, "b")
-x = op2.Dat(mixed_dats, [2,1], x_vals, valuetype, "x")
+##version 2
+#f_vals = np.asarray([(1.0, 2.0)]*sparsity.x_size, dtype=valuetype)
+#b_vals = np.asarray([0.0]*sparsity.b_size, dtype=valuetype)
+#x_vals = np.asarray([0.0]*sparsity.x_size, dtype=valuetype)
+
+#version 3
+fields = op2.MultiDat([velocity, pressure], "fields")
+
+xset = op2.MultiSet(sparsity.x_sets)
+bset = op2.MultiSet(sparsity.b_sets)
+
+b_block1 = np.asarray([0.0]*sparsity.b_sizes[0], dtype=valuetype)
+b_block2 = np.asarray([0.0]*sparsity.b_sizes[1], dtype=valuetype)
+
+print sparsity.b_sizes[0]
+print sparsity.b_sizes[1]
+
+b1 = op2.Dat(nodes,2,b_block1,valuetype,"b1")
+b2 = op2.Dat(nodes,1,b_block2,valuetype,"b2")
+
+x_block1 = np.asarray([0.0]*sparsity.x_sizes[0], dtype=valuetype)
+x_block2 = np.asarray([0.0]*sparsity.x_sizes[1], dtype=valuetype)
+
+x1 = op2.Dat(nodes,2,x_block1,valuetype,"x1")
+x2 = op2.Dat(nodes,1,x_block2,valuetype,"x2")
+
+f_block1 = np.asarray([0.0]*sparsity.x_sizes[0], dtype=valuetype)
+f_block2 = np.asarray([0.0]*sparsity.x_sizes[1], dtype=valuetype)
+
+f1 = op2.Dat(nodes,2,f_block1,valuetype,"f1")
+f2 = op2.Dat(nodes,1,f_block2,valuetype,"f2")
+
+f = op2.MultiDat([f1, f2], "f")
+b = op2.MultiDat([b1, b2], "b")
+x = op2.MultiDat([x1, x2], "x")
+
+row_maps = op2.MultiMap(sparsity.getRowMaps(elements)) #list of row maps [(),()]
+                                         # THE LIST OF MAPS MUST
+                                         # CONTAIN ALL THE MAPS.
+                                         # The maps will then be filetered at
+                                         # loop level to get from the multiple
+                                         # elemnts such as: [... [(),()] ...]
+                                         # the maps that have the iterset
+                                         # equal to the loop iterset
+                                         # so the map list becomes:
+                                         # [... [()] ...]
+
+                                         # DOES THE CONDITION THAT IN A TUPLE OF TUPLES
+                                         # of maps, only one of the pairs
+                                         # holds the maps from the iteration set of the
+                                         # loop to other mesh elements
+
+                                         # the filtering at loops level
+                                         # has effects over what happens
+                                         # when the sizes are computed
+
+col_maps = op2.MultiMap(sparsity.getColMaps(elements)) # list of colmaps *  as above  *
+
+print sparsity.getRowMaps(elements)
+print sparsity.getColMaps(elements)
+
+#Alternative for the user if he doesn't want to call the sparsity methods
+#row_maps = op2.MultiMap([elem_node1, elem_node2])
+#col_maps = op2.MultiMap([elem_node1, elem_node2])
+
+mass._code = """
+        void mass_cell_integral_0_otherwise(double A[1][1], double *x[2], double *velocity[2], double* pressure[1], int j, int k)
+{
+    printf(" This is the Kernel Code that's not generated yet! -> %d %d \\n",j,k);
+    A[1][1] = 2*j + k;
+    
+}
+
+        """
+        
+rhs._code = """
+void rhs_cell_integral_0_otherwise(double A[1][1], double *x[2], double *f_vec_0[2], double *f_vec_1[1], int j)
+{
+
+    printf("This is the RHS Kernel code that's not generated yet! -> %d \\n", j); 
+       
+}
+"""
 
 # Assemble and solve
-
+print "======= start first loop"
 op2.par_loop(mass, elements(3,3),
-             mat(mixed_maps[op2.i[0]], mixed_maps[op2.i[1]], op2.INC), #first the rowmaps then the colmaps
+             mat((row_maps[op2.i[0]], col_maps[op2.i[1]]), op2.INC), #first the rowmaps then the colmaps
              coords(elem_node1, op2.READ),
-             mixed_dats(mixed_maps, op2.READ))
+             fields(row_maps, op2.READ))
 
+print "======= start second loop"
 op2.par_loop(rhs, elements(3),
-                     b([elem_node1,elem_node1][op2.i[0]], op2.INC),
+                     b(row_maps[op2.i[0]], op2.INC),
                      coords(elem_node1, op2.READ),
-                     f(elem_node1, op2.READ))
+                     f(row_maps, op2.READ))
 
-solver = op2.Solver()
-solver.solve(mat, x, b)
+#solver = op2.Solver()
+#solver.solve(mat, x, b)
 
 # Print solution
-
-print "Expected solution: %s" % f.data
 print "Computed solution: %s" % x.data
 
 # Save output (if necessary)
-if opt['save_output']:
-    import pickle
-    with open("mass_vector.out","w") as out:
-        pickle.dump((f.data, x.data), out)
+#if opt['save_output']:
+#    import pickle
+#    with open("mass_vector.out","w") as out:
+#        pickle.dump((f.data, x.data), out)
