@@ -134,6 +134,21 @@ class validate_type(validate_base):
             raise exception("%s:%d Parameter %s must be of type %r" \
                     % (self.file, self.line, arg, argtype))
 
+class validate_extended_type(validate_base):
+    """Decorator to validate argument types
+
+    The decorator expects one or more arguments, which are 3-tuples of
+    (name, type, exception), where name is the argument name in the
+    function being decorated, type is the argument type to be validated
+    and exception is the exception type to be raised if validation fails."""
+
+    def check_arg(self, arg, argtype, exception):
+        if not isinstance(arg, argtype):
+            if not isinstance(arg, "Multi"+str(argtype)):
+                raise exception("%s:%d Parameter %s must be of type %r" \
+                     % (self.file, self.line, arg, argtype))
+
+
 class validate_in(validate_base):
     """Decorator to validate argument is in a set of valid argument values
 

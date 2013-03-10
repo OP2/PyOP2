@@ -132,6 +132,7 @@ class Set(base.Set):
 
     @validate_type(('size', (int, tuple, list), SizeTypeError))
     def __init__(self, size, name=None, halo=None):
+        self._set_list = []
         base.Set.__init__(self, size, name, halo)
 
     @classmethod
@@ -151,6 +152,14 @@ class Set(base.Set):
         if self._lib_handle is None:
             self._lib_handle = core.op_set(self)
         return self._lib_handle
+
+class MultiSet(base.Set):
+    """OP2 multi-set."""
+
+    ##TODO: Maybe a nest would need to be used here
+    def __init__(self, setlist):
+        self._set_list = setlist
+
 
 class Halo(base.Halo):
     def __init__(self, sends, receives, comm=PYOP2_COMM, gnn2unn=None):
@@ -210,9 +219,11 @@ class Dat(base.Dat):
 
     def __init__(self, dataset, dim, data=None, dtype=None, name=None,
                  soa=None, uid=None):
+
         base.Dat.__init__(self, dataset, dim, data, dtype, name, soa, uid)
-        halo = dataset.halo
-        if halo is not None:
+        if isinstance(dataset, Set):
+          halo = dataset.halo
+          if halo is not None:
             self._send_reqs = [None]*halo.comm.size
             self._send_buf = [None]*halo.comm.size
             self._recv_reqs = [None]*halo.comm.size
@@ -326,6 +337,45 @@ class Dat(base.Dat):
             self._lib_handle = core.op_dat(self)
         return self._lib_handle
 
+class MultiDat(base.Dat):
+     def __init__(self, dat_list, name=None):
+        self.mixed_name = name
+        self._name = "MultiDat"
+        self.dats = dat_list
+        self._data = []
+        self._dataset = []
+        self._soa = any(dat.soa for dat in self.dats)
+        self._needs_halo_update = False
+        for d in self.dats:
+            self._data += [d._data]
+            self._dataset += [d._dataset]
+
+     @property
+     def name(self):
+        return self.mixed_name
+
+     @property
+     def dim(self):
+        '''The number of values at each member of the dataset.'''
+        dims = []
+        for d in self.dats:
+            dims += [d.dim]
+        return dims
+
+     @property
+     def data(self):
+        '''The number of values at each member of the dataset.'''
+        datas = []
+        for d in self.dats:
+            datas += [d.data]
+        return datas
+        
+     @property
+     def soa(self):
+        return self._soa
+
+
+
 class Const(base.Const):
     """Data that is constant for any element of any set."""
 
@@ -355,6 +405,50 @@ class Map(base.Map):
         if len(dim) != 1:
             raise DimTypeError("Unrecognised dimension value %s" % dim)
         return cls(iterset, dataset, dim[0], values, name)
+
+#class MultiMap(base.Map):
+#    """OP2 map, a relation between two :class:`Set` objects."""#
+#
+#    def __init__(self, sparsity):
+#        self.mixed_map_rows = MixedMap(sparsity._rowmaps)
+#        self.mixed_map_cols = MixedMap(sparsity._colmaps)
+#        self._lib_handle = None
+#        Map._globalcount += 1
+
+#class MixedMap(base.Map):
+#    def __init__(self, map_list):
+#        self.maps = []
+#        for i in range(len(map_list)):
+#            mps= []
+#            for j in range(len(map_list[i])):
+#                mps += [map_list[i][j]._c_handle]
+#            self.maps = mps
+#        self._lib_handle = None
+#        Map._globalcount += 1
+
+class MultiMap(base.Map):
+    def __init__(self, map_list):
+        #self._multimap = True
+        self._name = "MultiMap"
+        #self.maps = []
+        #for i in range(len(map_list)):
+        #    mps= []
+        #    for j in range(len(map_list[i])):
+        #        mps += [map_list[i][j]]
+        #    self.maps += mps
+        self.maps = map_list
+        self._lib_handle = None
+        Map._globalcount += 1
+
+    @property
+    def dim(self):
+        """Dimension of the mapping: number of dataset elements mapped to per
+        iterset element."""
+        dims = []
+        for m in self.maps:
+            dims += [m.dim]
+        return dims
+
 
 _sparsity_cache = dict()
 def _empty_sparsity_cache():
@@ -456,35 +550,108 @@ class Sparsity(base.Sparsity):
     def onz(self):
         return int(self._o_nz)
 
+    def getRowMaps(self, itset):
+        res = []
+        for ms in self._rmaps:
+            for rowmap in ms:
+                if rowmap.iterset is itset:
+                    res += [rowmap]
+                    break
+        return res
+
+    def getColMaps(self, itset):
+        res = []
+        for ms in self._cmaps:
+            for colmap in ms:
+                if colmap.iterset is itset:
+                    res += [colmap]
+                    break
+        return res
+
+
 
 class Mat(base.Mat):
     """OP2 matrix data. A Mat is defined on a sparsity pattern and holds a value
     for each element in the :class:`Sparsity`."""
 
     def __init__(self, *args, **kwargs):
+        print "++++++++++++> This is matrix construction"
         super(Mat, self).__init__(*args, **kwargs)
-        self._handle = None
+        print self._sparsity.sparsity_list
+        self.mat_list = []
+        for i in range(len(self._sparsity.sparsity_list)):
+            print i
+            self.mat_list += [Mat(self._sparsity.sparsity_list[i],self._datatype,"mat_"+str(i))]
+
+        if self._sparsity.sparsity_list != []:
+            self.createNestedMat()
+
+        else:
+            self._handle = None
+        print "END OF CONSTR"
+
+    def createNestedMat(self):
+        print "create nested mat"
+        mat = PETSc.Mat()
+        petsc_matlist = [m.handle for m in self.mat_list]
+        #from IPython import embed; embed()
+        rows = len(self._sparsity._rmaps)
+        cols = len(self._sparsity._cmaps)
+        mat.createNest(rows,cols,petsc_matlist)#self.mat_list)
+        self._handle = mat
 
     def _init(self):
+        print "----------------> This is matrix construction"
         if not self.dtype == PETSc.ScalarType:
             raise RuntimeError("Can only create a matrix of type %s, %s is not supported" \
                     % (PETSc.ScalarType, self.dtype))
+        print self._sparsity.sparsity_list
+#        if self._sparsity.sparsity_list != []:
+            #print "this is for sparse block matrices"
+            #mat = PETSc.Mat()
+            #petsc_matlist = []
+            #for m in self.mat_list:
+            #    petsc_matlist += [m.handle]
+            #rows = len(self._sparsity._rmaps)
+            #cols = len(self._sparsity._cmaps)
+            #mat.createNest(rows,cols,petsc_matlist)
+            #print " -------------------------------------> PETSC"
+            #print mat
+ #       else:
         if PYOP2_COMM.size == 1:
             mat = PETSc.Mat()
             row_lg = PETSc.LGMap()
             col_lg = PETSc.LGMap()
-            rdim, cdim = self.sparsity.dims
-            row_lg.create(indices=np.arange(self.sparsity.nrows * rdim, dtype=PETSc.IntType))
-            col_lg.create(indices=np.arange(self.sparsity.ncols * cdim, dtype=PETSc.IntType))
-            self._array = np.zeros(self.sparsity.nz, dtype=PETSc.RealType)
-            # We're not currently building a blocked matrix, so need to scale the
-            # number of rows and columns by the sparsity dimensions
-            # FIXME: This needs to change if we want to do blocked sparse
-            # NOTE: using _rowptr and _colidx since we always want the host values
-            mat.createAIJWithArrays((self.sparsity.nrows*rdim, self.sparsity.ncols*cdim),
+            print self.sparsity.dims
+            if isinstance(self.sparsity.dims, list):
+                print "*1"
+                #could be wrong in the most general of cases
+                rdim, cdim = self.sparsity.dims[0]
+                print self.sparsity.nrows[0], rdim
+                print self.sparsity.ncols[0], cdim
+                row_lg.create(indices=np.arange(self.sparsity.nrows[0] * rdim, dtype=PETSc.IntType))
+                col_lg.create(indices=np.arange(self.sparsity.ncols[0] * cdim, dtype=PETSc.IntType))
+                self._array = np.zeros(self.sparsity.nz, dtype=PETSc.RealType)
+                mat = mat.createAIJWithArrays((self.sparsity.nrows[0]*rdim, self.sparsity.ncols[0]*cdim),
                                     (self.sparsity._rowptr, self.sparsity._colidx, self._array))
-            mat.setLGMap(rmap=row_lg, cmap=col_lg)
+                
+                mat.setLGMap(rmap=row_lg, cmap=col_lg)
+                #from IPython import embed; embed()
+            else:
+                print "*2"
+                rdim, cdim = self.sparsity.dims
+                row_lg.create(indices=np.arange(self.sparsity.nrows * rdim, dtype=PETSc.IntType))
+                col_lg.create(indices=np.arange(self.sparsity.ncols * cdim, dtype=PETSc.IntType))
+                self._array = np.zeros(self.sparsity.nz, dtype=PETSc.RealType)
+                # We're not currently building a blocked matrix, so need to scale the
+                # number of rows and columns by the sparsity dimensions
+                # FIXME: This needs to change if we want to do blocked sparse
+                # NOTE: using _rowptr and _colidx since we always want the host values
+                mat.createAIJWithArrays((self.sparsity.nrows*rdim, self.sparsity.ncols*cdim),
+                                    (self.sparsity._rowptr, self.sparsity._colidx, self._array))
+                mat.setLGMap(rmap=row_lg, cmap=col_lg)
         else:
+            print "*3"
             mat = PETSc.Mat()
             row_lg = PETSc.LGMap()
             col_lg = PETSc.LGMap()
@@ -499,6 +666,7 @@ class Mat(base.Mat):
             mat.setOption(mat.Option.IGNORE_OFF_PROC_ENTRIES, True)
             mat.setOption(mat.Option.IGNORE_ZERO_ENTRIES, True)
             mat.setOption(mat.Option.NEW_NONZERO_ALLOCATION_ERR, True)
+        #print mat.mat
         self._handle = mat
 
     def zero(self):
