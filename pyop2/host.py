@@ -138,15 +138,17 @@ class Arg(base.Arg):
                        {'name' : self.c_map_name()}
         if self._is_vec_map:
             if self._multimap:
-                val += ";\n".join(["%(type)s *%(vec_name)s[%(dim)s]" % \
+                total_dim = sum([self.map.maps[i].dim * self.data.dats[i].cdim
+                                 for i in range(len(self.data.dats))])
+                val += ";\n%(type)s *%(vec_name)s[%(dim)s]" % \
                     {'type' : self.ctype,
-                    'vec_name' : self.c_vec_name() + "_" + str(i),
-                    'dim' : map.dim} for map in self.map.maps])
+                    'vec_name' : self.c_vec_name(),
+                    'dim' : total_dim}
             else:
                 val += ";\n%(type)s *%(vec_name)s[%(dim)s]" % \
                    {'type' : self.ctype,
                     'vec_name' : self.c_vec_name(),
-                    'dim' : self.map.dim}
+                    'dim' : self.map.dim * self.data.cdim}
         return val
 
     def c_ind_data(self, idx):
@@ -157,13 +159,23 @@ class Arg(base.Arg):
                  'idx' : idx,
                  'dim' : self.data.cdim}
 
-    def c_ind_data_multi(self, idx, j):
-        return "%(name)s + %(map_name)s[i * %(map_dim)s + %(idx)s] * %(dim)s" % \
+    def c_ind_data_new(self, idx, j):
+        return "%(name)s + %(map_name)s[i * %(map_dim)s + %(idx)s] * %(dim)s + %(j)s" % \
+                {'name' : self.c_arg_name(),
+                 'map_name' : self.c_map_name(),
+                 'map_dim' : self.map.dim,
+                 'idx' : idx,
+                 'dim' : self.data.cdim,
+                 'j' : j}
+
+    def c_ind_data_multi(self, idx, j, l):
+        return "%(name)s + %(map_name)s[i * %(map_dim)s + %(idx)s] * %(dim)s + %(l)s" % \
                 {'name' : self.c_arg_name() + '_' + self.data.dats[j].name,
                  'map_name' : self.c_map_name(j),
                  'map_dim' : self.map.dim[j],
                  'idx' : idx,
-                 'dim' : self.data.dats[j].cdim}
+                 'dim' : self.data.dats[j].cdim,
+                 'l' : l}
 
     def c_kernel_arg_name(self):
         return "p_%s" % self.c_arg_name()
@@ -207,20 +219,24 @@ class Arg(base.Arg):
 
     def c_vec_init(self):
         val = []
+        k = 0
         if self._multimap:
             for j in range(len(self.map.maps)):
-                for i in range(self.map.maps[j]._dim):
-                    val.append("%(vec_name)s_%(index)s[%(idx)s] = %(data)s" %
-                       {'vec_name' : self.c_vec_name(),
-                        'idx' : i,
-                        'data' : self.c_ind_data_multi(i, j),
-                        'index' : j})
+                for l in range(self.data.dats[j].cdim):
+                    for i in range(self.map.maps[j]._dim):
+                        val.append("%(vec_name)s[%(idx)s] = %(data)s" %
+                           {'vec_name' : self.c_vec_name(),
+                            'idx' : k,
+                            'data' : self.c_ind_data_multi(i, j, l)})
+                        k += 1
         else:
-          for i in range(self.map._dim):
-            val.append("%(vec_name)s[%(idx)s] = %(data)s" %
-                       {'vec_name' : self.c_vec_name(),
-                        'idx' : i,
-                        'data' : self.c_ind_data(i)} )
+            for j in range(self.data.cdim):
+                for i in range(self.map._dim):
+                    val.append("%(vec_name)s[%(idx)s] = %(data)s" %
+                            {'vec_name' : self.c_vec_name(),
+                                'idx' : k,
+                                'data' : self.c_ind_data_new(i, j)} )
+                    k += 1
         return ";\n".join(val)
 
     def c_addto_scalar_field(self):
@@ -404,7 +420,7 @@ class ParLoop(base.ParLoop):
                             'i':str(i),
                             'dim':mapdim,
                             'nnodes': nnodes }
-                    s += "%(n)s_%(dn)s[%(pos)s] += p_%(n)s[0][0];" % { 'n':name, 'dn':dname, 'pos': pos }
+                    s += "%(n)s_%(dn)s[%(pos)s] += p_%(n)s[0];" % { 'n':name, 'dn':dname, 'pos': pos }
                     s+="}\n"
                 return s
         return ""
@@ -466,7 +482,7 @@ class ParLoop(base.ParLoop):
                 if arg._row_map:
                     name = "p_" + arg.c_arg_name()
                     t = arg.ctype
-                    return "%(type)s %(name)s[1][1];\n" % { 'type': t, 'name':name }
+                    return "%(type)s %(name)s[1];\n" % { 'type': t, 'name':name }
             return ';\n'.join([arg.c_zero_tmp() for arg in args if arg._is_mat])
 
         def c_addto_mixed_mat(self):
