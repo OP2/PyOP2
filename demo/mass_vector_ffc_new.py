@@ -233,18 +233,19 @@ mass._code = """
         void mass_cell_integral_0_otherwise(double A[1][1], double *x[2], double *velocity[2], double* pressure[1], int j, int k)
 {
     printf(" This is the Kernel Code that's not generated yet! -> %d %d \\n",j,k);
-    A[1][1] = 2*j + k;
-    
+    A[0][0] = 2*j + k;
+
 }
 
         """
-        
+
 rhs._code = """
 void rhs_cell_integral_0_otherwise(double A[1][1], double *x[2], double *f_vec_0[2], double *f_vec_1[1], int j)
 {
 
-    printf("This is the RHS Kernel code that's not generated yet! -> %d \\n", j); 
-       
+    printf("This is the RHS Kernel code that's not generated yet! -> %d \\n", j);
+    A[0][0] = 10;
+
 }
 """
 
@@ -255,14 +256,18 @@ op2.par_loop(mass, elements(3,3),
              coords(elem_node1, op2.READ),
              fields(row_maps, op2.READ))
 
+print mat.mat_list[0].handle.view()
+
 print "======= start second loop"
 op2.par_loop(rhs, elements(3),
                      b(row_maps[op2.i[0]], op2.INC),
                      coords(elem_node1, op2.READ),
                      f(row_maps, op2.READ))
 
-#solver = op2.Solver()
-#solver.solve(mat, x, b)
+print b.data[0]
+
+solver = op2.Solver(preconditioner="none")
+solver.solve(mat, x, b)
 
 # Print solution
 print "Computed solution: %s" % x.data

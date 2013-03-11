@@ -369,7 +369,7 @@ class MultiDat(base.Dat):
         for d in self.dats:
             datas += [d.data]
         return datas
-        
+
      @property
      def soa(self):
         return self._soa
@@ -634,7 +634,7 @@ class Mat(base.Mat):
                 self._array = np.zeros(self.sparsity.nz, dtype=PETSc.RealType)
                 mat = mat.createAIJWithArrays((self.sparsity.nrows[0]*rdim, self.sparsity.ncols[0]*cdim),
                                     (self.sparsity._rowptr, self.sparsity._colidx, self._array))
-                
+
                 mat.setLGMap(rmap=row_lg, cmap=col_lg)
                 #from IPython import embed; embed()
             else:
@@ -728,8 +728,37 @@ class Solver(base.Solver, PETSc.KSP):
 
     def solve(self, A, x, b):
         self._set_parameters()
-        px = PETSc.Vec().createWithArray(x.data, size=(x.dataset.size * x.cdim, None))
-        pb = PETSc.Vec().createWithArray(b.data_ro, size=(b.dataset.size * b.cdim, None))
+        if hasattr(x, "_name") and x._name == "MultiDat":
+            print "x is a MultiDat"
+            #xlist = x.data[0].reshape(x.data[0].size,1)
+            #for i in range(len(x.data) - 1):
+            #    for j in range(len(x.data[i+1])):
+            #        xlist += [x.data[i+1][j]]
+            #xlist = xlist.flatten()
+            x_petsc_vec = []
+            for dat in x.dats:
+                ppx = PETSc.Vec().createWithArray(dat.data, size=(dat.dataset.size * dat.cdim, None))
+                x_petsc_vec += [ppx]
+            print len(x_petsc_vec)
+            px = PETSc.Vec().createVecNest(x_petsc_vec)
+
+            #blist = b.data[0].reshape(b.data[0].size,1)
+            #print blist
+            #for i in range(len(b.data) - 1):
+            #    for j in range(len(b.data[i+1])):
+            #        blist += [b.data[i+1][j]]
+            #blist = blist.flatten()
+            #print blist
+            b_petsc_vec = []
+            for dat in b.dats:
+                ppb = PETSc.Vec().createWithArray(dat.data, size=(dat.dataset.size * dat.cdim, None))
+                b_petsc_vec += [ppb]
+            print len(b_petsc_vec)
+            pb = PETSc.Vec().createVecNest(b_petsc_vec)
+            #self.setPC(PetSC)
+        else:
+            px = PETSc.Vec().createWithArray(x.data, size=(x.dataset.size * x.cdim, None))
+            pb = PETSc.Vec().createWithArray(b.data_ro, size=(b.dataset.size * b.cdim, None))
         self.setOperators(A.handle)
         self.setFromOptions()
         if self.parameters['monitor_convergence']:
@@ -739,6 +768,9 @@ class Solver(base.Solver, PETSc.KSP):
                 print "%3d KSP Residual norm %14.12e" % (its, norm)
             self.setMonitor(monitor)
         # Not using super here since the MRO would call base.Solver.solve
+        print self.view()
+        print pb.view()
+        print px.view()
         PETSc.KSP.solve(self, pb, px)
         if self.parameters['monitor_convergence']:
             self.cancelMonitor()

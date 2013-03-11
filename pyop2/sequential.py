@@ -57,12 +57,16 @@ class ParLoop(rt.ParLoop):
             print " ==== pass args ===="
             if arg._is_mat:
                 print "pass 1"
-                _args.append(arg.data.handle.handle)
+                if arg._rowcol_map:
+                    for i in range(len(arg.data.mat_list)):
+                        _args.append(arg.data.mat_list[i].handle.handle)
+                else:
+                    _args.append(arg.data.handle.handle)
             else:
                 print "pass 1.1"
                 if arg._multimap:
                     for dat in arg.data.dats:
-                        print " -*- " 
+                        print " -*- "
                         _args.append(dat._data)
                 else:
                     _args.append(arg.data._data)
@@ -142,7 +146,7 @@ class ParLoop(rt.ParLoop):
 
         def c_vec_name(arg):
             return c_arg_name(arg) + "_vec"
-            
+
         def c_vec_name_multi(arg,i):
             return arg.data.dats[i].name + "_vec"
 
@@ -169,7 +173,13 @@ class ParLoop(rt.ParLoop):
                     if i != len(arg.data.dats) - 1:
                         val += ", "
             else:
-                val = "PyObject *_%(name)s" % {'name' : c_arg_name(arg) }
+                if arg._rowcol_map:
+                    for i in range(len(arg.data.mat_list)):
+                        val += "PyObject *_%(name)s" % {'name' : arg.data.mat_list[i].name }
+                        if i != len(arg.data.mat_list) - 1:
+                            val += ", "
+                else:
+                    val = "PyObject *_%(name)s" % {'name' : c_arg_name(arg) }
             # now handle the maps within the arg
             if arg._is_indirect or arg._is_mat:
                 print arg.map
@@ -202,8 +212,13 @@ class ParLoop(rt.ParLoop):
             val = ""
             if arg._is_mat:
                 print "branch 1"
-                val = "Mat %(name)s = (Mat)((uintptr_t)PyLong_AsUnsignedLong(_%(name)s))" % \
-                     { "name": c_arg_name(arg) }
+                if arg._rowcol_map:
+                    for i in range(len(arg.data.mat_list)):
+                        val += "Mat %(name)s = (Mat)((uintptr_t)PyLong_AsUnsignedLong(_%(name)s));\n" % \
+                            { "name": arg.data.mat_list[i].name }
+                else:
+                    val = "Mat %(name)s = (Mat)((uintptr_t)PyLong_AsUnsignedLong(_%(name)s))" % \
+                        { "name": c_arg_name(arg) }
             else:
                 print "branch 2"
                 if arg._multimap:
@@ -258,7 +273,7 @@ class ParLoop(rt.ParLoop):
                      'map_dim' : arg.map.dim,
                      'idx' : idx,
                      'dim' : arg.data.cdim}
-                  
+
         def c_ind_data_multi(arg, idx, j):
             print "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
             print arg.data
@@ -302,7 +317,7 @@ class ParLoop(rt.ParLoop):
                         ker_args += " " + c_vec_name(arg) + "_" + str(i)
                         if i < len(arg.data.dats)-1:
                             ker_args += ","
-                    return ker_args 
+                    return ker_args
                 elif arg._is_vec_map:
                     print "3.1"
                     print c_vec_name(arg)
@@ -355,15 +370,78 @@ class ParLoop(rt.ParLoop):
                  'rows' : "%s + i * %s" % (c_map_name(arg), nrows),
                  'cols' : "%s2 + i * %s" % (c_map_name(arg), ncols),
                  'insert' : arg.access == rt.WRITE }
-                 
+
         def c_addto_mixed_mat(arg):
-            return "//THIS IS THE ADD TO MIXED MAT CODE\n"
-            
+            for arg in args:
+                if arg._rowcol_map:
+                    s = ""
+                    name = c_arg_name(arg)
+                    p_data = 'p_%s' % name
+                    rsize = len(arg._map[0])
+                    csize = len(arg._map[1])
+                    for i in range(rsize):
+                        for j in range(csize):
+                            s += "if (b_1 == %d && b_2 == %d) {" % (i, j)
+                            dims = arg.data.sparsity.sparsity_list[rsize * i + j].dims
+                            print dims
+                            nrows = arg._map[0][i].dim
+                            ncols = arg._map[1][j].dim
+                            rmult = dims[0][0]
+                            cmult = dims[0][1]
+                            idx = '[0][0]'
+                            val = "&%s%s" % (p_data, idx)
+                            # I need the number of nodes in the mesh --> 4 in this case
+                            nnodes = arg._map[0][0].dataset.size
+                            row = "%(nnodes)s * (i_0 / %(dim)s) + %(map)s[i * %(dim)s + (i_0 %% %(dim)s)]" % \
+                                {'map' : c_map_name(arg)+"_r_"+str(i),
+                                'dim' : nrows,
+                                'nnodes' : nnodes }
+                            col = "%(nnodes)s * (i_1 / %(dim)s) + %(map)s[i * %(dim)s + (i_1 %% %(dim)s)]" % \
+                                {'map' : c_map_name(arg)+"_c_"+str(j),
+                                'dim' : ncols,
+                                'nnodes' : nnodes }
+                            pos = i * rsize + j
+                            mat_name = name + "_" + str(pos)
+                            s += "addto_scalar(%s, %s, %s, %s, %d); }\n"  % (mat_name, val, row, col, arg.access == rt.WRITE)
+                    return s
+
+
+            return ""
+
         def c_addto_mixed_vec(args):
             for arg in args:
                 if arg._row_map:
-                    
-                    return "//THIS IS THE ADD TO MIXED VEC CODE\n"
+                    s = ""
+                    name = c_arg_name(arg)
+                    p_data = 'p_%s' % name
+                    vsize = len(arg.data.dats)
+                    nnodes = arg.map.maps[0].dataset.size
+                    for i in range(vsize):
+                            s += "if (b_1 == %d) { " % i
+                            dim = arg.data.dats[i].dim[0]
+                            mapdim = arg.map.maps[i].dim
+                            print "-=-=-==-=-=-=-=="
+                            print dim, name, mapdim
+                            dname = arg.data.dats[i].name
+                            pos = "%(nnodes)s * (i_0 / %(dim)s) + %(n)s_map_%(i)s[%(dim)s*i + (i_0 %% %(dim)s)]" % {
+                                    'n':name,
+                                    'i':str(i),
+                                    'dim':mapdim,
+                                    'nnodes': nnodes }
+                            s += "%(n)s_%(dn)s[%(pos)s] += p_%(n)s[0][0];" % { 'n':name, 'dn':dname, 'pos': pos }
+                            #idx = '[0][0]'
+                            #val = "&%s%s" % (p_data, idx)
+                            ## I need the number of nodes in the mesh --> 4 in this case
+                            #nnodes = arg._map[0][0].dataset.size
+                            #row = "%(nnodes)s * (i_0 / %(dim)s) + %(map)s[i * %(dim)s + (i_0 %% %(dim)s)]" % \
+                            #    {'map' : c_map_name(arg)+"_r_"+str(i),
+                            #    'dim' : nrows,
+                            #    'nnodes' : nnodes }
+                            #pos = i * rsize + j
+                            #mat_name = name + "_" + str(pos)
+                            #s += "addto_scalar(%s, %s, %s, %s, %d); }\n"  % (mat_name, val, row, col, arg.access == rt.WRITE)
+                            s+="}\n"
+                    return s
             return ""
 
         def c_addto_vector_field(arg):
@@ -371,8 +449,6 @@ class ParLoop(rt.ParLoop):
             print name
             p_data = 'p_%s' % name
             print p_data
-            if arg._rowcol_map:
-                return c_addto_mixed_mat(arg)
             maps = as_tuple(arg.map, Map)
             nrows = maps[0].dim
             ncols = maps[1].dim
@@ -443,7 +519,7 @@ class ParLoop(rt.ParLoop):
                 return '%(name)s = ((%(type)s *)(((PyArrayObject *)_%(name)s)->data))[0]' % d
             tmp = '%(name)s[%%(i)s] = ((%(type)s *)(((PyArrayObject *)_%(name)s)->data))[%%(i)s]' % d
             return ';\n'.join([tmp % {'i' : i} for i in range(c.cdim)])
-            
+
         def c_mixed_block_loops(args):
             for arg in args:
                 if arg._rowcol_map:
@@ -453,16 +529,16 @@ class ParLoop(rt.ParLoop):
                                 for(int b_2 = 0; b_2 < %(col_blocks)s; b_2++){ " % \
                                     {'row_blocks' : len(arg._map[0]),
                                         'col_blocks' : len(arg._map[1])}
-                                    
+
                     return val
                 if arg._row_map:
                     print "This is is where we do the block loops"
                     print arg
                     val = "for(int b_1 = 0; b_1 < %(row_blocks)s; b_1++){ " % \
                                     {'row_blocks' : len(arg._map.maps)}
-                                    
+
                     return val
-            return ""       
+            return ""
         def c_mixed_block_loops_close(args):
             for arg in args:
                 if arg._rowcol_map:
@@ -472,9 +548,9 @@ class ParLoop(rt.ParLoop):
                     val = "} //end of the block loop"
                     return val
             return ""
-            
+
         def c_itspace_loops(args):
-            
+
             for arg in args:
                 print arg._row_map
                 if arg._rowcol_map:
@@ -505,13 +581,15 @@ class ParLoop(rt.ParLoop):
                 if arg._row_map:
                     rows = "int row_blk_size[%d] = {" % len(arg.data.dats)
                     for i in range(len(arg.data.dats)):
-                        rows += " %d" % arg.data.dats[i].dim
+                        ssize = arg.data.dats[i].dim[0] * arg.map.maps[i].dim
+                        print ssize
+                        rows += " %d" % ssize
                         if i < len(arg.data.dats)-1:
                             rows += ","
                     rows += " };\n"
                     return rows
             return ""
-            
+
         def c_zero_tmps(args):
             for arg in args:
                 if arg._rowcol_map:
@@ -552,17 +630,19 @@ class ParLoop(rt.ParLoop):
         _itspace_loop_close = '}'*len(self._it_space.extents)
         print "====== start vec field"
         _addtos_vector_field = ';\n'.join([c_addto_vector_field(arg) for arg in args \
-                                           if arg._is_mat and arg.data._is_vector_field])
+                                           if arg._is_mat and arg.data._is_vector_field and not arg._rowcol_map])
+
+        _addto_mixed_mat = c_addto_mixed_mat(args)
         print "====== start scalar field"
         _addtos_scalar_field = ';\n'.join([c_addto_scalar_field(arg) for arg in args \
                                            if arg._is_mat and arg.data._is_scalar_field])
-                                           
+
         _addto_mixed_vec = c_addto_mixed_vec(args)
-                                           
+
         print "====== start mixed space loops"
         _mixed_block_loops = c_mixed_block_loops(args)
         _mixed_block_loops_close = c_mixed_block_loops_close(args)
-        
+
         _tmp_blocksizes = c_tmp_blocksizes(args)
 
         _zero_tmps = c_zero_tmps(args) #';\n'.join([c_zero_tmp(arg) for arg in args if arg._is_mat])
@@ -588,6 +668,7 @@ class ParLoop(rt.ParLoop):
             %(zero_tmps)s;
             %(kernel_name)s(%(kernel_args)s);
             %(addto_mixed_vec)s
+            %(addto_mixed_mat)s
             %(addtos_vector_field)s;
             %(itspace_loop_close)s
             %(mixed_block_loops_close)s
@@ -596,7 +677,7 @@ class ParLoop(rt.ParLoop):
             }"""
 
         print "====== start stride"
-        
+
         if any(arg._is_soa for arg in args):
             kernel_code = """
             #define OP2_STRIDE(a, idx) a[idx]
@@ -607,7 +688,7 @@ class ParLoop(rt.ParLoop):
             kernel_code = """
             inline %(code)s
             """ % {'code' : self._kernel.code }
-            
+
         print "====== start code to compile"
         code_to_compile =  wrapper % { 'kernel_name' : self._kernel.name,
                                        'wrapper_args' : _wrapper_args,
@@ -625,7 +706,8 @@ class ParLoop(rt.ParLoop):
                                        'mixed_block_loops' : _mixed_block_loops,
                                        'mixed_block_loops_close' : _mixed_block_loops_close,
                                        'tmp_blocksizes': _tmp_blocksizes,
-                                       'addto_mixed_vec' : _addto_mixed_vec }
+                                       'addto_mixed_vec' : _addto_mixed_vec,
+                                       'addto_mixed_mat' : _addto_mixed_mat }
 
         print code_to_compile
         # We need to build with mpicc since that's required by PETSc
