@@ -61,6 +61,20 @@ class Dat(base.Dat):
         return self._vec
 
 
+class MultiDat(base.MultiDat):
+
+    @property
+    def vec(self):
+        """PETSc Vec appropriate for this Dat."""
+        if not hasattr(self, '_vec'):
+            vecnest = []
+            for d in self.dats:
+                size = (d.dataset.size * d.cdim, None)
+                vecnest.append(PETSc.Vec().createWithArray(d._data, size=size))
+            self._vec = PETSc.Vec().createNest(vecnest)
+        return self._vec
+
+
 class Mat(base.Mat):
     """OP2 matrix data. A Mat is defined on a sparsity pattern and holds a value
     for each element in the :class:`Sparsity`."""

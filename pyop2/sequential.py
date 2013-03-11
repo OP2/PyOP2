@@ -67,6 +67,7 @@ class ParLoop(host.ParLoop):
                   %(ind)s%(zero_tmps)s;
                   %(ind)s%(kernel_name)s(%(kernel_args)s);
                   %(ind)s%(addto_mixed_vec)s
+                  %(ind)s%(addto_mixed_mat)s
                   %(ind)s%(addtos_vector_field)s;
                   %(itspace_loop_close)s
                   %(mixed_block_loops_close)s
@@ -80,7 +81,11 @@ class ParLoop(host.ParLoop):
         _args = [0, 0]          # start, stop
         for arg in self.args:
             if arg._is_mat:
-                _args.append(arg.data.handle.handle)
+                if arg._rowcol_map:
+                    for i in range(len(arg.data.mat_list)):
+                        _args.append(arg.data.mat_list[i].handle.handle)
+                else:
+                    _args.append(arg.data.handle.handle)
             else:
                 if arg._multimap:
                     for dat in arg.data.dats:
