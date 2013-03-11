@@ -1499,7 +1499,11 @@ class Sparsity(object):
                (self._rmaps, self._cmaps, self._dims, self._name)
 
     def __del__(self):
-        core.free_sparsity(self)
+        if hasattr(self, 'sparsity_list'):
+            for sp in self.sparsity_list:
+                core.free_sparsity(sp)
+        else:
+            core.free_sparsity(self)
 
     @property
     def rowptr(self):
@@ -1806,6 +1810,7 @@ class ParLoop(object):
                                 if ms._dataset != arg.data.dats[k]._dataset:
                                     raise MapValueError( \
                                         "Dataset of arg %s map %s doesn't match the set of its Dat." % (i, j))
+                                k+=1
                                 continue
                             if ms._dataset != arg.data[k]._dataset:
                                 raise MapValueError( \
