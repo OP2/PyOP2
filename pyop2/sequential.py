@@ -254,16 +254,19 @@ class ParLoop(rt.ParLoop):
                 print "branch 5"
                 if arg._multimap:
                     print arg.map
+                    total_dim = 0
                     for i in range(len(arg.data.dats)):
-                        val += ";\n%(type)s *%(vec_name)s[%(dim)s]" % \
+                        total_dim += arg.map.maps[i].dim * arg.data.dats[i].cdim
+                    val += ";\n%(type)s *%(vec_name)s[%(dim)s]" % \
                             {'type' : arg.ctype,
-                            'vec_name' : c_vec_name(arg) + "_" + str(i),
-                            'dim' : arg.map.maps[i].dim}
+                            'vec_name' : c_vec_name(arg),
+                            'dim' : total_dim}
                 else:
+                    full_dim = arg.map.dim * arg.data.cdim
                     val += ";\n%(type)s *%(vec_name)s[%(dim)s]" % \
                        {'type' : arg.ctype,
                         'vec_name' : c_vec_name(arg),
-                        'dim' : arg.map.dim}
+                        'dim' : full_dim }#arg.map.dim}
             return val
 
         def c_ind_data(arg, idx):
@@ -274,15 +277,23 @@ class ParLoop(rt.ParLoop):
                      'idx' : idx,
                      'dim' : arg.data.cdim}
 
-        def c_ind_data_multi(arg, idx, j):
-            print "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
-            print arg.data
-            return "%(name)s + %(map_name)s[i * %(map_dim)s + %(idx)s] * %(dim)s" % \
+        def c_ind_data_new(arg, idx, j):
+            return "%(name)s + %(map_name)s[i * %(map_dim)s + %(idx)s] * %(dim)s + %(j)s" % \
+                    {'name' : c_arg_name(arg),
+                     'map_name' : c_map_name(arg),
+                     'map_dim' : arg.map.dim,
+                     'idx' : idx,
+                     'dim' : arg.data.cdim,
+                     'j' : j}
+
+        def c_ind_data_multi(arg, idx, j, l):
+            return "%(name)s + %(map_name)s[i * %(map_dim)s + %(idx)s] * %(dim)s + %(l)s" % \
                     {'name' : c_arg_name(arg) + '_' + arg.data.dats[j].name,
                      'map_name' : c_map_name(arg, j),
                      'map_dim' : arg.map.dim[0],
                      'idx' : idx,
-                     'dim' : arg.data.dats[j].cdim}
+                     'dim' : arg.data.dats[j].cdim,
+                     'l' : l}
 
         def c_kernel_arg(arg):
             if arg._uses_itspace:
@@ -314,7 +325,8 @@ class ParLoop(rt.ParLoop):
                     print "3.0"
                     ker_args = ""
                     for i in range(len(arg.data.dats)):
-                        ker_args += " " + c_vec_name(arg) + "_" + str(i)
+                        ker_args += " " + c_vec_name(arg) #+ "_" + str(i)
+                        break # fix the split
                         if i < len(arg.data.dats)-1:
                             ker_args += ","
                     return ker_args
@@ -337,20 +349,27 @@ class ParLoop(rt.ParLoop):
         def c_vec_init(arg):
             val = []
             if arg._multimap:
+                k = 0
                 for j in range(len(arg.map.maps)):
-                    for i in range(arg.map.maps[j]._dim):
-                        print arg.map.maps[j], arg.map.maps[j]._dim
-                        val.append("%(vec_name)s_%(index)s[%(idx)s] = %(data)s" %
-                           {'vec_name' : c_vec_name(arg),
-                            'idx' : i,
-                            'data' : c_ind_data_multi(arg, i, j),
-                            'index' : j})
+                    for l in range(arg.data.dats[j].cdim):
+                        for i in range(arg.map.maps[j]._dim):
+
+                            print arg.map.maps[j], arg.map.maps[j]._dim
+                            val.append("%(vec_name)s[%(idx)s] = %(data)s" %
+                                {'vec_name' : c_vec_name(arg),
+                                'idx' : k,
+                                'data' : c_ind_data_multi(arg, i, j, l)})
+                            k+=1
             else:
-              for i in range(arg.map._dim):
-                val.append("%(vec_name)s[%(idx)s] = %(data)s" %
+                k = 0
+                for j in range(arg.data.cdim):
+                    for i in range(arg.map._dim):
+
+                        val.append("%(vec_name)s[%(idx)s] = %(data)s" %
                            {'vec_name' : c_vec_name(arg),
-                            'idx' : i,
-                            'data' : c_ind_data(arg, i)} )
+                            'idx' : k,
+                            'data' : c_ind_data_new(arg, i, j)} )
+                        k+=1
             print "vec init"
             print val
             return ";\n".join(val)
@@ -404,8 +423,6 @@ class ParLoop(rt.ParLoop):
                             mat_name = name + "_" + str(pos)
                             s += "addto_scalar(%s, %s, %s, %s, %d); }\n"  % (mat_name, val, row, col, arg.access == rt.WRITE)
                     return s
-
-
             return ""
 
         def c_addto_mixed_vec(args):
@@ -420,26 +437,13 @@ class ParLoop(rt.ParLoop):
                             s += "if (b_1 == %d) { " % i
                             dim = arg.data.dats[i].dim[0]
                             mapdim = arg.map.maps[i].dim
-                            print "-=-=-==-=-=-=-=="
-                            print dim, name, mapdim
                             dname = arg.data.dats[i].name
                             pos = "%(nnodes)s * (i_0 / %(dim)s) + %(n)s_map_%(i)s[%(dim)s*i + (i_0 %% %(dim)s)]" % {
                                     'n':name,
                                     'i':str(i),
                                     'dim':mapdim,
                                     'nnodes': nnodes }
-                            s += "%(n)s_%(dn)s[%(pos)s] += p_%(n)s[0][0];" % { 'n':name, 'dn':dname, 'pos': pos }
-                            #idx = '[0][0]'
-                            #val = "&%s%s" % (p_data, idx)
-                            ## I need the number of nodes in the mesh --> 4 in this case
-                            #nnodes = arg._map[0][0].dataset.size
-                            #row = "%(nnodes)s * (i_0 / %(dim)s) + %(map)s[i * %(dim)s + (i_0 %% %(dim)s)]" % \
-                            #    {'map' : c_map_name(arg)+"_r_"+str(i),
-                            #    'dim' : nrows,
-                            #    'nnodes' : nnodes }
-                            #pos = i * rsize + j
-                            #mat_name = name + "_" + str(pos)
-                            #s += "addto_scalar(%s, %s, %s, %s, %d); }\n"  % (mat_name, val, row, col, arg.access == rt.WRITE)
+                            s += "%(n)s_%(dn)s[%(pos)s] += p_%(n)s[0];" % { 'n':name, 'dn':dname, 'pos': pos }
                             s+="}\n"
                     return s
             return ""
@@ -550,7 +554,6 @@ class ParLoop(rt.ParLoop):
             return ""
 
         def c_itspace_loops(args):
-
             for arg in args:
                 print arg._row_map
                 if arg._rowcol_map:
@@ -599,7 +602,7 @@ class ParLoop(rt.ParLoop):
                 if arg._row_map:
                     name = "p_" + c_arg_name(arg)
                     t = arg.ctype
-                    return "%(type)s %(name)s[1][1];\n" % { 'type': t, 'name':name }
+                    return "%(type)s %(name)s[1];\n" % { 'type': t, 'name':name }
             return ';\n'.join([c_zero_tmp(arg) for arg in args if arg._is_mat])
 
         args = self.args

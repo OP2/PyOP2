@@ -366,26 +366,6 @@ class Map(base.Map):
             raise DimTypeError("Unrecognised dimension value %s" % dim)
         return cls(iterset, dataset, dim[0], values, name)
 
-#class MultiMap(base.Map):
-#    """OP2 map, a relation between two :class:`Set` objects."""#
-#
-#    def __init__(self, sparsity):
-#        self.mixed_map_rows = MixedMap(sparsity._rowmaps)
-#        self.mixed_map_cols = MixedMap(sparsity._colmaps)
-#        self._lib_handle = None
-#        Map._globalcount += 1
-
-#class MixedMap(base.Map):
-#    def __init__(self, map_list):
-#        self.maps = []
-#        for i in range(len(map_list)):
-#            mps= []
-#            for j in range(len(map_list[i])):
-#                mps += [map_list[i][j]._c_handle]
-#            self.maps = mps
-#        self._lib_handle = None
-#        Map._globalcount += 1
-
 class MultiMap(base.Map):
     def __init__(self, map_list):
         #self._multimap = True
@@ -484,7 +464,13 @@ class Sparsity(base.Sparsity):
         _sparsity_cache[key] = self
 
     def __del__(self):
-        core.free_sparsity(self)
+        if hasattr(self, "sparsity_list"):
+            #pass
+            for sp in self.sparsity_list:
+                print "sparsity list"
+                core.free_sparsity(sp)
+        else:
+            core.free_sparsity(self)
 
     @property
     def rowptr(self):
