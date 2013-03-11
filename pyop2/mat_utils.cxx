@@ -27,6 +27,26 @@ void addto_vector(Mat mat, const void *values,
                 insert ? INSERT_VALUES : ADD_VALUES );
 }
 
+/*oid addto_mixed_matnest(Mat mat, int b1, int b2, const void *value, int row, int col, int insert)
+{
+  assert( mat && value);
+  // FIMXE: this assumes we're getting a PetscScalar
+  const PetscScalar * v = (const PetscScalar *)value;
+
+  if ( v[0] == 0.0 && !insert ) return;
+
+  Mat submat;
+  IS isrow;
+  IS iscol;
+
+  MatGetLocalSubMatrix(mat, isrow, iscol, &submat);
+
+  MatSetValuesLocal( submat,
+                1, (const PetscInt *)&row,
+                1, (const PetscInt *)&col,
+                v, insert ? INSERT_VALUES : ADD_VALUES );
+}*/
+
 void assemble_mat(Mat mat)
 {
   assert( mat );
