@@ -100,7 +100,7 @@ class Arg(object):
             for i in range(len(map)):
                 if not isinstance(map[i], list):
                     self._rowcol_map = False
-            
+
             print self._rowcol_map
             print "YAAAYY!!! I'm a Multi RowCol Arg"
             print "MultiMap list of maps for this arg is:"
@@ -1351,6 +1351,7 @@ class ParLoop(object):
 
     def check_args(self):
         iterset = self._it_space._iterset
+        print "START CHECK"
         for i, arg in enumerate(self._actual_args):
             if arg._is_global or arg._map == IdentityMap:
                 continue
@@ -1361,6 +1362,7 @@ class ParLoop(object):
                 if isinstance(m, list):
                     k = 0
                     for ms in m:
+                        print "ITERATION"
                         if ms._iterset != iterset:
                             raise MapValueError( \
                                 "Iterset of arg %s map %s doesn't match ParLoop iterset." % (i, j))
@@ -1369,8 +1371,15 @@ class ParLoop(object):
                                 continue
                             if arg.data._name == "MultiDat":
                                 if ms._dataset != arg.data.dats[k]._dataset:
+
+                                    print m
+                                    print ms
+                                    print arg.data.dats[k]
+
+                                    print ms._dataset, arg.data.dats[k]._dataset
                                     raise MapValueError( \
                                         "Dataset of arg %s map %s doesn't match the set of its Dat." % (i, j))
+                                k+=1
                                 continue
                             if ms._dataset != arg.data[k]._dataset:
                                 raise MapValueError( \
