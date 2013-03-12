@@ -68,7 +68,8 @@ def compile_form(form, name):
     # step in time-varying problems
     kernels, form_data = _form_cache.get(key, (None, None))
     if form_data is None:
-        code = ffc_compile_form(form, prefix=name, parameters=ffc_parameters)
+        code = '#include "pyop2_geometry.h"\n'
+        code += ffc_compile_form(form, prefix=name, parameters=ffc_parameters)
         form_data = form.form_data()
 
         kernels = [ Kernel(code, '%s_%s_integral_0_%s' % \
