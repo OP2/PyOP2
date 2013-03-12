@@ -584,7 +584,7 @@ class ParLoop(op2.ParLoop):
             op2stride = Const(1, self._it_space.size, name='op2stride',
                               dtype='int32')
         def compile_kernel():
-            prg = cl.Program(_ctx, self._src).build(options="-Werror")
+            prg = cl.Program(_ctx, self._src).build()
             return prg.__getattr__(self._stub_name)
 
         conf = self.launch_configuration()
