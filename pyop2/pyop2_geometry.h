@@ -2,46 +2,46 @@
 
 /// Compute Jacobian J for interval embedded in R^1
 #define compute_jacobian_interval_1d(J, vertex_coordinates) \
-  J[0] = vertex_coordinates[1][0] - vertex_coordinates[0][0];
+  J[0] = vertex_coordinates[1] - vertex_coordinates[0];
 
 /// Compute Jacobian J for interval embedded in R^2
 #define compute_jacobian_interval_2d(J, vertex_coordinates) \
-  J[0] = vertex_coordinates[1][0] - vertex_coordinates[0][0]; \
-  J[1] = vertex_coordinates[1][1] - vertex_coordinates[1][1];
+  J[0] = vertex_coordinates[2] - vertex_coordinates[0]; \
+  J[1] = vertex_coordinates[3] - vertex_coordinates[1];
 
 /// Compute Jacobian J for interval embedded in R^3
 #define compute_jacobian_interval_3d(J, vertex_coordinates) \
-  J[0] = vertex_coordinates[1][0] - vertex_coordinates[0][0]; \
-  J[1] = vertex_coordinates[1][1] - vertex_coordinates[0][1]; \
-  J[2] = vertex_coordinates[1][2] - vertex_coordinates[0][2];
+  J[0] = vertex_coordinates[3] - vertex_coordinates[0]; \
+  J[1] = vertex_coordinates[4] - vertex_coordinates[1]; \
+  J[2] = vertex_coordinates[5] - vertex_coordinates[2];
 
 /// Compute Jacobian J for triangle embedded in R^2
 #define compute_jacobian_triangle_2d(J, vertex_coordinates) \
-  J[0] = vertex_coordinates[1][0] - vertex_coordinates[0][0]; \
-  J[1] = vertex_coordinates[2][0] - vertex_coordinates[0][0]; \
-  J[2] = vertex_coordinates[1][1] - vertex_coordinates[0][1]; \
-  J[3] = vertex_coordinates[2][1] - vertex_coordinates[0][1];
+  J[0] = vertex_coordinates[2] - vertex_coordinates[0]; \
+  J[1] = vertex_coordinates[4] - vertex_coordinates[0]; \
+  J[2] = vertex_coordinates[3] - vertex_coordinates[1]; \
+  J[3] = vertex_coordinates[5] - vertex_coordinates[1];
 
 /// Compute Jacobian J for triangle embedded in R^3
 #define compute_jacobian_triangle_3d(J, vertex_coordinates) \
-  J[0] = vertex_coordinates[1][0] - vertex_coordinates[0][0]; \
-  J[1] = vertex_coordinates[2][0] - vertex_coordinates[0][0]; \
-  J[2] = vertex_coordinates[1][1] - vertex_coordinates[0][1]; \
-  J[3] = vertex_coordinates[2][1] - vertex_coordinates[0][1]; \
-  J[4] = vertex_coordinates[1][2] - vertex_coordinates[0][2]; \
-  J[5] = vertex_coordinates[2][2] - vertex_coordinates[0][2];
+  J[0] = vertex_coordinates[3] - vertex_coordinates[0]; \
+  J[1] = vertex_coordinates[6] - vertex_coordinates[0]; \
+  J[2] = vertex_coordinates[4] - vertex_coordinates[1]; \
+  J[3] = vertex_coordinates[7] - vertex_coordinates[1]; \
+  J[4] = vertex_coordinates[5] - vertex_coordinates[2]; \
+  J[5] = vertex_coordinates[8] - vertex_coordinates[2];
 
 /// Compute Jacobian J for tetrahedron embedded in R^3
 #define compute_jacobian_tetrahedron_3d(J, vertex_coordinates) \
-  J[0] = vertex_coordinates[1][0] - vertex_coordinates[0][0]; \
-  J[1] = vertex_coordinates[2][0] - vertex_coordinates[0][0]; \
-  J[2] = vertex_coordinates[3][0] - vertex_coordinates[0][0]; \
-  J[3] = vertex_coordinates[1][1] - vertex_coordinates[0][1]; \
-  J[4] = vertex_coordinates[2][1] - vertex_coordinates[0][1]; \
-  J[5] = vertex_coordinates[3][1] - vertex_coordinates[0][1]; \
-  J[6] = vertex_coordinates[1][2] - vertex_coordinates[0][2]; \
-  J[7] = vertex_coordinates[2][2] - vertex_coordinates[0][2]; \
-  J[8] = vertex_coordinates[3][2] - vertex_coordinates[0][2];
+  J[0] = vertex_coordinates[3]  - vertex_coordinates[0]; \
+  J[1] = vertex_coordinates[6]  - vertex_coordinates[0]; \
+  J[2] = vertex_coordinates[9]  - vertex_coordinates[0]; \
+  J[3] = vertex_coordinates[4]  - vertex_coordinates[1]; \
+  J[4] = vertex_coordinates[7]  - vertex_coordinates[1]; \
+  J[5] = vertex_coordinates[10] - vertex_coordinates[1]; \
+  J[6] = vertex_coordinates[5]  - vertex_coordinates[2]; \
+  J[7] = vertex_coordinates[8]  - vertex_coordinates[2]; \
+  J[8] = vertex_coordinates[11] - vertex_coordinates[2];
 
 //--- Computation of Jacobian inverses ---
 
