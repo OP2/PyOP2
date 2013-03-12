@@ -257,13 +257,13 @@ class ParLoop(rt.ParLoop):
                     total_dim = 0
                     for i in range(len(arg.data.dats)):
                         total_dim += arg.map.maps[i].dim * arg.data.dats[i].cdim
-                    val += ";\n%(type)s %(vec_name)s[%(dim)s]" % \
+                    val += ";\n%(type)s *%(vec_name)s[%(dim)s]" % \
                             {'type' : arg.ctype,
                             'vec_name' : c_vec_name(arg),
                             'dim' : total_dim}
                 else:
                     full_dim = arg.map.dim * arg.data.cdim
-                    val += ";\n%(type)s %(vec_name)s[%(dim)s]" % \
+                    val += ";\n%(type)s *%(vec_name)s[%(dim)s]" % \
                        {'type' : arg.ctype,
                         'vec_name' : c_vec_name(arg),
                         'dim' : full_dim }#arg.map.dim}
@@ -355,7 +355,7 @@ class ParLoop(rt.ParLoop):
                         for i in range(arg.map.maps[j]._dim):
 
                             print arg.map.maps[j], arg.map.maps[j]._dim
-                            val.append("%(vec_name)s[%(idx)s] = *(%(data)s)" %
+                            val.append("%(vec_name)s[%(idx)s] = %(data)s" %
                                 {'vec_name' : c_vec_name(arg),
                                 'idx' : k,
                                 'data' : c_ind_data_multi(arg, i, j, l)})
@@ -365,7 +365,7 @@ class ParLoop(rt.ParLoop):
                 for j in range(arg.data.cdim):
                     for i in range(arg.map._dim):
 
-                        val.append("%(vec_name)s[%(idx)s] = *(%(data)s)" %
+                        val.append("%(vec_name)s[%(idx)s] = %(data)s" %
                            {'vec_name' : c_vec_name(arg),
                             'idx' : k,
                             'data' : c_ind_data_new(arg, i, j)} )
