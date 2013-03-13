@@ -69,18 +69,13 @@ f = Coefficient(W)
 g = Coefficient(V)
 h = Coefficient(E)
 
-a = inner(v,u)*dx + inner(q,r)*dx
-#a = inner(s,t)*dx
+a = inner(s,t)*dx
 L = inner(s,f)*dx
-#L = inner(v,g)*dx + inner(q,h)*dx
 
 # Generate code for mass and rhs assembly.
 
 mass, = compile_form(a, "mass")
 rhs, = compile_form(L, "rhs")
-
-#from IPython import embed
-#embed()
 
 # Set up simulation data structures
 
@@ -97,7 +92,6 @@ elem_node_map  = np.asarray([ 0, 1, 3, 2, 3, 1 ], dtype=np.uint32)
 elem_elem_map = np.asarray([ 0, 1 ], dtype=np.uint32)
 edge_node_map  = np.asarray([ 0, 1, 1, 2, 2, 3, 3, 0, 1, 3 ], dtype=np.uint32)
 
-elem_node  = op2.Map(elements, nodes, 3, elem_node_map,  "elem_node")
 elem_node1 = op2.Map(elements, nodes, 3, elem_node_map,  "elem_node1")
 elem_elem = op2.Map(elements, elements, 1, elem_elem_map, "elem_elem")
 
@@ -105,15 +99,12 @@ edge_node1 = op2.Map(edges, nodes, 2, edge_node_map, "edge_node1")
 
 
 sparsity = op2.Sparsity([((elem_node1, elem_node1),(edge_node1, edge_node1)),(elem_elem, elem_elem)], [2,1], "sparsity")
-print "========"
 
 ##
 ## THE LIST OF BLOCKS WILL BE IN: sparsity.sparsity_list
 ##
 
 mat = op2.Mat(sparsity, valuetype, "mat")
-
-print "====== done with mat creation"
 
 coord_vals = np.asarray([ (0.0, 0.0), (2.0, 0.0), (1.0, 1.0), (0.0, 1.5) ],
                            dtype=valuetype)
@@ -127,18 +118,10 @@ pressure_vals = np.asarray([ 0.1, 0.1 ],
                            dtype=valuetype)
 pressure = op2.Dat(elements, 1, pressure_vals, valuetype, "pressure")
 
-
-#version 3
-fields = op2.MultiDat([velocity, pressure], "fields")
-
-xset = op2.MultiSet(sparsity.x_sets)
-bset = op2.MultiSet(sparsity.b_sets)
+f = op2.MultiDat([velocity, pressure], "fields")
 
 b_block1 = np.asarray([0.0]*sparsity.b_sizes[0], dtype=valuetype)
 b_block2 = np.asarray([0.0]*sparsity.b_sizes[1], dtype=valuetype)
-
-print sparsity.b_sizes[0]
-print sparsity.b_sizes[1]
 
 b1 = op2.Dat(nodes,2,b_block1,valuetype,"b1")
 b2 = op2.Dat(elements,1,b_block2,valuetype,"b2")
@@ -149,13 +132,6 @@ x_block2 = np.asarray([0.0]*sparsity.x_sizes[1], dtype=valuetype)
 x1 = op2.Dat(nodes,2,x_block1,valuetype,"x1")
 x2 = op2.Dat(elements,1,x_block2,valuetype,"x2")
 
-f_block1 = np.asarray([0.0]*sparsity.x_sizes[0], dtype=valuetype)
-f_block2 = np.asarray([0.0]*sparsity.x_sizes[1], dtype=valuetype)
-
-f1 = op2.Dat(nodes,2,f_block1,valuetype,"f1")
-f2 = op2.Dat(elements,1,f_block2,valuetype,"f2")
-
-f = op2.MultiDat([f1, f2], "f")
 b = op2.MultiDat([b1, b2], "b")
 x = op2.MultiDat([x1, x2], "x")
 
@@ -163,56 +139,24 @@ row_maps = op2.MultiMap(sparsity.getRowMaps(elements)) #list of row maps [(),()]
 
 col_maps = op2.MultiMap(sparsity.getColMaps(elements)) # list of colmaps *  as above  *
 
-print sparsity.getRowMaps(elements)
-print sparsity.getColMaps(elements)
-
-from IPython import embed
-embed()
-
-#mass._code = """
-#        void mass_cell_integral_0_otherwise(double A[1][1], double *x[2], double *velocity[2], double* pressure[1], int j, int k)
-#{
-#    printf(" This is the Kernel Code that's not generated yet! -> %d %d \\n",j,k);
-#    A[0][0] = 0.1;
-#
-#}
-
-#        """
-
-#rhs._code = """
-#void rhs_cell_integral_0_otherwise(double A[1][1], double *x[2], double *f_vec_0[2], double *f_vec_1[1], int j)
-#{#
-#
-#    printf("This is the RHS Kernel code that's not generated yet! -> %d \\n", j);
-#    A[0][0] = 0.1;
-#
-#}
-#"""
-
 # Assemble and solve
-print "======= start first loop"
 op2.par_loop(mass, elements(7,7),
              mat((row_maps[op2.i[0]], col_maps[op2.i[1]]), op2.INC), #first the rowmaps then the colmaps
              coords(elem_node1, op2.READ))
 
-print mat.mat_list[0].handle.view()
-
-print "======= start second loop"
 op2.par_loop(rhs, elements(7),
-                     b(row_maps[op2.i[0]], op2.INC),
-                     coords(elem_node1, op2.READ),
-                     fields(row_maps, op2.READ))
+             b(row_maps[op2.i[0]], op2.INC),
+             coords(elem_node1, op2.READ),
+             f(row_maps, op2.READ))
 
-print b.data[0]
-
-solver = op2.Solver(preconditioner="none")
-#solver = op2.Solver()
+solver = op2.Solver(linear_solver='gmres', preconditioner="none")
 solver.solve(mat, x, b)
 
 # Print solution
 print "Computed solution: %s" % x.data
+print "Forcing vector: %s" % f.data
 
-#Save output (if necessary)
+# Save output (if necessary)
 if opt['save_output']:
     import pickle
     with open("mass_vector.out","w") as out:
