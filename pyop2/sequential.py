@@ -411,11 +411,11 @@ class ParLoop(rt.ParLoop):
                             val = "&%s%s" % (p_data, idx)
                             # I need the number of nodes in the mesh --> 4 in this case
                             nnodes = arg._map[0][0].dataset.size
-                            row = "%(nnodes)s * (i_0 / %(dim)s) + %(map)s[i * %(dim)s + (i_0 %% %(dim)s)]" % \
+                            row = "%(nnodes)s * (j_0 / %(dim)s) + %(map)s[i * %(dim)s + (j_0 %% %(dim)s)]" % \
                                 {'map' : c_map_name(arg)+"_r_"+str(i),
                                 'dim' : nrows,
                                 'nnodes' : nnodes }
-                            col = "%(nnodes)s * (i_1 / %(dim)s) + %(map)s[i * %(dim)s + (i_1 %% %(dim)s)]" % \
+                            col = "%(nnodes)s * (j_1 / %(dim)s) + %(map)s[i * %(dim)s + (j_1 %% %(dim)s)]" % \
                                 {'map' : c_map_name(arg)+"_c_"+str(j),
                                 'dim' : ncols,
                                 'nnodes' : nnodes }
@@ -438,7 +438,7 @@ class ParLoop(rt.ParLoop):
                             dim = arg.data.dats[i].dim[0]
                             mapdim = arg.map.maps[i].dim
                             dname = arg.data.dats[i].name
-                            pos = "%(nnodes)s * (i_0 / %(dim)s) + %(n)s_map_%(i)s[%(dim)s*i + (i_0 %% %(dim)s)]" % {
+                            pos = "%(nnodes)s * (j_0 / %(dim)s) + %(n)s_map_%(i)s[%(dim)s*i + (j_0 %% %(dim)s)]" % {
                                     'n':name,
                                     'i':str(i),
                                     'dim':mapdim,
@@ -557,11 +557,14 @@ class ParLoop(rt.ParLoop):
             for arg in args:
                 print arg._row_map
                 if arg._rowcol_map:
-                    _itspace_loops = "for(int i_0 = 0; i_0 < row_blk_size[b_1]; i_0++){\n \
-                            for(int i_1 = 0; i_1 < col_blk_size[b_2]; i_1++) {\n"
+                    _itspace_loops = "for(int j_0 = 0; j_0 < row_blk_size[b_1]; j_0++){\n"
+                    _itspace_loops += "for(int j_1 = 0; j_1 < col_blk_size[b_2]; j_1++) {\n"
+                    _itspace_loops += "const int i_0 = j_0 + row_blk_start[b_1];\n"
+                    _itspace_loops += "const int i_1 = j_1 + col_blk_start[b_2];\n"
                     return _itspace_loops
                 if arg._row_map:
-                    _itspace_loops = "for(int i_0 = 0; i_0 < row_blk_size[b_1]; i_0++){\n"
+                    _itspace_loops = "for(int j_0 = 0; j_0 < row_blk_size[b_1]; j_0++){\n"
+                    _itspace_loops += "const int i_0 = j_0 + row_blk_start[b_1];\n"
                     return _itspace_loops
             return '\n'.join([itspace_loop(i,e) for i, e in zip(range(len(self._it_space.extents)), self._it_space.extents)])
 
@@ -569,28 +572,48 @@ class ParLoop(rt.ParLoop):
             for arg in args:
                 if arg._rowcol_map:
                     rows = "int row_blk_size[%d] = {" % len(arg._map[0])
+                    rowstart = "int row_blk_start[%d] = {" % len(arg._map[0])
+                    cnt = 0
                     for i in range(len(arg._map[0])):
-                        rows += " %d" % (arg.data.sparsity.dims[i][0] * arg._map[0][i].dim)
+                        sz = arg.data.sparsity.dims[i][0] * arg._map[0][i].dim
+                        rows += " %d" % sz
+                        rowstart += " %d" % cnt
                         if i < len(arg._map[0])-1:
                             rows += ","
+                            rowstart += ","
+                        cnt += sz
                     rows += " };\n"
+                    rowstart += " };\n"
                     cols = "int col_blk_size[%d] = {" % len(arg._map[1])
+                    colstart = "int col_blk_start[%d] = {" % len(arg._map[1])
+                    cnt = 0
                     for i in range(len(arg._map[1])):
-                        cols += " %d" % (arg.data.sparsity.dims[i][1] * arg._map[1][i].dim)
+                        sz = arg.data.sparsity.dims[i][1] * arg._map[1][i].dim
+                        cols += " %d" % sz
+                        colstart += " %d" % cnt
                         if i < len(arg._map[1])-1:
                             cols += ","
+                            colstart += ","
+                        cnt += sz
                     cols += " };\n"
-                    return rows+cols
+                    colstart += " };\n"
+                    return '\n'.join([rows, rowstart, cols, colstart])
                 if arg._row_map:
+                    rowstart = "int row_blk_start[%d] = {" % len(arg.data.dats)
+                    cnt = 0
                     rows = "int row_blk_size[%d] = {" % len(arg.data.dats)
                     for i in range(len(arg.data.dats)):
                         ssize = arg.data.dats[i].dim[0] * arg.map.maps[i].dim
                         print ssize
                         rows += " %d" % ssize
+                        rowstart += " %d" % cnt
                         if i < len(arg.data.dats)-1:
                             rows += ","
+                            rowstart += ","
+                        cnt += ssize
                     rows += " };\n"
-                    return rows
+                    rowstart += " };\n"
+                    return '\n'.join([rows, rowstart])
             return ""
 
         def c_zero_tmps(args):
