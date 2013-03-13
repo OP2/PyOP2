@@ -440,7 +440,6 @@ class Sparsity(base.Sparsity):
     @validate_type(('maps', (Map, tuple), MapTypeError), \
                    ('dims', (int, tuple), TypeError))
     def __new__(cls, maps, dims, name=None, block=None):
-        print "*************"
         key = 0
         if isinstance(maps, list):
             #do the stuff for the mixed spaces
@@ -458,7 +457,6 @@ class Sparsity(base.Sparsity):
     #@validate_type(('maps', (Map, tuple), MapTypeError), \
     #               ('dims', (int, tuple), TypeError))
     def __init__(self, maps, dims, name=None, block=None):
-        print "--------------"
         if getattr(self, '_cached', False):
             return
 
@@ -477,7 +475,6 @@ class Sparsity(base.Sparsity):
         key = 0
         self.sparsity_list = []
         if isinstance(maps, list):
-            print "--------block--------"
             key = (frozenset(maps), frozenset(dims))
             self._cached = True
             if not block:
@@ -490,13 +487,10 @@ class Sparsity(base.Sparsity):
                 sparsity._rmult = self._rowmult[i]
                 sparsity._cmult = self._colmult[i]
 
-                print "block number = %d" % i
-
                 core.build_sparsity_mixed(sparsity, parallel=PYOP2_COMM.size > 1)
 
                 self.sparsity_list += [sparsity]
 
-              print len(self.sparsity_list)
         else:
             key = (maps, as_tuple(dims, int, 2))
             self._cached = True
@@ -505,9 +499,7 @@ class Sparsity(base.Sparsity):
 
     def __del__(self):
         if hasattr(self, "sparsity_list"):
-            #pass
             for sp in self.sparsity_list:
-                print "sparsity list"
                 core.free_sparsity(sp)
         else:
             core.free_sparsity(self)
@@ -561,23 +553,17 @@ class Mat(base.Mat):
     for each element in the :class:`Sparsity`."""
 
     def __init__(self, *args, **kwargs):
-        print "++++++++++++> This is matrix construction"
         super(Mat, self).__init__(*args, **kwargs)
-        print self._sparsity.sparsity_list
         self.mat_list = []
         for i in range(len(self._sparsity.sparsity_list)):
-            print i
             self.mat_list += [Mat(self._sparsity.sparsity_list[i],self._datatype,"mat_"+str(i))]
 
         if self._sparsity.sparsity_list != []:
             self.createNestedMat()
-
         else:
             self._handle = None
-        print "END OF CONSTR"
 
     def createNestedMat(self):
-        print "create nested mat"
         mat = PETSc.Mat()
         petsc_matlist = [m.handle for m in self.mat_list]
         #from IPython import embed; embed()
@@ -587,34 +573,16 @@ class Mat(base.Mat):
         self._handle = mat
 
     def _init(self):
-        print "----------------> This is matrix construction"
         if not self.dtype == PETSc.ScalarType:
             raise RuntimeError("Can only create a matrix of type %s, %s is not supported" \
                     % (PETSc.ScalarType, self.dtype))
-        print self._sparsity.sparsity_list
-#        if self._sparsity.sparsity_list != []:
-            #print "this is for sparse block matrices"
-            #mat = PETSc.Mat()
-            #petsc_matlist = []
-            #for m in self.mat_list:
-            #    petsc_matlist += [m.handle]
-            #rows = len(self._sparsity._rmaps)
-            #cols = len(self._sparsity._cmaps)
-            #mat.createNest(rows,cols,petsc_matlist)
-            #print " -------------------------------------> PETSC"
-            #print mat
- #       else:
         if PYOP2_COMM.size == 1:
             mat = PETSc.Mat()
             row_lg = PETSc.LGMap()
             col_lg = PETSc.LGMap()
-            print self.sparsity.dims
             if isinstance(self.sparsity.dims, list):
-                print "*1"
                 #could be wrong in the most general of cases
                 rdim, cdim = self.sparsity.dims[0]
-                print self.sparsity.nrows[0], rdim
-                print self.sparsity.ncols[0], cdim
                 row_lg.create(indices=np.arange(self.sparsity.nrows[0] * rdim, dtype=PETSc.IntType))
                 col_lg.create(indices=np.arange(self.sparsity.ncols[0] * cdim, dtype=PETSc.IntType))
                 self._array = np.zeros(self.sparsity.nz, dtype=PETSc.RealType)
@@ -622,9 +590,7 @@ class Mat(base.Mat):
                                     (self.sparsity._rowptr, self.sparsity._colidx, self._array))
 
                 mat.setLGMap(rmap=row_lg, cmap=col_lg)
-                #from IPython import embed; embed()
             else:
-                print "*2"
                 rdim, cdim = self.sparsity.dims
                 row_lg.create(indices=np.arange(self.sparsity.nrows * rdim, dtype=PETSc.IntType))
                 col_lg.create(indices=np.arange(self.sparsity.ncols * cdim, dtype=PETSc.IntType))
@@ -637,7 +603,6 @@ class Mat(base.Mat):
                                     (self.sparsity._rowptr, self.sparsity._colidx, self._array))
                 mat.setLGMap(rmap=row_lg, cmap=col_lg)
         else:
-            print "*3"
             mat = PETSc.Mat()
             row_lg = PETSc.LGMap()
             col_lg = PETSc.LGMap()
@@ -652,7 +617,6 @@ class Mat(base.Mat):
             mat.setOption(mat.Option.IGNORE_OFF_PROC_ENTRIES, True)
             mat.setOption(mat.Option.IGNORE_ZERO_ENTRIES, True)
             mat.setOption(mat.Option.NEW_NONZERO_ALLOCATION_ERR, True)
-        #print mat.mat
         self._handle = mat
 
     def zero(self):
@@ -715,33 +679,17 @@ class Solver(base.Solver, PETSc.KSP):
     def solve(self, A, x, b):
         self._set_parameters()
         if hasattr(x, "_name") and x._name == "MultiDat":
-            print "x is a MultiDat"
-            #xlist = x.data[0].reshape(x.data[0].size,1)
-            #for i in range(len(x.data) - 1):
-            #    for j in range(len(x.data[i+1])):
-            #        xlist += [x.data[i+1][j]]
-            #xlist = xlist.flatten()
             x_petsc_vec = []
             for dat in x.dats:
                 ppx = PETSc.Vec().createWithArray(dat.data, size=(dat.dataset.size * dat.cdim, None))
                 x_petsc_vec += [ppx]
-            print len(x_petsc_vec)
             px = PETSc.Vec().createVecNest(x_petsc_vec)
 
-            #blist = b.data[0].reshape(b.data[0].size,1)
-            #print blist
-            #for i in range(len(b.data) - 1):
-            #    for j in range(len(b.data[i+1])):
-            #        blist += [b.data[i+1][j]]
-            #blist = blist.flatten()
-            #print blist
             b_petsc_vec = []
             for dat in b.dats:
                 ppb = PETSc.Vec().createWithArray(dat.data, size=(dat.dataset.size * dat.cdim, None))
                 b_petsc_vec += [ppb]
-            print len(b_petsc_vec)
             pb = PETSc.Vec().createVecNest(b_petsc_vec)
-            #self.setPC(PetSC)
         else:
             px = PETSc.Vec().createWithArray(x.data, size=(x.dataset.size * x.cdim, None))
             pb = PETSc.Vec().createWithArray(b.data_ro, size=(b.dataset.size * b.cdim, None))
@@ -751,12 +699,8 @@ class Solver(base.Solver, PETSc.KSP):
             self.reshist = []
             def monitor(ksp, its, norm):
                 self.reshist.append(norm)
-                print "%3d KSP Residual norm %14.12e" % (its, norm)
             self.setMonitor(monitor)
         # Not using super here since the MRO would call base.Solver.solve
-        print self.view()
-        print pb.view()
-        print px.view()
         PETSc.KSP.solve(self, pb, px)
         if self.parameters['monitor_convergence']:
             self.cancelMonitor()

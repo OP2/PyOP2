@@ -54,25 +54,20 @@ class ParLoop(rt.ParLoop):
         _fun = self.generate_code()
         _args = [0, 0]          # start, stop
         for arg in self.args:
-            print " ==== pass args ===="
             if arg._is_mat:
-                print "pass 1"
                 if arg._rowcol_map:
                     for i in range(len(arg.data.mat_list)):
                         _args.append(arg.data.mat_list[i].handle.handle)
                 else:
                     _args.append(arg.data.handle.handle)
             else:
-                print "pass 1.1"
                 if arg._multimap:
                     for dat in arg.data.dats:
-                        print " -*- "
                         _args.append(dat._data)
                 else:
                     _args.append(arg.data._data)
 
             if arg._is_dat:
-                print "pass 2"
                 if arg._multimap:
                     for i in range(len(arg.data.dats)):
                         maybe_setflags(arg.data.dats[i]._data, write=False)
@@ -80,23 +75,16 @@ class ParLoop(rt.ParLoop):
                     maybe_setflags(arg.data._data, write=False)
 
             if arg._is_indirect or arg._is_mat:
-                print "pass 3"
                 if arg._rowcol_map:
-                    print "pass 3.1"
                     for i in range(len(arg.map)):
                         for map in arg.map[i]:
-                            print " -*- "
                             _args.append(map.values)
                 elif arg._multimap:
-                    print "pass 3.2"
                     for map in arg.map.maps:
-                        print " -*- "
                         _args.append(map.values)
                 else:
-                    print "pass 3.3"
                     maps = as_tuple(arg.map, Map)
                     for map in maps:
-                        print " -*- "
                         _args.append(map.values)
 
         for c in Const._definitions():
@@ -182,7 +170,6 @@ class ParLoop(rt.ParLoop):
                     val = "PyObject *_%(name)s" % {'name' : c_arg_name(arg) }
             # now handle the maps within the arg
             if arg._is_indirect or arg._is_mat:
-                print arg.map
                 if arg._rowcol_map:
                     # if the arg is a mat arg and has a list of lists of maps
                     for i in range(len(arg.map)):
@@ -203,15 +190,11 @@ class ParLoop(rt.ParLoop):
                         maps = as_tuple(arg.map, Map)
                         if len(maps) is 2:
                             val += ", PyObject *_%(name)s" % {'name' : c_map_name(arg)+'2'}
-            print "----> val is:"
-            print val
             return val
 
         def c_wrapper_dec(arg):
-            print "declare wrapper args"
             val = ""
             if arg._is_mat:
-                print "branch 1"
                 if arg._rowcol_map:
                     for i in range(len(arg.data.mat_list)):
                         val += "Mat %(name)s = (Mat)((uintptr_t)PyLong_AsUnsignedLong(_%(name)s));\n" % \
@@ -220,7 +203,6 @@ class ParLoop(rt.ParLoop):
                     val = "Mat %(name)s = (Mat)((uintptr_t)PyLong_AsUnsignedLong(_%(name)s))" % \
                         { "name": c_arg_name(arg) }
             else:
-                print "branch 2"
                 if arg._multimap:
                     for i in range(len(arg.data.dats)):
                         if i > 0:
@@ -231,7 +213,6 @@ class ParLoop(rt.ParLoop):
                     val = "%(type)s *%(name)s = (%(type)s *)(((PyArrayObject *)_%(name)s)->data)" % \
                         {'name' : c_arg_name(arg), 'type' : arg.ctype}
             if arg._is_indirect or arg._is_mat:
-                print "branch 3"
                 if arg._rowcol_map:
                     for i in range(len(arg.map)):
                         for j in range(len(arg.map[i])):
@@ -247,13 +228,10 @@ class ParLoop(rt.ParLoop):
                         val += ";\nint *%(name)s = (int *)(((PyArrayObject *)_%(name)s)->data)" % \
                             {'name' : c_map_name(arg)}
             if arg._is_mat:
-                print "branch 4"
                 val += ";\nint *%(name)s2 = (int *)(((PyArrayObject *)_%(name)s2)->data)" % \
                            {'name' : c_map_name(arg)}
             if arg._is_vec_map:
-                print "branch 5"
                 if arg._multimap:
-                    print arg.map
                     total_dim = 0
                     for i in range(len(arg.data.dats)):
                         total_dim += arg.map.maps[i].dim * arg.data.dats[i].cdim
@@ -298,14 +276,10 @@ class ParLoop(rt.ParLoop):
         def c_kernel_arg(arg):
             if arg._uses_itspace:
                 if arg._is_mat:
-                    print "ker 1"
                     name = "p_%s" % c_arg_name(arg)
                     if arg.data._is_vector_field:
-                        print "ker 1.1"
-                        print name
                         return name
                     elif arg.data._is_scalar_field:
-                        print "ker 1.2"
                         idx = ''.join(["[i_%d]" % i for i, _ in enumerate(arg.data.dims)])
                         return "(%(t)s (*)[1])&%(name)s%(idx)s" % \
                             {'t' : arg.ctype,
@@ -317,12 +291,9 @@ class ParLoop(rt.ParLoop):
                     name = "p_%s" % c_arg_name(arg)
                     return name
                 else:
-                    print "ker 2"
                     return c_ind_data(arg, "i_%d" % arg.idx.index)
             elif arg._is_indirect:
-                print "ker 3"
                 if arg._multimap:
-                    print "3.0"
                     ker_args = ""
                     for i in range(len(arg.data.dats)):
                         ker_args += " " + c_vec_name(arg) #+ "_" + str(i)
@@ -331,17 +302,11 @@ class ParLoop(rt.ParLoop):
                             ker_args += ","
                     return ker_args
                 elif arg._is_vec_map:
-                    print "3.1"
-                    print c_vec_name(arg)
                     return c_vec_name(arg)
-                print "3.2"
-                print c_ind_data(arg,arg.idx)
                 return c_ind_data(arg, arg.idx)
             elif isinstance(arg.data, Global):
-                print "ker 4"
                 return c_arg_name(arg)
             else:
-                print "ker 5"
                 return "%(name)s + i * %(dim)s" % \
                     {'name' : c_arg_name(arg),
                      'dim' : arg.data.cdim}
@@ -353,8 +318,6 @@ class ParLoop(rt.ParLoop):
                 for j in range(len(arg.map.maps)):
                     for l in range(arg.data.dats[j].cdim):
                         for i in range(arg.map.maps[j]._dim):
-
-                            print arg.map.maps[j], arg.map.maps[j]._dim
                             val.append("%(vec_name)s[%(idx)s] = %(data)s" %
                                 {'vec_name' : c_vec_name(arg),
                                 'idx' : k,
@@ -370,8 +333,6 @@ class ParLoop(rt.ParLoop):
                             'idx' : k,
                             'data' : c_ind_data_new(arg, i, j)} )
                         k+=1
-            print "vec init"
-            print val
             return ";\n".join(val)
 
         def c_addto_scalar_field(arg):
@@ -402,7 +363,6 @@ class ParLoop(rt.ParLoop):
                         for j in range(csize):
                             s += "if (b_1 == %d && b_2 == %d) {" % (i, j)
                             dims = arg.data.sparsity.sparsity_list[rsize * i + j].dims
-                            print dims
                             nrows = arg._map[0][i].dim
                             ncols = arg._map[1][j].dim
                             rmult = dims[0][0]
@@ -450,9 +410,7 @@ class ParLoop(rt.ParLoop):
 
         def c_addto_vector_field(arg):
             name = c_arg_name(arg)
-            print name
             p_data = 'p_%s' % name
-            print p_data
             maps = as_tuple(arg.map, Map)
             nrows = maps[0].dim
             ncols = maps[1].dim
@@ -484,10 +442,6 @@ class ParLoop(rt.ParLoop):
 
         def tmp_decl(arg, extents):
             t = arg.data.ctype
-            print t
-            print arg.data._is_scalar_field
-            print arg.data._is_vector_field
-            print arg.data._is_mixed_field
             if arg.data._is_mixed_field:
                 #dims = ''.join(["[%d]" % d for d in extents])
                 return "" #"%s p_%s%s" % (t, c_arg_name(arg), dims)
@@ -527,8 +481,6 @@ class ParLoop(rt.ParLoop):
         def c_mixed_block_loops(args):
             for arg in args:
                 if arg._rowcol_map:
-                    print "This is is where we do the block loops"
-                    print arg
                     val = "for(int b_1 = 0; b_1 < %(row_blocks)s; b_1++){ \n \
                                 for(int b_2 = 0; b_2 < %(col_blocks)s; b_2++){ " % \
                                     {'row_blocks' : len(arg._map[0]),
@@ -536,8 +488,6 @@ class ParLoop(rt.ParLoop):
 
                     return val
                 if arg._row_map:
-                    print "This is is where we do the block loops"
-                    print arg
                     val = "for(int b_1 = 0; b_1 < %(row_blocks)s; b_1++){ " % \
                                     {'row_blocks' : len(arg._map.maps)}
 
@@ -555,7 +505,6 @@ class ParLoop(rt.ParLoop):
 
         def c_itspace_loops(args):
             for arg in args:
-                print arg._row_map
                 if arg._rowcol_map:
                     _itspace_loops = "for(int j_0 = 0; j_0 < row_blk_size[b_1]; j_0++){\n"
                     _itspace_loops += "for(int j_1 = 0; j_1 < col_blk_size[b_2]; j_1++) {\n"
@@ -604,7 +553,6 @@ class ParLoop(rt.ParLoop):
                     rows = "int row_blk_size[%d] = {" % len(arg.data.dats)
                     for i in range(len(arg.data.dats)):
                         ssize = arg.data.dats[i].dim[0] * arg.map.maps[i].dim
-                        print ssize
                         rows += " %d" % ssize
                         rowstart += " %d" % cnt
                         if i < len(arg.data.dats)-1:
@@ -631,41 +579,28 @@ class ParLoop(rt.ParLoop):
         args = self.args
         _wrapper_args = ', '.join([c_wrapper_arg(arg) for arg in args])
 
-        print "====== start tmp decs"
         _tmp_decs = ';\n'.join([tmp_decl(arg, self._it_space.extents) for arg in args if arg._is_mat])
-        print _tmp_decs
-        print "====== start wrapper decs"
         _wrapper_decs = ';\n'.join([c_wrapper_dec(arg) for arg in args])
 
-        print "====== start const decs"
         _const_decs = '\n'.join([const._format_declaration() for const in Const._definitions()]) + '\n'
 
-        print "====== start kernel user args"
         _kernel_user_args = [c_kernel_arg(arg) for arg in args]
-        print "====== start kernel it args"
         _kernel_it_args   = ["i_%d" % d for d in range(len(self._it_space.extents))]
-        print "====== start kernel args"
         _kernel_args = ', '.join(_kernel_user_args + _kernel_it_args)
 
-        print "====== start vec inits"
         _vec_inits = ';\n'.join([c_vec_init(arg) for arg in args \
                                  if not arg._is_mat and arg._is_vec_map])
-        print "====== start itspace loops"
-        _itspace_loops =  c_itspace_loops(args) #'\n'.join([itspace_loop(i,e) for i, e in zip(range(len(self._it_space.extents)), self._it_space.extents)])
-        print _itspace_loops
+        _itspace_loops =  c_itspace_loops(args)
         _itspace_loop_close = '}'*len(self._it_space.extents)
-        print "====== start vec field"
         _addtos_vector_field = ';\n'.join([c_addto_vector_field(arg) for arg in args \
                                            if arg._is_mat and arg.data._is_vector_field and not arg._rowcol_map])
 
         _addto_mixed_mat = c_addto_mixed_mat(args)
-        print "====== start scalar field"
         _addtos_scalar_field = ';\n'.join([c_addto_scalar_field(arg) for arg in args \
                                            if arg._is_mat and arg.data._is_scalar_field])
 
         _addto_mixed_vec = c_addto_mixed_vec(args)
 
-        print "====== start mixed space loops"
         _mixed_block_loops = c_mixed_block_loops(args)
         _mixed_block_loops_close = c_mixed_block_loops_close(args)
 
@@ -702,7 +637,6 @@ class ParLoop(rt.ParLoop):
             }
             }"""
 
-        print "====== start stride"
 
         if any(arg._is_soa for arg in args):
             kernel_code = """
@@ -715,7 +649,6 @@ class ParLoop(rt.ParLoop):
             inline %(code)s
             """ % {'code' : self._kernel.code }
 
-        print "====== start code to compile"
         code_to_compile =  wrapper % { 'kernel_name' : self._kernel.name,
                                        'wrapper_args' : _wrapper_args,
                                        'wrapper_decs' : _wrapper_decs,
@@ -735,7 +668,6 @@ class ParLoop(rt.ParLoop):
                                        'addto_mixed_vec' : _addto_mixed_vec,
                                        'addto_mixed_mat' : _addto_mixed_mat }
 
-        print code_to_compile
         # We need to build with mpicc since that's required by PETSc
         cc = os.environ.get('CC')
         os.environ['CC'] = 'mpicc'

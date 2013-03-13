@@ -88,42 +88,22 @@ class Arg(object):
     .. warning:: User code should not directly instantiate :class:`Arg`. Instead, use the call syntax on the :class:`DataCarrier`.
     """
     def __init__(self, data=None, map=None, idx=None, access=None):
-        print "init Arg"
         self._multimap = False ## if the arg is multimap
         self._rowcol_map = False ## if the arg has been created in the backend as
                                 ## being a composed arg of row maps and col maps
                                 ## like this [ [ rowmaps], [colmaps] ]
         self._row_map = False
-        print map
         if isinstance(map, list):
             self._rowcol_map = True
             for i in range(len(map)):
                 if not isinstance(map[i], list):
                     self._rowcol_map = False
-
-            print self._rowcol_map
-            print "YAAAYY!!! I'm a Multi RowCol Arg"
-            print "MultiMap list of maps for this arg is:"
-            print len(map)
-            for i in range(len(map)):
-                    print map[i]
-            print idx
-            print access
-            #self._rowcol_map = True
         else:
             if hasattr(map,"_name") and map._name == "MultiMap":
-                print "YAAAYY!!! I'm a MultiMap Arg"
                 if idx != None and not self._rowcol_map:
-                    print " BLAAA BLAAAAAA"
                     self._row_map = True
                 #TODO: Compose the multimap arg, maybe assign lists to where
                 # single parameters were before
-                print "MultiMap list of maps for this arg is:"
-                print len(map.maps)
-                for i in range(len(map.maps)):
-                    print map.maps[i]
-                print idx
-                print access
                 self._multimap = True
         self._dat = data
         self._map = map
@@ -566,12 +546,10 @@ class Dat(DataCarrier):
     @validate_in(('access', _modes, ModeValueError))
     def __call__(self, path, access):
         if hasattr(path,"_name") and path._name == "MultiMap":
-            print "This dat contains a multimap"
             #check that the datasets of the maps match the sets of the multi dat
             for i in range(len(path.maps)):
                 if path.maps[i]._dataset != self.dats[i].dataset and path.maps[i] != IdentityMap:
                     raise MapValueError("Dataset of MultiMap does not match Dataset of MultiDat.")
-            print "check complete"
             return _make_object('Arg', data=self, map=path, access=access)
         else:
             if isinstance(path, Map):
@@ -930,9 +908,7 @@ class Sparsity(object):
     #               ('dims', (int, tuple), TypeError))
     def __init__(self, maps, dims, name=None, block=None):
         assert not name or isinstance(name, str), "Name must be of type str"
-        print  "++++++++++++++++++"
         if block:
-            print "+++++++++++block++++++++++"
             self._dims = []
             self._rmaps = []
             self._cmaps = []
@@ -1010,15 +986,6 @@ class Sparsity(object):
                         self._nrrows += [nrows]
                         self._nrcols += [ncols]
 
-
-                    print "current"
-                    print self._rowmaps
-                    print self._colmaps
-
-                    print "rowmult and colmult"
-                    print self._rowmult
-                    print self._colmult
-
                 # Add to rmaps and cmaps (for reference)
                 row2d = []
                 col2d = []
@@ -1028,11 +995,6 @@ class Sparsity(object):
                     col2d += [mc]
                 self._rmaps += [row2d]
                 self._cmaps += [col2d]
-                print "rmaps and cmaps"
-                #self._rmaps += [[rmapsi]]
-                #self._cmaps += [[cmapsi]]
-                print self._rmaps
-                print self._cmaps
 
                 # Validate the maps
                 assert len(rmapsi) == len(cmapsi), \
@@ -1057,19 +1019,12 @@ class Sparsity(object):
                 self._rows_size += rmapsi[0].dataset.size
                 self._cols_size += cmapsi[0].dataset.size
 
-                print "rows_size and cols_size"
-                print self._rows_size
-                print self._cols_size
-
                 self._nrows = np.append(self._nrows, rmapsi[0].dataset.size)
                 self._ncols = np.append(self._ncols, cmapsi[0].dataset.size)
 
                 self._dims += [as_tuple(dims[i], int, 2)]
                 self.x_sizes += [rmapsi[0].dataset.size * self._dims[i][0]]
                 self.b_sizes += [cmapsi[0].dataset.size * self._dims[i][1]]
-                print self._nrrows
-                print self._nrcols
-                print self._dims
             self._spars = len(maps)
             self._itmaps = len(self._rowmaps)
             self.b_size = self._rows_size
@@ -1078,8 +1033,6 @@ class Sparsity(object):
             maps = (maps,maps) if isinstance(maps, Map) else maps
             lmaps = (maps,) if isinstance(maps[0], Map) else maps
             self._rmaps, self._cmaps = map (lambda x : as_tuple(x, Map), zip(*lmaps))
-            print self._rmaps
-            print self._cmaps
 
             assert len(self._rmaps) == len(self._cmaps), \
                 "Must pass equal number of row and column maps"
@@ -1099,9 +1052,6 @@ class Sparsity(object):
             self._ncols = self._cmaps[0].dataset.size
 
             self._dims = as_tuple(dims, int, 2)
-            print self._nrows
-            print self._ncols
-            print self._dims
 
         self._name = name or "sparsity_%d" % Sparsity._globalcount
         self._lib_handle = None
@@ -1121,9 +1071,6 @@ class Sparsity(object):
         sparsity. Similarly, the dataset of all the maps which appear
         second must be common and will form the column :class:`Set` of
         the ``Sparsity``."""
-        #print "before zip"
-        #print self._rmaps
-        #print self._cmaps
         return zip(self._rmaps, self._cmaps)
 
     @property
@@ -1178,7 +1125,6 @@ class Mat(DataCarrier):
     @validate_type(('sparsity', Sparsity, SparsityTypeError), \
                    ('name', str, NameTypeError))
     def __init__(self, sparsity, dtype=None, name=None):
-        print "******************> This is matrix construction"
         self._sparsity = sparsity
         self._datatype = np.dtype(dtype)
         self._name = name or "mat_%d" % Mat._globalcount
@@ -1197,11 +1143,6 @@ class Mat(DataCarrier):
             path_maps_cols = path[1].map.maps
             path_maps = [path_maps_rows, path_maps_cols]
             path_idxs = [arg.idx for arg in path]
-            print "paths for rows and cols"
-            print path_maps_rows
-            print path_maps_cols
-            print "path_idxs"
-            print path_idxs
             #TODO: Introduce the check whether the maps exist
             return _make_object('Arg', data=self, map=path_maps, access=access, idx=path_idxs)
 
@@ -1351,18 +1292,15 @@ class ParLoop(object):
 
     def check_args(self):
         iterset = self._it_space._iterset
-        print "START CHECK"
         for i, arg in enumerate(self._actual_args):
             if arg._is_global or arg._map == IdentityMap:
                 continue
             for j, m in enumerate(arg._map):
-                print arg
                 if not isinstance(m, list) and m._name == "MultiMap":
                     m = m.maps
                 if isinstance(m, list):
                     k = 0
                     for ms in m:
-                        print "ITERATION"
                         if ms._iterset != iterset:
                             raise MapValueError( \
                                 "Iterset of arg %s map %s doesn't match ParLoop iterset." % (i, j))
@@ -1371,12 +1309,6 @@ class ParLoop(object):
                                 continue
                             if arg.data._name == "MultiDat":
                                 if ms._dataset != arg.data.dats[k]._dataset:
-
-                                    print m
-                                    print ms
-                                    print arg.data.dats[k]
-
-                                    print ms._dataset, arg.data.dats[k]._dataset
                                     raise MapValueError( \
                                         "Dataset of arg %s map %s doesn't match the set of its Dat." % (i, j))
                                 k+=1
@@ -1453,11 +1385,8 @@ class ParLoop(object):
                 idxs = (arg.idx[0].__class__, arg.idx[0].index,
                         arg.idx[1].index)
                 if isinstance(arg.map[0], list):
-                    print arg.map[0]
-                    print arg.map[1]
                     dims_1 = []
                     dims_2 = []
-                    print len(arg.map[0])
                     for i in range(len(arg.map[0])):
                         dims_1 += [arg.map[0][i].dim]
                         dims_2 += [arg.map[1][i].dim]

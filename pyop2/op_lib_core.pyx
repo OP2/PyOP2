@@ -602,9 +602,6 @@ def build_sparsity_mixed(object sparsity, bool parallel):
     # Row and col multipliers
     cdef int nmaps = len(sparsity._rmaps)
 
-    print "namps"
-    print nmaps
-
     cdef int *rmultl = <int *>malloc(nmaps * sizeof(int))
     cdef int *cmultl = <int *>malloc(nmaps * sizeof(int))
 
@@ -612,14 +609,6 @@ def build_sparsity_mixed(object sparsity, bool parallel):
     for i in range(nmaps):
         rmultl[i] = sparsity._rmult[i]
         cmultl[i] = sparsity._cmult[i]
-
-    print "rmultl"
-    for i in range(nmaps):
-        print rmultl[i]
-
-    print "cmultl"
-    for i in range(nmaps):
-        print cmultl[i]
 
     # Set the number of rows
     cdef int *nrowsl =  <int *>malloc(nmaps * sizeof(int))
@@ -635,10 +624,6 @@ def build_sparsity_mixed(object sparsity, bool parallel):
         lsizel[i] = nrowsl[i] * rmultl[i]
         if lsizel[i] > lsize:
             lsize = lsizel[i]
-
-    print "lsziel"
-    for i in range(nmaps):
-        print lsizel[i]
 
     cdef op_map rmap, cmap
     cdef int *d_nnz, *o_nnz, *rowptr, *colidx
