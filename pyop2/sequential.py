@@ -569,11 +569,11 @@ class ParLoop(rt.ParLoop):
                 if arg._rowcol_map:
                     name = "p_" + c_arg_name(arg)
                     t = arg.ctype
-                    return "%(type)s %(name)s[1][1];\n" % { 'type': t, 'name':name }
+                    return "%(type)s %(name)s[1][1] = {{0}};\n" % { 'type': t, 'name':name }
                 if arg._row_map:
                     name = "p_" + c_arg_name(arg)
                     t = arg.ctype
-                    return "%(type)s %(name)s[1];\n" % { 'type': t, 'name':name }
+                    return "%(type)s %(name)s[1] = {0};\n" % { 'type': t, 'name':name }
             return ';\n'.join([c_zero_tmp(arg) for arg in args if arg._is_mat])
 
         args = self.args
