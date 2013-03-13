@@ -1256,14 +1256,14 @@ class Sparsity(object):
 
     _globalcount = 0
 
-    @validate_type(('maps', (Map, tuple), MapTypeError),)
+    @validate_type(('maps', (Map, tuple, list), MapTypeError),)
     def __new__(cls, maps, name=None):
         cached = _sparsity_cache.get(tuple(maps))
         if cached is not None:
             return cached
         return super(Sparsity, cls).__new__(cls, maps, name)
 
-    @validate_type(('maps', (Map, tuple), MapTypeError),)
+    @validate_type(('maps', (Map, tuple, list), MapTypeError),)
     def __init__(self, maps, name=None, block=None):
         assert not name or isinstance(name, str), "Name must be of type str"
 
