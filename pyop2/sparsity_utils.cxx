@@ -13,7 +13,6 @@ void build_sparsity_pattern_seq ( int rmult, int cmult, int nrows, int nmaps,
   int lsize = nrows*rmult;
   std::vector< std::set< int > > s_diag(lsize);
 
-  printf(" namps = %d \n", nmaps);
   for ( int m = 0; m < nmaps; m++ ) {
     op_map rowmap = rowmaps[m];
     op_map colmap = colmaps[m];
@@ -22,15 +21,12 @@ void build_sparsity_pattern_seq ( int rmult, int cmult, int nrows, int nmaps,
       for ( int i = 0; i < rowmap->dim; ++i ) {
         for ( int r = 0; r < rmult; r++ ) {
           int row = rmult * rowmap->map[i + e*rowmap->dim] + r;
-          printf(" %d ", row);
           for ( int d = 0; d < colmap->dim; d++ ) {
             for ( int c = 0; c < cmult; c++ ) {
-              printf(" -> %d", cmult * colmap->map[d + e * colmap->dim] + c);
               s_diag[row].insert(cmult * colmap->map[d + e * colmap->dim] + c);
             }
           }
         }
-        printf("\n");
       }
     }
   }
@@ -125,7 +121,6 @@ void build_sparsity_pattern_mixed_seq ( int* rmult, int* cmult, int* nrows, int 
   // Create and populate auxiliary data structure: for each element of
   // the from set, for each row pointed to by the row map, add all
   // columns pointed to by the col map
-  //printf("lsize = %d \n", lsize);
   std::vector< std::set< int > > s_diag(lsize);
 
   for ( int m = 0; m < nmaps; m++ ) {
@@ -137,26 +132,20 @@ void build_sparsity_pattern_mixed_seq ( int* rmult, int* cmult, int* nrows, int 
      //the matrix must now
      int rowssize = rowmap->to->size; //number of elements in the row
      int colssize = rowmap->to->size; // number of elements in the column
-     printf("rsize = %d \n", rsize);
      for ( int e = 0; e < rsize; ++e ) {
         for ( int i = 0; i < rowmap->dim; ++i ) {
             for ( int r = 0; r < rmult[m]; r++ ) {
-                printf("rowmap = %d \n",rowmap->map[i + e*rowmap->dim]);
                 int row = r * rowssize + rowmap->map[i + e*rowmap->dim];
-                printf("row = %d : ", row);
                 for ( int d = 0; d < colmap->dim; d++ ) {
                     for ( int c = 0; c < cmult[m]; c++ ) {
-                        printf(" %d ", c * colssize + colmap->map[d + e * colmap->dim]);
                         s_diag[row].insert(c * colssize + colmap->map[d + e * colmap->dim]);
                     }
                 }
-                printf("\n");
             }
         }
      }
   }
 
-  printf("loop is done \n");
   // Create final sparsity structure
   int * nnz = (int*)malloc(lsize * sizeof(int));
   int * rowptr = (int*)malloc((lsize+1) * sizeof(int));
