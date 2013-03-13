@@ -268,7 +268,7 @@ class ParLoop(rt.ParLoop):
             return "%(name)s + %(map_name)s[i * %(map_dim)s + %(idx)s] * %(dim)s + %(l)s" % \
                     {'name' : c_arg_name(arg) + '_' + arg.data.dats[j].name,
                      'map_name' : c_map_name(arg, j),
-                     'map_dim' : arg.map.dim[0],
+                     'map_dim' : arg.map.dim[j],
                      'idx' : idx,
                      'dim' : arg.data.dats[j].cdim,
                      'l' : l}
