@@ -515,11 +515,11 @@ class ParLoop(base.ParLoop):
                 if arg._rowcol_map:
                     name = "p_" + arg.c_arg_name()
                     t = arg.ctype
-                    return "%(type)s %(name)s[1][1];\n" % { 'type': t, 'name':name }
+                    return "%(type)s %(name)s[1][1] = {{0}};\n" % { 'type': t, 'name':name }
                 if arg._row_map:
                     name = "p_" + arg.c_arg_name()
                     t = arg.ctype
-                    return "%(type)s %(name)s[1];\n" % { 'type': t, 'name':name }
+                    return "%(type)s %(name)s[1] = {0};\n" % { 'type': t, 'name':name }
             return ';\n'.join([arg.c_zero_tmp() for arg in args if arg._is_mat])
 
         def c_addto_mixed_mat(self):
