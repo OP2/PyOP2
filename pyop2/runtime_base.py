@@ -437,8 +437,8 @@ def _empty_sparsity_cache():
 class Sparsity(base.Sparsity):
     """OP2 Sparsity, a matrix structure derived from the union of the outer product of pairs of :class:`Map` objects."""
 
-    @validate_type(('maps', (Map, tuple), MapTypeError), \
-                   ('dims', (int, tuple), TypeError))
+    @validate_type(('maps', (Map, tuple, list), MapTypeError), \
+                   ('dims', (int, tuple, list), TypeError))
     def __new__(cls, maps, dims, name=None, block=None):
         key = 0
         if isinstance(maps, list):
@@ -454,8 +454,8 @@ class Sparsity(base.Sparsity):
             return cached
         return super(Sparsity, cls).__new__(cls, maps, dims, name, block)
 
-    #@validate_type(('maps', (Map, tuple), MapTypeError), \
-    #               ('dims', (int, tuple), TypeError))
+    @validate_type(('maps', (Map, tuple, list), MapTypeError), \
+                  ('dims', (int, tuple, list), TypeError))
     def __init__(self, maps, dims, name=None, block=None):
         if getattr(self, '_cached', False):
             return
