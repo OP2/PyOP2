@@ -69,142 +69,8 @@ L = inner(v,f)*dx
 
 # Generate code for mass and rhs assembly.
 
-#mass, = compile_form(a, "mass")
-#rhs,  = compile_form(L, "rhs")
-
-mass="""
-void mass_cell_integral_0_0(    double A[1][1], double *x[2], int j, int k)
-{
-    // Compute Jacobian of affine map from reference cell
-    const double J_00 = x[1][0] - x[0][0];
-    const double J_01 = x[2][0] - x[0][0];
-    const double J_10 = x[1][1] - x[0][1];
-    const double J_11 = x[2][1] - x[0][1];
-
-    // Compute determinant of Jacobian
-    double detJ = J_00*J_11 - J_01*J_10;
-
-    // Compute inverse of Jacobian
-
-    const double det = fabs(detJ);
-
-    // Cell Volume.
-
-    // Compute circumradius, assuming triangle is embedded in 2D.
-
-
-    // Facet Area.
-
-    // Array of quadrature weights.
-    const double W3[3] = {0.166666666666667, 0.166666666666667, 0.166666666666667};
-    // Quadrature points on the UFC reference element: (0.166666666666667, 0.166666666666667), (0.166666666666667, 0.666666666666667), (0.666666666666667, 0.166666666666667)
-
-    // Value of basis functions at quadrature points.
-    const double FE0_C0[3][6] = \
-    {{0.666666666666667, 0.166666666666667, 0.166666666666667, 0.0, 0.0, 0.0},
-    {0.166666666666667, 0.166666666666667, 0.666666666666667, 0.0, 0.0, 0.0},
-    {0.166666666666667, 0.666666666666667, 0.166666666666667, 0.0, 0.0, 0.0}};
-
-    const double FE0_C1[3][6] = \
-    {{0.0, 0.0, 0.0, 0.666666666666667, 0.166666666666667, 0.166666666666667},
-    {0.0, 0.0, 0.0, 0.166666666666667, 0.166666666666667, 0.666666666666667},
-    {0.0, 0.0, 0.0, 0.166666666666667, 0.666666666666667, 0.166666666666667}};
-
-
-    // Compute element tensor using UFL quadrature representation
-    // Optimisations: ('eliminate zeros', False), ('ignore ones', False), ('ignore zero tables', False), ('optimisation', False), ('remove zero terms', False)
-
-    // Loop quadrature points for integral.
-    // Number of operations to compute element tensor for following IP loop = 648
-    for (unsigned int ip = 0; ip < 3; ip++)
-    {
-
-      // Number of operations for primary indices: 216
-      for (unsigned int r = 0; r < 1; r++)
-      {
-        for (unsigned int s = 0; s < 1; s++)
-        {
-          // Number of operations to compute entry: 6
-          A[r][s] += (((FE0_C0[ip][r*3+j]))*((FE0_C0[ip][s*3+k])) + ((FE0_C1[ip][r*3+j]))*((FE0_C1[ip][s*3+k])))*W3[ip]*det;
-        }// end loop over 's'
-      }// end loop over 'r'
-    }// end loop over 'ip'
-}
-"""
-
-rhs="""
-void rhs_cell_integral_0_0(    double A[1], double *x[2], double **w0, int j)
-{
-    // Compute Jacobian of affine map from reference cell
-    const double J_00 = x[1][0] - x[0][0];
-    const double J_01 = x[2][0] - x[0][0];
-    const double J_10 = x[1][1] - x[0][1];
-    const double J_11 = x[2][1] - x[0][1];
-
-    // Compute determinant of Jacobian
-    double detJ = J_00*J_11 - J_01*J_10;
-
-    // Compute inverse of Jacobian
-
-    const double det = fabs(detJ);
-
-    // Cell Volume.
-
-    // Compute circumradius, assuming triangle is embedded in 2D.
-
-
-    // Facet Area.
-
-    // Array of quadrature weights.
-    const double W3[3] = {0.166666666666667, 0.166666666666667, 0.166666666666667};
-    // Quadrature points on the UFC reference element: (0.166666666666667, 0.166666666666667), (0.166666666666667, 0.666666666666667), (0.666666666666667, 0.166666666666667)
-
-    // Value of basis functions at quadrature points.
-    const double FE0_C0[3][6] = \
-    {{0.666666666666667, 0.166666666666667, 0.166666666666667, 0.0, 0.0, 0.0},
-    {0.166666666666667, 0.166666666666667, 0.666666666666667, 0.0, 0.0, 0.0},
-    {0.166666666666667, 0.666666666666667, 0.166666666666667, 0.0, 0.0, 0.0}};
-
-    const double FE0_C1[3][6] = \
-    {{0.0, 0.0, 0.0, 0.666666666666667, 0.166666666666667, 0.166666666666667},
-    {0.0, 0.0, 0.0, 0.166666666666667, 0.166666666666667, 0.666666666666667},
-    {0.0, 0.0, 0.0, 0.166666666666667, 0.666666666666667, 0.166666666666667}};
-
-
-    // Compute element tensor using UFL quadrature representation
-    // Optimisations: ('eliminate zeros', False), ('ignore ones', False), ('ignore zero tables', False), ('optimisation', False), ('remove zero terms', False)
-
-    // Loop quadrature points for integral.
-    // Number of operations to compute element tensor for following IP loop = 108
-    for (unsigned int ip = 0; ip < 3; ip++)
-    {
-
-      // Coefficient declarations.
-      double F0 = 0.0;
-      double F1 = 0.0;
-
-      // Total number of operations to compute function values = 24
-      for (unsigned int r = 0; r < 3; r++)
-      {
-        for (unsigned int s = 0; s < 2; s++)
-        {
-          F0 += (FE0_C0[ip][3*s+r])*w0[r][s];
-          F1 += (FE0_C1[ip][3*s+r])*w0[r][s];
-        }// end loop over 's'
-      }// end loop over 'r'
-
-      // Number of operations for primary indices: 12
-      for (unsigned int r = 0; r < 2; r++)
-      {
-        // Number of operations to compute entry: 6
-        A[r] += (((FE0_C0[ip][r*3+j]))*F0 + ((FE0_C1[ip][r*3+j]))*F1)*W3[ip]*det;
-      }// end loop over 'r'
-    }// end loop over 'ip'
-}
-
-"""
-
-
+mass, = compile_form(a, "mass")
+rhs,  = compile_form(L, "rhs")
 
 # Set up simulation data structures
 
@@ -219,13 +85,6 @@ elem_node_map = np.asarray([ 0, 1, 3, 2, 3, 1 ], dtype=np.uint32)
 elem_node = op2.Map(elements, nodes, 3, elem_node_map, "elem_node")
 
 sparsity = op2.Sparsity((elem_node, elem_node), 2, "sparsity")
-print "========"
-
-sparsity = op2.Sparsity([((elem_node, elem_node),(elem_node, elem_node)), (elem_node, elem_node)], [2, 2], "sparsity")
-print "========"
-
-#from IPython import embed; embed()
-
 
 mat = op2.Mat(sparsity, valuetype, "mat")
 
@@ -247,9 +106,9 @@ op2.par_loop(mass, elements(6,6),
              coords(elem_node, op2.READ))
 
 op2.par_loop(rhs, elements(6),
-                     b(elem_node[op2.i[0]], op2.INC),
-                     coords(elem_node, op2.READ),
-                     f(elem_node, op2.READ))
+             b(elem_node[op2.i[0]], op2.INC),
+             coords(elem_node, op2.READ),
+             f(elem_node, op2.READ))
 
 solver = op2.Solver()
 solver.solve(mat, x, b)
