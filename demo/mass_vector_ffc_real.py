@@ -85,20 +85,15 @@ NUM_NODES = 4
 valuetype = np.float64
 
 nodes = op2.Set(NUM_NODES, "nodes")
-edges = op2.Set(NUM_EDGES, "edges")
 elements = op2.Set(NUM_ELE, "elements")
 
 elem_node_map  = np.asarray([ 0, 1, 3, 2, 3, 1 ], dtype=np.uint32)
-elem_elem_map = np.asarray([ 0, 1 ], dtype=np.uint32)
-edge_node_map  = np.asarray([ 0, 1, 1, 2, 2, 3, 3, 0, 1, 3 ], dtype=np.uint32)
+elem_elem_map = np.arange(elements.size, dtype=np.uint32)
 
 elem_node1 = op2.Map(elements, nodes, 3, elem_node_map,  "elem_node1")
 elem_elem = op2.Map(elements, elements, 1, elem_elem_map, "elem_elem")
 
-edge_node1 = op2.Map(edges, nodes, 2, edge_node_map, "edge_node1")
-
-
-sparsity = op2.Sparsity([((elem_node1, elem_node1),(edge_node1, edge_node1)),(elem_elem, elem_elem)], [2,1], "sparsity")
+sparsity = op2.Sparsity([(elem_node1, elem_node1),(elem_elem, elem_elem)], [2,1], "sparsity")
 
 ##
 ## THE LIST OF BLOCKS WILL BE IN: sparsity.sparsity_list
@@ -106,7 +101,7 @@ sparsity = op2.Sparsity([((elem_node1, elem_node1),(edge_node1, edge_node1)),(el
 
 mat = op2.Mat(sparsity, valuetype, "mat")
 
-coord_vals = np.asarray([ (0.0, 0.0), (2.0, 0.0), (1.0, 1.0), (0.0, 1.5) ],
+coord_vals = np.asarray([ (0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0) ],
                            dtype=valuetype)
 coords = op2.Dat(nodes, 2, coord_vals, valuetype, "coords")
 
@@ -120,14 +115,14 @@ pressure = op2.Dat(elements, 1, pressure_vals, valuetype, "pressure")
 
 f = op2.MultiDat([velocity, pressure], "fields")
 
-b_block1 = np.asarray([0.0]*sparsity.b_sizes[0], dtype=valuetype)
-b_block2 = np.asarray([0.0]*sparsity.b_sizes[1], dtype=valuetype)
+b_block1 = np.zeros(sparsity.b_sizes[0], dtype=valuetype)
+b_block2 = np.zeros(sparsity.b_sizes[1], dtype=valuetype)
 
 b1 = op2.Dat(nodes,2,b_block1,valuetype,"b1")
 b2 = op2.Dat(elements,1,b_block2,valuetype,"b2")
 
-x_block1 = np.asarray([0.0]*sparsity.x_sizes[0], dtype=valuetype)
-x_block2 = np.asarray([0.0]*sparsity.x_sizes[1], dtype=valuetype)
+x_block1 = np.zeros(sparsity.x_sizes[0], dtype=valuetype)
+x_block2 = np.zeros(sparsity.x_sizes[1], dtype=valuetype)
 
 x1 = op2.Dat(nodes,2,x_block1,valuetype,"x1")
 x2 = op2.Dat(elements,1,x_block2,valuetype,"x2")
