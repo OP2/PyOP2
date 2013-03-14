@@ -131,7 +131,7 @@ void build_sparsity_pattern_mixed_seq ( int* rmult, int* cmult, int* nrows, int 
      //according to the number of rows and multiplicity
      //the matrix must now
      int rowssize = rowmap->to->size; //number of elements in the row
-     int colssize = rowmap->to->size; // number of elements in the column
+     int colssize = colmap->to->size; // number of elements in the column
      for ( int e = 0; e < rsize; ++e ) {
         for ( int i = 0; i < rowmap->dim; ++i ) {
             for ( int r = 0; r < rmult[m]; r++ ) {
