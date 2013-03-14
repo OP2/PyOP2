@@ -556,7 +556,7 @@ class Mat(base.Mat):
         super(Mat, self).__init__(*args, **kwargs)
         self.mat_list = []
         for i in range(len(self._sparsity.sparsity_list)):
-            self.mat_list += [Mat(self._sparsity.sparsity_list[i],self._datatype,"mat_"+str(i))]
+            self.mat_list += [Mat(self._sparsity.sparsity_list[i],self._datatype,'_'.join([self._name, str(i)]))]
 
         if self._sparsity.sparsity_list != []:
             self.createNestedMat()
