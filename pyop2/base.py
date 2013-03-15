@@ -937,6 +937,9 @@ class MultiDat(Dat):
         for d in self.dats:
             d.zero()
 
+    def __iter__(self):
+        return self.dats.__iter__()
+
     def __repr__(self):
         return "MultiDat(%r, '%s')" % (self.dats, self._name)
 
@@ -1230,6 +1233,9 @@ class MultiMap(Map):
         for m in self.maps:
             dims += [m.dim]
         return dims
+
+    def __iter__(self):
+        return self.maps.__iter__()
 
     def __repr__(self):
         return "MultiMap(%r, '%s')" % (self.maps, self._name)
