@@ -378,9 +378,11 @@ class MultiDat(base.MultiDat):
      def soa(self):
         return self._soa
 
+     def __iter__(self):
+         return self.dats.__iter__()
+
      def __repr__(self):
          return "MultiDat(%r, %r)" % (self.dats, self.name)
-
 
 
 class Const(base.Const):
@@ -435,6 +437,9 @@ class MultiMap(base.Map):
         for m in self.maps:
             dims += [m.dim]
         return dims
+
+    def __iter__(self):
+        return self.maps.__iter__()
 
 
 _sparsity_cache = dict()
