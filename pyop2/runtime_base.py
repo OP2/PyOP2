@@ -341,9 +341,10 @@ class MultiDat(base.MultiDat):
 
      _globalcount = 0
 
-     def __init__(self, dat_list, name=None):
+     def __init__(self, dats, name=None):
+        self.dats = dats
         self._name = name or "multidat_%d" % MultiDat._globalcount
-        self.dats = dat_list
+        self._dim = [d.dim for d in dats]
         self._data = []
         self._dataset = []
         self._soa = any(dat.soa for dat in self.dats)
@@ -352,6 +353,10 @@ class MultiDat(base.MultiDat):
             self._data += [d._data]
             self._dataset += [d._dataset]
         MultiDat._globalcount += 1
+
+     def zero(self):
+         for d in self.dats:
+             d.zero()
 
      @property
      def dim(self):
@@ -372,6 +377,9 @@ class MultiDat(base.MultiDat):
      @property
      def soa(self):
         return self._soa
+
+     def __repr__(self):
+         return "MultiDat(%r, %r)" % (self.dats, self.name)
 
 
 
