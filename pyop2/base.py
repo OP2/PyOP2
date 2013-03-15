@@ -1883,7 +1883,7 @@ class ParLoop(object):
                     map_dim = None
                 else:
                     map_dim = arg.map.dim
-                if arg.data._name == "MultiDat":
+                if isinstance(arg.data, MultiDat):
                     key += (frozenset(arg.data.dim), arg.data.dtype, frozenset(map_dim), idx, arg.access)
                 else:
                     key += (arg.data.dim, arg.data.dtype, map_dim, idx, arg.access)
