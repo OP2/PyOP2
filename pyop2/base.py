@@ -455,8 +455,6 @@ class DataCarrier(object):
     @property
     def dtype(self):
         """The Python type of the data."""
-        if self._name == "MultiDat":
-            return self._data[0].dtype
         return self._data.dtype
 
     @property
@@ -626,15 +624,22 @@ class Dat(DataCarrier):
                      self(IdentityMap, WRITE)).compute()
 
     def __str__(self):
-        if self._name == "MultiDat":
-            return "OP2 Dat: %s on the dats: %s end of MultiDat" \
-               % (self._name, self.dats)
         return "OP2 Dat: %s on (%s) with dim %s and datatype %s" \
                % (self._name, self._dataset, self._dim, self._data.dtype.name)
 
     def __repr__(self):
         return "Dat(%r, %s, '%s', None, '%s')" \
                % (self._dataset, self._dim, self._data.dtype, self._name)
+
+class MultiDat(Dat):
+
+    @property
+    def dtype(self):
+        """The Python type of the data."""
+        return self._data[0].dtype
+
+    def __str__(self):
+        return "OP2 Dat: %s on the dats: %s end of MultiDat" % (self.name, self.dats)
 
 class Const(DataCarrier):
     """Data that is constant for any element of any set."""
@@ -1377,7 +1382,7 @@ class ParLoop(object):
                     map_dim = None
                 else:
                     map_dim = arg.map.dim
-                if arg.data._name == "MultiDat":
+                if isinstance(arg.data, MultiDat):
                     key += (frozenset(arg.data.dim), arg.data.dtype, frozenset(map_dim), idx, arg.access)
                 else:
                     key += (arg.data.dim, arg.data.dtype, map_dim, idx, arg.access)

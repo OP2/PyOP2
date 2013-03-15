@@ -153,9 +153,7 @@ class ParLoop(rt.ParLoop):
         def c_wrapper_arg(arg):
             # do the dats within the args
             val = ""
-            if arg.data._name == "MultiDat":
-                if not isinstance(arg.data.dats, list):
-                    raise RuntimeError("The data of the MultiDat arg must be a list of OP2 Dats")
+            if isinstance(arg.data, MultiDat):
                 for i in range(len(arg.data.dats)):
                     val += "PyObject *_%(name)s" % {'name' : c_arg_name(arg) + "_" + arg.data.dats[i].name }
                     if i != len(arg.data.dats) - 1:

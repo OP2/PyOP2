@@ -337,10 +337,12 @@ class Dat(base.Dat):
             self._lib_handle = core.op_dat(self)
         return self._lib_handle
 
-class MultiDat(base.Dat):
+class MultiDat(base.MultiDat):
+
+     _globalcount = 0
+
      def __init__(self, dat_list, name=None):
-        self.mixed_name = name
-        self._name = "MultiDat"
+        self._name = name or "multidat_%d" % MultiDat._globalcount
         self.dats = dat_list
         self._data = []
         self._dataset = []
@@ -349,10 +351,7 @@ class MultiDat(base.Dat):
         for d in self.dats:
             self._data += [d._data]
             self._dataset += [d._dataset]
-
-     @property
-     def name(self):
-        return self.mixed_name
+        MultiDat._globalcount += 1
 
      @property
      def dim(self):
@@ -678,7 +677,7 @@ class Solver(base.Solver, PETSc.KSP):
 
     def solve(self, A, x, b):
         self._set_parameters()
-        if hasattr(x, "_name") and x._name == "MultiDat":
+        if isinstance(x, MultiDat):
             x_petsc_vec = []
             for dat in x.dats:
                 ppx = PETSc.Vec().createWithArray(dat.data, size=(dat.dataset.size * dat.cdim, None))
