@@ -899,6 +899,7 @@ class MultiDat(Dat):
     def __init__(self, dats, name=None):
         self._name = name or '_'.join(dat.name for dat in dats)
         self.dats = dats
+        self._dim = [d.dim for d in dats]
         self._data = []
         self._dataset = []
         self._soa = any(dat.soa for dat in self.dats)
@@ -931,6 +932,10 @@ class MultiDat(Dat):
     def dtype(self):
         """The Python type of the data."""
         return self._data[0].dtype
+
+    def zero(self):
+        for d in self.dats:
+            d.zero()
 
     def __repr__(self):
         return "MultiDat(%r, '%s')" % (self.dats, self._name)
