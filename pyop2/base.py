@@ -631,6 +631,9 @@ class DataCarrier(object):
                     "float64": "double" }
         return typemap[self.dtype.name]
 
+    def __iter__(self):
+        yield self
+
     @property
     def name(self):
         """User-defined label."""
@@ -1805,38 +1808,17 @@ class ParLoop(object):
         for i, arg in enumerate(self._actual_args):
             if arg._is_global or arg._map == IdentityMap:
                 continue
-            for j, m in enumerate(arg._map):
-                if not isinstance(m, list) and m._name == "MultiMap":
-                    m = m.maps
-                if isinstance(m, list):
-                    k = 0
-                    for ms in m:
-                        if ms._iterset != iterset:
-                            raise MapValueError( \
-                                "Iterset of arg %s map %s doesn't match ParLoop iterset." % (i, j))
-                        else:
-                            if arg._is_mat:
-                                continue
-                            if arg.data._name == "MultiDat":
-                                if ms._dataset != arg.data.dats[k]._dataset:
-                                    raise MapValueError( \
-                                        "Dataset of arg %s map %s doesn't match the set of its Dat." % (i, j))
-                                k+=1
-                                continue
-                            if ms._dataset != arg.data[k]._dataset:
-                                raise MapValueError( \
-                                    "Dataset of arg %s map %s doesn't match the set of its Dat." % (i, j))
-                        k += 1
-                else:
-                  if m._iterset != iterset:
-                    raise MapValueError( \
-                        "Iterset of arg %s map %s doesn't match ParLoop iterset." % (i, j))
-                  else:
-                    if arg._is_mat:
-                        continue
-                    if m._dataset != arg.data._dataset:
+            for j, (m_, d_) in enumerate(zip(arg._map, arg._dat)):
+                for k, (m, d) in enumerate(zip(m_, d_)):
+                    if m._iterset != iterset:
                         raise MapValueError( \
-                            "Dataset of arg %s map %sdoesn't match the set of its Dat." % (i, j))
+                            "Iterset of arg %s map %s doesn't match ParLoop iterset." % (i, j))
+                    else:
+                        if arg._is_mat:
+                            continue
+                        if m._dataset != d._dataset:
+                            raise MapValueError( \
+                                "Dataset of arg %s map %s doesn't match the set of its Dat." % (i, j))
 
     def generate_code(self):
         raise RuntimeError('Must select a backend')
