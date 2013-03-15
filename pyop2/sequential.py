@@ -370,15 +370,14 @@ class ParLoop(rt.ParLoop):
                             idx = '[0][0]'
                             val = "&%s%s" % (p_data, idx)
                             # I need the number of nodes in the mesh --> 4 in this case
-                            nnodes = arg._map[0][0].dataset.size
-                            row = "%(nnodes)s * (j_0 / %(dim)s) + %(map)s[i * %(dim)s + (j_0 %% %(dim)s)]" % \
+                            row = "(j_0 / %(dim)s) + %(rmult)s * %(map)s[i * %(dim)s + (j_0 %% %(dim)s)]" % \
                                 {'map' : c_map_name(arg)+"_r_"+str(i),
                                 'dim' : nrows,
-                                'nnodes' : nnodes }
-                            col = "%(nnodes)s * (j_1 / %(dim)s) + %(map)s[i * %(dim)s + (j_1 %% %(dim)s)]" % \
+                                'rmult' : rmult }
+                            col = "(j_1 / %(dim)s) + %(cmult)s * %(map)s[i * %(dim)s + (j_1 %% %(dim)s)]" % \
                                 {'map' : c_map_name(arg)+"_c_"+str(j),
                                 'dim' : ncols,
-                                'nnodes' : nnodes }
+                                'cmult' : cmult }
                             pos = i * rsize + j
                             mat_name = name + "_" + str(pos)
                             s += "addto_scalar(%s, %s, %s, %s, %d); }\n"  % (mat_name, val, row, col, arg.access == rt.WRITE)
@@ -392,17 +391,16 @@ class ParLoop(rt.ParLoop):
                     name = c_arg_name(arg)
                     p_data = 'p_%s' % name
                     vsize = len(arg.data.dats)
-                    nnodes = arg.map.maps[0].dataset.size
                     for i in range(vsize):
                             s += "if (b_1 == %d) { " % i
                             dim = arg.data.dats[i].dim[0]
                             mapdim = arg.map.maps[i].dim
                             dname = arg.data.dats[i].name
-                            pos = "%(nnodes)s * (j_0 / %(dim)s) + %(n)s_map_%(i)s[%(dim)s*i + (j_0 %% %(dim)s)]" % {
+                            pos = "(j_0 / %(mdim)s) + %(dim)s * %(n)s_map_%(i)s[%(mdim)s*i + (j_0 %% %(mdim)s)]" % {
                                     'n':name,
                                     'i':str(i),
-                                    'dim':mapdim,
-                                    'nnodes': nnodes }
+                                    'mdim':mapdim,
+                                    'dim': dim }
                             s += "%(n)s_%(dn)s[%(pos)s] += p_%(n)s[0];" % { 'n':name, 'dn':dname, 'pos': pos }
                             s+="}\n"
                     return s
