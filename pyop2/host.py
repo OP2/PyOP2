@@ -369,61 +369,59 @@ class ParLoop(base.ParLoop):
             tmp = '%(name)s[%%(i)s] = ((%(type)s *)(((PyArrayObject *)_%(name)s)->data))[%%(i)s]' % d
             return ';\n'.join([tmp % {'i' : i} for i in range(c.cdim)])
 
-    def c_addto_mixed_mat(args):
-        for arg in args:
-            if arg._rowcol_map:
-                s = ""
-                name = c_arg_name(arg)
-                p_data = 'p_%s' % name
-                rsize = len(arg._map[0])
-                csize = len(arg._map[1])
-                for i in range(rsize):
-                    for j in range(csize):
-                        s += "if (b_1 == %d && b_2 == %d) {" % (i, j)
-                        dims = arg.data.sparsity.sparsity_list[rsize * i + j].dims
-                        nrows = arg._map[0][i].dim
-                        ncols = arg._map[1][j].dim
-                        rmult = dims[0][0]
-                        cmult = dims[0][1]
-                        idx = '[0][0]'
-                        val = "&%s%s" % (p_data, idx)
-                        nnodes = arg._map[0][0].dataset.size
-                        row = "%(nnodes)s * (j_0 / %(dim)s) + %(map)s[i * %(dim)s + (j_0 %% %(dim)s)]" % \
-                            {'map' : arg.c_map_name()+"_r_"+str(i),
-                            'dim' : nrows,
-                            'nnodes' : nnodes }
-                        col = "%(nnodes)s * (j_1 / %(dim)s) + %(map)s[i * %(dim)s + (j_1 %% %(dim)s)]" % \
-                            {'map' : arg.c_map_name()+"_c_"+str(j),
-                            'dim' : ncols,
-                            'nnodes' : nnodes }
-                        pos = i * rsize + j
-                        mat_name = name + "_" + str(pos)
-                        s += "addto_scalar(%s, %s, %s, %s, %d); }\n"  % (mat_name, val, row, col, arg.access == WRITE)
-                return s
-        return ""
+        def c_addto_mixed_mat(args):
+            for arg in args:
+                if arg._rowcol_map:
+                    s = ""
+                    name = arg.c_arg_name()
+                    p_data = 'p_%s' % name
+                    rsize = len(arg._map[0])
+                    csize = len(arg._map[1])
+                    for i in range(rsize):
+                        for j in range(csize):
+                            s += "if (b_1 == %d && b_2 == %d) {" % (i, j)
+                            dims = arg.data.sparsity.sparsity_list[rsize * i + j].dims
+                            nrows = arg._map[0][i].dim
+                            ncols = arg._map[1][j].dim
+                            rmult = dims[0][0]
+                            cmult = dims[0][1]
+                            idx = '[0][0]'
+                            val = "&%s%s" % (p_data, idx)
+                            row = "(j_0 / %(dim)s) + %(rmult)s * %(map)s[i * %(dim)s + (j_0 %% %(dim)s)]" % \
+                                {'map' : arg.c_map_name(i, j),
+                                'dim' : nrows,
+                                'rmult' : rmult }
+                            col = "(j_1 / %(dim)s) + %(cmult)s * %(map)s[i * %(dim)s + (j_1 %% %(dim)s)]" % \
+                                {'map' : arg.c_map_name(i, j),
+                                'dim' : ncols,
+                                'cmult' : cmult }
+                            pos = i * rsize + j
+                            mat_name = name + "_" + str(pos)
+                            s += "addto_scalar(%s, %s, %s, %s, %d); }\n"  % (mat_name, val, row, col, arg.access == WRITE)
+                    return s
+            return ""
 
-    def c_addto_mixed_vec(args):
-        for arg in args:
-            if arg._row_map:
-                s = ""
-                name = arg.c_arg_name()
-                p_data = 'p_%s' % name
-                vsize = len(arg.data.dats)
-                nnodes = arg.map.maps[0].dataset.size
-                for i in range(vsize):
-                    s += "if (b_1 == %d) { " % i
-                    dim = arg.data.dats[i].dim[0]
-                    mapdim = arg.map.maps[i].dim
-                    dname = arg.data.dats[i].name
-                    pos = "%(nnodes)s * (j_0 / %(dim)s) + %(n)s_map_%(i)s[%(dim)s*i + (j_0 %% %(dim)s)]" % {
-                            'n':name,
-                            'i':str(i),
-                            'dim':mapdim,
-                            'nnodes': nnodes }
-                    s += "%(n)s_%(dn)s[%(pos)s] += p_%(n)s[0];" % { 'n':name, 'dn':dname, 'pos': pos }
-                    s+="}\n"
-                return s
-        return ""
+        def c_addto_mixed_vec(args):
+            for arg in args:
+                if arg._row_map:
+                    s = ""
+                    name = arg.c_arg_name()
+                    p_data = 'p_%s' % name
+                    vsize = len(arg.data.dats)
+                    for i in range(vsize):
+                        s += "if (b_1 == %d) { " % i
+                        dim = arg.data.dats[i].dim[0]
+                        mapdim = arg.map.maps[i].dim
+                        dname = arg.data.dats[i].name
+                        pos = "(j_0 / %(mdim)s) + %(dim)s * %(n)s_map_%(i)s[%(mdim)s*i + (j_0 %% %(mdim)s)]" % {
+                                'n':name,
+                                'i':str(i),
+                                'mdim':mapdim,
+                                'dim': dim }
+                        s += "%(n)s_%(dn)s[%(pos)s] += p_%(n)s[0];" % { 'n':name, 'dn':dname, 'pos': pos }
+                        s+="}\n"
+                    return s
+            return ""
 
         def c_mixed_block_loops(args):
             for arg in args:

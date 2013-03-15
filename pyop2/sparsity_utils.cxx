@@ -128,16 +128,14 @@ void build_sparsity_pattern_mixed_seq ( int* rmult, int* cmult, int* nrows, int 
      op_map colmap = colmaps[m];
      int rsize = rowmap->from->size;
      // The sparsity requires that dofs be spread over the block according to
-     // the number of rows and multiplicity the matrix must now
-     int rowssize = rowmap->to->size; //number of elements in the row
-     int colssize = colmap->to->size; // number of elements in the column
+     // the number of rows and multiplicity
      for ( int e = 0; e < rsize; ++e ) {
         for ( int i = 0; i < rowmap->dim; ++i ) {
             for ( int r = 0; r < rmult[m]; r++ ) {
-                int row = r * rowssize + rowmap->map[i + e*rowmap->dim];
+                int row = r + rmult[m] * rowmap->map[i + e*rowmap->dim];
                 for ( int d = 0; d < colmap->dim; d++ ) {
                     for ( int c = 0; c < cmult[m]; c++ ) {
-                        s_diag[row].insert(c * colssize + colmap->map[d + e * colmap->dim]);
+                      s_diag[row].insert(c + cmult[m] * colmap->map[d + e * colmap->dim]);
                     }
                 }
             }
