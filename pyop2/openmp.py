@@ -106,8 +106,7 @@ class ParLoop(device.ParLoop):
         _args.append(plan.offset)
         _args.append(plan.nelems)
 
-        if plan.ncolors != plan.ncolors_core or plan.ncolors != plan.ncolors_owned:
-            self.halo_exchange_begin()
+        self.halo_exchange_begin()
 
         boffset = 0
         for c in range(plan.ncolors):
@@ -159,7 +158,7 @@ class ParLoop(device.ParLoop):
 
             plan = FakePlan(self._it_space.iterset, part_size)
         return plan
-        
+
 
     def generate_code(self):
 
