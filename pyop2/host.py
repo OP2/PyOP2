@@ -278,6 +278,8 @@ class Arg(base.Arg):
         t = self.data.ctype
         if self.data._is_scalar_field:
             dims = ''.join(["[%d]" % d for d in extents])
+        elif self.data._is_mixed_field:
+            dims = ''.join(["[1]" for d in self.data.dims])
         elif self.data._is_vector_field:
             dims = ''.join(["[%d]" % d for d in self.data.dims])
         else:
