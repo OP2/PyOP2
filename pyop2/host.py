@@ -97,11 +97,11 @@ class Arg(base.Arg):
                         val += ", PyObject *_%s2" % self.c_map_name()
         return val
 
-    def c_vec_dec(self):
+    def c_vec_dec(self, dim):
         return ";\n%(type)s *%(vec_name)s[%(dim)s]" % \
                {'type' : self.ctype,
                 'vec_name' : self.c_vec_name(),
-                'dim' : self.map.dim}
+                'dim' : dim}
 
     def c_wrapper_dec(self):
         if self._is_mat:
@@ -140,15 +140,9 @@ class Arg(base.Arg):
             if self._multimap:
                 total_dim = sum([self.map.maps[i].dim * self.data.dats[i].cdim
                                  for i in range(len(self.data.dats))])
-                val += ";\n%(type)s *%(vec_name)s[%(dim)s]" % \
-                    {'type' : self.ctype,
-                    'vec_name' : self.c_vec_name(),
-                    'dim' : total_dim}
+                val += self.c_vec_dec(total_dim)
             else:
-                val += ";\n%(type)s *%(vec_name)s[%(dim)s]" % \
-                   {'type' : self.ctype,
-                    'vec_name' : self.c_vec_name(),
-                    'dim' : self.map.dim * self.data.cdim}
+                val += self.c_vec_dec(self.map.dim * self.data.cdim)
         return val
 
     def c_ind_data(self, idx):
