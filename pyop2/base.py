@@ -366,6 +366,9 @@ class Set(object):
     def __call__(self, *dims):
         return IterationSpace(self, dims)
 
+    def __iter__(self):
+        yield self
+
     @property
     def core_size(self):
         """Core set size.  Owned elements not touching halo elements."""
@@ -842,40 +845,42 @@ class Dat(DataCarrier):
 
     def halo_exchange_begin(self):
         """Begin halo exchange."""
-        halo = self.dataset.halo
-        if halo is None:
-            return
-        for dest,ele in enumerate(halo.sends):
-            if ele.size == 0:
-                # Don't send to self (we've asserted that ele.size ==
-                # 0 previously) or if there are no elements to send
-                self._send_reqs[dest] = MPI.REQUEST_NULL
-                continue
-            self._send_buf[dest] = self._data[ele]
-            self._send_reqs[dest] = halo.comm.Isend(self._send_buf[dest],
-                                                    dest=dest, tag=self._id)
-        for source,ele in enumerate(halo.receives):
-            if ele.size == 0:
-                # Don't receive from self or if there are no elements
-                # to receive
-                self._recv_reqs[source] = MPI.REQUEST_NULL
-                continue
-            self._recv_buf[source] = self._data[ele]
-            self._recv_reqs[source] = halo.comm.Irecv(self._recv_buf[source],
-                                                      source=source, tag=self._id)
+        for d in self.dataset:
+            halo = d.halo
+            if halo is None:
+                return
+            for dest,ele in enumerate(halo.sends):
+                if ele.size == 0:
+                    # Don't send to self (we've asserted that ele.size ==
+                    # 0 previously) or if there are no elements to send
+                    self._send_reqs[dest] = MPI.REQUEST_NULL
+                    continue
+                self._send_buf[dest] = self._data[ele]
+                self._send_reqs[dest] = halo.comm.Isend(self._send_buf[dest],
+                                                        dest=dest, tag=self._id)
+            for source,ele in enumerate(halo.receives):
+                if ele.size == 0:
+                    # Don't receive from self or if there are no elements
+                    # to receive
+                    self._recv_reqs[source] = MPI.REQUEST_NULL
+                    continue
+                self._recv_buf[source] = self._data[ele]
+                self._recv_reqs[source] = halo.comm.Irecv(self._recv_buf[source],
+                                                          source=source, tag=self._id)
 
     def halo_exchange_end(self):
         """End halo exchange. Waits on MPI recv."""
-        halo = self.dataset.halo
-        if halo is None:
-            return
-        MPI.Request.Waitall(self._recv_reqs)
-        MPI.Request.Waitall(self._send_reqs)
-        self._send_buf = [None]*len(self._send_buf)
-        for source, buf in enumerate(self._recv_buf):
-            if buf is not None:
-                self._data[halo.receives[source]] = buf
-        self._recv_buf = [None]*len(self._recv_buf)
+        for d in self.dataset:
+            halo = d.halo
+            if halo is None:
+                return
+            MPI.Request.Waitall(self._recv_reqs)
+            MPI.Request.Waitall(self._send_reqs)
+            self._send_buf = [None]*len(self._send_buf)
+            for source, buf in enumerate(self._recv_buf):
+                if buf is not None:
+                    self._data[halo.receives[source]] = buf
+            self._recv_buf = [None]*len(self._recv_buf)
 
     @property
     def norm(self):
