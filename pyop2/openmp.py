@@ -74,11 +74,11 @@ class Arg(host.Arg):
     def c_local_tensor_name(self):
         return self.c_kernel_arg_name(str(_max_threads))
 
-    def c_vec_dec(self):
+    def c_vec_dec(self, dim):
         return ";\n%(type)s *%(vec_name)s[%(dim)s]" % \
                    {'type' : self.ctype,
                     'vec_name' : self.c_vec_name(str(_max_threads)),
-                    'dim' : self.map.dim}
+                    'dim' : dim}
 
     def c_reduction_dec(self):
         return "%(type)s %(name)s_l[%(max_threads)s][%(dim)s]" % \
