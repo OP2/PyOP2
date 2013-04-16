@@ -54,10 +54,10 @@ class Arg(base.Arg):
     def c_vec_name(self):
         return self.c_arg_name() + "_vec"
 
-    def c_map_name(self, i=None, j=None):
+    def c_map_name(self, i=None, rc=None):
         suffix = ""
-        if j is not None:
-            suffix += "_%s" % j
+        if rc is not None:
+            suffix += "_%s" % rc
         if i is not None:
             suffix += "_%s" % i
         return self.c_arg_name() + "_map" + suffix
@@ -77,11 +77,11 @@ class Arg(base.Arg):
         if self._is_indirect or self._is_mat:
             if self._rowcol_map:
                 # if the arg is a mat arg and has a list of lists of maps
-                for i in range(len(self.map)):
+                for i, rc in enumerate(['r', 'c']):
                     if not isinstance(self.map[i], list):
                         raise RuntimeError("The arg requires a list of lists of maps as it's a mixed mat arg")
                     for j in range(len(self.map[i])):
-                        val += ", PyObject *_%s" % self.c_map_name(i, j)
+                        val += ", PyObject *_%s" % self.c_map_name(i=j, rc=rc)
             else:
                 if isinstance(self.map, MultiMap):
                     # if the arg is MultiDat which has a MultiMap
@@ -120,10 +120,10 @@ class Arg(base.Arg):
                     {'name' : self.c_arg_name(), 'type' : self.ctype}
         if self._is_indirect or self._is_mat:
             if self._rowcol_map:
-                for i in range(len(self.map)):
+                for i, rc in enumerate(['r', 'c']):
                     for j in range(len(self.map[i])):
                         val += ";\nint *%(name)s = (int *)(((PyArrayObject *)_%(name)s)->data)" % \
-                                            {'name' : self.c_map_name(i, j)}
+                                            {'name' : self.c_map_name(i=j, rc=rc)}
                 return val
             else:
                 if self._multimap:
@@ -376,19 +376,17 @@ class ParLoop(base.ParLoop):
                     for i in range(rsize):
                         for j in range(csize):
                             s += "if (b_1 == %d && b_2 == %d) {" % (i, j)
-                            dims = arg.data.sparsity.sparsity_list[rsize * i + j].dims
+                            rmult, cmult = arg.data.sparsity.sparsity_list[rsize * i + j].dims[0]
                             nrows = arg._map[0][i].dim
                             ncols = arg._map[1][j].dim
-                            rmult = dims[0][0]
-                            cmult = dims[0][1]
                             idx = '[0][0]'
                             val = "&%s%s" % (p_data, idx)
                             row = "(j_0 / %(dim)s) + %(rmult)s * %(map)s[i * %(dim)s + (j_0 %% %(dim)s)]" % \
-                                {'map' : arg.c_map_name(i, j),
+                                {'map' : arg.c_map_name(i=i, rc='r'),
                                 'dim' : nrows,
                                 'rmult' : rmult }
                             col = "(j_1 / %(dim)s) + %(cmult)s * %(map)s[i * %(dim)s + (j_1 %% %(dim)s)]" % \
-                                {'map' : arg.c_map_name(i, j),
+                                {'map' : arg.c_map_name(i=j, rc='c'),
                                 'dim' : ncols,
                                 'cmult' : cmult }
                             pos = i * rsize + j
