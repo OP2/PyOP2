@@ -33,10 +33,10 @@ containing the map values. Our example mapping is from cells to vertices.
 We also need to define some data on our sets: ::
 
   vertex_coords = op2.Dat(vertices, 2, [ (0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0) ] )
-  cell_centre = op2.Dat(cells, 2, [ (0.0, 0.0), (0.0, 0.0) ] )
-  cell_mass = op2.Dat(cells, 1, [ 0.0, 0.0 ] )
+  cell_centre = op2.Dat(cells, 2)
+  cell_mass = op2.Dat(cells, 1)
 
-Data (`Dat` s) is declared
+Data (`Dat` objects) are declared on a set, and can be of any dimension.
 
 A kernel that computes the centre and mass of the cells is defined by embedding
 a C function in a string. ::
