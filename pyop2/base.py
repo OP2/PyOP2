@@ -45,6 +45,7 @@ from configuration import configuration
 from caching import Cached, ObjectCached
 from versioning import Versioned, modifies, modifies_argn, CopyOnWrite, \
     shallow_copy, zeroes
+from debug import DescMap
 from exceptions import *
 from utils import *
 from backends import _make_object
@@ -1017,6 +1018,12 @@ class DataSet(ObjectCached):
         return "OP2 DataSet: %s on set %s, with dim %s" % \
             (self._name, self._set, self._dim)
 
+    def desc(self):
+        descMap = DescMap("Set \"" + self._name + "\"")
+        descMap["sizes"] = self.sizes
+        descMap["dim"] = self.dim
+        return str(descMap)
+
     def __repr__(self):
         return "DataSet(%r, %r, %r)" % (self._set, self._dim, self._name)
 
@@ -1905,6 +1912,16 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
     def __str__(self):
         return "OP2 Dat: %s on (%s) with datatype %s" \
                % (self._name, self._dataset, self.dtype.name)
+
+    def desc(self):
+        descMap = DescMap("Dat \"" + self._name + "\"")
+        descMap["on"] = self._dataset.desc()
+        descMap["datatype"] = self._data.dtype.name
+        descMap["data"] = self._data
+        descMap["data_stdev"] = self._data.std()
+        descMap["data_sum"] = self._data.sum()
+        descMap["data_nonzero"] = "%d / %d" % ((self._data != 0).sum(), len(self._data))
+        return str(descMap)
 
     def __repr__(self):
         return "Dat(%r, None, %r, %r)" \
@@ -2848,6 +2865,13 @@ class Map(object):
         return "OP2 Map: %s from (%s) to (%s) with arity %s" \
                % (self._name, self._iterset, self._toset, self._arity)
 
+    def desc(self):
+        descMap = DescMap("Map \"" + self._name + "\"")
+        descMap["from"] = self._iterset.desc()
+        descMap["to"] = self._dataset.desc()
+        descMap["dim"] = self._dim
+        return str(descMap)
+
     def __repr__(self):
         return "Map(%r, %r, %r, None, %r)" \
                % (self._iterset, self._toset, self._arity, self._name)
@@ -3238,6 +3262,13 @@ class Sparsity(ObjectCached):
         return "OP2 Sparsity: dsets %s, rmaps %s, cmaps %s, name %s" % \
                (self._dsets, self._rmaps, self._cmaps, self._name)
 
+    def desc(self):
+        descMap = DescMap("Sparsity \"" + self._name + "\"")
+        descMap["nrows"] = self._nrows
+        descMap["ncols"] = self._ncols
+        descMap["dims"] = self._dims
+        return str(descMap)
+
     def __repr__(self):
         return "Sparsity(%r, %r, %r)" % (self.dsets, self.maps, self.name)
 
@@ -3429,6 +3460,17 @@ class Mat(SetAssociated):
     def __str__(self):
         return "OP2 Mat: %s, sparsity (%s), datatype %s" \
                % (self._name, self._sparsity, self._datatype.name)
+
+    def desc(self):
+        descMap = DescMap("Mat \"" + self._name + "\"")
+        descMap["datatype"] = self._datatype
+        descMap["sparsity"] = self._sparsity.desc()
+        if len(self.dims) == 1:
+            descMap["values"] = self.values
+            descMap["values_stdev"] = self.values.std()
+            descMap["values_sum"] = self.values.sum()
+            descMap["values_nonzero"] = "%d / %d" % ((self.values != 0).sum(), len(self.values))
+        return str(descMap)
 
     def __repr__(self):
         return "Mat(%r, %r, %r)" \
