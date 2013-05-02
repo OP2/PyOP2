@@ -41,6 +41,7 @@ subclass these as required to implement backend-specific features.
 import numpy as np
 import operator
 
+from debug import DescMap
 from exceptions import *
 from utils import *
 from backends import _make_object
@@ -410,6 +411,11 @@ class Set(object):
 
     def __str__(self):
         return "OP2 Set: %s with size %s, dim %s" % (self._name, self._size, self._dim)
+
+    def desc(self):
+        descMap = DescMap("Set \"" + self._name + "\"")
+        descMap["size"] = self._size
+        return str(descMap)
 
     def __repr__(self):
         return "Set(%r, %r, %r)" % (self._size, self._dim, self._name)
@@ -788,6 +794,17 @@ class Dat(DataCarrier):
         return "OP2 Dat: %s on (%s) with datatype %s" \
                % (self._name, self._dataset, self._data.dtype.name)
 
+    def desc(self):
+        descMap = DescMap("Dat \"" + self._name + "\"")
+        descMap["on"] = self._dataset.desc()
+        descMap["dimension"] = self._dim
+        descMap["datatype"] = self._data.dtype.name
+        descMap["data"] = self._data
+        descMap["data_stdev"] = self._data.std()
+        descMap["data_sum"] = self._data.sum()
+        descMap["data_nonzero"] = "%d / %d" % ((self._data != 0).sum(), len(self._data))
+        return str(descMap)
+
     def __repr__(self):
         return "Dat(%r, '%s', None, '%s')" \
                % (self._dataset, self._data.dtype, self._name)
@@ -953,6 +970,13 @@ class MultiDat(Dat):
 
     def __str__(self):
         return "OP2 MultiDat %s on the dats: %s" % (self._name, self.dats)
+
+    def desc(self):
+        descMap = DescMap("MultiDat \"" + self._name +"\"")
+        descMap["dimensions"] = self.dim
+        for idx, dat in enumerate(self.dats):
+            descMap["dat" + str(idx)] = dat.desc()
+        return str(descMap)
 
 class Const(DataCarrier):
     """Data that is constant for any element of any set."""
@@ -1192,6 +1216,13 @@ class Map(object):
     def __str__(self):
         return "OP2 Map: %s from (%s) to (%s) with dim %s" \
                % (self._name, self._iterset, self._dataset, self._dim)
+
+    def desc(self):
+        descMap = DescMap("Map \"" + self._name + "\"")
+        descMap["from"] = self._iterset.desc()
+        descMap["to"] = self._dataset.desc()
+        descMap["dim"] = self._dim
+        return str(descMap)
 
     def __repr__(self):
         return "Map(%r, %r, %s, None, '%s')" \
@@ -1513,6 +1544,13 @@ class Sparsity(object):
         return "OP2 Sparsity: rmaps %s, cmaps %s, name %s" % \
                (self._rmaps, self._cmaps, self._name)
 
+    def desc(self):
+        descMap = DescMap("Sparsity \"" + self._name + "\"")
+        descMap["nrows"] = self._nrows
+        descMap["ncols"] = self._ncols
+        descMap["dims"] = self._dims
+        return str(descMap)
+
     def __repr__(self):
         return "Sparsity((%r, %r), %r, %r)" % \
                (self._rmaps, self._cmaps, self._dims, self._name)
@@ -1693,6 +1731,19 @@ class Mat(DataCarrier):
     def __str__(self):
         return "OP2 Mat: %s, sparsity (%s), datatype %s" \
                % (self._name, self._sparsity, self._datatype.name)
+
+    def desc(self):
+        descMap = DescMap("Mat \"" + self._name + "\"")
+        descMap["datatype"] = self._datatype
+        descMap["sparsity"] = self._sparsity.desc()
+        for idx, mat in enumerate(self.mat_list):
+            descMap["mat" + str(idx)] = mat.desc()
+        if len(self.dims) == 1:
+            descMap["values"] = self.values
+            descMap["values_stdev"] = self.values.std()
+            descMap["values_sum"] = self.values.sum()
+            descMap["values_nonzero"] = "%d / %d" % ((self.values != 0).sum(), len(self.values))
+        return str(descMap)
 
     def __repr__(self):
         return "Mat(%r, '%s', '%s')" \

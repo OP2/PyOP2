@@ -186,6 +186,10 @@ class Solver(base.Solver, PETSc.KSP):
             self.parameters['monitor_convergence'] = True
 
     def solve(self, A, x, b):
+        print "Before solve:"
+        print "A:\n", A.desc(), "\n"
+        print "x:\n", x.desc(), "\n"
+        print "b:\n", b.desc(), "\n"
         self._set_parameters()
         self.setOperators(A.handle)
         self.setFromOptions()
