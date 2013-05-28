@@ -54,42 +54,41 @@ from mpi4py import MPI as _MPI
 
 class MPI(object):
 
-    COMM = None
+    class __metaclass__(type):
 
-    @property
-    @classmethod
-    def parallel(cls):
-        """Are we running in parallel?"""
-        return cls.COMM.size > 1
+        COMM = None
 
-    @property
-    @classmethod
-    def comm(cls):
-        """The MPI Communicator used by PyOP2."""
-        return cls.COMM
+        @property
+        def parallel(cls):
+            """Are we running in parallel?"""
+            return cls.comm.size > 1
 
-    @comm.setter
-    @classmethod
-    def set_comm(cls, comm):
-        """Set the MPI communicator for parallel communication."""
-        if comm is None:
-            cls.COMM = _MPI.COMM_WORLD
-        elif type(comm) is int:
-            # If it's come from Fluidity where an MPI_Comm is just an
-            # integer.
-            cls.COMM = _MPI.Comm.f2py(comm)
-        else:
-            cls.COMM = comm
+        @property
+        def comm(cls):
+            """The MPI Communicator used by PyOP2."""
+            return cls.COMM
 
-    @property
-    @classmethod
-    def rank(cls):
-        return cls.COMM.rank
+        @comm.setter
+        def comm(cls, comm):
+            """Set the MPI communicator for parallel communication."""
+            if comm is None:
+                cls.COMM = _MPI.COMM_WORLD
+            elif type(comm) is int:
+                # If it's come from Fluidity where an MPI_Comm is just an
+                # integer.
+                cls.COMM = _MPI.Comm.f2py(comm)
+            else:
+                cls.COMM = comm
+            cls.comm = comm
+            from IPython import embed
 
-    @property
-    @classmethod
-    def size(cls):
-        return cls.COMM.size
+        @property
+        def rank(cls):
+            return cls.comm.rank
+
+        @property
+        def size(cls):
+            return cls.comm.size
 
 def debug(*msg):
     if cfg.debug:

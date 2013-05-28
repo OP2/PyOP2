@@ -45,12 +45,14 @@ from base import *
 
 class MPI(base.MPI):
 
-    @comm.setter
-    @classmethod
-    def set_comm(cls, comm):
-        super(MPI, cls).set_comm(comm)
-        # PETSc objects also need to be built on the same communicator.
-        PETSc.Sys.setDefaultComm(cls.COMM)
+    class __metaclass__(base.MPI.__metaclass__):
+
+        @base.MPI.__metaclass__.comm.setter
+        def comm(cls, comm):
+            """Set the MPI communicator for parallel communication."""
+            cls.comm = comm
+            # PETSc objects also need to be built on the same communicator.
+            PETSc.Sys.setDefaultComm(cls.comm)
 
 class Dat(base.Dat):
 
