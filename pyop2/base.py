@@ -52,43 +52,43 @@ from mpi4py import MPI as _MPI
 
 # MPI Communicator
 
-class MPI(object):
+class MPIConfig(object):
 
-    class __metaclass__(type):
+    def __init__(self):
+        self.COMM = _MPI.COMM_WORLD
 
-        COMM = None
+    @property
+    def parallel(self):
+        """Are we running in parallel?"""
+        return self.comm.size > 1
 
-        @property
-        def parallel(cls):
-            """Are we running in parallel?"""
-            return cls.comm.size > 1
+    @property
+    def comm(self):
+        """The MPI Communicator used by PyOP2."""
+        return self.COMM
 
-        @property
-        def comm(cls):
-            """The MPI Communicator used by PyOP2."""
-            return cls.COMM
+    @comm.setter
+    def comm(self, comm):
+        """Set the MPI communicator for parallel communication."""
+        self._set_comm(comm)
 
-        @comm.setter
-        def comm(cls, comm):
-            """Set the MPI communicator for parallel communication."""
-            if comm is None:
-                cls.COMM = _MPI.COMM_WORLD
-            elif type(comm) is int:
-                # If it's come from Fluidity where an MPI_Comm is just an
-                # integer.
-                cls.COMM = _MPI.Comm.f2py(comm)
-            else:
-                cls.COMM = comm
-            cls.comm = comm
-            from IPython import embed
+    def _set_comm(self, comm):
+        if type(comm) is int:
+            # If it's come from Fluidity where an MPI_Comm is just an
+            # integer.
+            self.COMM = _MPI.Comm.f2py(comm)
+        elif comm is not None:
+            self.COMM = comm
 
-        @property
-        def rank(cls):
-            return cls.comm.rank
+    @property
+    def rank(self):
+        return self.comm.rank
 
-        @property
-        def size(cls):
-            return cls.comm.size
+    @property
+    def size(self):
+        return self.comm.size
+
+MPI = MPIConfig()
 
 def debug(*msg):
     if cfg.debug:
@@ -311,18 +311,18 @@ class Arg(object):
         if self.access is not READ:
             self._in_flight = True
             if self.access is INC:
-                op = MPI.SUM
+                op = _MPI.SUM
             elif self.access is MIN:
-                op = MPI.MIN
+                op = _MPI.MIN
             elif self.access is MAX:
-                op = MPI.MAX
+                op = _MPI.MAX
             # If the MPI supports MPI-3, this could be MPI_Iallreduce
             # instead, to allow overlapping comp and comms.
             # We must reduce into a temporary buffer so that when
             # executing over the halo region, which occurs after we've
             # called this reduction, we don't subsequently overwrite
             # the result.
-            COMM.Allreduce(self.data._data, self.data._buf, op=op)
+            MPI.comm.Allreduce(self.data._data, self.data._buf, op=op)
 
     def reduction_end(self):
         """End reduction for the argument if it is in flight.
@@ -505,16 +505,16 @@ class Halo(object):
     numbering, however insertion into :class:`Mat`s uses cross-process
     numbering under the hood.
     """
-    def __init__(self, sends, receives, comm=MPI.comm, gnn2unn=None):
+    def __init__(self, sends, receives, comm=None, gnn2unn=None):
         self._sends = tuple(np.asarray(x, dtype=np.int32) for x in sends)
         self._receives = tuple(np.asarray(x, dtype=np.int32) for x in receives)
         self._global_to_petsc_numbering = gnn2unn
         if type(comm) is int:
             self._comm = MPI.Comm.f2py(comm)
         else:
-            self._comm = comm
+            self._comm = comm or MPI.comm
         # FIXME: is this a necessity?
-        assert self._comm == COMM, "Halo communicator not COMM"
+        assert self._comm == MPI.comm, "Halo communicator not COMM"
         rank = self._comm.rank
         size = self._comm.size
 
@@ -588,7 +588,7 @@ class Halo(object):
     def __setstate__(self, dict):
         self.__dict__.update(dict)
         # FIXME: This will break for custom halo communicators
-        self._comm = COMM
+        self._comm = MPI.comm
 
 class IterationSpace(object):
     """OP2 iteration space type.
