@@ -48,34 +48,52 @@ from utils import *
 from backends import _make_object
 import configuration as cfg
 import op_lib_core as core
-from mpi4py import MPI
+from mpi4py import MPI as _MPI
 
 # MPI Communicator
-PYOP2_COMM = None
 
-def running_in_parallel():
-    return PYOP2_COMM.size > 1
+class MPI(object):
+
+    COMM = None
+
+    @property
+    @classmethod
+    def parallel(cls):
+        """Are we running in parallel?"""
+        return cls.COMM.size > 1
+
+    @property
+    @classmethod
+    def comm(cls):
+        """The MPI Communicator used by PyOP2."""
+        return cls.COMM
+
+    @comm.setter
+    @classmethod
+    def set_comm(cls, comm):
+        """Set the MPI communicator for parallel communication."""
+        if comm is None:
+            cls.COMM = _MPI.COMM_WORLD
+        elif type(comm) is int:
+            # If it's come from Fluidity where an MPI_Comm is just an
+            # integer.
+            cls.COMM = _MPI.Comm.f2py(comm)
+        else:
+            cls.COMM = comm
+
+    @property
+    @classmethod
+    def rank(cls):
+        return cls.COMM.rank
+
+    @property
+    @classmethod
+    def size(cls):
+        return cls.COMM.size
 
 def debug(*msg):
     if cfg.debug:
-        print('[%d]' % PYOP2_COMM.rank if running_in_parallel() else '', *msg)
-
-def get_mpi_communicator():
-    """The MPI Communicator used by PyOP2."""
-    global PYOP2_COMM
-    return PYOP2_COMM
-
-def set_mpi_communicator(comm):
-    """Set the MPI communicator for parallel communication."""
-    global PYOP2_COMM
-    if comm is None:
-        PYOP2_COMM = MPI.COMM_WORLD
-    elif type(comm) is int:
-        # If it's come from Fluidity where an MPI_Comm is just an
-        # integer.
-        PYOP2_COMM = MPI.Comm.f2py(comm)
-    else:
-        PYOP2_COMM = comm
+        print('[%d]' % MPI.rank if MPI.parallel else '', *msg)
 
 # Common base classes
 
@@ -305,7 +323,7 @@ class Arg(object):
             # executing over the halo region, which occurs after we've
             # called this reduction, we don't subsequently overwrite
             # the result.
-            PYOP2_COMM.Allreduce(self.data._data, self.data._buf, op=op)
+            COMM.Allreduce(self.data._data, self.data._buf, op=op)
 
     def reduction_end(self):
         """End reduction for the argument if it is in flight.
@@ -488,7 +506,7 @@ class Halo(object):
     numbering, however insertion into :class:`Mat`s uses cross-process
     numbering under the hood.
     """
-    def __init__(self, sends, receives, comm=PYOP2_COMM, gnn2unn=None):
+    def __init__(self, sends, receives, comm=MPI.comm, gnn2unn=None):
         self._sends = tuple(np.asarray(x, dtype=np.int32) for x in sends)
         self._receives = tuple(np.asarray(x, dtype=np.int32) for x in receives)
         self._global_to_petsc_numbering = gnn2unn
@@ -497,7 +515,7 @@ class Halo(object):
         else:
             self._comm = comm
         # FIXME: is this a necessity?
-        assert self._comm == PYOP2_COMM, "Halo communicator not PYOP2_COMM"
+        assert self._comm == COMM, "Halo communicator not COMM"
         rank = self._comm.rank
         size = self._comm.size
 
@@ -571,7 +589,7 @@ class Halo(object):
     def __setstate__(self, dict):
         self.__dict__.update(dict)
         # FIXME: This will break for custom halo communicators
-        self._comm = PYOP2_COMM
+        self._comm = COMM
 
 class IterationSpace(object):
     """OP2 iteration space type.
@@ -1270,7 +1288,7 @@ class Sparsity(Cached):
         self._name = name or "sparsity_%d" % Sparsity._globalcount
         self._lib_handle = None
         Sparsity._globalcount += 1
-        core.build_sparsity(self, parallel=PYOP2_COMM.size > 1)
+        core.build_sparsity(self, parallel=MPI.parallel)
         self._initialized = True
 
     @property

@@ -42,12 +42,15 @@ required to implement backend-specific features.
 from petsc4py import PETSc
 import base
 from base import *
-from base import set_mpi_communicator as set_base_mpi_communicator
 
-def set_mpi_communicator(comm):
-    set_base_mpi_communicator(comm)
-    # PETSc objects also need to be built on the same communicator.
-    PETSc.Sys.setDefaultComm(base.PYOP2_COMM)
+class MPI(base.MPI):
+
+    @comm.setter
+    @classmethod
+    def set_comm(cls, comm):
+        super(MPI, cls).set_comm(comm)
+        # PETSc objects also need to be built on the same communicator.
+        PETSc.Sys.setDefaultComm(cls.COMM)
 
 class Dat(base.Dat):
 

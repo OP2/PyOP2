@@ -38,8 +38,7 @@ import device
 import configuration as cfg
 import op_lib_core as core
 import base
-from base import READ, WRITE, RW, INC, MIN, MAX, IdentityMap, i
-from base import running_in_parallel, debug
+from base import READ, WRITE, RW, INC, MIN, MAX, IdentityMap, i, MPI, debug
 from utils import validate_type
 from exceptions import MatTypeError, DatTypeError
 
@@ -71,7 +70,7 @@ def init(**kwargs):
     if backend == 'pyop2.void':
         backends.set_backend(cfg.backend)
         backends._BackendSelector._backend._setup()
-        backends._BackendSelector._backend.set_mpi_communicator(kwargs.get('comm'))
+        backends._BackendSelector._backend.MPI.comm = kwargs.get('comm')
         core.op_init(args=None, diags=0)
 
 def exit():
