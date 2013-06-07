@@ -91,30 +91,27 @@ cdef class Plan:
     cdef int _nshared
     cdef int _ncolors
 
-    def __cinit__(self, kernel, iset, *args, **kwargs):
-        ps = kwargs.get('partition_size', 1)
-        mc = kwargs.get('matrix_coloring', False)
-        st = kwargs.get('staging', True)
-        tc = kwargs.get('thread_coloring', True)
-
-        assert ps > 0, "partition size must be strictly positive"
+    def __cinit__(self, kernel, iset, *args, partition_size=1,
+                  matrix_coloring=False, staging=True, thread_coloring=True,
+                  **kwargs):
+        assert partition_size > 0, "partition size must be strictly positive"
 
         self._need_exec_halo = any(arg._is_indirect_and_not_read or arg._is_mat
                                    for arg in args)
 
-        self._compute_partition_info(iset, ps, mc, args)
-        if st:
-            self._compute_staging_info(iset, ps, mc, args)
+        self._compute_partition_info(iset, partition_size, matrix_coloring, args)
+        if staging:
+            self._compute_staging_info(iset, partition_size, matrix_coloring, args)
 
-        self._compute_coloring(iset, ps, mc, tc, args)
+        self._compute_coloring(iset, partition_size, matrix_coloring, thread_coloring, args)
 
-    def _compute_partition_info(self, iset, ps, mc, args):
+    def _compute_partition_info(self, iset, partition_size, matrix_coloring, args):
         def nelems_iter(len):
             if len:
                 acc = 0
                 while acc < len:
-                    yield min(ps, len - acc)
-                    acc += ps
+                    yield min(partition_size, len - acc)
+                    acc += partition_size
 
         _gen = (nelems_iter(iset._core_size),
                 nelems_iter(iset.size - iset._core_size), )
@@ -135,7 +132,7 @@ cdef class Plan:
 
         self._offset = numpy.fromiter(offset_iter(), dtype=numpy.int32)
 
-    def _compute_staging_info(self, iset, ps, mc, args):
+    def _compute_staging_info(self, iset, partition_size, matrix_coloring, args):
         """Constructs:
             - nindirect
             - ind_map
@@ -230,7 +227,7 @@ cdef class Plan:
                 nshareds[pi] += align(sizes[(dat,map,pi)] * dat.dtype.itemsize * dat.cdim)
         self._nshared = max(nshareds)
 
-    def _compute_coloring(self, iset, ps, mc, tc, args):
+    def _compute_coloring(self, iset, partition_size, matrix_coloring, thread_coloring, args):
         """Constructs:
             - thrcol
             - nthrcol
@@ -248,7 +245,7 @@ cdef class Plan:
                 l = race_args.get(k, [])
                 l.append((arg.map, arg.idx))
                 race_args[k] = l
-            elif mc and arg._is_mat:
+            elif matrix_coloring and arg._is_mat:
                 k = arg.data
                 rowmap = k.sparsity.maps[0][0]
                 l = race_args.get(k, [])
@@ -297,7 +294,7 @@ cdef class Plan:
         cdef int * nelems = <int *> numpy.PyArray_DATA(self._nelems)
         cdef int * offset = <int *> numpy.PyArray_DATA(self._offset)
 
-        if tc:
+        if thread_coloring:
             for _p in range(self._nblocks):
                 _base_color = 0
                 terminated = False
@@ -343,8 +340,8 @@ cdef class Plan:
 
         cdef int * _pcolors = <int *> numpy.PyArray_DATA(pcolors)
 
-        cdef int _first_block_owned = int(math.ceil(iset._core_size / float(ps)))
-        cdef int _first_block_halo = int(math.ceil(iset.size / float(ps)))
+        cdef int _first_block_owned = int(math.ceil(iset._core_size / float(partition_size)))
+        cdef int _first_block_halo = int(math.ceil(iset.size / float(partition_size)))
 
         _base_color = 0
         terminated = False
