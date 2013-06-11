@@ -397,6 +397,7 @@ cdef class Plan:
             free(flat_race_args[i].mip)
         free(flat_race_args)
 
+        self._pcolors = pcolors
         self._ncolors = max(pcolors) + 1
         self._ncolblk = numpy.bincount(pcolors).astype(numpy.int32)
         self._blkmap = numpy.argsort(pcolors, kind='mergesort').astype(numpy.int32)

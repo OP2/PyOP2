@@ -302,6 +302,27 @@ class _GenericPlan(base.Cached):
 
         return key
 
+    def __str__(self):
+        return """%(class)s
+nblocks: %(nblocks)d
+nelems: %(nelems)s
+offset: %(offset)s
+ncolors / core / owned: %(ncolors)d / %(ncolors_core)d / %(ncolors_owned)d
+pcolors: %(pcolors)s
+blkmap: %(blkmap)s
+ncolblk: %(ncolblk)s
+""" %{
+        'class': self.__class__.__name__,
+        'nblocks' : self.nblocks,
+        'nelems' : self.nelems,
+        'offset' : self.offset,
+        'ncolors' : self.ncolors,
+        'ncolors_core' : self.ncolors_core,
+        'ncolors_owned' : self.ncolors_owned,
+        'pcolors' : getattr(self, '_pcolors', []),
+        'blkmap' : self.blkmap,
+        'ncolblk' : self.ncolblk}
+
 class CPlan(_GenericPlan, core.op_plan):
     """
     Legacy plan function.
