@@ -247,7 +247,7 @@ class ParLoop(device.ParLoop, host.ParLoop):
 
 
     def _get_plan(self, part_size):
-        if [arg for arg in self.args if arg._is_indirect or arg._is_mat]:
+        if self._is_indirect:
             plan = device.Plan(self._kernel, self._it_space.iterset,
                                *self._unwound_args,
                                partition_size=part_size,
