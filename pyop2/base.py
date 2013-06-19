@@ -296,6 +296,14 @@ class Arg(object):
         descriptor."""
         return not self == other
 
+    def desc(self):
+        descMap = DescMap("Arg")
+        descMap["dat"] = self._dat.desc()
+        descMap["map"] = self._map.desc()
+        descMap["idx"] = str(self._idx)
+        descMap["access"] = str(self._access)
+        return str(descMap)
+
     def __str__(self):
         return "OP2 Arg: dat %s, map %s, index %s, access %s" % \
             (self._dat, self._map, self._idx, self._access)
