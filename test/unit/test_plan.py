@@ -38,7 +38,7 @@ import random
 from pyop2 import op2
 from pyop2 import device
 
-backends = ['sequential', 'openmp', 'opencl', 'cuda']
+backends = ['openmp']
 
 def _seed():
     return 0.02041724
@@ -141,6 +141,116 @@ class TestPlan:
                              matrix_coloring=False,
                              partition_size=2)
 
+    @pytest.fixture(scope="class", params=[2,3])
+    def partition_size(cls, request):
+        return request.param
+
+    @pytest.fixture(scope="class", params=[(0,0,0,16), (0,0,16,16), (0,0,12,16), (0,16,16,16),
+                                           (0,12,12,16), (0,12,16,16), (0,8,12,16), (16,16,16,16),
+                                           (12,12,12,16), (12,12,16,16), (8,8,12,16), (12,16,16,16),
+                                           (8,12,12,16), (8,12,16,16), (4,8,12,16)])
+    def set_sizes(cls, request):
+        return list(request.param)
+
+    def test_mpi_triangle(self, backend, set_sizes, partition_size):
+        kernel = op2.Kernel("", "dummy")
+        edges = op2.Set(set_sizes, 1, "edges")
+        nodes = op2.Set(16, 1, "nodes")
+        dat = op2.Dat(nodes, numpy.zeros(nodes.size, dtype=numpy.int32))
+        g = op2.Global(1, 0, numpy.uint32, "g")
+
+        mapping = [[0,1], [0,2], [1,2], [1,5], [1,4], [2,4], [2,3], [3,4],
+                   [4,5], [5,6], [4,6], [4,7], [3,7], [6,7], [6,8], [7,8]]
+        edeges2nodes = op2.Map(edges, nodes, 2, mapping, "edges2nodes")
+
+        device.compare_plans(kernel,
+                             edges,
+                             dat(edeges2nodes[0], op2.INC), 
+                             dat(edeges2nodes[1], op2.INC),
+                             matrix_coloring=False,
+                             partition_size=partition_size)
+
+        device.compare_plans(kernel,
+                             edges,
+                             dat(edeges2nodes[0], op2.INC), 
+                             dat(edeges2nodes[1], op2.INC),
+                             g(op2.INC),
+                             matrix_coloring=False,
+                             partition_size=partition_size)
+
+    def test_mpi_nodeps(self, backend, set_sizes, partition_size):
+        kernel = op2.Kernel("", "dummy")
+        edges = op2.Set(set_sizes, 1, "edges")
+        nodes = op2.Set(16, 1, "nodes")
+        dat = op2.Dat(nodes, numpy.zeros(nodes.size, dtype=numpy.int32))
+        g = op2.Global(1, 0, numpy.uint32, "g")
+
+        mapping = [ [x,x] for x in range(16) ]
+        edeges2nodes = op2.Map(edges, nodes, 2, mapping, "edges2nodes")
+
+        device.compare_plans(kernel,
+                             edges,
+                             dat(edeges2nodes[0], op2.INC), 
+                             dat(edeges2nodes[1], op2.INC),
+                             matrix_coloring=False,
+                             partition_size=partition_size)
+
+        device.compare_plans(kernel,
+                             edges,
+                             dat(edeges2nodes[0], op2.INC), 
+                             dat(edeges2nodes[1], op2.INC),
+                             g(op2.INC),
+                             matrix_coloring=False,
+                             partition_size=partition_size)
+
+    def test_mpi_alldep(self, backend, set_sizes, partition_size):
+        kernel = op2.Kernel("", "dummy")
+        edges = op2.Set(set_sizes, 1, "edges")
+        nodes = op2.Set(16, 1, "nodes")
+        dat = op2.Dat(nodes, numpy.zeros(nodes.size, dtype=numpy.int32))
+        g = op2.Global(1, 0, numpy.uint32, "g")
+
+        mapping = [ [0,x] for x in range(16) ]
+        edeges2nodes = op2.Map(edges, nodes, 2, mapping, "edges2nodes")
+
+        device.compare_plans(kernel,
+                             edges,
+                             dat(edeges2nodes[0], op2.INC), 
+                             dat(edeges2nodes[1], op2.INC),
+                             matrix_coloring=False,
+                             partition_size=partition_size)
+
+        device.compare_plans(kernel,
+                             edges,
+                             dat(edeges2nodes[0], op2.INC), 
+                             dat(edeges2nodes[1], op2.INC),
+                             g(op2.INC),
+                             matrix_coloring=False,
+                             partition_size=partition_size)
+
+    def test_mpi_empty_set(self, backend, partition_size):
+        kernel = op2.Kernel("", "dummy")
+        edges = op2.Set(0, 1, "edges")
+        nodes = op2.Set(9, 1, "nodes")
+
+        e2n = op2.Map(edges, nodes, 2, [], "edges2nodes")
+        dat = op2.Dat(nodes, numpy.zeros(9, dtype=numpy.int32))
+        g = op2.Global(1, 0, numpy.uint32, "g")
+
+        device.compare_plans(kernel,
+                             edges,
+                             dat(e2n[0], op2.INC), 
+                             dat(e2n[1], op2.INC),
+                             matrix_coloring=False,
+                             partition_size=partition_size)
+
+        device.compare_plans(kernel,
+                             edges,
+                             dat(e2n[0], op2.INC), 
+                             dat(e2n[1], op2.INC),
+                             g(op2.INC),
+                             matrix_coloring=False,
+                             partition_size=partition_size)
 
 if __name__ == '__main__':
     import os
