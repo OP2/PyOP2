@@ -246,4 +246,10 @@ the compiled code.
 
 If you pasted all the Python code above into the interpreter, then the effect
 of the kernel should now be visible. In order to see this, the data accessors
-can be used to read the values of the Dats.
+can be used to read the values of the Dats. We will use the read-only accessors
+to inspect the values of the `cell_centre` and `cell_mass` Dats: ::
+
+  cell_centre.data_ro
+  cell_mass.data_ro
+
+You should see the output: ::
