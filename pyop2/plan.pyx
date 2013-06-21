@@ -99,6 +99,8 @@ cdef class Plan:
         self._need_exec_halo = any(arg._is_indirect_and_not_read or arg._is_mat
                                    for arg in args)
 
+        self._has_global_reduction = any(arg._is_global_reduction for arg in args)
+
         self._compute_partition_info(iset, partition_size, matrix_coloring, args)
         if staging:
             self._compute_staging_info(iset, partition_size, matrix_coloring, args)
@@ -113,11 +115,26 @@ cdef class Plan:
                     yield min(partition_size, len - acc)
                     acc += partition_size
 
-        _gen = (nelems_iter(iset._core_size),
-                nelems_iter(iset.size - iset._core_size), )
+        # core elements
+        _gen = (nelems_iter(iset._core_size),)
+        self._first_block_owned = int(math.ceil(iset._core_size / float(partition_size)))
 
-        if self._need_exec_halo:
-            _gen += (nelems_iter(iset._ieh_size - iset._size), )
+        if self._has_global_reduction:
+            _gen += (nelems_iter(iset.size - iset._core_size),)
+            self._first_block_halo = self._first_block_owned + int(math.ceil((iset.size-iset._core_size) / float(partition_size)))
+            if self._need_exec_halo:
+                _gen += (nelems_iter(iset._ieh_size - iset._size),)
+        else:
+            # if there are no global reduction we can partition owned and 
+            # halo exec element together.
+            if self._need_exec_halo:
+                _gen += (nelems_iter(iset._ieh_size - iset._core_size),)
+            else:
+                _gen += (nelems_iter(iset.size - iset._core_size),)
+            # in that case the reduction_begin operation is a no op and thus can
+            # be called before executing own elements
+            self._first_block_halo = self._first_block_owned
+            
 
         self._nelems = numpy.fromiter(itertools.chain(*_gen),
                                       dtype=numpy.int32)
@@ -294,6 +311,11 @@ cdef class Plan:
         cdef int * nelems = <int *> numpy.PyArray_DATA(self._nelems)
         cdef int * offset = <int *> numpy.PyArray_DATA(self._offset)
 
+        def _zero_working_array():
+            for _rai in range(n_race_args):
+                for _i in range(flat_race_args[_rai].size):
+                    flat_race_args[_rai].tmp[_i] = 0
+
         if thread_coloring:
             for _p in range(self._nblocks):
                 _base_color = 0
@@ -301,10 +323,7 @@ cdef class Plan:
                 while not terminated:
                     terminated = True
 
-                    # zero out working array:
-                    for _rai in range(n_race_args):
-                        for _i in range(flat_race_args[_rai].size):
-                            flat_race_args[_rai].tmp[_i] = 0
+                    _zero_working_array()
 
                     # color threads
                     for _t in range(offset[_p], offset[_p] + nelems[_p]):
@@ -340,43 +359,26 @@ cdef class Plan:
 
         cdef int * _pcolors = <int *> numpy.PyArray_DATA(pcolors)
 
-        cdef int _first_block_owned = int(math.ceil(iset._core_size / float(partition_size)))
-        cdef int _first_block_halo = int(math.ceil(iset.size / float(partition_size)))
-
         _base_color = 0
         terminated = False
         while not terminated:
             terminated = True
 
-            # zero out working array:
-            for _rai in range(n_race_args):
-                for _i in range(flat_race_args[_rai].size):
-                    flat_race_args[_rai].tmp[_i] = 0
+            _zero_working_array()
 
             for _p in range(self._nblocks):
                 if _pcolors[_p] == -1:
                     if not terminated:
-                        if _p in [_first_block_owned, _first_block_halo]:
-                            # break early to finish coloring of the preivous group (core < owned < halo exec)
+                        if _p == self._first_block_owned or \
+                           (_p == self._first_block_halo and self._has_global_reduction):
                             break
                     else:
-                        if _p == _first_block_owned:
-                            self._ncolors_core = pcolors.max() + 1
-                            #self._ncolors_core = max(1, pcolors.max() + 1)
-                            _base_color = self._ncolors_core
-                            # zero out working array (clear deps between core/owned/halo):
-                            for _rai in range(n_race_args):
-                                for _i in range(flat_race_args[_rai].size):
-                                    flat_race_args[_rai].tmp[_i] = 0
-
-
-                        if _p == _first_block_halo:
+                        if _p == self._first_block_owned:
                             _base_color = pcolors.max() + 1
-                            self._ncolors_owned = _base_color + 1
-                            # zero out working array (clear deps between core/owned/halo):
-                            for _rai in range(n_race_args):
-                                for _i in range(flat_race_args[_rai].size):
-                                    flat_race_args[_rai].tmp[_i] = 0
+                            _zero_working_array()
+                        if _p == self._first_block_halo and self._has_global_reduction:
+                            _base_color = pcolors.max() + 1
+                            _zero_working_array()
 
                     _mask = 0
                     for _t in range(offset[_p], offset[_p] + nelems[_p]):
@@ -408,6 +410,11 @@ cdef class Plan:
 
         self._pcolors = pcolors
         self._ncolors = (max(pcolors) + 1) if len(pcolors) else 0
+        self._ncolors_core = (max(pcolors[:self._first_block_owned] + 1)) if self._first_block_owned > 0 else 0
+        if self._has_global_reduction:
+            self._ncolors_owned = (max(pcolors[:self._first_block_halo] + 1)) if self._first_block_halo > self._first_block_owned else self._ncolors_core
+        else:
+            self._ncolors_owned = 0
         self._ncolblk = numpy.bincount(pcolors).astype(numpy.int32)
         self._blkmap = numpy.argsort(pcolors, kind='mergesort').astype(numpy.int32)
 
