@@ -13,6 +13,7 @@ Contents:
 
    installation
    concepts
+   introduction
    kernels
    ir
    architecture
