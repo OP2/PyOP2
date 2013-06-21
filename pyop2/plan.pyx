@@ -225,7 +225,7 @@ cdef class Plan:
             for k in d.iterkeys():
                 dat, map = k
                 nshareds[pi] += align(sizes[(dat,map,pi)] * dat.dtype.itemsize * dat.cdim)
-        self._nshared = max(nshareds)
+        self._nshared = max(nshareds) if nshareds else 0
 
     def _compute_coloring(self, iset, partition_size, matrix_coloring, thread_coloring, args):
         """Constructs:
@@ -407,7 +407,7 @@ cdef class Plan:
         free(flat_race_args)
 
         self._pcolors = pcolors
-        self._ncolors = max(pcolors) + 1
+        self._ncolors = (max(pcolors) + 1) if len(pcolors) else 0
         self._ncolblk = numpy.bincount(pcolors).astype(numpy.int32)
         self._blkmap = numpy.argsort(pcolors, kind='mergesort').astype(numpy.int32)
 
