@@ -225,6 +225,11 @@ class ParLoop(device.ParLoop, host.ParLoop):
         self.halo_exchange_begin()
 
         boffset = 0
+
+        if plan.ncolors_owned == 0:
+            # special case hack
+            self.reduction_begin()
+
         for c in range(plan.ncolors):
             if c == plan.ncolors_core:
                 self.halo_exchange_end()
