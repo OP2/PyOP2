@@ -38,6 +38,7 @@ Cython implementation of the Plan construction.
 import base
 from utils import align
 import math
+import itertools
 import numpy
 cimport numpy
 from libc.stdlib cimport malloc, free
@@ -90,26 +91,65 @@ cdef class Plan:
     cdef int _nshared
     cdef int _ncolors
 
-    def __cinit__(self, kernel, iset, *args, **kwargs):
-        ps = kwargs.get('partition_size', 1)
-        mc = kwargs.get('matrix_coloring', False)
-        st = kwargs.get('staging', True)
-        tc = kwargs.get('thread_coloring', True)
+    def __cinit__(self, kernel, iset, *args, partition_size=1,
+                  matrix_coloring=False, staging=True, thread_coloring=True,
+                  **kwargs):
+        assert partition_size > 0, "partition size must be strictly positive"
 
-        assert ps > 0, "partition size must be strictly positive"
+        self._need_exec_halo = any(arg._is_indirect_and_not_read or arg._is_mat
+                                   for arg in args)
 
-        self._compute_partition_info(iset, ps, mc, args)
-        if st:
-            self._compute_staging_info(iset, ps, mc, args)
+        self._has_global_reduction = any(arg._is_global_reduction for arg in args)
 
-        self._compute_coloring(iset, ps, mc, tc, args)
+        self._compute_partition_info(iset, partition_size, matrix_coloring, args)
+        if staging:
+            self._compute_staging_info(iset, partition_size, matrix_coloring, args)
 
-    def _compute_partition_info(self, iset, ps, mc, args):
-        self._nblocks = int(math.ceil(iset.size / float(ps)))
-        self._nelems = numpy.array([min(ps, iset.size - i * ps) for i in range(self._nblocks)],
-                                  dtype=numpy.int32)
+        self._compute_coloring(iset, partition_size, matrix_coloring, thread_coloring, args)
 
-    def _compute_staging_info(self, iset, ps, mc, args):
+    def _compute_partition_info(self, iset, partition_size, matrix_coloring, args):
+        def nelems_iter(len):
+            if len:
+                acc = 0
+                while acc < len:
+                    yield min(partition_size, len - acc)
+                    acc += partition_size
+
+        # core elements
+        _gen = (nelems_iter(iset._core_size),)
+        self._first_block_owned = int(math.ceil(iset._core_size / float(partition_size)))
+
+        if self._has_global_reduction:
+            _gen += (nelems_iter(iset.size - iset._core_size),)
+            self._first_block_halo = self._first_block_owned + int(math.ceil((iset.size-iset._core_size) / float(partition_size)))
+            if self._need_exec_halo:
+                _gen += (nelems_iter(iset._ieh_size - iset._size),)
+        else:
+            # if there are no global reduction we can partition owned and 
+            # halo exec element together.
+            if self._need_exec_halo:
+                _gen += (nelems_iter(iset._ieh_size - iset._core_size),)
+            else:
+                _gen += (nelems_iter(iset.size - iset._core_size),)
+            # in that case the reduction_begin operation is a no op and thus can
+            # be called before executing own elements
+            self._first_block_halo = self._first_block_owned
+            
+
+        self._nelems = numpy.fromiter(itertools.chain(*_gen),
+                                      dtype=numpy.int32)
+
+        self._nblocks = self._nelems.size
+
+        def offset_iter():
+            _offset = 0
+            for nelems in self._nelems:
+                yield _offset
+                _offset += nelems
+
+        self._offset = numpy.fromiter(offset_iter(), dtype=numpy.int32)
+
+    def _compute_staging_info(self, iset, partition_size, matrix_coloring, args):
         """Constructs:
             - nindirect
             - ind_map
@@ -138,7 +178,7 @@ cdef class Plan:
         sizes = dict()
 
         for pi in range(self._nblocks):
-            start = pi * ps
+            start = self._offset[pi]
             end = start + self._nelems[pi]
 
             for dat,map in d.iterkeys():
@@ -161,7 +201,7 @@ cdef class Plan:
                 # fills with -1 for debugging
                 # this should be removed and generated code changed
                 # once we switch to python plan only
-                pad = numpy.empty(len(indices(dat,map)) * iset.size - cumsum, dtype=numpy.int32)
+                pad = numpy.empty(len(indices(dat,map)) * (iset._ieh_size if self._need_exec_halo else iset.size) - cumsum, dtype=numpy.int32)
                 pad.fill(-1)
                 yield pad
         t = tuple(ind_iter())
@@ -196,22 +236,15 @@ cdef class Plan:
                     _off[(dat,map)] += sizes[(dat,map,pi)]
         self._ind_offs = numpy.fromiter(off_iter(), dtype=numpy.int32)
 
-        def offset_iter():
-            _offset = 0
-            for pi in range(self._nblocks):
-                yield _offset
-                _offset += self._nelems[pi]
-        self._offset = numpy.fromiter(offset_iter(), dtype=numpy.int32)
-
         # max shared memory required by work groups
         nshareds = [0] * self._nblocks
         for pi in range(self._nblocks):
             for k in d.iterkeys():
                 dat, map = k
                 nshareds[pi] += align(sizes[(dat,map,pi)] * dat.dtype.itemsize * dat.cdim)
-        self._nshared = max(nshareds)
+        self._nshared = max(nshareds) if nshareds else 0
 
-    def _compute_coloring(self, iset, ps, mc, tc, args):
+    def _compute_coloring(self, iset, partition_size, matrix_coloring, thread_coloring, args):
         """Constructs:
             - thrcol
             - nthrcol
@@ -229,7 +262,7 @@ cdef class Plan:
                 l = race_args.get(k, [])
                 l.append((arg.map, arg.idx))
                 race_args[k] = l
-            elif mc and arg._is_mat:
+            elif matrix_coloring and arg._is_mat:
                 k = arg.data
                 rowmap = k.sparsity.maps[0][0]
                 l = race_args.get(k, [])
@@ -243,9 +276,9 @@ cdef class Plan:
         pcds = [None] * n_race_args
         for i, ra in enumerate(race_args.iterkeys()):
             if isinstance(ra, base.Dat):
-                s = ra.dataset.size
+                s = ra.dataset.exec_size if self._need_exec_halo else ra.dataset.size
             elif isinstance(ra, base.Mat):
-                s = ra.sparsity.maps[0][0].dataset.size
+                s = ra.sparsity.maps[0][0].dataset.exec_size if self._need_exec_halo else ra.sparsity.maps[0][0].dataset.size
 
             pcds[i] = numpy.empty((s,), dtype=numpy.uint32)
             flat_race_args[i].size = s
@@ -260,7 +293,6 @@ cdef class Plan:
                 flat_race_args[i].mip[j].idx = idx
 
         # type constraining a few variables
-        cdef int _tid
         cdef int _p
         cdef unsigned int _base_color
         cdef int _t
@@ -271,29 +303,30 @@ cdef class Plan:
         cdef int _i
 
         # intra partition coloring
-        self._thrcol = numpy.empty((iset.size, ), dtype=numpy.int32)
+        self._thrcol = numpy.empty((iset.exec_size if self._need_exec_halo else iset.size, ), dtype=numpy.int32)
         self._thrcol.fill(-1)
 
         # create direct reference to numpy array storage
         cdef int * thrcol = <int *> numpy.PyArray_DATA(self._thrcol)
         cdef int * nelems = <int *> numpy.PyArray_DATA(self._nelems)
+        cdef int * offset = <int *> numpy.PyArray_DATA(self._offset)
 
+        def _zero_working_array():
+            for _rai in range(n_race_args):
+                for _i in range(flat_race_args[_rai].size):
+                    flat_race_args[_rai].tmp[_i] = 0
 
-        if tc:
-            _tid = 0
+        if thread_coloring:
             for _p in range(self._nblocks):
                 _base_color = 0
                 terminated = False
                 while not terminated:
                     terminated = True
 
-                    # zero out working array:
-                    for _rai in range(n_race_args):
-                        for _i in range(flat_race_args[_rai].size):
-                            flat_race_args[_rai].tmp[_i] = 0
+                    _zero_working_array()
 
                     # color threads
-                    for _t in range(_tid, _tid + nelems[_p]):
+                    for _t in range(offset[_p], offset[_p] + nelems[_p]):
                         if thrcol[_t] == -1:
                             _mask = 0
 
@@ -315,13 +348,10 @@ cdef class Plan:
                                         flat_race_args[_rai].tmp[flat_race_args[_rai].mip[_mi].map_base[_t * flat_race_args[_rai].mip[_mi].dim + flat_race_args[_rai].mip[_mi].idx]] |= _mask
 
                     _base_color += 32
-                _tid += nelems[_p]
 
             self._nthrcol = numpy.zeros(self._nblocks,dtype=numpy.int32)
-            _tid = 0
             for _p in range(self._nblocks):
-                self._nthrcol[_p] = max(self._thrcol[_tid:(_tid + nelems[_p])]) + 1
-                _tid += nelems[_p]
+                self._nthrcol[_p] = max(self._thrcol[offset[_p]:(offset[_p] + nelems[_p])]) + 1
 
         # partition coloring
         pcolors = numpy.empty(self._nblocks, dtype=numpy.int32)
@@ -334,16 +364,24 @@ cdef class Plan:
         while not terminated:
             terminated = True
 
-            # zero out working array:
-            for _rai in range(n_race_args):
-                for _i in range(flat_race_args[_rai].size):
-                    flat_race_args[_rai].tmp[_i] = 0
+            _zero_working_array()
 
-            _tid = 0
             for _p in range(self._nblocks):
                 if _pcolors[_p] == -1:
+                    if not terminated:
+                        if _p == self._first_block_owned or \
+                           (_p == self._first_block_halo and self._has_global_reduction):
+                            break
+                    else:
+                        if _p == self._first_block_owned:
+                            _base_color = pcolors.max() + 1
+                            _zero_working_array()
+                        if _p == self._first_block_halo and self._has_global_reduction:
+                            _base_color = pcolors.max() + 1
+                            _zero_working_array()
+
                     _mask = 0
-                    for _t in range(_tid, _tid + nelems[_p]):
+                    for _t in range(offset[_p], offset[_p] + nelems[_p]):
                         for _rai in range(n_race_args):
                             for _mi in range(flat_race_args[_rai].count):
                                 _mask |= flat_race_args[_rai].tmp[flat_race_args[_rai].mip[_mi].map_base[_t * flat_race_args[_rai].mip[_mi].dim + flat_race_args[_rai].mip[_mi].idx]]
@@ -358,11 +396,10 @@ cdef class Plan:
                         _pcolors[_p] = _base_color + _color
 
                         _mask = 1 << _color
-                        for _t in range(_tid, _tid + nelems[_p]):
+                        for _t in range(offset[_p], offset[_p] + nelems[_p]):
                             for _rai in range(n_race_args):
                                 for _mi in range(flat_race_args[_rai].count):
                                     flat_race_args[_rai].tmp[flat_race_args[_rai].mip[_mi].map_base[_t * flat_race_args[_rai].mip[_mi].dim + flat_race_args[_rai].mip[_mi].idx]] |= _mask
-                _tid += nelems[_p]
 
             _base_color += 32
 
@@ -371,7 +408,13 @@ cdef class Plan:
             free(flat_race_args[i].mip)
         free(flat_race_args)
 
-        self._ncolors = max(pcolors) + 1
+        self._pcolors = pcolors
+        self._ncolors = (max(pcolors) + 1) if len(pcolors) else 0
+        self._ncolors_core = (max(pcolors[:self._first_block_owned] + 1)) if self._first_block_owned > 0 else 0
+        if self._has_global_reduction:
+            self._ncolors_owned = (max(pcolors[:self._first_block_halo] + 1)) if self._first_block_halo > self._first_block_owned else self._ncolors_core
+        else:
+            self._ncolors_owned = 0
         self._ncolblk = numpy.bincount(pcolors).astype(numpy.int32)
         self._blkmap = numpy.argsort(pcolors, kind='mergesort').astype(numpy.int32)
 
@@ -390,10 +433,6 @@ cdef class Plan:
     @property
     def nblocks(self):
         return self._nblocks
-
-    @property
-    def ncolors(self):
-        return self._ncolors
 
     @property
     def ncolblk(self):
@@ -439,14 +478,22 @@ cdef class Plan:
     def thrcol(self):
         return self._thrcol
 
-    #dummy values for now, to make it run with the cuda backend
     @property
     def ncolors_core(self):
-        return self._ncolors
+        try:
+            return self._ncolors_core
+        except AttributeError:
+            return self._ncolors
 
-    #dummy values for now, to make it run with the cuda backend
     @property
     def ncolors_owned(self):
+        try:
+            return self._ncolors_owned
+        except AttributeError:
+            return self._ncolors
+
+    @property
+    def ncolors(self):
         return self._ncolors
 
     #dummy values for now, to make it run with the cuda backend
