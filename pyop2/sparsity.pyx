@@ -31,9 +31,6 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
 # OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from libcpp.vector cimport vector
-from libcpp.set cimport set
-from cython.operator cimport dereference as deref, preincrement as inc
 from cpython cimport bool
 import numpy as np
 cimport numpy as np
@@ -73,11 +70,9 @@ cdef build_sparsity_pattern_seq(int rmult, int cmult, int nrows, list maps):
         int e, i, r, d, c
         int lsize, rsize, row
         cmap rowmap, colmap
-        vector[set[int]] s_diag
-        set[int].iterator it
 
     lsize = nrows*rmult
-    s_diag = vector[set[int]](lsize)
+    s_diag = [set() for _ in range(lsize)]
 
     for rmap, cmap in maps:
         rowmap = init_map(rmap)
@@ -89,25 +84,21 @@ cdef build_sparsity_pattern_seq(int rmult, int cmult, int nrows, list maps):
                     row = rmult * rowmap.values[i + e*rowmap.arity] + r
                     for d in range(colmap.arity):
                         for c in range(cmult):
-                            s_diag[row].insert(cmult * colmap.values[d + e * colmap.arity] + c)
+                            s_diag[row].add(cmult * colmap.values[d + e * colmap.arity] + c)
 
     # Create final sparsity structure
     cdef np.ndarray[DTYPE_t, ndim=1] nnz = np.empty(lsize, dtype=np.int32)
     cdef np.ndarray[DTYPE_t, ndim=1] rowptr = np.empty(lsize + 1, dtype=np.int32)
     rowptr[0] = 0
     for row in range(lsize):
-        nnz[row] = s_diag[row].size()
+        nnz[row] = len(s_diag[row])
         rowptr[row+1] = rowptr[row] + nnz[row]
 
     cdef np.ndarray[DTYPE_t, ndim=1] colidx = np.empty(rowptr[lsize], dtype=np.int32)
     # Note: elements in a set are always sorted, so no need to sort colidx
     for row in range(lsize):
-        i = rowptr[row]
-        it = s_diag[row].begin()
-        while it != s_diag[row].end():
-            colidx[i] = deref(it)
-            inc(it)
-            i += 1
+        for i, v in enumerate(s_diag[row], rowptr[row]):
+            colidx[i] = v
 
     return rowptr[lsize], nnz, rowptr, colidx
 
@@ -121,11 +112,10 @@ cdef build_sparsity_pattern_mpi(int rmult, int cmult, int nrows, list maps):
         int lsize, rsize, row, entry
         int e, i, r, d, c
         cmap rowmap, colmap
-        vector[set[int]] s_diag, s_odiag
 
     lsize = nrows*rmult
-    s_diag = vector[set[int]](lsize)
-    s_odiag = vector[set[int]](lsize)
+    s_diag = [set() for _ in range(lsize)]
+    s_odiag = [set() for _ in range(lsize)]
 
     for rmap, cmap in maps:
         rowmap = init_map(rmap)
@@ -141,9 +131,9 @@ cdef build_sparsity_pattern_mpi(int rmult, int cmult, int nrows, list maps):
                             for c in range(cmult):
                                 entry = cmult * colmap.values[d + e * colmap.arity] + c
                                 if entry < lsize:
-                                    s_diag[row].insert(entry)
+                                    s_diag[row].add(entry)
                                 else:
-                                    s_odiag[row].insert(entry)
+                                    s_odiag[row].add(entry)
 
     # Create final sparsity structure
     cdef np.ndarray[DTYPE_t, ndim=1] d_nnz = np.empty(lsize, dtype=np.int32)
@@ -151,9 +141,9 @@ cdef build_sparsity_pattern_mpi(int rmult, int cmult, int nrows, list maps):
     cdef int d_nz = 0
     cdef int o_nz = 0
     for row in range(lsize):
-        d_nnz[row] = s_diag[row].size()
+        d_nnz[row] = len(s_diag[row])
         d_nz += d_nnz[row]
-        o_nnz[row] = s_odiag[row].size()
+        o_nnz[row] = len(s_odiag[row])
         o_nz += o_nnz[row]
 
     return d_nnz, o_nnz, d_nz, o_nz

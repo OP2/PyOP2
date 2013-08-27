@@ -82,7 +82,7 @@ class sdist(_sdist):
         # Make sure the compiled Cython files in the distribution are up-to-date
         from Cython.Build import cythonize
         cythonize(plan_sources)
-        cythonize(sparsity_sources, language="c++")
+        cythonize(sparsity_sources)
         cythonize(computeind_sources)
         _sdist.run(self)
 cmdclass['sdist'] = sdist
@@ -117,6 +117,6 @@ setup(name='PyOP2',
       ext_modules=[Extension('pyop2.plan', plan_sources,
                              include_dirs=[numpy.get_include()]),
                    Extension('pyop2.sparsity', sparsity_sources,
-                             include_dirs=['pyop2', numpy.get_include()], language="c++"),
+                             include_dirs=['pyop2', numpy.get_include()]),
                    Extension('pyop2.computeind', computeind_sources,
                              include_dirs=[numpy.get_include()])])
