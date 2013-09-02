@@ -300,6 +300,7 @@ class Mat(base.Mat, CopyOnWrite):
 
     @collective
     def dump(self, filename):
+        base.evaluate(set([self]), set())
         """Dump the matrix to file ``filename`` in PETSc binary format."""
         base._trace.evaluate(set([self]), set())
         vwr = PETSc.Viewer().createBinary(filename, PETSc.Viewer.Mode.WRITE)
@@ -410,7 +411,7 @@ class Mat(base.Mat, CopyOnWrite):
 
     @property
     def values(self):
-        base._trace.evaluate(set([self]), set())
+        base._trace.evaluate(reads=[s for s in self])
         return self.handle[:, :]
 
     @property

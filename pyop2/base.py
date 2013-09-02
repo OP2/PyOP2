@@ -60,17 +60,97 @@ class LazyComputation(object):
     """
 
     def __init__(self, reads, writes):
-        self.reads = set(flatten(reads))
-        self.writes = set(flatten(writes))
+        self.reads = to_set(reads)
+        self.writes = to_set(writes)
         self._scheduled = False
 
     def enqueue(self):
-        global _trace
         _trace.append(self)
         return self
 
     def _run(self):
         assert False, "Not implemented"
+
+
+class LazyPass(LazyComputation):
+
+    def _run(self):
+        pass
+
+
+class LazyMethodCall(LazyComputation):
+
+    """Helper class for the lazy evaluation of a method call.
+    """
+
+    def __init__(self, reads, writes, bound_method, *args, **kwargs):
+        LazyComputation.__init__(self, reads, writes)
+        self._method = bound_method
+        self._args = args
+        self._kwargs = kwargs
+
+    def _run(self):
+        self._method(*self._args, **self._kwargs)
+
+    def __str__(self):
+        return "LazyMethodCall(%r(%r))" % (str(self._method), ", ".join([str(a) for a in self._args]))
+
+
+class Dependency(object):
+
+    """Contract for lazy evaluation dependencies."""
+
+    def __init__(self, dat):
+        self._dat = dat
+
+    def __eq__(self, other):
+        return type(self) == type(other) and self._dat is other._dat
+
+    def __hash__(self):
+        return self._HASH ^ hash(self._dat)
+
+    def __str__(self):
+        return "%s(%s)" % (self.__class__.__name__, self._dat._name)
+
+
+class CORE(Dependency):
+    _HASH = 0b1001
+
+
+class OWNED(Dependency):
+    _HASH = 0b0110
+
+
+class HALOEXEC(Dependency):
+    _HASH = 0b1100
+
+
+class HALOIMPORT(Dependency):
+    _HASH = 0b0011
+
+
+class NET(Dependency):
+
+    """An abstract 'dependencies' for network operations."""
+
+    _HASH = 0b1111
+
+    def __init__(self, dat, parloop):
+        self._dat = dat
+        self._parloop = parloop
+
+    def __eq__(self, other):
+        return type(self) == type(other) and self._dat is other._dat and self._parloop is other._parloop
+
+    def __hash__(self):
+        return self._HASH ^ hash(self._dat) ^ hash(self._parloop)
+
+    def __str__(self):
+        return "NET(%r, %r)" % (self._dat, self._parloop)
+
+
+def ALL(dat):
+    return [CORE(dat), OWNED(dat), HALOEXEC(dat), HALOIMPORT(dat)]
 
 
 class ExecutionTrace(object):
@@ -95,8 +175,8 @@ class ExecutionTrace(object):
         return computation in self._trace
 
     def clear(self):
-        """Forcefully drops delayed computation. Only use this if you know what you
-        are doing.
+        """Forcefully drops delayed computations. Only use this if you know
+        what you are doing.
         """
         self._trace = list()
 
@@ -118,20 +198,8 @@ class ExecutionTrace(object):
                      :class:`DataCarrier` (and any other dependent computation).
         """
 
-        if reads is not None:
-            try:
-                reads = set(flatten(reads))
-            except TypeError:       # not an iterable
-                reads = set([reads])
-        else:
-            reads = set()
-        if writes is not None:
-            try:
-                writes = set(flatten(writes))
-            except TypeError:
-                writes = set([writes])
-        else:
-            writes = set()
+        reads = to_set(reads)
+        writes = to_set(writes)
 
         def _depends_on(reads, writes, cont):
             return reads & cont.writes or writes & cont.reads or writes & cont.writes
@@ -836,10 +904,20 @@ class Subset(ExtrudedSet):
 
 
 class SetPartition(object):
+    """A continuous sub section of an OP2 Set."""
+
+    @validate_type(('set', Set, SetTypeError),
+                   ('offset', int, IndexTypeError),
+                   ('size', int, SizeTypeError))
     def __init__(self, set, offset, size):
         self.set = set
         self.offset = offset
         self.size = size
+
+    def extend(self, other):
+        assert self.set == other.set
+        assert self.offset + self.size == other.offset
+        self.size += other.size
 
 
 class MixedSet(Set):
@@ -1666,7 +1744,7 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
         :meth:`data_with_halos`.
 
         """
-        _trace.evaluate(set([self]), set([self]))
+        _trace.evaluate(ALL(self), ALL(self))
         if self.dataset.total_size > 0 and self._data.size == 0 and self.cdim > 0:
             raise RuntimeError("Illegal access: no data associated with this Dat!")
         maybe_setflags(self._data, write=True)
@@ -1704,7 +1782,7 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
         :meth:`data_ro_with_halos`.
 
         """
-        _trace.evaluate(set([self]), set())
+        _trace.evaluate(reads=ALL(self))
         if self.dataset.total_size > 0 and self._data.size == 0 and self.cdim > 0:
             raise RuntimeError("Illegal access: no data associated with this Dat!")
         v = self._data[:self.dataset.size].view()
@@ -1780,7 +1858,7 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
             }""" % {'t': self.ctype, 'dim': self.cdim}
             self._zero_kernel = _make_object('Kernel', k, 'zero')
         _make_object('ParLoop', self._zero_kernel, self.dataset.set,
-                     self(WRITE)).enqueue()
+                     self(WRITE))._spawn_and_queue()
 
         self._version_set_zero()
 
@@ -1790,7 +1868,7 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
 
         :arg other: The destination :class:`Dat`"""
 
-        self._copy_parloop(other).enqueue()
+        self._copy_parloop(other)._spawn_and_queue()
 
     @collective
     def _copy_parloop(self, other):
@@ -1840,24 +1918,25 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
         del self._numpy_data
 
         if configuration['lazy_evaluation']:
-            _trace.evaluate(self._cow_parloop.reads, self._cow_parloop.writes)
-            _trace._trace.remove(self._cow_parloop)
+            _trace.evaluate({CORE(self), OWNED(self)}, set())
+            for c in self._cow_parloop:
+                _trace._trace.remove(c)
 
-        self._cow_parloop._run()
+        for c in self._cow_parloop:
+            c._run()
 
     def _cow_shallow_copy(self):
 
         other = shallow_copy(self)
 
         # Set up the copy to happen when required.
-        other._cow_parloop = self._copy_parloop(other)
+        other._cow_parloop = self._copy_parloop(other)._spawn()
         # Remove the write dependency of the copy (in order to prevent
         # premature execution of the loop).
-        other._cow_parloop.writes = set()
         if configuration['lazy_evaluation']:
-            # In the lazy case, we enqueue now to ensure we are at the
-            # right point in the trace.
-            other._cow_parloop.enqueue()
+            for c in other._cow_parloop:
+                c.writes = set()
+                c.enqueue()
 
         return other
 
@@ -2278,7 +2357,7 @@ class Const(DataCarrier):
         """Remove this Const object from the namespace
 
         This allows the same name to be redeclared with a different shape."""
-        _trace.evaluate(set(), set([self]))
+        _trace.evaluate(writes=self)
         Const._defs.discard(self)
 
     def _format_declaration(self):
@@ -2383,7 +2462,7 @@ class Global(DataCarrier, _EmptyDataMixin):
     @property
     def data(self):
         """Data array."""
-        _trace.evaluate(set([self]), set())
+        _trace.evaluate(reads=self)
         if len(self._data) is 0:
             raise RuntimeError("Illegal access: No data associated with this Global!")
         return self._data
@@ -2400,7 +2479,7 @@ class Global(DataCarrier, _EmptyDataMixin):
     @data.setter
     @modifies
     def data(self, value):
-        _trace.evaluate(set(), set([self]))
+        _trace.evaluate(writes=self)
         self._data = verify_reshape(value, self.dtype, self.dim)
 
     @property
@@ -3239,7 +3318,8 @@ class JITModule(Cached):
                 f.write(src)
 
 
-class ParLoop(LazyComputation):
+class ParLoop(object):
+
     """Represents the kernel, iteration space and arguments of a parallel loop
     invocation.
 
@@ -3252,9 +3332,6 @@ class ParLoop(LazyComputation):
     @validate_type(('kernel', Kernel, KernelTypeError),
                    ('iterset', Set, SetTypeError))
     def __init__(self, kernel, iterset, *args):
-        LazyComputation.__init__(self,
-                                 set([a.data for a in args if a.access in [READ, RW]]) | Const._defs,
-                                 set([a.data for a in args if a.access in [RW, WRITE, MIN, MAX, INC]]))
         # Always use the current arguments, also when we hit cache
         self._actual_args = args
         self._kernel = kernel
@@ -3274,23 +3351,88 @@ class ParLoop(LazyComputation):
 
         self._it_space = self.build_itspace(iterset)
 
-    def _run(self):
-        return self.compute()
+    @collective
+    def _spawn_and_queue(self):
+        closures = self._spawn()
+        for c in closures:
+            c.enqueue()
+        return closures
 
     @collective
-    def compute(self):
-        """Executes the kernel over all members of the iteration space."""
-        self.halo_exchange_begin()
-        self.maybe_set_dat_dirty()
-        self._compute(self.it_space.iterset.core_part)
-        self.halo_exchange_end()
-        self._compute(self.it_space.iterset.owned_part)
-        self.reduction_begin()
+    def _spawn(self):
+        closures = list()
+        # would it be better to always leave it split and fuse back
+        # during lazy computation scheduling
+        if self.is_direct:
+            closures.append(self._spawn_compute([ParLoop.CORE, ParLoop.OWNED]))
+        else:
+            closures.extend(self._spawn_halo_exchange_sends())
+            closures.append(self._spawn_compute([ParLoop.CORE]))
+            closures.extend(self._spawn_halo_exchange_recvs())
+            closures.append(self._spawn_compute([ParLoop.OWNED]))
+
+        closures.extend(self._spawn_reduction_begins())
         if self.needs_exec_halo:
-            self._compute(self.it_space.iterset.exec_part)
-        self.reduction_end()
+            closures.append(self._spawn_compute([ParLoop.HALOEXEC]))
+        closures.extend(self._spawn_reduction_ends())
+        closures.extend(self._spawn_assembles())
+        return closures
+
+    CORE, OWNED, HALOEXEC = range(3)
+
+    @collective
+    def _spawn_compute(self, sections):
+        reads, writes = ([], [])
+        part = None
+        for s in sections:
+            direct = [CORE, OWNED, HALOEXEC][s]
+            neighboor = [[OWNED], [CORE, HALOEXEC], [OWNED, HALOIMPORT]][s]
+
+            p = getattr(self.it_space.iterset,
+                        ["core_part", "owned_part", "exec_part"][s])
+            if not part:
+                part = p
+            else:
+                part.extend(p)
+
+            for arg in self.args:
+                if arg._is_global:
+                    reads.append(arg.data)
+                    if arg.access in [MIN, MAX, INC]:
+                        writes.append(arg.data)
+                elif arg._is_mat:
+                    if arg.access in [READ, RW, INC]:
+                        reads.extend(arg.data)
+                    if arg.access in [WRITE, RW, INC]:
+                        writes.extend(arg.data)
+                elif arg._is_dat:
+                    if arg.access in [READ, RW]:
+                        reads.extend([direct(d) for d in arg.data])
+                        if not arg._is_direct:
+                            reads.extend([n(d) for d in arg.data for n in neighboor])
+                    if arg.access in [RW, WRITE, INC, MIN, MAX]:
+                        writes.extend([direct(d) for d in arg.data])
+                        if not arg._is_direct:
+                            writes.extend([n(d) for d in arg.data for n in neighboor])
+
+        if part.size > 0:
+            return LazyMethodCall(set(reads) | Const._defs,
+                                  set(writes),
+                                  self.compute,
+                                  part)
+        else:
+            return LazyPass(set(reads) | Const._defs,
+                            set(writes))
+
+    def _pass(self, part):
+        pass
+
+    @collective
+    def compute(self, part):
+        """Executes the kernel over all members of the iteration space."""
+        self.maybe_set_dat_dirty()
+        self._compute(part)
         self.maybe_set_halo_update_needed()
-        self.assemble()
 
     @collective
     def _compute(self, part):
@@ -3304,37 +3446,41 @@ class ParLoop(LazyComputation):
                     maybe_setflags(d._data, write=False)
 
     @collective
-    def halo_exchange_begin(self):
-        """Start halo exchanges."""
+    def _spawn_halo_exchange_sends(self):
         if self.is_direct:
-            # No need for halo exchanges for a direct loop
-            return
-        for arg in self.args:
-            if arg._is_dat:
-                arg.halo_exchange_begin()
+            return []
+
+        return [LazyMethodCall({CORE(arg.data), OWNED(arg.data)},
+                               {NET(arg.data, self)},
+                               arg.halo_exchange_begin)
+                for arg in self.args if arg._is_dat and arg.access in [READ, RW]]
 
     @collective
-    def halo_exchange_end(self):
+    def _spawn_halo_exchange_recvs(self):
         """Finish halo exchanges (wait on irecvs)"""
         if self.is_direct:
-            return
-        for arg in self.args:
-            if arg._is_dat:
-                arg.halo_exchange_end()
+            return []
+
+        return [LazyMethodCall({NET(arg.data, self)},
+                               {HALOEXEC(arg.data), HALOIMPORT(arg.data)},
+                               arg.halo_exchange_end)
+                for arg in self.args if arg._is_dat and arg.access in [READ, RW]]
 
     @collective
-    def reduction_begin(self):
+    def _spawn_reduction_begins(self):
         """Start reductions"""
-        for arg in self.args:
-            if arg._is_global_reduction:
-                arg.reduction_begin()
+        return [LazyMethodCall({arg.data},
+                               set(),
+                               arg.reduction_begin)
+                for arg in self.args if arg._is_global_reduction]
 
     @collective
-    def reduction_end(self):
+    def _spawn_reduction_ends(self):
         """End reductions"""
-        for arg in self.args:
-            if arg._is_global_reduction:
-                arg.reduction_end()
+        return [LazyMethodCall(set(),
+                               {arg.data},
+                               arg.reduction_end)
+                for arg in self.args if arg._is_global_reduction]
 
     @collective
     def maybe_set_halo_update_needed(self):
@@ -3344,10 +3490,11 @@ class ParLoop(LazyComputation):
             if arg._is_dat and arg.access in [INC, WRITE, RW]:
                 arg.data.needs_halo_update = True
 
-    def assemble(self):
-        for arg in self.args:
-            if arg._is_mat:
-                arg.data._assemble()
+    def _spawn_assembles(self):
+        return [LazyMethodCall([m for m in arg.data],
+                               [m for m in arg.data],
+                               arg.data._assemble)
+                for arg in self.args if arg._is_mat]
 
     def build_itspace(self, iterset):
         """Checks that the iteration set of the :class:`ParLoop` matches the
@@ -3516,7 +3663,14 @@ class Solver(object):
         :arg x: The :class:`Dat` to receive the solution.
         :arg b: The :class:`Dat` containing the RHS.
         """
-        _trace.evaluate(set([A, b]), set([x]))
+        reads = list(A)
+        for rhs in b:
+            reads.extend(ALL(rhs))
+        writes = list()
+        for s in x:
+            writes.extend(ALL(s))
+
+        _trace.evaluate(reads, writes)
         self._solve(A, x, b)
 
     def _solve(self, A, x, b):
@@ -3525,4 +3679,4 @@ class Solver(object):
 
 @collective
 def par_loop(kernel, it_space, *args):
-    return _make_object('ParLoop', kernel, it_space, *args).enqueue()
+    return _make_object('ParLoop', kernel, it_space, *args)._spawn_and_queue()
