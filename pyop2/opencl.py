@@ -328,9 +328,6 @@ class Global(device.Global, DeviceDataMixin):
             self._device_data = array.to_device(_queue, self._data)
         return self._device_data
 
-    def _allocate_reduction_array(self, nelems):
-        self._d_reduc_array = array.zeros(_queue, nelems * self.cdim, dtype=self.dtype)
-
     @property
     def data(self):
         base._trace.evaluate(set([self]), set())
@@ -347,75 +344,32 @@ class Global(device.Global, DeviceDataMixin):
         if self.state is not DeviceDataMixin.DEVICE_UNALLOCATED:
             self.state = DeviceDataMixin.HOST
 
-    def _post_kernel_reduction_task(self, nelems, reduction_operator):
-        assert reduction_operator in [INC, MIN, MAX]
+    def _allocate_reduction_buffer(self, nelems, op):
+        if not hasattr(self, '_reduction_buffer') or \
+           self._reduction_buffer.size != nelems:
+            self._host_reduction_buffer = np.zeros(np.prod(nelems) * self.cdim,
+                                                   dtype=self.dtype).reshape((-1,) + self._dim)
+            if op is not INC:
+                self._host_reduction_buffer[:] = self._data
+            self._reduction_buffer = array.to_device(_queue, self._host_reduction_buffer)
+        else:
+            if op is not INC:
+                self._reduction_buffer.fill(self._data)
+            else:
+                self._reduction_buffer.fill(0)
 
-        def generate_code():
-            def headers():
-                if self.dtype == np.dtype('float64'):
-                    return """
-#if defined(cl_khr_fp64)
-#if defined(cl_amd_fp64)
-#pragma OPENCL EXTENSION cl_amd_fp64 : enable
-#else
-#pragma OPENCL EXTENSION cl_khr_fp64 : enable
-#endif
-#elif defined(cl_amd_fp64)
-#pragma OPENCL EXTENSION cl_amd_fp64 : enable
-#endif
+    def _finalise_reduction(self, nelems, op):
+        self._reduction_buffer.get(ary=self._host_reduction_buffer)
+        self.state = DeviceDataMixin.HOST
+        tmp = self._host_reduction_buffer
 
-"""
-                else:
-                    return ""
+        np_op, fn = {MIN: (np.min, min),
+                     MAX: (np.max, max),
+                     INC: (np.sum, lambda x, y: x + y)}[op]
 
-            op = {INC: 'INC', MIN: 'min', MAX: 'max'}[reduction_operator]
-
-            return """
-%(headers)s
-#define INC(a,b) ((a)+(b))
-__kernel
-void global_%(type)s_%(dim)s_post_reduction (
-  __global %(type)s* dat,
-  __global %(type)s* tmp,
-  __private int count
-)
-{
-  __private %(type)s accumulator[%(dim)d];
-  for (int j = 0; j < %(dim)d; ++j)
-  {
-    accumulator[j] = dat[j];
-  }
-  for (int i = 0; i < count; ++i)
-  {
-    for (int j = 0; j < %(dim)d; ++j)
-    {
-      accumulator[j] = %(op)s(accumulator[j], *(tmp + i * %(dim)d + j));
-    }
-  }
-  for (int j = 0; j < %(dim)d; ++j)
-  {
-    dat[j] = accumulator[j];
-  }
-}
-""" % {'headers': headers(), 'dim': self.cdim, 'type': self._cl_type, 'op': op}
-
-        src, kernel = _reduction_task_cache.get(
-            (self.dtype, self.cdim, reduction_operator), (None, None))
-        if src is None:
-            src = generate_code()
-            prg = cl.Program(_ctx, src).build(options="-Werror")
-            name = "global_%s_%s_post_reduction" % (self._cl_type, self.cdim)
-            kernel = prg.__getattr__(name)
-            _reduction_task_cache[
-                (self.dtype, self.cdim, reduction_operator)] = (src, kernel)
-
-        kernel.set_arg(0, self._array.data)
-        kernel.set_arg(1, self._d_reduc_array.data)
-        kernel.set_arg(2, np.int32(nelems))
-        cl.enqueue_task(_queue, kernel).wait()
-        self._array.get(queue=_queue, ary=self._data)
-        self.state = DeviceDataMixin.BOTH
-        del self._d_reduc_array
+        tmp = np_op(tmp, axis=0)
+        for i in range(self.cdim):
+            self._data[i] = fn(self._data[i], tmp[i])
 
 
 class Map(device.Map):
@@ -701,8 +655,8 @@ class ParLoop(device.ParLoop):
             args.append(a.data._array.data)
 
         for a in self._all_global_reduction_args:
-            a.data._allocate_reduction_array(conf['work_group_count'])
-            args.append(a.data._d_reduc_array.data)
+            a.data._allocate_reduction_buffer(conf['work_group_count'], a.access)
+            args.append(a.data._reduction_buffer.data)
 
         for cst in Const._definitions():
             args.append(cst._array.data)
@@ -758,7 +712,7 @@ class ParLoop(device.ParLoop):
         self.maybe_set_dat_dirty()
 
         for a in self._all_global_reduction_args:
-            a.data._post_kernel_reduction_task(conf['work_group_count'], a.access)
+            a.data._finalise_reduction(conf['work_group_count'], a.access)
 
 
 def _setup():
@@ -771,7 +725,6 @@ def _setup():
     global _has_dpfloat
     global _warpsize
     global _AMD_fixes
-    global _reduction_task_cache
     global _supports_64b_atomics
 
     _ctx = cl.create_some_context()
@@ -796,7 +749,6 @@ def _setup():
         _warpsize = 32
 
     _AMD_fixes = _queue.device.platform.vendor in ['Advanced Micro Devices, Inc.']
-    _reduction_task_cache = dict()
 
 _supports_64b_atomics = False
 _debug = False
@@ -809,7 +761,6 @@ _max_work_group_size = 0
 _has_dpfloat = False
 _warpsize = 0
 _AMD_fixes = False
-_reduction_task_cache = None
 
 _jinja2_env = Environment(loader=PackageLoader("pyop2", "assets"))
 _jinja2_direct_loop = _jinja2_env.get_template("opencl_direct_loop.jinja2")
