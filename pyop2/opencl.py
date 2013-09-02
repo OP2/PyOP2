@@ -35,11 +35,11 @@
 
 import collections
 from jinja2 import Environment, PackageLoader
-import math
 import numpy as np
 from pycparser import c_parser, c_ast, c_generator
 import pyopencl as cl
 from pyopencl import array
+from math import ceil
 
 import device
 from device import *
@@ -619,7 +619,11 @@ class ParLoop(device.ParLoop):
         # inside shared memory padding
         available_local_memory -= 2 * (len(self._unique_indirect_dat_args) - 1)
 
-        max_bytes = sum(map(lambda a: a.data._bytes_per_elem, self._all_indirect_args))
+        max_indirect_bytes = sum([arg.data._bytes_per_elem for arg in self._all_indirect_args]) \
+            if self._all_indirect_args else 0
+        max_gbl_reduction_bytes = max([a.data.dtype.itemsize for a in self._all_global_reduction_args]) \
+            if self._all_global_reduction_args else 0
+        max_bytes = max(max_indirect_bytes, max_gbl_reduction_bytes)
         return available_local_memory / (2 * _warpsize * max_bytes) * (2 * _warpsize)
 
     def launch_configuration(self):
@@ -647,7 +651,7 @@ class ParLoop(device.ParLoop):
                 ps = available_local_memory / per_elem_max_local_mem_req
                 wgs = min(_max_work_group_size, (ps / _warpsize) * _warpsize)
             nwg = min(_pref_work_group_count, int(
-                math.ceil(self._it_space.size / float(wgs))))
+                ceil(self._it_space.size / float(wgs))))
             ttc = wgs * nwg
 
             local_memory_req = per_elem_max_local_mem_req * wgs
@@ -671,10 +675,13 @@ class ParLoop(device.ParLoop):
                          *self._unwound_args,
                          partition_size=conf['partition_size'],
                          matrix_coloring=self._requires_matrix_coloring)
-            conf['local_memory_size'] = _plan.nshared
             conf['ninds'] = _plan.ninds
             conf['work_group_size'] = min(_max_work_group_size,
                                           conf['partition_size'])
+            gbl_reduction_shared_memory = conf['work_group_size'] * \
+                max([arg.data.dtype.itemsize for arg in self._all_global_reduction_args]) \
+                if self._all_global_reduction_args else 0
+            conf['local_memory_size'] = int(ceil(max(_plan.nshared, gbl_reduction_shared_memory) / 64.0)) * 64
             conf['work_group_count'] = _plan.nblocks
         conf['warpsize'] = _warpsize
         conf['op2stride'] = self._it_space.size
