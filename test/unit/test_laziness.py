@@ -107,7 +107,14 @@ count(unsigned int* x)
         assert all(d.data == 1.0)
         assert len(op2.base._trace._trace) == 0
 
-    def test_chain(self, backend, skip_greedy, iterset):
+    def test_chain(self, backend, skip_greedy, skip_opencl, skip_cuda, iterset):
+        """Test correct dependency propagation across multiple loops."""
+        # This test cannot be performed on OpenCL or CUDA because of
+        # how it asserted and how 'device' backend differ from CPU ones.
+        # Because of host/device transfers, public and private Dat accessors
+        # cannot be used as an indicator of the progress of the lazy
+        # evaluation
+
         a = op2.Global(1, 0, numpy.uint32, "a")
         x = op2.Dat(iterset, numpy.zeros(nelems), numpy.uint32, "x")
         y = op2.Dat(iterset, numpy.zeros(nelems), numpy.uint32, "y")
@@ -134,28 +141,22 @@ sum(unsigned int* sum, unsigned int* x)
 }
 """
 
-        pl_add = op2.par_loop(op2.Kernel(kernel_add_one, "add_one"), iterset, x(op2.RW))
-        pl_copy = op2.par_loop(op2.Kernel(kernel_copy, "copy"), iterset, y(op2.WRITE), x(op2.READ))
-        pl_sum = op2.par_loop(op2.Kernel(kernel_sum, "sum"), iterset, a(op2.INC), x(op2.READ))
+        op2.par_loop(op2.Kernel(kernel_add_one, "add_one"), iterset, x(op2.RW))
+        op2.par_loop(op2.Kernel(kernel_copy, "copy"), iterset, y(op2.WRITE), x(op2.READ))
+        op2.par_loop(op2.Kernel(kernel_sum, "sum"), iterset, a(op2.INC), x(op2.READ))
 
         # check everything is zero at first
+        assert a._data[0] == 0
         assert sum(x._data) == 0
         assert sum(y._data) == 0
-        assert a._data[0] == 0
-        assert op2.base._trace.in_queue(pl_add)
-        assert op2.base._trace.in_queue(pl_copy)
-        assert op2.base._trace.in_queue(pl_sum)
 
         # force computation affecting 'a' (1st and 3rd par_loop)
         assert a.data[0] == nelems
-        assert not op2.base._trace.in_queue(pl_add)
-        assert op2.base._trace.in_queue(pl_copy)
-        assert not op2.base._trace.in_queue(pl_sum)
-        assert sum(x.data) == nelems
+        assert sum(x.data_ro) == nelems
+        assert all(y._data == 0)
 
         # force the last par_loop remaining (2nd)
-        assert sum(y.data) == nelems
-        assert not op2.base._trace.in_queue(pl_copy)
+        assert sum(y.data_ro) == nelems
 
 if __name__ == '__main__':
     import os
