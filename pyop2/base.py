@@ -1119,11 +1119,11 @@ class Dat(DataCarrier):
         if halo is None:
             return
         for dest, ele in halo.sends.iteritems():
-            self._send_buf[dest] = self._data[ele]
+            self._send_buf[dest] = self.data_ro[ele]
             self._send_reqs[dest] = halo.comm.Isend(self._send_buf[dest],
                                                     dest=dest, tag=self._id)
         for source, ele in halo.receives.iteritems():
-            self._recv_buf[source] = self._data[ele]
+            self._recv_buf[source] = self.data_ro[ele]
             self._recv_reqs[source] = halo.comm.Irecv(self._recv_buf[source],
                                                       source=source, tag=self._id)
 
