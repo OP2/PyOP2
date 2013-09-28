@@ -76,7 +76,7 @@ PyOP2 kernels are functions written in C, with the following special properties:
 
 To provide a concrete example, consider the following C function: ::
 
-  void mass_centre(double *x[2], *double centre, double *mass)
+  void mass_centre(double *x[2], double *centre, double *mass)
   {
     centre[0] = (x[0][0] + x[1][0] + x[2][0]) / 3.0;
     centre[1] = (x[0][1] + x[1][1] + x[2][1]) / 3.0;
@@ -258,3 +258,20 @@ You should see the output: ::
          [ 0.33333333,  0.66666667]])
   array([[0.5],
          [0.5]])
+
+Data structures for finite element assembly
+-------------------------------------------
+
+Whilst we have already implemented a minimal PyOP2 program, we have yet to
+implement a finite element method using PyOP2. There are several extra
+components to this process, but we will begin by looking at how to construct the
+data structures for finite element assembly.
+
+Matrices in PyOP2 consists of Sparsities, which represent the non-zero
+structure of a matrix, and Matrices, which define data on Sparsities. Because it
+is assumed that matrices are only constructed through global assembly, there is
+no way to specify the structure of a Sparsity manually.
+
+Instead, the Sparsity structure of matrices is composed from pairs of Maps.
+The product of these Maps, the Row Map and the Col Map, is used to generate the
+Sparsity pattern. This produces an appropriate pattern for
