@@ -20,5 +20,9 @@ def create_sum(operands, is_leaf):
     return new_sym
 
 
+def c_sym(const):
+    return Symbol(const, ())
+
+
 def assign(operands):
     Assign(operands[0], operands[1])
