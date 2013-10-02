@@ -11,7 +11,7 @@ util.update({
     "wrap": lambda e: "(%s)" % e,
     "bracket": lambda s: "{%s}" % s,
     "decl": lambda q, t, s, a: "%s%s %s%s;" % (q, t, s, a),
-    "decl_init": lambda q, t, s, a, e: "%s%s %s%s= %s;" % (q, t, s, a, e),
+    "decl_init": lambda q, t, s, a, e: "%s%s %s%s = %s;" % (q, t, s, a, e),
     "for": lambda s1, e, s2, s3: "for (%s; %s; %s)\n%s" % (s1, e, s2, s3)
 })
 
@@ -70,6 +70,16 @@ class UnExpr(Expr):
     def __init__(self, expr):
         Expr.__init__(self)
         self.children.append(expr)
+
+
+class ArrayInit(Expr):
+
+    def __init__(self, syms):
+        Expr.__init__(self)
+        self.children = syms
+
+    def gencode(self):
+        return util["bracket"](", ".join(n.gencode() for n in self.children))
 
 
 class Parentheses(UnExpr):
@@ -197,12 +207,9 @@ class Block(Statement):
         self.openscope = openscope
 
     def gencode(self):
-        code = ""
+        code = "\n".join([n.gencode() for n in self.children])
         if self.openscope:
-            code = "{\n"
-        for n in self.children:
-            code += n.gencode() + "\n"
-        code += "}\n"
+            code = "{\n%s\n}\n" % indent(code)
         return code
 
 
@@ -210,18 +217,18 @@ class For(Statement):
 
     def __init__(self, init, cond, incr, body, pragma=None):
         Statement.__init__(self, pragma)
+        self.children.append(body)
         self.init = init
         self.cond = cond
         self.incr = incr
-        self.body = body
 
     def gencode(self):
         return util["for"](self.init.gencode(), self.cond.gencode(),
-                           self.incr.gencode(), self.body.gencode())
+                           self.incr.gencode(), self.children[0].gencode())
 
 
 # Utility functions ###
-
-def indent(depth):
-    """Return indentation for depth"""
-    return depth * " "
+def indent(block):
+    """Indent each row of the given string block with n*4 spaces."""
+    indentation = " " * 4
+    return indentation + ("\n" + indentation).join(block.split("\n"))
