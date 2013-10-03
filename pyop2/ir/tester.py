@@ -18,7 +18,7 @@ def main():
                 Incr(i_sym, c_sym(1)), Block([decl_1], openscope=True))
 
     decl_2 = Decl("double", Symbol("B", (3,)),
-                  ArrayInit([c_sym(3), c_sym(3), c_sym(3)]), ["const"])
+                  ArrayInit("{3, 3, 3}"), ["const"])
 
     for_2 = For(Decl("int", i_sym, c_sym(0)), Less(i_sym, c_sym(3)),
                 Incr(i_sym, c_sym(1)), Block([decl_1, for_1], openscope=True))

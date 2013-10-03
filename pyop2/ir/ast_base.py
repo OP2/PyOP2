@@ -8,6 +8,7 @@ util.update({
     "point": lambda p: "[%s]" % p,
     "assign": lambda s, e: "%s = %s" % (s, e),
     "incr": lambda s, e: "%s += %s" % (s, e),
+    "incr++": lambda s: "%s++" % s,
     "wrap": lambda e: "(%s)" % e,
     "bracket": lambda s: "{%s}" % s,
     "decl": lambda q, t, s, a: "%s%s %s%s;" % (q, t, s, a),
@@ -74,12 +75,12 @@ class UnExpr(Expr):
 
 class ArrayInit(Expr):
 
-    def __init__(self, syms):
+    def __init__(self, values):
         Expr.__init__(self)
-        self.children = syms
+        self.values = values
 
     def gencode(self):
-        return util["bracket"](", ".join(n.gencode() for n in self.children))
+        return self.values
 
 
 class Parentheses(UnExpr):
@@ -162,8 +163,11 @@ class Incr(Statement):
         self.children.append(exp)
 
     def gencode(self):
-        return util["incr"](self.children[0].gencode(),
-                            self.children[1].gencode())
+        if type(self.children[1]) == Symbol and self.children[1].symbol == 1:
+            return util["incr++"](self.children[0].gencode())
+        else:
+            return util["incr"](self.children[0].gencode(),
+                                self.children[1].gencode())
 
 
 class Decl(Statement):
