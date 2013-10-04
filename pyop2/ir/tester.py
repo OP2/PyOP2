@@ -15,13 +15,13 @@ def main():
 
     i_sym = Symbol("i", ())
     for_1 = For(Decl("int", i_sym, c_sym(0)), Less(i_sym, c_sym(3)),
-                Incr(i_sym, c_sym(1)), Block([decl_1], openscope=True))
+                Incr(i_sym, c_sym(1)), Block([decl_1], open_scope=True))
 
     decl_2 = Decl("double", Symbol("B", (3,)),
                   ArrayInit("{3, 3, 3}"), ["const"])
 
     for_2 = For(Decl("int", i_sym, c_sym(0)), Less(i_sym, c_sym(3)),
-                Incr(i_sym, c_sym(1)), Block([decl_1, for_1], openscope=True))
+                Incr(i_sym, c_sym(1)), Block([decl_1, for_1], open_scope=True))
 
     root = Root([ass_1, exp_2, for_1, decl_2, for_2])
 
