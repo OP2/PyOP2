@@ -15,7 +15,7 @@ def create_sum(operands, is_leaf):
     op2 = operands[1]
     new_sym = Sum(Symbol(op1[0], op1[1]), Symbol(op2[0], op2[1]))
     if not is_leaf:
-        par = Parentheses(new_sym)
+        par = Par(new_sym)
         new_sym = par
     return new_sym
 
