@@ -2,7 +2,6 @@
 
 from ast_base import *
 from ast_builder import create_sum, c_sym
-from ast_handler import generate_code
 
 
 def main():
@@ -26,7 +25,7 @@ def main():
     root = Root([ass_1, exp_2, for_1, decl_2, for_2])
 
     print "Generate the code for this AST"
-    print generate_code(root)
+    print root.gencode()
 
 
 def create_simple_exp():
