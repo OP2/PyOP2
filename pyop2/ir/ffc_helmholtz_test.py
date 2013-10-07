@@ -29,6 +29,9 @@ def main():
     print kernel
     print plan
 
+    # plan.create_plan()
+    # embed()
+
 
 if __name__ == '__main__':
     op2.init()

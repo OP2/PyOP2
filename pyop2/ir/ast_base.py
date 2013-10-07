@@ -252,15 +252,17 @@ class FunCall(Statement):
 class FunDecl(Statement):
 
     def __init__(self, ret, name, args, body, pred=[]):
+        Statement.__init__(self)
+        self.children.append(body)
         self.pred = pred
         self.ret = ret
         self.name = name
         self.args = args
-        self.body = body
 
     def gencode(self):
         sign_list = self.pred + [self.ret, self.name, util["wrap"](self.args)]
-        return " ".join(sign_list) + "\n{\n%s\n}" % indent(self.body.gencode())
+        return " ".join(sign_list) + \
+               "\n{\n%s\n}" % indent(self.children[0].gencode())
 
 
 # Utility functions ###

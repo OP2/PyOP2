@@ -22,4 +22,5 @@ class LoopOptimiser(object):
         self.loop_nest = loop_nest
 
     def licm(self):
-        print "optimising a loop"
+        print "\nFinding loop-invariant code"
+        embed()
