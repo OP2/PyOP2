@@ -35,3 +35,5 @@ class KernelPlan(object):
 
     def _plan_cpu(self):
         pass
+        #lo = LoopOptimiser(self._for)
+        #lo.licm()
