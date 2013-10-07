@@ -1,5 +1,8 @@
 from ufl import *
-from pyop2.ffc_interface import compile_form
+from pyop2 import op2
+from ffc import default_parameters, compile_form
+
+from kernel_plan import KernelPlan
 
 
 def main():
@@ -12,10 +15,21 @@ def main():
 
     a = (dot(grad(v), grad(u)) - v * u) * dx
 
-    kernel = compile_form(a, "helmholtz")
+    # Set up compiler parameters
+    ffc_parameters = default_parameters()
+    ffc_parameters['write_file'] = False
+    ffc_parameters['format'] = 'pyop2'
+    ffc_parameters["pyop2-ir"] = True
+
+    kernel = compile_form(a, prefix="helmholtz", parameters=ffc_parameters)
+
+    # Create a plan for executing this kernel
+    plan = KernelPlan(kernel)
 
     print kernel
+    print plan
 
 
 if __name__ == '__main__':
+    op2.init()
     main()

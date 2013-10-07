@@ -11,6 +11,8 @@
 #   padding and data alignment are for aligned unit-stride load
 #   trip count/bound adjustment is for auto-vectorisation
 
+from ast_base import *
+
 
 class LoopOptimiser(object):
 
