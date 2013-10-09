@@ -78,6 +78,16 @@ class LoopOptimiser(object):
                     expr_dep[dep_right].append(right)
                 return ((), False)
 
+        def replace_const(node, rep_dict):
+            pass
+
+        def place_loops(dep):
+            """Return the loops the should wrap a statement dependening on
+            the iteration variables in dep. It also says where the new loop(s)
+            should be placed in the original loop nest (possibly also in a
+            pre-header block)."""
+            pass
+
         # Find out all variables which are written to in this loop nest
         written_vars = []
         for s in self.block.children:
@@ -114,6 +124,5 @@ class LoopOptimiser(object):
                 # Append the node at the right level in the loop nest
 
                 # Replace invariant sub-trees with the proper temp variable
-
     def interchange(self):
         pass
