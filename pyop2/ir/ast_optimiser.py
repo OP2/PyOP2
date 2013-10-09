@@ -101,19 +101,19 @@ class LoopOptimiser(object):
                 # Create the new loop
                 il = dep[-1]
                 loop = [l for l in self.fors if l.init.sym.symbol == il][0]
-                var_decl = [Decl(typ, Symbol("LI%s" % i, (loop.size(),))) \
-                                for i, e in zip(range(len(expr)), expr)]
-                var_sym = [Symbol(s.sym.symbol, (loop.init.sym.symbol)) \
-                                for s in var_decl]
+                var_decl = [Decl(typ, Symbol("LI%s" % i, (loop.size(),)))
+                            for i, e in zip(range(len(expr)), expr)]
+                var_sym = [Symbol(s.sym.symbol, (loop.init.sym.symbol))
+                           for s in var_decl]
                 var_ass = [Assign(s, e) for s, e in zip(var_sym, expr)]
-                inv_for = For(dcopy(loop.init), dcopy(loop.cond), \
-                    dcopy(loop.incr), Block(var_ass, open_scope=True))
+                inv_for = For(dcopy(loop.init), dcopy(loop.cond),
+                              dcopy(loop.incr), Block(var_ass, open_scope=True))
                 inv_block = Block(var_decl + [inv_for])
-                
+                print inv_block
+
                 # Append the node at the right level in the loop nest
 
                 # Replace invariant sub-trees with the proper temp variable
-
 
     def interchange(self):
         pass
