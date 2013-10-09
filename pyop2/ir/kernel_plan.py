@@ -1,6 +1,7 @@
 # Calculate an optimisation plan for a list of kernels
 
-from pyop2.ir.ast_base import For, Statement
+from pyop2.ir.ast_optimiser import LoopOptimiser
+from pyop2.ir.ast_base import *
 
 
 class KernelPlan(object):
@@ -17,7 +18,7 @@ class KernelPlan(object):
 
     def _visit_ir(self, node, _for=[], _dlabs=[]):
         """Return lists of:
-            - (perfect) loop nests
+            - perfect loop nests
             - dense linear algebra blocks
         that will be exploited at plan creation time."""
 
@@ -34,6 +35,5 @@ class KernelPlan(object):
         return (_for, _dlabs)
 
     def _plan_cpu(self):
-        pass
-        #lo = LoopOptimiser(self._for)
-        #lo.licm()
+        lo = [LoopOptimiser(_for) for _for in self._for]
+        lo[0].licm()

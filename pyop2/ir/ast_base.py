@@ -115,14 +115,16 @@ class Less(BinExpr):
 
 class Symbol(Expr):
 
-    """A generic symbol. Rank 0 = scalar, rank 1 = array, rank 2 = matrix, etc.
+    """A generic symbol. len(rank) = 0 => scalar, 1 => array, 2 => matrix, etc
     rank is a tuple whose entries represent iteration variables the symbol
-    depends on or explicit numbers. """
+    depends on or explicit numbers representing the entry of a tensor the
+    symbol is accessing. """
 
     def __init__(self, symbol, rank):
         Expr.__init__(self)
         self.symbol = symbol
         self.rank = rank
+        self.loop_dep = tuple([i for i in rank if not str(i).isdigit()])
 
     def gencode(self):
         points = ""
