@@ -78,8 +78,27 @@ class LoopOptimiser(object):
                     expr_dep[dep_right].append(right)
                 return ((), False)
 
-        def replace_const(node, rep_dict):
-            pass
+        def replace_const(node, syms_dict):
+            # Reached a leaf, go back
+            if isinstance(node, Symbol):
+                return False
+            # Reached a parentheses, go deeper
+            if isinstance(node, Par):
+                return replace_const(node.children[0], syms_dict)
+
+            # Found invariant sub-expression
+            if node in syms_dict:
+                return True
+
+            # Traverse the expression tree and replace
+            left = node.children[0]
+            right = node.children[1]
+            if replace_const(left, syms_dict):
+                left = syms_dict[left]
+            if replace_const(right, syms_dict):
+                right = syms_dict[right]
+
+            return False
 
         # Find out all variables which are written to in this loop nest
         written_vars = []
@@ -128,23 +147,24 @@ class LoopOptimiser(object):
                 sym_rank = tuple([l.size() for l in wl],)
                 syms = [Symbol("LI_%s_%s" % (wl[-1].it_var(), i), sym_rank)
                         for i in range(len(expr))]
-                var_decl = [Decl(typ, s) for s in syms]
+                var_decl = [Decl(typ, _s) for _s in syms]
                 for_rank = tuple([l.it_var() for l in wl])
-                for_sym = [Symbol(s.sym.symbol, for_rank) for s in var_decl]
-                for_ass = [Assign(s, e) for s, e in zip(for_sym, expr)]
+                for_sym = [Symbol(_s.sym.symbol, for_rank) for _s in var_decl]
+                for_ass = [Assign(_s, e) for _s, e in zip(for_sym, expr)]
                 block = Block(for_ass, open_scope=True)
                 for l in reversed(wl):
                     inv_for = For(dcopy(l.init), dcopy(l.cond),
                                   dcopy(l.incr), block)
                     block = inv_for
                 inv_block = Block(var_decl + [inv_for])
+                print inv_block
 
                 # 3) Append the node at the right level in the loop nest
                 new_block = var_decl + [inv_for] + place.children[0].children
                 place.children[0].children = new_block
-                print inv_block
 
-                # 4) Replace invariant sub-trees with the proper temp variable
+                # 4) Replace invariant sub-trees with the proper tmp variable
+                replace_const(s.children[1], dict(zip(expr, for_sym)))
 
     def interchange(self):
         pass
