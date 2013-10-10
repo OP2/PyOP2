@@ -140,8 +140,9 @@ class LoopOptimiser(object):
                 inv_block = Block(var_decl + [inv_for])
 
                 # 3) Append the node at the right level in the loop nest
-                place.chilren = [inv_block] + place.children
-                embed()
+                new_block = var_decl + [inv_for] + place.children[0].children
+                place.children[0].children = new_block
+                print inv_block
 
                 # 4) Replace invariant sub-trees with the proper temp variable
 

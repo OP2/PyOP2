@@ -226,7 +226,7 @@ class Block(Statement):
     def gencode(self, scope=False):
         code = "".join([n.gencode(scope) for n in self.children])
         if self.open_scope:
-            code = "{\n%s\n}" % indent(code)
+            code = "{\n%s\n}\n" % indent(code)
         return code
 
 
