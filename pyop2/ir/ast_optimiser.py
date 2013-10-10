@@ -138,10 +138,12 @@ class LoopOptimiser(object):
                                   dcopy(l.incr), block)
                     block = inv_for
                 inv_block = Block(var_decl + [inv_for])
-                print inv_block
 
-                # Append the node at the right level in the loop nest
+                # 3) Append the node at the right level in the loop nest
+                place.chilren = [inv_block] + place.children
+                embed()
 
-                # Replace invariant sub-trees with the proper temp variable
+                # 4) Replace invariant sub-trees with the proper temp variable
+
     def interchange(self):
         pass
