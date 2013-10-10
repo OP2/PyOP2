@@ -239,6 +239,9 @@ class For(Statement):
         self.cond = cond
         self.incr = incr
 
+    def it_var(self):
+        return self.init.sym.symbol
+
     def size(self):
         return self.cond.children[1].symbol - self.init.init.symbol
 

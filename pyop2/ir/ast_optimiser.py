@@ -81,13 +81,6 @@ class LoopOptimiser(object):
         def replace_const(node, rep_dict):
             pass
 
-        def place_loops(dep):
-            """Return the loops the should wrap a statement dependening on
-            the iteration variables in dep. It also says where the new loop(s)
-            should be placed in the original loop nest (possibly also in a
-            pre-header block)."""
-            pass
-
         # Find out all variables which are written to in this loop nest
         written_vars = []
         for s in self.block.children:
@@ -104,20 +97,46 @@ class LoopOptimiser(object):
 
             # Create a new sub-tree for each invariant sub-expression
             # The logic is: the invariant expression goes after the outermost
-            # depending loop (e.g if exp depends on i,j and the nest is i-j-k,
-            # the exp goes after i). The expression is then wrapped with all
-            # the inner loops it depends on (in order to be autovectorized).
+            # non-depending loop and after the faster varying dimension loop
+            # (e.g if exp depends on i,j and the nest is i-j-k, the exp goes
+            # after i). The expression is then wrapped with all the inner
+            # loops it depends on (in order to be autovectorized).
             for dep, expr in expr_dep.items():
-                # Create the new loop
-                il = dep[-1]
-                loop = [l for l in self.fors if l.init.sym.symbol == il][0]
-                var_decl = [Decl(typ, Symbol("LI%s" % i, (loop.size(),)))
-                            for i, e in zip(range(len(expr)), expr)]
-                var_sym = [Symbol(s.sym.symbol, (loop.init.sym.symbol))
-                           for s in var_decl]
-                var_ass = [Assign(s, e) for s, e in zip(var_sym, expr)]
-                inv_for = For(dcopy(loop.init), dcopy(loop.cond),
-                              dcopy(loop.incr), Block(var_ass, open_scope=True))
+                # 1) Find the loops that should wrap invariant statement
+                # and where the new for block should be placed in the original
+                # loop nest (in a pre-header block if out of the outermost).
+
+                # Invariant code must be out of the faster varying dimension
+                fast_for = [l for l in self.fors if l.it_var() == dep[-1]][0]
+                # Invariant code must be out of the outermost non-depending dim
+                n_dep_for = [l for l in self.fors if l.it_var() not in dep][0]
+
+                # Find where to put the new invariant for
+                pre_loop = None
+                for l in self.fors:
+                    if l.it_var() not in [fast_for.it_var(), n_dep_for.it_var()]:
+                        pre_loop = l
+                    else:
+                        break
+                if pre_loop:
+                    place, wl = (pre_loop, [fast_for])
+                else:
+                    place, wl = (None,
+                                 [l for l in self.fors if l.it_var() in dep])
+
+                # 2) Create the new loop
+                sym_rank = tuple([l.size() for l in wl],)
+                syms = [Symbol("LI_%s_%s" % (wl[-1].it_var(), i), sym_rank)
+                        for i in range(len(expr))]
+                var_decl = [Decl(typ, s) for s in syms]
+                for_rank = tuple([l.it_var() for l in wl])
+                for_sym = [Symbol(s.sym.symbol, for_rank) for s in var_decl]
+                for_ass = [Assign(s, e) for s, e in zip(for_sym, expr)]
+                block = Block(for_ass, open_scope=True)
+                for l in reversed(wl):
+                    inv_for = For(dcopy(l.init), dcopy(l.cond),
+                                  dcopy(l.incr), block)
+                    block = inv_for
                 inv_block = Block(var_decl + [inv_for])
                 print inv_block
 
