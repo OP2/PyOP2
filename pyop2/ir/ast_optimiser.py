@@ -82,10 +82,12 @@ class LoopOptimiser(object):
             # Reached a leaf, go back
             if isinstance(node, Symbol):
                 return False
-            # Reached a parentheses, go deeper
+            # Reached a parentheses, found or go deeper
             if isinstance(node, Par):
-                return replace_const(node.children[0], syms_dict)
-
+                if node in syms_dict:
+                    return True
+                else:
+                    return replace_const(node.children[0], syms_dict)
             # Found invariant sub-expression
             if node in syms_dict:
                 return True
@@ -94,9 +96,9 @@ class LoopOptimiser(object):
             left = node.children[0]
             right = node.children[1]
             if replace_const(left, syms_dict):
-                left = syms_dict[left]
+                node.children[0] = syms_dict[left]
             if replace_const(right, syms_dict):
-                right = syms_dict[right]
+                node.children[1] = syms_dict[right]
 
             return False
 
@@ -165,6 +167,7 @@ class LoopOptimiser(object):
 
                 # 4) Replace invariant sub-trees with the proper tmp variable
                 replace_const(s.children[1], dict(zip(expr, for_sym)))
+                embed()
 
     def interchange(self):
         pass
