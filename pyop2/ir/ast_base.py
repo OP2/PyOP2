@@ -292,3 +292,7 @@ def semicolon(scope):
         return ""
     else:
         return ";\n"
+
+
+def c_sym(const):
+    return Symbol(const, ())

@@ -18,11 +18,3 @@ def create_sum(operands, is_leaf):
         par = Par(new_sym)
         new_sym = par
     return new_sym
-
-
-def c_sym(const):
-    return Symbol(const, ())
-
-
-def assign(operands):
-    Assign(operands[0], operands[1])

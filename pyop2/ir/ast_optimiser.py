@@ -1,16 +1,3 @@
-# Loops optimiser: licm, register tiling, unroll-and-jam, peeling
-#   licm is usually about moving stuff independent of the inner-most loop
-#       here, a slightly different algorithm is employed: only const values are
-#       searched in a statement (i.e. read-only values), but their motion
-#       takes into account the whole loop nest. Therefore, this is licm
-#       tailored to assembly routines
-#   register tiling
-#   unroll-and-jam
-#   peeling
-# Memory optimiser: padding, data alignment, trip count/bound adjustment
-#   padding and data alignment are for aligned unit-stride load
-#   trip count/bound adjustment is for auto-vectorisation
-
 from collections import defaultdict
 from copy import deepcopy as dcopy
 
@@ -19,7 +6,19 @@ from pyop2.ir.ast_base import *
 
 class LoopOptimiser(object):
 
-    """Loops optimiser: licm, register tiling, unroll-and-jam, peeling."""
+    """ Loops optimiser:
+        * LICM:
+        is usually about moving stuff independent of the inner-most loop
+        here, a slightly different algorithm is employed: only const values are
+        searched in a statement (i.e. read-only values), but their motion
+        takes into account the whole loop nest. Therefore, this is licm
+        tailored to assembly routines
+        * register tiling:
+        -
+        * unroll-and-jam:
+        -
+        * peeling:
+        - """
 
     def __init__(self, loop_nest):
         self.loop_nest = loop_nest
@@ -167,7 +166,6 @@ class LoopOptimiser(object):
 
                 # 4) Replace invariant sub-trees with the proper tmp variable
                 replace_const(s.children[1], dict(zip(expr, for_sym)))
-                embed()
 
     def interchange(self):
         pass

@@ -36,4 +36,6 @@ class KernelPlan(object):
 
     def _plan_cpu(self):
         lo = [LoopOptimiser(_for) for _for in self._for]
-        lo[0].licm()
+
+        for nest in lo:
+            nest.licm()
