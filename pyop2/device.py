@@ -157,8 +157,9 @@ class DeviceDataMixin(object):
         self._from_device()
         if self.state is not DeviceDataMixin.DEVICE_UNALLOCATED:
             self.state = DeviceDataMixin.BOTH
-        maybe_setflags(self._data, write=False)
-        return self._data
+        v = self._data.view()
+        v.setflags(write=False)
+        return v
 
     def _maybe_to_soa(self, data):
         """Convert host data to SoA order for device upload if necessary

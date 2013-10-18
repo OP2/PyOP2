@@ -1085,8 +1085,9 @@ class Dat(DataCarrier):
         _trace.evaluate(set([self]), set())
         if self.dataset.total_size > 0 and self._data.size == 0:
             raise RuntimeError("Illegal access: no data associated with this Dat!")
-        maybe_setflags(self._data, write=False)
-        return self._data
+        v = self._data.view()
+        v.setflags(write=False)
+        return v
 
     def save(self, filename):
         """Write the data array to file ``filename`` in NumPy format."""
