@@ -26,7 +26,7 @@ def main():
 
     # Create a plan for executing this kernel
     plan = KernelPlan(kernel)
-    plan.create_plan()
+    plan.plan_cpu("AVX", "INTEL")  # FIXME: backend
 
 
 if __name__ == '__main__':

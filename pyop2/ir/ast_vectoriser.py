@@ -11,14 +11,13 @@ class LoopVectoriser(object):
         * Memory:
           padding, data alignment, trip count/bound adjustment
           padding and data alignment are for aligned unit-stride load
-          trip count/bound adjustment is for auto-vectorisation.
-        * Unroll_and_jam:
-          unroll and jam outer loops if beneficial for vectorisation. """
+          trip count/bound adjustment is for auto-vectorisation. """
 
-    def __init__(self, kernel_ast, loop_optimiser, isa):
+    def __init__(self, kernel_ast, loop_optimiser, isa, compiler):
         self.lo = loop_optimiser
         self.ast = kernel_ast
         self.intr = self._set_isa(isa)
+        self.comp = self._set_compiler(compiler)
 
     # Memory optimisations #
 
@@ -66,8 +65,10 @@ class LoopVectoriser(object):
     def outer_product(self):
         pass
 
+    # Utilities
+
     def _set_isa(self, isa):
-        """Set the proper intrinsics instruction set for the vectorizer """
+        """Set the proper intrinsics instruction set. """
 
         if isa == "AVX":
             return {
@@ -92,7 +93,14 @@ class LoopVectoriser(object):
                 "unpck_lo": lambda r1, r2: "_mm256_unpacklo_pd (%s, %s)" % (r1, r2),
             }
 
-    # Utilities
+    def _set_compiler(self, compiler):
+        """Set compiler-specific keywords. """
+
+        if compiler == "INTEL":
+            return {
+                "align_array": lambda o: "__attribute__((aligned(%s)))" % o,
+                "decl_align_for": "#pragma vector aligned"
+            }
 
     def _roundup(self, x):
         """Return x rounded up to the vector length. """

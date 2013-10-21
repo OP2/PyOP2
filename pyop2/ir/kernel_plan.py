@@ -13,10 +13,6 @@ class KernelPlan(object):
         self.kernel_ast = kernel_ast
         self.fors, self.dlabs = self._visit_ir(kernel_ast)
 
-    def create_plan(self, backend="sequential"):
-        if backend == "sequential":
-            self._plan_cpu()
-
     def _visit_ir(self, node, fors=[], dlabs=[]):
         """Return lists of:
             - perfect loop nests
@@ -35,7 +31,7 @@ class KernelPlan(object):
 
         return (fors, dlabs)
 
-    def _plan_cpu(self):
+    def plan_cpu(self, isa, compiler):
         lo = [LoopOptimiser(fors) for fors in self.fors]
 
         for nest in lo:
@@ -43,7 +39,6 @@ class KernelPlan(object):
             nest.licm()
 
             # Vectorisation
-            # FIXME: backend
-            vect = LoopVectoriser(self.kernel_ast, nest, "AVX")
+            vect = LoopVectoriser(self.kernel_ast, nest, isa, compiler)
             vect.pad_and_align()
             vect.adjust_loop(False)

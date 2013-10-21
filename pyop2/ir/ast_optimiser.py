@@ -15,8 +15,11 @@ class LoopOptimiser(object):
         tailored to assembly routines
         * register tiling:
         -
+        * interchange:
+        permute the loops in the nest
         * unroll-and-jam:
-        -
+        unroll outer loops and jam unrolled bodies
+
         * peeling:
         - """
 
