@@ -11,8 +11,8 @@ util.update({
     "incr++": lambda s: "%s++" % s,
     "wrap": lambda e: "(%s)" % e,
     "bracket": lambda s: "{%s}" % s,
-    "decl": lambda q, t, s, a: "%s%s %s%s" % (q, t, s, a),
-    "decl_init": lambda q, t, s, a, e: "%s%s %s%s = %s" % (q, t, s, a, e),
+    "decl": lambda q, t, s, a: "%s%s %s %s" % (q, t, s, a),
+    "decl_init": lambda q, t, s, a, e: "%s%s %s %s = %s" % (q, t, s, a, e),
     "for": lambda s1, e, s2, s3: "for (%s; %s; %s)\n%s" % (s1, e, s2, s3)
 })
 
@@ -187,33 +187,32 @@ class Decl(Statement):
     e.g. static const double FE0[3][3] __attribute__(align(32)) = {{...}};
     """
 
-    def __init__(self, typ, sym, init=None, qualifiers=[], attributes=[]):
+    def __init__(self, typ, sym, init=None, qualifiers=None, attributes=None):
         Statement.__init__(self)
         self.typ = typ
         self.sym = sym
-        self.qual = qualifiers
-        self.att = attributes
+        self.qual = qualifiers or []
+        self.attr = attributes or []
         if not init:
             self.init = EmptyStatement()
         else:
             self.init = init
-        #decl[sym.symbol] = (typ, qualifiers, attributes)
         decl[sym.symbol] = self
 
     def gencode(self, scope=False):
 
         def spacer(v):
             if v:
-                return " ".join(self.qual) + " "
+                return " ".join(v) + " "
             else:
                 return ""
 
         if type(self.init) == EmptyStatement:
             return util["decl"](spacer(self.qual), self.typ,
-                                self.sym.gencode(), spacer(self.att)) + semicolon(scope)
+                                self.sym.gencode(), spacer(self.attr)) + semicolon(scope)
         else:
             return util["decl_init"](spacer(self.qual), self.typ,
-                                     self.sym.gencode(), spacer(self.att),
+                                     self.sym.gencode(), spacer(self.attr),
                                      self.init.gencode()) + semicolon(scope)
 
 
@@ -233,12 +232,13 @@ class Block(Statement):
 
 class For(Statement):
 
-    def __init__(self, init, cond, incr, body, pragma=None):
+    def __init__(self, init, cond, incr, body, pragma=""):
         Statement.__init__(self, pragma)
         self.children.append(body)
         self.init = init
         self.cond = cond
         self.incr = incr
+        self.pragma = pragma
 
     def it_var(self):
         return self.init.sym.symbol
@@ -247,9 +247,10 @@ class For(Statement):
         return self.cond.children[1].symbol - self.init.init.symbol
 
     def gencode(self, scope=False):
-        return util["for"](self.init.gencode(True),
-                           self.cond.gencode(), self.incr.gencode(True),
-                           self.children[0].gencode())
+        return self.pragma + "\n" + util["for"](self.init.gencode(True),
+                                                self.cond.gencode(), self.incr.gencode(
+                                                    True),
+                                                self.children[0].gencode())
 
 
 class FunCall(Statement):

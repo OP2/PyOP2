@@ -25,32 +25,35 @@ class LoopOptimiser(object):
 
     def __init__(self, loop_nest):
         self.loop_nest = loop_nest
-        self.fors, self.symbols = self._explore_perfect_nest(loop_nest)
+        self.fors, self.decls, self.sym = self._explore_perfect_nest(loop_nest)
 
     def _explore_perfect_nest(self, node):
         """Explore perfect loop nests and collect info."""
 
-        def traverse_tree(node, fors, symbols):
+        def traverse_tree(node, fors, decls, symbols):
             if isinstance(node, Block):
                 self.block = node
-                return traverse_tree(node.children[0], fors, symbols)
+                return traverse_tree(node.children[0], fors, decls, symbols)
             elif isinstance(node, For):
                 fors.append(node)
-                return traverse_tree(node.children[0], fors, symbols)
+                return traverse_tree(node.children[0], fors, decls, symbols)
             elif isinstance(node, Par):
-                return traverse_tree(node.children[0], fors, symbols)
+                return traverse_tree(node.children[0], fors, decls, symbols)
+            elif isinstance(node, Decl):
+                decls[node.sym.symbol] = node
+                return (fors, decls, symbols)
             elif isinstance(node, Symbol):
                 if node.symbol not in symbols and node.rank:
                     symbols.append(node.symbol)
-                return (fors, symbols)
+                return (fors, decls, symbols)
             elif perf_stmt(node) or isinstance(node, BinExpr):
-                traverse_tree(node.children[0], fors, symbols)
-                traverse_tree(node.children[1], fors, symbols)
-                return (fors, symbols)
+                traverse_tree(node.children[0], fors, decls, symbols)
+                traverse_tree(node.children[1], fors, decls, symbols)
+                return (fors, decls, symbols)
             else:
-                return (fors, symbols)
+                return (fors, decls, symbols)
 
-        return traverse_tree(node, [], [])
+        return traverse_tree(node, [], {}, [])
 
     def licm(self):
         """Loop-invariant code motion."""
@@ -176,8 +179,10 @@ class LoopOptimiser(object):
                 inv_block = Block(var_decl + [inv_for])
                 print inv_block
 
-                # Update the list of symbols accessed in the loop nest
-                self.symbols += [d.sym.symbol for d in var_decl]
+                # Update the lists of symbols accessed and of decls
+                self.sym += [d.sym.symbol for d in var_decl]
+                self.decls.update(dict(zip([d.sym.symbol for d in var_decl],
+                                           var_decl)))
 
                 # 3) Append the node at the right level in the loop nest
                 new_block = var_decl + [inv_for] + place.children[0].children
