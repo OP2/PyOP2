@@ -34,29 +34,33 @@ class LoopVectoriser(object):
             rounded = self._roundup(d.sym.rank[-1])
             d.sym.rank = d.sym.rank[:-1] + (rounded,)
 
-    def adjust_loop(self, only_bound=True):
+    def adjust_loop(self, only_bound):
         """Adjust trip count and bound of each innermost loop in the nest."""
 
         def inner_loops(node, loops):
             """Find the inner loops in the tree rooted in node."""
             if perf_stmt(node):
                 return False
+            elif isinstance(node, Block):
+                return any([inner_loops(s, loops) for s in node.children])
             elif isinstance(node, For):
                 found = inner_loops(node.children[0], loops)
                 if not found:
                     loops.append(node)
                 return True
-            elif isinstance(node, Block):
-                return any([inner_loops(s, loops) for s in node.children])
 
+        # Find all inner loops in the kernel
         i_loops = []
         inner_loops(self.lo.loop_nest, i_loops)
 
-        if not only_bound:
+        for l in i_loops:
             # Also adjust the loop increment factor
-            print ""
+            if not only_bound:
+                l.incr.children[1] = c_sym(self.intr["dp_reg"])
 
-        # Adjust the loops bound
+            # Adjust the loops bound
+            bound = l.cond.children[1]
+            l.cond.children[1] = c_sym(self._roundup(bound.symbol))
 
     # Vectorisation
     def outer_product(self):
@@ -69,7 +73,7 @@ class LoopVectoriser(object):
             return {
                 "inst_set": "AVX",
                 "avail_reg": 16,
-                "double_words": 4,
+                "dp_reg": 4,  # Number of double values per register
                 "zeroall": "_mm256_zeroall ()",
                 "setzero": "_mm256_setzero_pd ()",
                 "decl_var": lambda n: "__m256d %s" % n,
@@ -92,6 +96,5 @@ class LoopVectoriser(object):
 
     def _roundup(self, x):
         """Return x rounded up to the vector length. """
-
-        word_len = self.intr["double_words"]
+        word_len = self.intr["dp_reg"]
         return int(ceil(x / float(word_len))) * word_len

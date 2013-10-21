@@ -46,4 +46,4 @@ class KernelPlan(object):
             # FIXME: backend
             vect = LoopVectoriser(self.kernel_ast, nest, "AVX")
             vect.pad_and_align()
-            vect.adjust_loop()
+            vect.adjust_loop(False)

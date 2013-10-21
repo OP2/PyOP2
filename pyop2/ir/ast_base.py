@@ -248,7 +248,7 @@ class For(Statement):
 
     def gencode(self, scope=False):
         return util["for"](self.init.gencode(True),
-                           self.cond.gencode(), self.incr.gencode(),
+                           self.cond.gencode(), self.incr.gencode(True),
                            self.children[0].gencode())
 
 
@@ -274,7 +274,7 @@ class FunDecl(Statement):
 
     def gencode(self):
         sign_list = self.pred + [self.ret, self.name,
-                                 util["wrap"](", ".join([arg.gencode() for arg in self.args]))]
+                                 util["wrap"](", ".join([arg.gencode(True) for arg in self.args]))]
         return " ".join(sign_list) + \
                "\n{\n%s\n}" % indent(self.children[0].gencode())
 
