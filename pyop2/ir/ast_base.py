@@ -197,7 +197,8 @@ class Decl(Statement):
             self.init = EmptyStatement()
         else:
             self.init = init
-        decl[sym.symbol] = (typ, qualifiers, attributes)
+        #decl[sym.symbol] = (typ, qualifiers, attributes)
+        decl[sym.symbol] = self
 
     def gencode(self, scope=False):
 
@@ -296,3 +297,8 @@ def semicolon(scope):
 
 def c_sym(const):
     return Symbol(const, ())
+
+
+def perf_stmt(node):
+    """Checks if the node is allowed to be in the perfect nest."""
+    return isinstance(node, (Assign, Incr, FunCall, Decl, EmptyStatement))

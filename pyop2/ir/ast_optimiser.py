@@ -22,19 +22,32 @@ class LoopOptimiser(object):
 
     def __init__(self, loop_nest):
         self.loop_nest = loop_nest
-        self.fors = self._explore_perfect_nest(loop_nest)
+        self.fors, self.symbols = self._explore_perfect_nest(loop_nest)
 
-    def _explore_perfect_nest(self, node, fors=[]):
-        """Explore perfect loop nests."""
+    def _explore_perfect_nest(self, node):
+        """Explore perfect loop nests and collect info."""
 
-        if isinstance(node, Block):
-            self.block = node
-            return self._explore_perfect_nest(node.children[0])
-        elif isinstance(node, For):
-            fors.append(node)
-            return self._explore_perfect_nest(node.children[0])
-        else:
-            return fors
+        def traverse_tree(node, fors, symbols):
+            if isinstance(node, Block):
+                self.block = node
+                return traverse_tree(node.children[0], fors, symbols)
+            elif isinstance(node, For):
+                fors.append(node)
+                return traverse_tree(node.children[0], fors, symbols)
+            elif isinstance(node, Par):
+                return traverse_tree(node.children[0], fors, symbols)
+            elif isinstance(node, Symbol):
+                if node.symbol not in symbols and node.rank:
+                    symbols.append(node.symbol)
+                return (fors, symbols)
+            elif perf_stmt(node) or isinstance(node, BinExpr):
+                traverse_tree(node.children[0], fors, symbols)
+                traverse_tree(node.children[1], fors, symbols)
+                return (fors, symbols)
+            else:
+                return (fors, symbols)
+
+        return traverse_tree(node, [], [])
 
     def licm(self):
         """Loop-invariant code motion."""
@@ -111,8 +124,8 @@ class LoopOptimiser(object):
         # one loop in the loop nest
         for s in self.block.children:
             expr_dep = defaultdict(list)
-            if type(s) in [Assign, Incr]:
-                typ = decl[s.children[0].symbol][0]
+            if isinstance(s, (Assign, Incr)):
+                typ = decl[s.children[0].symbol].typ
                 extract_const(s.children[1], expr_dep)
 
             # Create a new sub-tree for each invariant sub-expression
@@ -159,6 +172,9 @@ class LoopOptimiser(object):
                     block = inv_for
                 inv_block = Block(var_decl + [inv_for])
                 print inv_block
+
+                # Update the list of symbols accessed in the loop nest
+                self.symbols += [d.sym.symbol for d in var_decl]
 
                 # 3) Append the node at the right level in the loop nest
                 new_block = var_decl + [inv_for] + place.children[0].children

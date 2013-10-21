@@ -27,7 +27,6 @@ def main():
     # Create a plan for executing this kernel
     plan = KernelPlan(kernel)
     plan.create_plan()
-    # embed()
 
 
 if __name__ == '__main__':
