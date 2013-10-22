@@ -62,10 +62,63 @@ class LoopVectoriser(object):
 
     # Vectorisation
     def outer_product(self):
-        pass
+
+        class Alloc(object):
+
+            """Handle allocation of register variables. """
+
+            def __init__(self, intr, factor):
+                # TODO Use factor
+                nreg = (intr["avail_reg"] - intr["dp_reg"])
+                self.res = [intr["reg"](v) for v in range(intr["dp_reg"])]
+                self.var = [intr["reg"](v)
+                            for v in range(intr["dp_reg"], nreg)]
+
+            def get_reg(self):
+                return self.var.pop(0)
+
+            def free_reg(self, reg):
+                self.var.insert(0, reg)
+
+            def get_tensor(self):
+                return self.res
+
+        def swap_reg(reg, intr):
+            # Swap values in a vector register
+            pass
+
+        def incr_tensor(tensor, out_regs, mode):
+            pass
+
+        def scan_tree(regs, node):
+            pass
+
+        def restore_layout(regs, tensor, mode):
+            pass
+
+        # TODO: need to determine order of loops w.r.t. the local tensor
+        # entries. E.g. if j-k inner loops and A[j][k], then increments of
+        # A are performed within the k loop. On the other hand, if ip is
+        # the innermost loop, stores in memory are done outside of ip
+        mode = 0  # 0 == Stores, 1 == Local incrs
+
+        for stmt in self.lo.block.children:  # FIXME: need find outer prods
+            tensor = stmt.children[0]
+            expr = stmt.children[1]
+
+            # Get source-level variables
+            regs = Alloc(self.intr, 1)  # TODO: set appropriate factor
+
+            inner_var = []
+            for i in range(intr["dp_reg"]):
+                # Register shuffles, vectorisation of a row, update tensor
+                swap_reg(inner_var, self.intr)
+                out_reg = scan_tree(regs, expr)
+                incr_tensor(tensor, out_reg, mode)
+            # Restore the tensor layout
+            restore_layout(regs, tensor, mode)
 
     # Utilities
-
     def _inner_loops(self, node, loops):
         """Find the inner loops in the tree rooted in node."""
         if perf_stmt(node):
@@ -87,6 +140,7 @@ class LoopVectoriser(object):
                 "avail_reg": 16,
                 "alignment": 32,
                 "dp_reg": 4,  # Number of double values per register
+                "reg": lambda n: "ymm%s" % n,
                 "zeroall": "_mm256_zeroall ()",
                 "setzero": "_mm256_setzero_pd ()",
                 "decl_var": lambda n: "__m256d %s" % n,

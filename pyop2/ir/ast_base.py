@@ -136,9 +136,10 @@ class Symbol(Expr):
         return str(self.symbol) + points
 
 
+# Vector expression classes ###
+
+
 # Statements ###
-
-
 class Statement(Node):
 
     """Base class for the statement set of productions"""

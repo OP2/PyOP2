@@ -50,3 +50,4 @@ class KernelPlan(object):
             vect.pad_and_align(self.decl)
             vect.adjust_loop(False)
             vect.set_alignment(self.decl, True)
+            vect.outer_product()
