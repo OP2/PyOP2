@@ -98,6 +98,12 @@ class Sum(BinExpr):
         BinExpr.__init__(self, expr1, expr2, " + ")
 
 
+class Sub(BinExpr):
+
+    def __init__(self, expr1, expr2):
+        BinExpr.__init__(self, expr1, expr2, " - ")
+
+
 class Prod(BinExpr):
 
     def __init__(self, expr1, expr2):
@@ -139,6 +145,51 @@ class Symbol(Expr):
 # Vector expression classes ###
 
 
+class AVXSum(Sum):
+
+    def gencode(self):
+        op1, op2 = (self.children[0], self.children[1])
+        return "_mm256_add_pd (%s, %s)" % (op1.gencode(), op2.gencode())
+
+
+class AVXSub(Sub):
+
+    def gencode(self):
+        op1, op2 = (self.children[0], self.children[1])
+        return "_mm256_add_pd (%s, %s)" % (op1.gencode(), op2.gencode())
+
+
+class AVXProd(Prod):
+
+    def gencode(self):
+        op1, op2 = (self.children[0], self.children[1])
+        return "_mm256_mul_pd (%s, %s)" % (op1.gencode(), op2.gencode())
+
+
+class AVXDiv(Div):
+
+    def gencode(self):
+        op1, op2 = (self.children[0], self.children[1])
+        return "_mm256_div_pd (%s, %s)" % (op1.gencode(), op2.gencode())
+
+
+class AVXSymbol(Sum):
+
+    def gencode(self):
+        mem_access = False
+        points = ""
+        for p in self.rank:
+            points += util["point"](p)
+            mem_access = mem_access or not p.isdigit()
+        symbol = str(self.symbol) + points
+        if mem_access:
+            return "_mm256_load_pd (%s)" % symbol
+        else:
+            # TODO: maybe need to differentiate with broadcasts
+            return "_mm256_set1_pd (%s)" % symbol
+
+
+# Statements ###
 # Statements ###
 class Statement(Node):
 

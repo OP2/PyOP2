@@ -85,24 +85,24 @@ class LoopVectoriser(object):
 
         def swap_reg(reg, intr):
             # Swap values in a vector register
-            pass
-
-        def incr_tensor(tensor, out_regs, mode):
-            pass
+            print "Swap"
 
         def scan_tree(regs, node):
             pass
 
+        def incr_tensor(tensor, out_regs, mode):
+            print "Incr tensor"
+
         def restore_layout(regs, tensor, mode):
-            pass
+            print "Restore layout"
 
         # TODO: need to determine order of loops w.r.t. the local tensor
         # entries. E.g. if j-k inner loops and A[j][k], then increments of
         # A are performed within the k loop. On the other hand, if ip is
         # the innermost loop, stores in memory are done outside of ip
-        mode = 0  # 0 == Stores, 1 == Local incrs
-
-        for stmt in self.lo.block.children:  # FIXME: need find outer prods
+        # mode = 0  # 0 == Stores, 1 == Local incrs
+        """
+        for stmt in self.lo.block.children: #FIXME: need find outer prods
             tensor = stmt.children[0]
             expr = stmt.children[1]
 
@@ -116,7 +116,7 @@ class LoopVectoriser(object):
                 out_reg = scan_tree(regs, expr)
                 incr_tensor(tensor, out_reg, mode)
             # Restore the tensor layout
-            restore_layout(regs, tensor, mode)
+            restore_layout(regs, tensor, mode)"""
 
     # Utilities
     def _inner_loops(self, node, loops):
