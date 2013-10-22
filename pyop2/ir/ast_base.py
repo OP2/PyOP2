@@ -173,7 +173,7 @@ class AVXDiv(Div):
         return "_mm256_div_pd (%s, %s)" % (op1.gencode(), op2.gencode())
 
 
-class AVXSymbol(Sum):
+class AVXLoadSymbol(Sum):
 
     def gencode(self):
         mem_access = False
@@ -190,7 +190,8 @@ class AVXSymbol(Sum):
 
 
 # Statements ###
-# Statements ###
+
+
 class Statement(Node):
 
     """Base class for the statement set of productions"""
@@ -332,8 +333,60 @@ class FunDecl(Statement):
                "\n{\n%s\n}" % indent(self.children[0].gencode())
 
 
-# Utility functions ###
+# Vector statements classes
 
+
+class AVXStore(Assign):
+
+    def gencode(self):
+        op1 = self.children[0].gencode()
+        op2 = self.children[1].gencode()
+        return "_mm256_store_pd (%s, %s)" % (op1, op2)
+
+
+class AVXLocalPermute(Statement):
+
+    def __init__(self, r, mask):
+        self.r = r
+        self.mask = mask
+
+    def gencode(self):
+        return "_mm256_permute_pd (%s, %s)" % (self.r, self.mask)
+
+
+class AVXGlobalPermute(Statement):
+
+    def __init__(self, r1, r2, mask):
+        self.r1 = r1
+        self.r2 = r2
+        self.mask = mask
+
+    def gencode(self):
+        return "_mm256_permute2f128_pd (%s, %s, %s)" \
+            % (self.r1, self.r2, self.mask)
+
+
+def AVXUnpackHi(Statement):
+
+    def __init__(self, r1, r2):
+        self.r1 = r1
+        self.r2 = r2
+
+    def gencode(self):
+        return "_mm256_unpackhi_pd (%s, %s)" % (self.r1, self.r2)
+
+
+def AVXUnpackLo(Statement):
+
+    def __init__(self, r1, r2):
+        self.r1 = r1
+        self.r2 = r2
+
+    def gencode(self):
+        return "_mm256_unpacklo_pd (%s, %s)" % (self.r1, self.r2)
+
+
+# Utility functions ###
 
 def indent(block):
     """Indent each row of the given string block with n*4 spaces."""
