@@ -68,13 +68,17 @@ class LoopVectoriser(object):
             """Handle allocation of register variables. """
 
             def __init__(self, intr, factor):
-                # TODO Use factor
-                nreg = (intr["avail_reg"] - intr["dp_reg"])
-                self.res = [intr["reg"](v) for v in range(intr["dp_reg"])]
-                self.var = [intr["reg"](v)
-                            for v in range(intr["dp_reg"], nreg)]
+                # TODO Use factor when unrolling...
+                n_res = intr["dp_reg"]
+                self.n_tot = intr["avail_reg"]
+                self.res = [intr["reg"](v) for v in range(n_res)]
+                self.var = [intr["reg"](v) for v in range(n_res, self.n_tot)]
 
             def get_reg(self):
+                if len(self.var) == 0:
+                    l = self.n_tot * 2
+                    self.var += [intr["reg"](v) for v in range(self.n_tot, l)]
+                    self.n_tot = l
                 return self.var.pop(0)
 
             def free_reg(self, reg):
@@ -84,10 +88,36 @@ class LoopVectoriser(object):
                 return self.res
 
         def swap_reg(reg, intr):
-            # Swap values in a vector register
+            """Swap values in a vector register. """
             print "Swap"
 
-        def scan_tree(regs, node):
+        def vect_mem(node, regs, intr, loops, decls=[], in_vrs={}, out_vrs={}):
+            """Return a list of vector variables declarations representing
+            loads, sets, broadcasts. Also return dicts of allocated inner
+            and outer variables. """
+
+            if isinstance(node, Symbol):
+                # Check if this symbol's values are iterated over with the
+                # fastest varying dimension of the loop nest
+                reg = regs.get_reg()
+                if node.rank and loops[1] == node.rank[-1]:
+                    in_vrs[node] = reg
+                else:
+                    out_vrs[node] = reg
+                expr = intr["symbol"](node.symbol, node.rank)
+                decls.append(Decl(intr["decl_var"], Symbol(reg, ()), expr))
+            elif isinstance(node, Par):
+                child = node.children[0]
+                vect_mem(child, regs, intr, loops, decls, in_vrs, out_vrs)
+            else:
+                left = node.children[0]
+                right = node.children[1]
+                vect_mem(left, regs, intr, loops, decls, in_vrs, out_vrs)
+                vect_mem(right, regs, intr, loops, decls, in_vrs, out_vrs)
+
+            return (decls, in_vrs, out_vrs)
+
+        def vect_expr(node, regs):
             pass
 
         def incr_tensor(tensor, out_regs, mode):
@@ -100,23 +130,28 @@ class LoopVectoriser(object):
         # entries. E.g. if j-k inner loops and A[j][k], then increments of
         # A are performed within the k loop. On the other hand, if ip is
         # the innermost loop, stores in memory are done outside of ip
-        # mode = 0  # 0 == Stores, 1 == Local incrs
-        """
-        for stmt in self.lo.block.children: #FIXME: need find outer prods
+        mode = 0  # 0 == Stores, 1 == Local incrs
+        loops = (self.lo.fors[-2].it_var(), self.lo.fors[-1].it_var())
+
+        for stmt in self.lo.block.children:  # FIXME: need find outer prods
             tensor = stmt.children[0]
             expr = stmt.children[1]
 
             # Get source-level variables
             regs = Alloc(self.intr, 1)  # TODO: set appropriate factor
 
+            # Find required loads
+            decls, in_vrs, out_vrs = vect_mem(expr, regs, self.intr, loops)
+            embed()
+
             inner_var = []
-            for i in range(intr["dp_reg"]):
+            for i in range(self.intr["dp_reg"]):
                 # Register shuffles, vectorisation of a row, update tensor
                 swap_reg(inner_var, self.intr)
-                out_reg = scan_tree(regs, expr)
+                out_reg = vect_expr(expr, regs)
                 incr_tensor(tensor, out_reg, mode)
             # Restore the tensor layout
-            restore_layout(regs, tensor, mode)"""
+            restore_layout(regs, tensor, mode)
 
     # Utilities
     def _inner_loops(self, node, loops):
@@ -143,9 +178,9 @@ class LoopVectoriser(object):
                 "reg": lambda n: "ymm%s" % n,
                 "zeroall": "_mm256_zeroall ()",
                 "setzero": "_mm256_setzero_pd ()",
-                "decl_var": lambda n: "__m256d %s" % n,
+                "decl_var": "__m256d",
                 "align_array": lambda p: "__attribute__((aligned(%s)))" % p,
-                "symbol": lambda s, r: AVXLoadSymbol(s, r),
+                "symbol": lambda s, r: AVXLoad(s, r),
                 "store": lambda m, r: AVXStore(m, r),
                 "mul": lambda r1, r2: AVXProd(r1, r2),
                 "div": lambda r1, r2: AVXDiv(r1, r2),

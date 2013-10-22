@@ -173,7 +173,7 @@ class AVXDiv(Div):
         return "_mm256_div_pd (%s, %s)" % (op1.gencode(), op2.gencode())
 
 
-class AVXLoadSymbol(Sum):
+class AVXLoad(Symbol):
 
     def gencode(self):
         mem_access = False
