@@ -177,8 +177,7 @@ class LoopVectoriser(object):
         new_block = []
         for d in decls + stmt:
             new_block.append(d)
-        embed()
-        #self.lo.block.children = new_block
+        self.lo.block.children = new_block
 
     # Utilities
     def _inner_loops(self, node, loops):

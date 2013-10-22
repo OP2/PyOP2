@@ -338,10 +338,10 @@ class FunDecl(Statement):
 
 class AVXStore(Assign):
 
-    def gencode(self):
+    def gencode(self, scope=False):
         op1 = self.children[0].gencode()
         op2 = self.children[1].gencode()
-        return "_mm256_store_pd (%s, %s)" % (op1, op2)
+        return "_mm256_store_pd (%s, %s)" % (op1, op2) + semicolon(scope)
 
 
 class AVXLocalPermute(Statement):
