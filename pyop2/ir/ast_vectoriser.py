@@ -87,9 +87,10 @@ class LoopVectoriser(object):
             def get_tensor(self):
                 return self.res
 
-        def swap_reg(reg, intr):
+        def swap_reg(step, reg):
             """Swap values in a vector register. """
             print "Swap"
+            return []
 
         def vect_mem(node, regs, intr, loops, decls=[], in_vrs={}, out_vrs={}):
             """Return a list of vector variables declarations representing
@@ -117,14 +118,35 @@ class LoopVectoriser(object):
 
             return (decls, in_vrs, out_vrs)
 
-        def vect_expr(node, regs):
-            pass
+        def vect_expr(node, in_vrs, out_vrs):
+            """Turn a scalar expression into its intrinsics equivalent. """
 
-        def incr_tensor(tensor, out_regs, mode):
-            print "Incr tensor"
+            if isinstance(node, Symbol):
+                return Symbol(in_vrs.get(node) or out_vrs.get(node), ())
+            elif isinstance(node, Par):
+                return vect_expr(node.children[0], in_vrs, out_vrs)
+            else:
+                left = vect_expr(node.children[0], in_vrs, out_vrs)
+                right = vect_expr(node.children[1], in_vrs, out_vrs)
+                if isinstance(node, Sum):
+                    return self.intr["add"](left, right)
+                elif isinstance(node, Sub):
+                    return self.intr["sub"](left, right)
+                elif isinstance(node, Prod):
+                    return self.intr["mul"](left, right)
+                elif isinstance(node, Div):
+                    return self.intr["div"](left, right)
+
+        def incr_tensor(tensor, ofs, out_reg, mode):
+            """Add the right hand side contained in out_reg to tensor."""
+            if mode == 0:
+                # Store in memory
+                loc = (tensor.rank[0] + "+" + str(ofs), tensor.rank[1])
+                return self.intr["store"](Symbol(tensor.symbol, loc), out_reg)
 
         def restore_layout(regs, tensor, mode):
             print "Restore layout"
+            return []
 
         # TODO: need to determine order of loops w.r.t. the local tensor
         # entries. E.g. if j-k inner loops and A[j][k], then increments of
@@ -142,19 +164,21 @@ class LoopVectoriser(object):
 
             # Find required loads
             decls, in_vrs, out_vrs = vect_mem(expr, regs, self.intr, loops)
-
-            inner_var = []
+            stmt = []
             for i in range(self.intr["dp_reg"]):
                 # Register shuffles, vectorisation of a row, update tensor
-                swap_reg(inner_var, self.intr)
-                out_reg = vect_expr(expr, regs)
-                incr_tensor(tensor, out_reg, mode)
+                stmt.extend(swap_reg(i, in_vrs))
+                intr_expr = vect_expr(expr, in_vrs, out_vrs)
+                stmt.append(incr_tensor(tensor, i, intr_expr, mode))
             # Restore the tensor layout
-            restore_layout(regs, tensor, mode)
+            stmt.extend(restore_layout(regs, tensor, mode))
 
-        # Append declarations at the beginning of the for body
-        for d in decls:
-            self.lo.block.children.insert(0, d)
+        # Create the vectorized for body
+        new_block = []
+        for d in decls + stmt:
+            new_block.append(d)
+        embed()
+        #self.lo.block.children = new_block
 
     # Utilities
     def _inner_loops(self, node, loops):
