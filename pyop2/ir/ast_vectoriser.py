@@ -142,7 +142,6 @@ class LoopVectoriser(object):
 
             # Find required loads
             decls, in_vrs, out_vrs = vect_mem(expr, regs, self.intr, loops)
-            embed()
 
             inner_var = []
             for i in range(self.intr["dp_reg"]):
@@ -152,6 +151,10 @@ class LoopVectoriser(object):
                 incr_tensor(tensor, out_reg, mode)
             # Restore the tensor layout
             restore_layout(regs, tensor, mode)
+
+        # Append declarations at the beginning of the for body
+        for d in decls:
+            self.lo.block.children.insert(0, d)
 
     # Utilities
     def _inner_loops(self, node, loops):
