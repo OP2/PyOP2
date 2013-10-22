@@ -350,8 +350,10 @@ class AVXLocalPermute(Statement):
         self.r = r
         self.mask = mask
 
-    def gencode(self):
-        return "_mm256_permute_pd (%s, %s)" % (self.r, self.mask)
+    def gencode(self, scope=False):
+        op = self.r.gencode()
+        return "_mm256_permute_pd (%s, %s)" % (op, self.mask) + \
+            semicolon(scope)
 
 
 class AVXGlobalPermute(Statement):
@@ -361,9 +363,11 @@ class AVXGlobalPermute(Statement):
         self.r2 = r2
         self.mask = mask
 
-    def gencode(self):
+    def gencode(self, scope=False):
+        op1 = self.r1.gencode()
+        op2 = self.r2.gencode()
         return "_mm256_permute2f128_pd (%s, %s, %s)" \
-            % (self.r1, self.r2, self.mask)
+            % (op1, op2, self.mask) + semicolon(scope)
 
 
 def AVXUnpackHi(Statement):

@@ -89,8 +89,13 @@ class LoopVectoriser(object):
 
         def swap_reg(step, reg):
             """Swap values in a vector register. """
-            print "Swap"
-            return []
+
+            if step == 0:
+                return []
+            elif step in [1, 3]:
+                return [self.intr["l_perm"](r, "5") for r in reg.values()]
+            elif step == 2:
+                return [self.intr["g_perm"](r, r, "1") for r in reg.values()]
 
         def vect_mem(node, regs, intr, loops, decls=[], in_vrs={}, out_vrs={}):
             """Return a list of vector variables declarations representing
@@ -102,9 +107,9 @@ class LoopVectoriser(object):
                 # fastest varying dimension of the loop nest
                 reg = regs.get_reg()
                 if node.rank and loops[1] == node.rank[-1]:
-                    in_vrs[node] = reg
+                    in_vrs[node] = Symbol(reg, ())
                 else:
-                    out_vrs[node] = reg
+                    out_vrs[node] = Symbol(reg, ())
                 expr = intr["symbol"](node.symbol, node.rank)
                 decls.append(Decl(intr["decl_var"], Symbol(reg, ()), expr))
             elif isinstance(node, Par):
@@ -122,7 +127,7 @@ class LoopVectoriser(object):
             """Turn a scalar expression into its intrinsics equivalent. """
 
             if isinstance(node, Symbol):
-                return Symbol(in_vrs.get(node) or out_vrs.get(node), ())
+                return in_vrs.get(node) or out_vrs.get(node)
             elif isinstance(node, Par):
                 return vect_expr(node.children[0], in_vrs, out_vrs)
             else:
