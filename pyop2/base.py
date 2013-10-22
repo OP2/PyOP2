@@ -48,6 +48,7 @@ from backends import _make_object
 from mpi import MPI, _MPI, _check_comm, collective
 from sparsity import build_sparsity
 from version import __version__ as version
+import profiling as p
 
 
 class LazyComputation(object):
@@ -3001,7 +3002,16 @@ class ParLoop(LazyComputation):
         self._it_space = self.build_itspace(iterset)
 
     def _run(self):
-        return self.compute()
+        if configuration["profile"]:
+            loop_name = "_".join([self._kernel.name,
+                                  self.it_space.name.split("/")[-1],
+                                  self._kernel.cache_key])
+            p.tic(loop_name)
+            c = self.compute()
+            p.toc(loop_name)
+            return c
+        else:
+            return self.compute()
 
     @collective
     def compute(self):
@@ -3243,7 +3253,12 @@ class Solver(object):
         :arg b: The :class:`Dat` containing the RHS.
         """
         _trace.evaluate(set([A, b]), set([x]))
-        self._solve(A, x, b)
+        if configuration["profile"]:
+            p.tic("solve")
+            self._solve(A, x, b)
+            p.toc("solve")
+        else:
+            self._solve(A, x, b)
 
     def _solve(self, A, x, b):
         raise NotImplementedError("solve must be implemented by backend")
