@@ -25,10 +25,40 @@ class LoopOptimiser(object):
 
     def __init__(self, loop_nest):
         self.loop_nest = loop_nest
+        self.out_prod_loops = None
         self.fors, self.decls, self.sym = self._explore_perfect_nest(loop_nest)
 
     def _explore_perfect_nest(self, node):
-        """Explore perfect loop nests and collect info."""
+        """Explore the loop nest and collect various info like:
+            - which loops are in the nest
+            - declarations
+            - optimisations suggested by the higher layers via pragmas
+            - ...
+        ."""
+
+        def check_opts(node, loops):
+            """Check if node is associated some pragma. If that is the case,
+            it saves this info so as to enable pyop2 optimising such node. """
+            if node.pragma:
+                opts = node.pragma.split(" ", 2)
+                if len(opts) < 3:
+                    return
+                if opts[1] == "pyop2":
+                    delim = opts[2].find('(')
+                    opt_name = opts[2][:delim].replace(" ", "")
+                    opt_par = opts[2][delim:].replace(" ", "")
+                    # Found high-level optimisation
+                    if opt_name == "outerproduct":
+                        # Find outer product loops
+                        for l in loops:
+                            if l.it_var() in [opt_par[1], opt_par[3]]:
+                                self.out_prod_loops = l
+                    else:
+                        # TODO: return a proper error
+                        print "Unrecognised opt %s - skipping it", opt_name
+                else:
+                    # TODO: return a proper error
+                    print "Unrecognised pragma - skipping it"
 
         def traverse_tree(node, fors, decls, symbols):
             if isinstance(node, Block):
@@ -46,7 +76,12 @@ class LoopOptimiser(object):
                 if node.symbol not in symbols and node.rank:
                     symbols.append(node.symbol)
                 return (fors, decls, symbols)
-            elif perf_stmt(node) or isinstance(node, BinExpr):
+            elif isinstance(node, BinExpr):
+                traverse_tree(node.children[0], fors, decls, symbols)
+                traverse_tree(node.children[1], fors, decls, symbols)
+                return (fors, decls, symbols)
+            elif perf_stmt(node):
+                check_opts(node, fors)
                 traverse_tree(node.children[0], fors, decls, symbols)
                 traverse_tree(node.children[1], fors, decls, symbols)
                 return (fors, decls, symbols)

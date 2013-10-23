@@ -1,4 +1,5 @@
 from math import ceil
+from copy import deepcopy as dcopy
 
 from pyop2.ir.ast_base import *
 
@@ -150,15 +151,40 @@ class LoopVectoriser(object):
                 return self.intr["store"](Symbol(tensor.symbol, loc), out_reg)
 
         def restore_layout(regs, tensor, mode):
-            print "Restore layout"
-            return []
+            """Restore the storage layout of the tensor. """
+
+            # Determine tensor symbols
+            tensor_syms = []
+            for i in range(self.intr["dp_reg"]):
+                rank = (tensor.rank[0] + "+" + str(i), tensor.rank[1])
+                tensor_syms.append(Symbol(tensor.symbol, rank))
+
+            code = []
+            tensor_regs = [Symbol(r, ()) for r in regs.get_tensor()]
+
+            # Load LHS values from memory
+            for i, j in zip(tensor_syms, tensor_regs):
+                load_sym = self.intr["symbol"](i.symbol, i.rank)
+                code.append(Decl(self.intr["decl_var"], j, load_sym))
+
+            # In-register restoration of the tensor
+            # if mode == 0:
+                # TODO
+            #   code.append(Assign())
+
+            # Store LHS values in memory
+            for i, j in zip(tensor_syms, tensor_regs):
+                code.append(self.intr["store"](i, j))
+
+            return code
 
         # TODO: need to determine order of loops w.r.t. the local tensor
         # entries. E.g. if j-k inner loops and A[j][k], then increments of
         # A are performed within the k loop. On the other hand, if ip is
         # the innermost loop, stores in memory are done outside of ip
         mode = 0  # 0 == Stores, 1 == Local incrs
-        loops = (self.lo.fors[-2].it_var(), self.lo.fors[-1].it_var())
+        loops = (self.lo.fors[-2], self.lo.fors[-1])
+        loops_it = tuple([l.it_var() for l in loops])
 
         for stmt in self.lo.block.children:  # FIXME: need find outer prods
             tensor = stmt.children[0]
@@ -168,7 +194,7 @@ class LoopVectoriser(object):
             regs = Alloc(self.intr, 1)  # TODO: set appropriate factor
 
             # Find required loads
-            decls, in_vrs, out_vrs = vect_mem(expr, regs, self.intr, loops)
+            decls, in_vrs, out_vrs = vect_mem(expr, regs, self.intr, loops_it)
             stmt = []
             for i in range(self.intr["dp_reg"]):
                 # Register shuffles, vectorisation of a row, update tensor
@@ -176,13 +202,22 @@ class LoopVectoriser(object):
                 intr_expr = vect_expr(expr, in_vrs, out_vrs)
                 stmt.append(incr_tensor(tensor, i, intr_expr, mode))
             # Restore the tensor layout
-            stmt.extend(restore_layout(regs, tensor, mode))
+            layout = restore_layout(regs, tensor, mode)
 
         # Create the vectorized for body
         new_block = []
         for d in decls + stmt:
             new_block.append(d)
         self.lo.block.children = new_block
+
+        # Append the layout code after the outer product loops
+        # TODO: now appending *after* the loop nest, can instead be done
+        # by appending at a certain depth depending on which loops (outer
+        # product loops vs other loops) come first
+        layout_loops = dcopy(loops)
+        layout_loops[0].children = [Block([layout_loops[1]], open_scope=True)]
+        layout_loops[1].children = [Block(layout, open_scope=True)]
+        # TODO: append
 
     # Utilities
     def _inner_loops(self, node, loops):
