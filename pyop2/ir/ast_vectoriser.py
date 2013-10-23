@@ -233,6 +233,12 @@ class LoopVectoriser(object):
         parent = self.lo.pre_header.children
         parent.insert(parent.index(self.lo.loop_nest) + 1, layout_loops[0])
 
+    def peel(self):
+        """Peel iterations out of the outer_product loops s.t. the iteration
+        space becomes rectancular with sides of length multiple of the vector
+        length (e.g. in the case of AVX, 4x4, 8x4, 8x8, ...), and create
+        additional loops for the remainder of the iteration space. """
+
     # Utilities
     def _inner_loops(self, node, loops):
         """Find the inner loops in the tree rooted in node."""
