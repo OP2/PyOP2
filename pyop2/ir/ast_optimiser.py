@@ -25,7 +25,7 @@ class LoopOptimiser(object):
 
     def __init__(self, loop_nest):
         self.loop_nest = loop_nest
-        self.out_prod_loops = []
+        self.out_prods = {}
         self.fors, self.decls, self.sym = self._explore_perfect_nest(loop_nest)
 
     def _explore_perfect_nest(self, node):
@@ -50,9 +50,8 @@ class LoopOptimiser(object):
                     # Found high-level optimisation
                     if opt_name == "outerproduct":
                         # Find outer product loops
-                        for l in loops:
-                            if l.it_var() in [opt_par[1], opt_par[3]]:
-                                self.out_prod_loops.append(l)
+                        self.out_prods[node] = [l for l in loops
+                                                if l.it_var() in [opt_par[1], opt_par[3]]]
                     else:
                         # TODO: return a proper error
                         print "Unrecognised opt %s - skipping it", opt_name

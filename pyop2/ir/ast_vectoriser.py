@@ -183,10 +183,9 @@ class LoopVectoriser(object):
         # A are performed within the k loop. On the other hand, if ip is
         # the innermost loop, stores in memory are done outside of ip
         mode = 0  # 0 == Stores, 1 == Local incrs
-        loops = (self.lo.fors[-2], self.lo.fors[-1])
-        loops_it = tuple([l.it_var() for l in loops])
 
-        for stmt in self.lo.block.children:  # FIXME: need find outer prods
+        for stmt, loops in self.lo.out_prods.items():
+            loops_it = tuple([l.it_var() for l in loops])
             tensor = stmt.children[0]
             expr = stmt.children[1]
 
