@@ -13,7 +13,7 @@ class KernelPlan(object):
         self.kernel_ast = kernel_ast
         self.decl, self.fors, self.dlabs = self._visit_ir(kernel_ast)
 
-    def _visit_ir(self, node, fors=[], dlabs=[], decls={}):
+    def _visit_ir(self, node, parent=None, fors=[], dlabs=[], decls={}):
         """Return lists of:
             - declarations within the kernel
             - perfect loop nests
@@ -24,19 +24,19 @@ class KernelPlan(object):
             decls[node.sym.symbol] = node
             return (decls, fors, dlabs)
         if isinstance(node, For):
-            fors.append(node)
+            fors.append((node, parent))
             return (decls, fors, dlabs)
         if isinstance(node, Statement) and node.pragma:
             dlabs.append(node)
             return (decls, fors, dlabs)
 
         for c in node.children:
-            self._visit_ir(c, fors, dlabs)
+            self._visit_ir(c, node, fors, dlabs, decls)
 
         return (decls, fors, dlabs)
 
     def plan_cpu(self, isa, compiler):
-        lo = [LoopOptimiser(fors) for fors in self.fors]
+        lo = [LoopOptimiser(l, pre_l) for l, pre_l in self.fors]
 
         for nest in lo:
             # Loop optimisations

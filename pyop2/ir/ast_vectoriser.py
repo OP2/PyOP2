@@ -216,7 +216,8 @@ class LoopVectoriser(object):
         layout_loops = dcopy(loops)
         layout_loops[0].children = [Block([layout_loops[1]], open_scope=True)]
         layout_loops[1].children = [Block(layout, open_scope=True)]
-        # TODO: append
+        parent = self.lo.pre_header.children
+        parent.insert(parent.index(self.lo.loop_nest) + 1, layout_loops[0])
 
     # Utilities
     def _inner_loops(self, node, loops):

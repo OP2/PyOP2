@@ -23,8 +23,9 @@ class LoopOptimiser(object):
         * peeling:
         - """
 
-    def __init__(self, loop_nest):
+    def __init__(self, loop_nest, pre_header):
         self.loop_nest = loop_nest
+        self.pre_header = pre_header
         self.out_prods = {}
         self.fors, self.decls, self.sym = self._explore_perfect_nest(loop_nest)
 
