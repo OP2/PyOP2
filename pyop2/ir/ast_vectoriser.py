@@ -70,16 +70,17 @@ class LoopVectoriser(object):
 
             def __init__(self, intr, factor):
                 # TODO Use factor when unrolling...
-                n_res = intr["dp_reg"]
-                self.n_tot = intr["avail_reg"]
-                self.res = [intr["reg"](v) for v in range(n_res)]
-                self.var = [intr["reg"](v) for v in range(n_res, self.n_tot)]
+                nres = intr["dp_reg"]
+                self.ntot = intr["avail_reg"]
+                self.res = [intr["reg"](v) for v in range(nres)]
+                self.var = [intr["reg"](v) for v in range(nres, self.ntot)]
+                self.i = intr
 
             def get_reg(self):
                 if len(self.var) == 0:
-                    l = self.n_tot * 2
-                    self.var += [intr["reg"](v) for v in range(self.n_tot, l)]
-                    self.n_tot = l
+                    l = self.ntot * 2
+                    self.var += [self.i["reg"](v) for v in range(self.ntot, l)]
+                    self.ntot = l
                 return self.var.pop(0)
 
             def free_reg(self, reg):
@@ -160,20 +161,33 @@ class LoopVectoriser(object):
                 tensor_syms.append(Symbol(tensor.symbol, rank))
 
             code = []
-            tensor_regs = [Symbol(r, ()) for r in regs.get_tensor()]
+            t_regs = [Symbol(r, ()) for r in regs.get_tensor()]
 
             # Load LHS values from memory
-            for i, j in zip(tensor_syms, tensor_regs):
+            for i, j in zip(tensor_syms, t_regs):
                 load_sym = self.intr["symbol"](i.symbol, i.rank)
                 code.append(Decl(self.intr["decl_var"], j, load_sym))
 
             # In-register restoration of the tensor
-            # if mode == 0:
-                # TODO
-            #   code.append(Assign())
+            # TODO: AVX only at the present moment
+            perm = self.intr["g_perm"]
+            uphi = self.intr["unpck_hi"]
+            uplo = self.intr["unpck_lo"]
+            typ = self.intr["decl_var"]
+            n_reg = self.intr["dp_reg"]
+            if mode == 0:
+                tmp = [Symbol(regs.get_reg(), ()) for i in range(n_reg)]
+                code.append(Decl(typ, tmp[0], uphi(t_regs[1], t_regs[0])))
+                code.append(Decl(typ, tmp[1], uplo(t_regs[0], t_regs[1])))
+                code.append(Decl(typ, tmp[2], uphi(t_regs[2], t_regs[3])))
+                code.append(Decl(typ, tmp[3], uplo(t_regs[3], t_regs[2])))
+                code.append(Assign(t_regs[0], perm(tmp[1], tmp[3], 32)))
+                code.append(Assign(t_regs[1], perm(tmp[0], tmp[2], 32)))
+                code.append(Assign(t_regs[2], perm(tmp[3], tmp[1], 49)))
+                code.append(Assign(t_regs[3], perm(tmp[2], tmp[0], 49)))
 
             # Store LHS values in memory
-            for i, j in zip(tensor_syms, tensor_regs):
+            for i, j in zip(tensor_syms, t_regs):
                 code.append(self.intr["store"](i, j))
 
             return code
@@ -255,7 +269,7 @@ class LoopVectoriser(object):
                 "l_perm": lambda r, f: AVXLocalPermute(r, f),
                 "g_perm": lambda r1, r2, f: AVXGlobalPermute(r1, r2, f),
                 "unpck_hi": lambda r1, r2: AVXUnpackHi(r1, r2),
-                "unpck_lo": lambda r1, r2: AVXUnpackLo(r1, r2),
+                "unpck_lo": lambda r1, r2: AVXUnpackLo(r1, r2)
             }
 
     def _set_compiler(self, compiler):

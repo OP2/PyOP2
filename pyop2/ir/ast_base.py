@@ -3,7 +3,6 @@
 
 # This dictionary is used as a template generator for simple exprs and commands
 util = {}
-
 util.update({
     "point": lambda p: "[%s]" % p,
     "assign": lambda s, e: "%s = %s" % (s, e),
@@ -350,10 +349,10 @@ class AVXLocalPermute(Statement):
         self.r = r
         self.mask = mask
 
-    def gencode(self, scope=False):
+    def gencode(self, scope=True):
         op = self.r.gencode()
-        return "_mm256_permute_pd (%s, %s)" % (op, self.mask) + \
-            semicolon(scope)
+        return "_mm256_permute_pd (%s, %s)" \
+            % (op, self.mask) + semicolon(scope)
 
 
 class AVXGlobalPermute(Statement):
@@ -363,31 +362,35 @@ class AVXGlobalPermute(Statement):
         self.r2 = r2
         self.mask = mask
 
-    def gencode(self, scope=False):
+    def gencode(self, scope=True):
         op1 = self.r1.gencode()
         op2 = self.r2.gencode()
         return "_mm256_permute2f128_pd (%s, %s, %s)" \
             % (op1, op2, self.mask) + semicolon(scope)
 
 
-def AVXUnpackHi(Statement):
+class AVXUnpackHi(Statement):
 
     def __init__(self, r1, r2):
         self.r1 = r1
         self.r2 = r2
 
-    def gencode(self):
-        return "_mm256_unpackhi_pd (%s, %s)" % (self.r1, self.r2)
+    def gencode(self, scope=True):
+        op1 = self.r1.gencode()
+        op2 = self.r2.gencode()
+        return "_mm256_unpackhi_pd (%s, %s)" % (op1, op2) + semicolon(scope)
 
 
-def AVXUnpackLo(Statement):
+class AVXUnpackLo(Statement):
 
     def __init__(self, r1, r2):
         self.r1 = r1
         self.r2 = r2
 
-    def gencode(self):
-        return "_mm256_unpacklo_pd (%s, %s)" % (self.r1, self.r2)
+    def gencode(self, scope=True):
+        op1 = self.r1.gencode()
+        op2 = self.r2.gencode()
+        return "_mm256_unpacklo_pd (%s, %s)" % (op1, op2) + semicolon(scope)
 
 
 # Utility functions ###
