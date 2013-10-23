@@ -63,6 +63,7 @@ class Timer(object):
         self._timer = timer
         self._start = None
         self._timings = []
+        self._data_volumes = []
         self._timers[n] = self
 
     def start(self):
@@ -74,6 +75,10 @@ class Timer(object):
         assert self._start, "Timer %s has not been started yet." % self._name
         self._timings.append(self._timer() - self._start)
         self._start = None
+
+    def data_volume(self, volume):
+        """Record the ideal data volume."""
+        self._data_volumes.append(volume)
 
     @property
     def name(self):
@@ -97,16 +102,31 @@ class Timer(object):
         return sum(self._timings)
 
     @property
+    def total_vol(self):
+        """Total data_volume for all recorded events."""
+        return sum(self._data_volumes)
+
+    @property
     def average(self):
         """Average time spent per recorded event."""
         return np.average(self._timings)
+
+    @property
+    def average_vol(self):
+        """Average data volume per recorded event."""
+        return np.average(self._data_volumes)
+
+    @property
+    def average_bw(self):
+        """Average data volume per recorded event."""
+        return self.total_vol / self.total / 1000000
 
     @classmethod
     def summary(cls, filename=None):
         """Print a summary table for all timers or write CSV to filename."""
         if not cls._timers:
             return
-        column_heads = ("Timer", "Total time", "Calls", "Average time")
+        column_heads = ("Timer", "Total time", "Calls", "Average time", "Valuable BW")
         if isinstance(filename, str):
             import csv
             with open(filename, 'wb') as f:
@@ -114,7 +134,7 @@ class Timer(object):
                 dialect = csv.excel
                 dialect.lineterminator = '\n'
                 w = csv.writer(f, dialect=dialect)
-                w.writerows([(t.name, t.total, t.ncalls, t.average)
+                w.writerows([(t.name, t.total, t.ncalls, t.average, t.average_bw)
                             for t in cls._timers.values()])
         else:
             namecol = max([len(column_heads[0])] + [len(t.name)
@@ -125,13 +145,15 @@ class Timer(object):
                             for t in cls._timers.values()])
             averagecol = max([len(column_heads[3])] + [len('%g' % t.average)
                              for t in cls._timers.values()])
-            fmt = "%%%ds | %%%ds | %%%ds | %%%ds" % (
-                namecol, totalcol, ncallscol, averagecol)
+            bwcol = max([len(column_heads[4])] + [len('%g' % t.average_bw)
+                        for t in cls._timers.values()])
+            fmt = "%%%ds | %%%ds | %%%ds | %%%ds | %%%ds" % (
+                namecol, totalcol, ncallscol, averagecol, bwcol)
             print fmt % column_heads
-            fmt = "%%%ds | %%%dg | %%%dd | %%%dg" % (
-                namecol, totalcol, ncallscol, averagecol)
+            fmt = "%%%ds | %%%dg | %%%dd | %%%dg | %%%dg" % (
+                namecol, totalcol, ncallscol, averagecol, bwcol)
             for t in cls._timers.values():
-                print fmt % (t.name, t.total, t.ncalls, t.average)
+                print fmt % (t.name, t.total, t.ncalls, t.average, t.average_bw)
 
     @classmethod
     def get_timers(cls):
@@ -169,6 +191,11 @@ def tic(name):
 def toc(name):
     """Stop a timer with the given name."""
     Timer(name).stop()
+
+
+def data_volume(name, volume):
+    """Record the ideal data volume for a given loop."""
+    Timer(name).data_volume(volume)
 
 
 def summary(filename=None):

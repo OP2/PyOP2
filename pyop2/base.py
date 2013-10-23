@@ -3006,6 +3006,9 @@ class ParLoop(LazyComputation):
             loop_name = "_".join([self._kernel.name,
                                   self.it_space.name.split("/")[-1],
                                   self._kernel.cache_key])
+            vol = sum([arg.data.dataset.set.size * arg.data.cdim * arg.data.dtype.itemsize
+                       for arg in self.args if arg._is_dat])
+            p.data_volume(loop_name, vol)
             p.tic(loop_name)
             c = self.compute()
             p.toc(loop_name)
