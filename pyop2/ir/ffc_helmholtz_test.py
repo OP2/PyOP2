@@ -8,7 +8,7 @@ from kernel_plan import KernelPlan
 def main():
 
     # Set up Helmholtz problem (only left hand side)
-    P = FiniteElement("Lagrange", "triangle", 1)
+    P = FiniteElement("Lagrange", "triangle", 2)
 
     v = TestFunction(P)
     u = TrialFunction(P)

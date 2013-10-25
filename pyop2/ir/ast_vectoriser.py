@@ -39,6 +39,9 @@ class LoopVectoriser(object):
     def adjust_loop(self, only_bound):
         """Adjust trip count and bound of each innermost loop in the nest."""
 
+        # save a copy of the old loops
+        self.orig_i_loops = dcopy(self.i_loops)
+
         for l in self.i_loops:
             # Also adjust the loop increment factor
             if not only_bound:
@@ -63,25 +66,60 @@ class LoopVectoriser(object):
 
     # Vectorisation
 
-    def outer_product(self, opts=None):
-        """Compute outer products according to opts. """
+    def outer_product(self, opts=0):
+        """Compute outer products according to opts.
+            opts = 0 : no peeling, just use padding
+            opts = 1 : peeling for autovectorisation
+            opts = 2 : peeling for outer product
+            opts = 3 : outer product and unroll everything
+        """
 
         for stmt, loops in self.lo.out_prods.items():
+            vect_len = self.intr["dp_reg"]
+            l_size = loops[0].size()
+
+            # Adjust outer loop increment
+            loops[0].incr.children[1] = c_sym(self.intr["dp_reg"])
+
+            # Vectorisation
             op = OuterProduct(stmt, loops, self.intr)
-            body, layout = op.generate()
-            self.lo.block.children = body
-            # Append the layout code after the outer product loops
-            # TODO: now appending *after* the loop nest, can instead be done
-            # by appending at a certain depth depending on which loops (outer
-            # product loops vs other loops) come first
+            extra_its = l_size - vect_len
+            if extra_its >= 0:
+                body, layout = op.generate(vect_len)
+                if extra_its > 0 and opts in [1, 2]:
+                # peel out
+                    loop_peel = dcopy(loops)
+                    # Adjust main and remainder loops bound and trip
+                    bound = loops[0].cond.children[1].symbol
+                    bound -= bound % vect_len
+                    loops[0].cond.children[1] = c_sym(bound)
+                    loop_peel[0].init.init = c_sym(bound)
+                    loop_peel[0].incr.children[1] = c_sym(1)
+                    loop_peel[1].incr.children[1] = c_sym(1)
+                    # Append peeling loop after the main loop
+                    parent_loop = self.lo.fors[0]
+                    for l in self.lo.fors[1:]:
+                        if l.it_var() == loops[0].it_var():
+                            break
+                        else:
+                            parent_loop = l
+                    parent_loop.children[0].children.append(loop_peel[0])
+
+                    # TODO opts == 2:
+                    # body_peel, layout_peel = op.generate(extra_its)
+
+                    # TODO: Need to modify bound of layout loop
+            else:
+                body, layout = op.generate(l_size)
+
+            # TODO: this works only for FFC. If we have multiple outer product
+            # statements, we need to insert the vectorized code at the right
+            # point in the outer product loops
+            loops[1].children[0].children = body
+
+            # Append the layout code after the loop nest
             parent = self.lo.pre_header.children
             parent.insert(parent.index(self.lo.loop_nest) + 1, layout)
-
-    def peel(self):
-        """Peel iterations out of the outer_product loops s.t. the iteration
-        space becomes rectancular with sides of length multiple of the vector
-        length (e.g. in the case of AVX, 4x4, 8x4, 8x8, ...), and create
-        additional loops for the remainder of the iteration space. """
 
     # Utilities
     def _inner_loops(self, node, loops):
@@ -233,12 +271,12 @@ class OuterProduct(object):
             loc = (tensor.rank[0] + "+" + str(ofs), tensor.rank[1])
             return self.intr["store"](Symbol(tensor.symbol, loc), out_reg)
 
-    def _restore_layout(self, regs, tensor, mode):
+    def _restore_layout(self, rows, regs, tensor, mode):
         """Restore the storage layout of the tensor. """
 
         # Determine tensor symbols
         tensor_syms = []
-        for i in range(self.intr["dp_reg"]):
+        for i in range(rows):
             rank = (tensor.rank[0] + "+" + str(i), tensor.rank[1])
             tensor_syms.append(Symbol(tensor.symbol, rank))
 
@@ -268,13 +306,15 @@ class OuterProduct(object):
             code.append(Assign(t_regs[2], perm(tmp[3], tmp[1], 49)))
             code.append(Assign(t_regs[3], perm(tmp[2], tmp[0], 49)))
 
+        # TODO: here some __m256 vars could not be declared if rows < 4
+
         # Store LHS values in memory
         for i, j in zip(tensor_syms, t_regs):
             code.append(self.intr["store"](i, j))
 
         return code
 
-    def generate(self):
+    def generate(self, rows):
         # TODO: need to determine order of loops w.r.t. the local tensor
         # entries. E.g. if j-k inner loops and A[j][k], then increments of
         # A are performed within the k loop. On the other hand, if ip is
@@ -291,13 +331,13 @@ class OuterProduct(object):
         # Find required loads
         decls, in_vrs, out_vrs = self._vect_mem(expr, regs, loops_it)
         stmt = []
-        for i in range(self.intr["dp_reg"]):
+        for i in range(rows):
             # Register shuffles, vectorisation of a row, update tensor
             stmt.extend(self._swap_reg(i, in_vrs))
             intr_expr = self._vect_expr(expr, in_vrs, out_vrs)
             stmt.append(self._incr_tensor(tensor, i, intr_expr, mode))
         # Restore the tensor layout
-        layout = self._restore_layout(regs, tensor, mode)
+        layout = self._restore_layout(rows, regs, tensor, mode)
 
         # Create the vectorized for body
         new_block = []

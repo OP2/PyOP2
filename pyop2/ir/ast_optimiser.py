@@ -60,15 +60,15 @@ class LoopOptimiser(object):
                     # TODO: return a proper error
                     print "Unrecognised pragma - skipping it"
 
-        def traverse_tree(node, fors, decls, symbols):
+        def inspect(node, fors, decls, symbols):
             if isinstance(node, Block):
                 self.block = node
-                return traverse_tree(node.children[0], fors, decls, symbols)
+                return inspect(node.children[0], fors, decls, symbols)
             elif isinstance(node, For):
                 fors.append(node)
-                return traverse_tree(node.children[0], fors, decls, symbols)
+                return inspect(node.children[0], fors, decls, symbols)
             elif isinstance(node, Par):
-                return traverse_tree(node.children[0], fors, decls, symbols)
+                return inspect(node.children[0], fors, decls, symbols)
             elif isinstance(node, Decl):
                 decls[node.sym.symbol] = node
                 return (fors, decls, symbols)
@@ -77,18 +77,18 @@ class LoopOptimiser(object):
                     symbols.append(node.symbol)
                 return (fors, decls, symbols)
             elif isinstance(node, BinExpr):
-                traverse_tree(node.children[0], fors, decls, symbols)
-                traverse_tree(node.children[1], fors, decls, symbols)
+                inspect(node.children[0], fors, decls, symbols)
+                inspect(node.children[1], fors, decls, symbols)
                 return (fors, decls, symbols)
             elif perf_stmt(node):
                 check_opts(node, fors)
-                traverse_tree(node.children[0], fors, decls, symbols)
-                traverse_tree(node.children[1], fors, decls, symbols)
+                inspect(node.children[0], fors, decls, symbols)
+                inspect(node.children[1], fors, decls, symbols)
                 return (fors, decls, symbols)
             else:
                 return (fors, decls, symbols)
 
-        return traverse_tree(node, [], {}, [])
+        return inspect(node, [], {}, [])
 
     def licm(self):
         """Loop-invariant code motion."""
