@@ -62,176 +62,20 @@ class LoopVectoriser(object):
                 l.pragma = self.comp["decl_aligned_for"]
 
     # Vectorisation
-    def outer_product(self):
 
-        class Alloc(object):
-
-            """Handle allocation of register variables. """
-
-            def __init__(self, intr, factor):
-                # TODO Use factor when unrolling...
-                nres = intr["dp_reg"]
-                self.ntot = intr["avail_reg"]
-                self.res = [intr["reg"](v) for v in range(nres)]
-                self.var = [intr["reg"](v) for v in range(nres, self.ntot)]
-                self.i = intr
-
-            def get_reg(self):
-                if len(self.var) == 0:
-                    l = self.ntot * 2
-                    self.var += [self.i["reg"](v) for v in range(self.ntot, l)]
-                    self.ntot = l
-                return self.var.pop(0)
-
-            def free_reg(self, reg):
-                self.var.insert(0, reg)
-
-            def get_tensor(self):
-                return self.res
-
-        def swap_reg(step, reg):
-            """Swap values in a vector register. """
-
-            if step == 0:
-                return []
-            elif step in [1, 3]:
-                return [self.intr["l_perm"](r, "5") for r in reg.values()]
-            elif step == 2:
-                return [self.intr["g_perm"](r, r, "1") for r in reg.values()]
-
-        def vect_mem(node, regs, intr, loops, decls=[], in_vrs={}, out_vrs={}):
-            """Return a list of vector variables declarations representing
-            loads, sets, broadcasts. Also return dicts of allocated inner
-            and outer variables. """
-
-            if isinstance(node, Symbol):
-                # Check if this symbol's values are iterated over with the
-                # fastest varying dimension of the loop nest
-                reg = regs.get_reg()
-                if node.rank and loops[1] == node.rank[-1]:
-                    in_vrs[node] = Symbol(reg, ())
-                else:
-                    out_vrs[node] = Symbol(reg, ())
-                expr = intr["symbol"](node.symbol, node.rank)
-                decls.append(Decl(intr["decl_var"], Symbol(reg, ()), expr))
-            elif isinstance(node, Par):
-                child = node.children[0]
-                vect_mem(child, regs, intr, loops, decls, in_vrs, out_vrs)
-            else:
-                left = node.children[0]
-                right = node.children[1]
-                vect_mem(left, regs, intr, loops, decls, in_vrs, out_vrs)
-                vect_mem(right, regs, intr, loops, decls, in_vrs, out_vrs)
-
-            return (decls, in_vrs, out_vrs)
-
-        def vect_expr(node, in_vrs, out_vrs):
-            """Turn a scalar expression into its intrinsics equivalent. """
-
-            if isinstance(node, Symbol):
-                return in_vrs.get(node) or out_vrs.get(node)
-            elif isinstance(node, Par):
-                return vect_expr(node.children[0], in_vrs, out_vrs)
-            else:
-                left = vect_expr(node.children[0], in_vrs, out_vrs)
-                right = vect_expr(node.children[1], in_vrs, out_vrs)
-                if isinstance(node, Sum):
-                    return self.intr["add"](left, right)
-                elif isinstance(node, Sub):
-                    return self.intr["sub"](left, right)
-                elif isinstance(node, Prod):
-                    return self.intr["mul"](left, right)
-                elif isinstance(node, Div):
-                    return self.intr["div"](left, right)
-
-        def incr_tensor(tensor, ofs, out_reg, mode):
-            """Add the right hand side contained in out_reg to tensor."""
-            if mode == 0:
-                # Store in memory
-                loc = (tensor.rank[0] + "+" + str(ofs), tensor.rank[1])
-                return self.intr["store"](Symbol(tensor.symbol, loc), out_reg)
-
-        def restore_layout(regs, tensor, mode):
-            """Restore the storage layout of the tensor. """
-
-            # Determine tensor symbols
-            tensor_syms = []
-            for i in range(self.intr["dp_reg"]):
-                rank = (tensor.rank[0] + "+" + str(i), tensor.rank[1])
-                tensor_syms.append(Symbol(tensor.symbol, rank))
-
-            code = []
-            t_regs = [Symbol(r, ()) for r in regs.get_tensor()]
-
-            # Load LHS values from memory
-            for i, j in zip(tensor_syms, t_regs):
-                load_sym = self.intr["symbol"](i.symbol, i.rank)
-                code.append(Decl(self.intr["decl_var"], j, load_sym))
-
-            # In-register restoration of the tensor
-            # TODO: AVX only at the present moment
-            perm = self.intr["g_perm"]
-            uphi = self.intr["unpck_hi"]
-            uplo = self.intr["unpck_lo"]
-            typ = self.intr["decl_var"]
-            n_reg = self.intr["dp_reg"]
-            if mode == 0:
-                tmp = [Symbol(regs.get_reg(), ()) for i in range(n_reg)]
-                code.append(Decl(typ, tmp[0], uphi(t_regs[1], t_regs[0])))
-                code.append(Decl(typ, tmp[1], uplo(t_regs[0], t_regs[1])))
-                code.append(Decl(typ, tmp[2], uphi(t_regs[2], t_regs[3])))
-                code.append(Decl(typ, tmp[3], uplo(t_regs[3], t_regs[2])))
-                code.append(Assign(t_regs[0], perm(tmp[1], tmp[3], 32)))
-                code.append(Assign(t_regs[1], perm(tmp[0], tmp[2], 32)))
-                code.append(Assign(t_regs[2], perm(tmp[3], tmp[1], 49)))
-                code.append(Assign(t_regs[3], perm(tmp[2], tmp[0], 49)))
-
-            # Store LHS values in memory
-            for i, j in zip(tensor_syms, t_regs):
-                code.append(self.intr["store"](i, j))
-
-            return code
-
-        # TODO: need to determine order of loops w.r.t. the local tensor
-        # entries. E.g. if j-k inner loops and A[j][k], then increments of
-        # A are performed within the k loop. On the other hand, if ip is
-        # the innermost loop, stores in memory are done outside of ip
-        mode = 0  # 0 == Stores, 1 == Local incrs
+    def outer_product(self, opts=None):
+        """Compute outer products according to opts. """
 
         for stmt, loops in self.lo.out_prods.items():
-            loops_it = tuple([l.it_var() for l in loops])
-            tensor = stmt.children[0]
-            expr = stmt.children[1]
-
-            # Get source-level variables
-            regs = Alloc(self.intr, 1)  # TODO: set appropriate factor
-
-            # Find required loads
-            decls, in_vrs, out_vrs = vect_mem(expr, regs, self.intr, loops_it)
-            stmt = []
-            for i in range(self.intr["dp_reg"]):
-                # Register shuffles, vectorisation of a row, update tensor
-                stmt.extend(swap_reg(i, in_vrs))
-                intr_expr = vect_expr(expr, in_vrs, out_vrs)
-                stmt.append(incr_tensor(tensor, i, intr_expr, mode))
-            # Restore the tensor layout
-            layout = restore_layout(regs, tensor, mode)
-
-        # Create the vectorized for body
-        new_block = []
-        for d in decls + stmt:
-            new_block.append(d)
-        self.lo.block.children = new_block
-
-        # Append the layout code after the outer product loops
-        # TODO: now appending *after* the loop nest, can instead be done
-        # by appending at a certain depth depending on which loops (outer
-        # product loops vs other loops) come first
-        layout_loops = dcopy(loops)
-        layout_loops[0].children = [Block([layout_loops[1]], open_scope=True)]
-        layout_loops[1].children = [Block(layout, open_scope=True)]
-        parent = self.lo.pre_header.children
-        parent.insert(parent.index(self.lo.loop_nest) + 1, layout_loops[0])
+            op = OuterProduct(stmt, loops, self.intr)
+            body, layout = op.generate()
+            self.lo.block.children = body
+            # Append the layout code after the outer product loops
+            # TODO: now appending *after* the loop nest, can instead be done
+            # by appending at a certain depth depending on which loops (outer
+            # product loops vs other loops) come first
+            parent = self.lo.pre_header.children
+            parent.insert(parent.index(self.lo.loop_nest) + 1, layout)
 
     def peel(self):
         """Peel iterations out of the outer_product loops s.t. the iteration
@@ -291,3 +135,177 @@ class LoopVectoriser(object):
         """Return x rounded up to the vector length. """
         word_len = self.intr["dp_reg"]
         return int(ceil(x / float(word_len))) * word_len
+
+
+class OuterProduct(object):
+
+    """Compute outer product vectorisation of a statement. """
+
+    def __init__(self, stmt, loops, intr):
+        self.stmt = stmt
+        self.loops = loops
+        self.intr = intr
+
+    class Alloc(object):
+
+        """Handle allocation of register variables. """
+
+        def __init__(self, intr, factor):
+            # TODO Use factor when unrolling...
+            nres = intr["dp_reg"]
+            self.ntot = intr["avail_reg"]
+            self.res = [intr["reg"](v) for v in range(nres)]
+            self.var = [intr["reg"](v) for v in range(nres, self.ntot)]
+            self.i = intr
+
+        def get_reg(self):
+            if len(self.var) == 0:
+                l = self.ntot * 2
+                self.var += [self.i["reg"](v) for v in range(self.ntot, l)]
+                self.ntot = l
+            return self.var.pop(0)
+
+        def free_reg(self, reg):
+            self.var.insert(0, reg)
+
+        def get_tensor(self):
+            return self.res
+
+    def _swap_reg(self, step, reg):
+        """Swap values in a vector register. """
+
+        if step == 0:
+            return []
+        elif step in [1, 3]:
+            return [self.intr["l_perm"](r, "5") for r in reg.values()]
+        elif step == 2:
+            return [self.intr["g_perm"](r, r, "1") for r in reg.values()]
+
+    def _vect_mem(self, node, regs, loops, decls=[], in_vrs={}, out_vrs={}):
+        """Return a list of vector variables declarations representing
+        loads, sets, broadcasts. Also return dicts of allocated inner
+        and outer variables. """
+
+        if isinstance(node, Symbol):
+            # Check if this symbol's values are iterated over with the
+            # fastest varying dimension of the loop nest
+            reg = regs.get_reg()
+            if node.rank and loops[1] == node.rank[-1]:
+                in_vrs[node] = Symbol(reg, ())
+            else:
+                out_vrs[node] = Symbol(reg, ())
+            expr = self.intr["symbol"](node.symbol, node.rank)
+            decls.append(Decl(self.intr["decl_var"], Symbol(reg, ()), expr))
+        elif isinstance(node, Par):
+            child = node.children[0]
+            self._vect_mem(child, regs, loops, decls, in_vrs, out_vrs)
+        else:
+            left = node.children[0]
+            right = node.children[1]
+            self._vect_mem(left, regs, loops, decls, in_vrs, out_vrs)
+            self._vect_mem(right, regs, loops, decls, in_vrs, out_vrs)
+
+        return (decls, in_vrs, out_vrs)
+
+    def _vect_expr(self, node, in_vrs, out_vrs):
+        """Turn a scalar expression into its intrinsics equivalent. """
+
+        if isinstance(node, Symbol):
+            return in_vrs.get(node) or out_vrs.get(node)
+        elif isinstance(node, Par):
+            return self._vect_expr(node.children[0], in_vrs, out_vrs)
+        else:
+            left = self._vect_expr(node.children[0], in_vrs, out_vrs)
+            right = self._vect_expr(node.children[1], in_vrs, out_vrs)
+            if isinstance(node, Sum):
+                return self.intr["add"](left, right)
+            elif isinstance(node, Sub):
+                return self.intr["sub"](left, right)
+            elif isinstance(node, Prod):
+                return self.intr["mul"](left, right)
+            elif isinstance(node, Div):
+                return self.intr["div"](left, right)
+
+    def _incr_tensor(self, tensor, ofs, out_reg, mode):
+        """Add the right hand side contained in out_reg to tensor."""
+        if mode == 0:
+            # Store in memory
+            loc = (tensor.rank[0] + "+" + str(ofs), tensor.rank[1])
+            return self.intr["store"](Symbol(tensor.symbol, loc), out_reg)
+
+    def _restore_layout(self, regs, tensor, mode):
+        """Restore the storage layout of the tensor. """
+
+        # Determine tensor symbols
+        tensor_syms = []
+        for i in range(self.intr["dp_reg"]):
+            rank = (tensor.rank[0] + "+" + str(i), tensor.rank[1])
+            tensor_syms.append(Symbol(tensor.symbol, rank))
+
+        code = []
+        t_regs = [Symbol(r, ()) for r in regs.get_tensor()]
+
+        # Load LHS values from memory
+        for i, j in zip(tensor_syms, t_regs):
+            load_sym = self.intr["symbol"](i.symbol, i.rank)
+            code.append(Decl(self.intr["decl_var"], j, load_sym))
+
+        # In-register restoration of the tensor
+        # TODO: AVX only at the present moment
+        perm = self.intr["g_perm"]
+        uphi = self.intr["unpck_hi"]
+        uplo = self.intr["unpck_lo"]
+        typ = self.intr["decl_var"]
+        n_reg = self.intr["dp_reg"]
+        if mode == 0:
+            tmp = [Symbol(regs.get_reg(), ()) for i in range(n_reg)]
+            code.append(Decl(typ, tmp[0], uphi(t_regs[1], t_regs[0])))
+            code.append(Decl(typ, tmp[1], uplo(t_regs[0], t_regs[1])))
+            code.append(Decl(typ, tmp[2], uphi(t_regs[2], t_regs[3])))
+            code.append(Decl(typ, tmp[3], uplo(t_regs[3], t_regs[2])))
+            code.append(Assign(t_regs[0], perm(tmp[1], tmp[3], 32)))
+            code.append(Assign(t_regs[1], perm(tmp[0], tmp[2], 32)))
+            code.append(Assign(t_regs[2], perm(tmp[3], tmp[1], 49)))
+            code.append(Assign(t_regs[3], perm(tmp[2], tmp[0], 49)))
+
+        # Store LHS values in memory
+        for i, j in zip(tensor_syms, t_regs):
+            code.append(self.intr["store"](i, j))
+
+        return code
+
+    def generate(self):
+        # TODO: need to determine order of loops w.r.t. the local tensor
+        # entries. E.g. if j-k inner loops and A[j][k], then increments of
+        # A are performed within the k loop. On the other hand, if ip is
+        # the innermost loop, stores in memory are done outside of ip
+        mode = 0  # 0 == Stores, 1 == Local incrs
+
+        loops_it = tuple([l.it_var() for l in self.loops])
+        tensor = self.stmt.children[0]
+        expr = self.stmt.children[1]
+
+        # Get source-level variables
+        regs = self.Alloc(self.intr, 1)  # TODO: set appropriate factor
+
+        # Find required loads
+        decls, in_vrs, out_vrs = self._vect_mem(expr, regs, loops_it)
+        stmt = []
+        for i in range(self.intr["dp_reg"]):
+            # Register shuffles, vectorisation of a row, update tensor
+            stmt.extend(self._swap_reg(i, in_vrs))
+            intr_expr = self._vect_expr(expr, in_vrs, out_vrs)
+            stmt.append(self._incr_tensor(tensor, i, intr_expr, mode))
+        # Restore the tensor layout
+        layout = self._restore_layout(regs, tensor, mode)
+
+        # Create the vectorized for body
+        new_block = []
+        for d in decls + stmt:
+            new_block.append(d)
+
+        # Code for restoring the layout
+        layout_loops = dcopy(self.loops)
+        layout_loops[0].children = [Block([layout_loops[1]], open_scope=True)]
+        layout_loops[1].children = [Block(layout, open_scope=True)]
+        return (new_block, layout_loops[0])
