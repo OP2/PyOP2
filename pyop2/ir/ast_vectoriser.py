@@ -89,10 +89,11 @@ class LoopVectoriser(object):
                 if extra_its > 0 and opts in [1, 2]:
                 # peel out
                     loop_peel = dcopy(loops)
-                    # Adjust main and remainder loops bound and trip
+                    # Adjust main, layout and remainder loops bound and trip
                     bound = loops[0].cond.children[1].symbol
                     bound -= bound % vect_len
                     loops[0].cond.children[1] = c_sym(bound)
+                    layout.cond.children[1] = c_sym(bound)
                     loop_peel[0].init.init = c_sym(bound)
                     loop_peel[0].incr.children[1] = c_sym(1)
                     loop_peel[1].incr.children[1] = c_sym(1)
