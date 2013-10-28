@@ -71,20 +71,19 @@ class LoopVectoriser(object):
             opts = 0 : no peeling, just use padding
             opts = 1 : peeling for autovectorisation
             opts = 2 : peeling for outer product
-            opts = 3 : outer product and unroll everything
+            opts = 3 : set unroll_and_jam factor
         """
 
         for stmt, loops in self.lo.out_prods.items():
             vect_len = self.intr["dp_reg"]
-            l_size = loops[0].size()
-
-            # Adjust outer loop increment
-            loops[0].incr.children[1] = c_sym(self.intr["dp_reg"])
+            rows = loops[0].size()
 
             # Vectorisation
             op = OuterProduct(stmt, loops, self.intr)
-            extra_its = l_size - vect_len
-            if extra_its >= 0:
+            extra_its = rows - vect_len
+            if opts == 3:
+                body, layout = op.generate(rows)
+            elif extra_its >= 0:
                 body, layout = op.generate(vect_len)
                 if extra_its > 0 and opts in [1, 2]:
                 # peel out
@@ -111,7 +110,7 @@ class LoopVectoriser(object):
 
                     # TODO: Need to modify bound of layout loop
             else:
-                body, layout = op.generate(l_size)
+                body, layout = op.generate(rows)
 
             # TODO: this works only for FFC. If we have multiple outer product
             # statements, we need to insert the vectorized code at the right
@@ -210,60 +209,65 @@ class OuterProduct(object):
         def get_tensor(self):
             return self.res
 
-    def _swap_reg(self, step, reg):
+    def _swap_reg(self, step, vrs):
         """Swap values in a vector register. """
 
-        if step == 0:
-            return []
-        elif step in [1, 3]:
-            return [self.intr["l_perm"](r, "5") for r in reg.values()]
-        elif step == 2:
-            return [self.intr["g_perm"](r, r, "1") for r in reg.values()]
+        # Find inner variables
+        regs = [reg for node, reg in vrs.items()
+                if node.rank and node.rank[-1] == self.loops[1].it_var()]
 
-    def _vect_mem(self, node, regs, loops, decls=[], in_vrs={}, out_vrs={}):
+        if step in [0, 2]:
+            return [self.intr["l_perm"](r, "5") for r in regs]
+        elif step == 1:
+            return [self.intr["g_perm"](r, r, "1") for r in regs]
+        elif step == 3:
+            return []
+
+    def _vect_mem(self, node, vrs, decls):
         """Return a list of vector variables declarations representing
         loads, sets, broadcasts. Also return dicts of allocated inner
         and outer variables. """
-
-        if isinstance(node, Symbol):
-            # Check if this symbol's values are iterated over with the
-            # fastest varying dimension of the loop nest
-            reg = regs.get_reg()
-            if node.rank and loops[1] == node.rank[-1]:
-                in_vrs[node] = Symbol(reg, ())
-            else:
-                out_vrs[node] = Symbol(reg, ())
-            expr = self.intr["symbol"](node.symbol, node.rank)
-            decls.append(Decl(self.intr["decl_var"], Symbol(reg, ()), expr))
-        elif isinstance(node, Par):
-            child = node.children[0]
-            self._vect_mem(child, regs, loops, decls, in_vrs, out_vrs)
-        else:
-            left = node.children[0]
-            right = node.children[1]
-            self._vect_mem(left, regs, loops, decls, in_vrs, out_vrs)
-            self._vect_mem(right, regs, loops, decls, in_vrs, out_vrs)
+        stmt = []
+        for node, reg in vrs.items():
+            exp = self.intr["symbol"](node.symbol, node.rank)
+            if not decls.get(node.gencode()):
+                decls[node.gencode()] = reg
+                stmt.append(Decl(self.intr["decl_var"], reg, exp))
+        return stmt
 
         return (decls, in_vrs, out_vrs)
 
-    def _vect_expr(self, node, in_vrs, out_vrs):
-        """Turn a scalar expression into its intrinsics equivalent. """
+    def _vect_expr(self, node, ofs, regs, decls, vrs={}):
+        """Turn a scalar expression into its intrinsics equivalent.
+        Also return dicts of allocated vector variables. """
 
         if isinstance(node, Symbol):
-            return in_vrs.get(node) or out_vrs.get(node)
+            if node.rank and self.loops[0].it_var() == node.rank[-1]:
+                # The symbol depends on the outer loop dimension, so add ofst
+                new_rank = list(node.rank)
+                new_rank[-1] = new_rank[-1] + "+" + str(ofs)
+                node = Symbol(node.symbol, tuple(new_rank))
+            if node.gencode() not in decls:
+                reg = regs.get_reg()
+                vrs[node] = Symbol(reg, ())
+                return (vrs[node], vrs)
+            else:
+                return (decls[node.gencode()], vrs)
         elif isinstance(node, Par):
-            return self._vect_expr(node.children[0], in_vrs, out_vrs)
+            return self._vect_expr(node.children[0], ofs, regs, decls, vrs)
         else:
-            left = self._vect_expr(node.children[0], in_vrs, out_vrs)
-            right = self._vect_expr(node.children[1], in_vrs, out_vrs)
+            left, vrs = self._vect_expr(
+                node.children[0], ofs, regs, decls, vrs)
+            right, vrs = self._vect_expr(
+                node.children[1], ofs, regs, decls, vrs)
             if isinstance(node, Sum):
-                return self.intr["add"](left, right)
+                return (self.intr["add"](left, right), vrs)
             elif isinstance(node, Sub):
-                return self.intr["sub"](left, right)
+                return (self.intr["sub"](left, right), vrs)
             elif isinstance(node, Prod):
-                return self.intr["mul"](left, right)
+                return (self.intr["mul"](left, right), vrs)
             elif isinstance(node, Div):
-                return self.intr["div"](left, right)
+                return (self.intr["div"](left, right), vrs)
 
     def _incr_tensor(self, tensor, ofs, out_reg, mode):
         """Add the right hand side contained in out_reg to tensor."""
@@ -316,37 +320,52 @@ class OuterProduct(object):
         return code
 
     def generate(self, rows):
+        """Generate the outer-product intrinsics-based vectorisation code. """
+
         # TODO: need to determine order of loops w.r.t. the local tensor
         # entries. E.g. if j-k inner loops and A[j][k], then increments of
         # A are performed within the k loop. On the other hand, if ip is
         # the innermost loop, stores in memory are done outside of ip
         mode = 0  # 0 == Stores, 1 == Local incrs
 
-        loops_it = tuple([l.it_var() for l in self.loops])
+        cols = self.intr["dp_reg"]
+
         tensor = self.stmt.children[0]
         expr = self.stmt.children[1]
 
         # Get source-level variables
         regs = self.Alloc(self.intr, 1)  # TODO: set appropriate factor
 
-        # Find required loads
-        decls, in_vrs, out_vrs = self._vect_mem(expr, regs, loops_it)
+        # Adjust outer loop increment
+        self.loops[0].incr.children[1] = c_sym(rows)
+
         stmt = []
-        for i in range(rows):
-            # Register shuffles, vectorisation of a row, update tensor
-            stmt.extend(self._swap_reg(i, in_vrs))
-            intr_expr = self._vect_expr(expr, in_vrs, out_vrs)
-            stmt.append(self._incr_tensor(tensor, i, intr_expr, mode))
+        decls = {}
+        rows_per_col = rows / cols
+        rows_to_peel = rows % cols
+        peeling = 0
+        for i in range(cols):
+            # Handle extra rows
+            if peeling < rows_to_peel:
+                nrows = rows_per_col + 1
+                peeling += 1
+            else:
+                nrows = rows_per_col
+            for j in range(nrows):
+                # Vectorize, declare allocated variables, increment tensor
+                ofs = j * cols
+                v_expr, vrs = self._vect_expr(expr, ofs, regs, decls)
+                stmt.extend(self._vect_mem(expr, vrs, decls))
+                stmt.append(self._incr_tensor(tensor, i + ofs, v_expr, mode))
+            # Register shuffles
+            if rows_per_col + (rows_to_peel - peeling) > 0:
+                stmt.extend(self._swap_reg(i, vrs))
+
         # Restore the tensor layout
-        layout = self._restore_layout(rows, regs, tensor, mode)
-
-        # Create the vectorized for body
-        new_block = []
-        for d in decls + stmt:
-            new_block.append(d)
-
-        # Code for restoring the layout
+        regs = self.Alloc(self.intr, 1)
+        layout = self._restore_layout(cols, regs, tensor, mode)
         layout_loops = dcopy(self.loops)
+        layout_loops[0].incr.children[1] = c_sym(cols)
         layout_loops[0].children = [Block([layout_loops[1]], open_scope=True)]
         layout_loops[1].children = [Block(layout, open_scope=True)]
-        return (new_block, layout_loops[0])
+        return (stmt, layout_loops[0])
