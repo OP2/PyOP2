@@ -32,7 +32,7 @@ class LoopOptimiser(object):
             - ...
         ."""
 
-        def check_opts(node):
+        def check_opts(node, parent):
             """Check if node is associated some pragma. If that is the case,
             it saves this info so as to enable pyop2 optimising such node. """
             if node.pragma:
@@ -45,8 +45,9 @@ class LoopOptimiser(object):
                     opt_par = opts[2][delim:].replace(" ", "")
                     # Found high-level optimisation
                     if opt_name == "outerproduct":
-                        # Find outer product iteration variables
-                        self.out_prods[node] = [opt_par[1], opt_par[3]]
+                        # Find outer product iteration variables and store the
+                        # parent for future manipulation
+                        self.out_prods[node] = ([opt_par[1], opt_par[3]], parent)
                     else:
                         # TODO: return a proper error
                         print "Unrecognised opt %s - skipping it", opt_name
@@ -54,15 +55,17 @@ class LoopOptimiser(object):
                     # TODO: return a proper error
                     print "Unrecognised pragma - skipping it"
 
-        def inspect(node, fors, decls, symbols):
+        def inspect(node, parent, fors, decls, symbols):
             if isinstance(node, Block):
                 self.block = node
-                return inspect(node.children[0], fors, decls, symbols)
+                for n in node.children:
+                    inspect(n, node, fors, decls, symbols)
+                return (fors, decls, symbols)
             elif isinstance(node, For):
                 fors.append(node)
-                return inspect(node.children[0], fors, decls, symbols)
+                return inspect(node.children[0], node, fors, decls, symbols)
             elif isinstance(node, Par):
-                return inspect(node.children[0], fors, decls, symbols)
+                return inspect(node.children[0], node, fors, decls, symbols)
             elif isinstance(node, Decl):
                 decls[node.sym.symbol] = node
                 return (fors, decls, symbols)
@@ -71,18 +74,18 @@ class LoopOptimiser(object):
                     symbols.append(node.symbol)
                 return (fors, decls, symbols)
             elif isinstance(node, BinExpr):
-                inspect(node.children[0], fors, decls, symbols)
-                inspect(node.children[1], fors, decls, symbols)
+                inspect(node.children[0], node, fors, decls, symbols)
+                inspect(node.children[1], node, fors, decls, symbols)
                 return (fors, decls, symbols)
             elif perf_stmt(node):
-                check_opts(node)
-                inspect(node.children[0], fors, decls, symbols)
-                inspect(node.children[1], fors, decls, symbols)
+                check_opts(node, parent)
+                inspect(node.children[0], node, fors, decls, symbols)
+                inspect(node.children[1], node, fors, decls, symbols)
                 return (fors, decls, symbols)
             else:
                 return (fors, decls, symbols)
 
-        return inspect(node, [], {}, [])
+        return inspect(node, None, [], {}, [])
 
     def licm(self):
         """Loop-invariant code motion."""

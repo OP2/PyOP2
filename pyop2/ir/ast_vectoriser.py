@@ -73,8 +73,9 @@ class LoopVectoriser(object):
             opts = 3 : set unroll_and_jam factor
         """
 
-        for stmt, it_vars in self.lo.out_prods.items():
+        for stmt, stmt_info in self.lo.out_prods.items():
             # First, find outer product loops in the nest
+            it_vars, parent = stmt_info
             loops = [l for l in self.lo.fors if l.it_var() in it_vars]
 
             vect_len = self.intr["dp_reg"]
@@ -115,7 +116,10 @@ class LoopVectoriser(object):
             # TODO: this works only for FFC. If we have multiple outer product
             # statements, we need to insert the vectorized code at the right
             # point in the outer product loops
-            loops[1].children[0].children = body
+            blk = parent.children
+            ofs = blk.index(stmt)
+            parent.children = blk[:ofs] + body + blk[ofs+1:]
+            #loops[1].children[0].children = body
 
             # Append the layout code after the loop nest
             parent = self.lo.pre_header.children
