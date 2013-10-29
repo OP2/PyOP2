@@ -14,9 +14,8 @@ class LoopVectoriser(object):
           padding and data alignment are for aligned unit-stride load
           trip count/bound adjustment is for auto-vectorisation. """
 
-    def __init__(self, kernel_ast, loop_optimiser, isa, compiler):
+    def __init__(self, loop_optimiser, isa, compiler):
         self.lo = loop_optimiser
-        self.ast = kernel_ast
         self.intr = self._set_isa(isa)
         self.comp = self._set_compiler(compiler)
         self.i_loops = []

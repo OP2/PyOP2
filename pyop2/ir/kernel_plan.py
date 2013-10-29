@@ -39,16 +39,23 @@ class KernelPlan(object):
         lo = [LoopOptimiser(l, pre_l) for l, pre_l in self.fors]
 
         for nest in lo:
-            # Loop optimisations
-            #nest.interchange((1, 2, 0))
-            nest.licm()
+            # 1) Loop optimisations
+            nest.interchange((1, 2, 0))
+            inv_outer_loops = nest.licm()
 
             # Update declarations due to licm
             self.decl.update(nest.decls)
 
-            # Vectorisation
-            vect = LoopVectoriser(self.kernel_ast, nest, isa, compiler)
+            # 2) Vectorisation
+            vect = LoopVectoriser(nest, isa, compiler)
             vect.pad_and_align(self.decl)
             vect.adjust_loop(False)
-            vect.set_alignment(self.decl, True)
-            vect.outer_product(3)
+            #vect.set_alignment(self.decl, True)
+            #vect.outer_product(3)
+
+            # 3) Vectorisation of loops produced while transforming the
+            # original loop nest
+            for l in inv_outer_loops:
+                opt_l = LoopOptimiser(l, self.kernel_ast)
+                vect = LoopVectoriser(opt_l, isa, compiler)
+                vect.adjust_loop(False)

@@ -158,6 +158,7 @@ class LoopOptimiser(object):
 
         # Extract read-only sub-expressions that do not depend on at least
         # one loop in the loop nest
+        ext_loops = []
         for s in self.block.children:
             expr_dep = defaultdict(list)
             if isinstance(s, (Assign, Incr)):
@@ -191,15 +192,13 @@ class LoopOptimiser(object):
                     place, ofs, wl = (pre_loop.children[0], 0, [fast_for])
                 else:
                     parent = self.pre_header
+                    loops = [l for l in self.fors if l.it_var() in dep]
                     place, ofs, wl = (parent,
-                                      parent.children.index(self.loop_nest),
-                                      [l for l in self.fors if l.it_var() in dep])
-                    # place, wl = (None, \
-                    #        [l for l in self.fors if l.it_var() in dep])
+                                      parent.children.index(self.loop_nest), loops)
 
                 # 2) Create the new loop
                 sym_rank = tuple([l.size() for l in wl],)
-                syms = [Symbol("LI_%s_%s" % (wl[-1].it_var(), i), sym_rank)
+                syms = [Symbol("LI_%s_%s" % (wl[0].it_var(), i), sym_rank)
                         for i in range(len(expr))]
                 var_decl = [Decl(typ, _s) for _s in syms]
                 for_rank = tuple([l.it_var() for l in reversed(wl)])
@@ -224,6 +223,13 @@ class LoopOptimiser(object):
 
                 # 4) Replace invariant sub-trees with the proper tmp variable
                 replace_const(s.children[1], dict(zip(expr, for_sym)))
+
+                # 5) Record invariant loops which have been hoisted out of
+                # the present loop nest
+                if not pre_loop:
+                    ext_loops.append(inv_for)
+
+        return ext_loops
 
     def interchange(self, perm):
         """Interchange the loops according to the encoding in perm.
