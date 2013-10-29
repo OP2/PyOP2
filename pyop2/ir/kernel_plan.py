@@ -40,6 +40,7 @@ class KernelPlan(object):
 
         for nest in lo:
             # Loop optimisations
+            #nest.interchange((1, 2, 0))
             nest.licm()
 
             # Update declarations due to licm

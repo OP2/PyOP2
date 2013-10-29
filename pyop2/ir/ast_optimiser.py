@@ -188,38 +188,70 @@ class LoopOptimiser(object):
                     else:
                         break
                 if pre_loop:
-                    place, wl = (pre_loop, [fast_for])
+                    place, ofs, wl = (pre_loop.children[0], 0, [fast_for])
                 else:
-                    place, wl = (None,
-                                 [l for l in self.fors if l.it_var() in dep])
+                    parent = self.pre_header
+                    place, ofs, wl = (parent,
+                                      parent.children.index(self.loop_nest),
+                                      [l for l in self.fors if l.it_var() in dep])
+                    # place, wl = (None, \
+                    #        [l for l in self.fors if l.it_var() in dep])
 
                 # 2) Create the new loop
                 sym_rank = tuple([l.size() for l in wl],)
                 syms = [Symbol("LI_%s_%s" % (wl[-1].it_var(), i), sym_rank)
                         for i in range(len(expr))]
                 var_decl = [Decl(typ, _s) for _s in syms]
-                for_rank = tuple([l.it_var() for l in wl])
+                for_rank = tuple([l.it_var() for l in reversed(wl)])
                 for_sym = [Symbol(_s.sym.symbol, for_rank) for _s in var_decl]
                 for_ass = [Assign(_s, e) for _s, e in zip(for_sym, expr)]
                 block = Block(for_ass, open_scope=True)
-                for l in reversed(wl):
+                for l in wl:
                     inv_for = For(dcopy(l.init), dcopy(l.cond),
                                   dcopy(l.incr), block)
-                    block = inv_for
+                    block = Block([inv_for], open_scope=True)
                 inv_block = Block(var_decl + [inv_for])
                 print inv_block
 
                 # Update the lists of symbols accessed and of decls
                 self.sym += [d.sym.symbol for d in var_decl]
                 self.decls.update(dict(zip([d.sym.symbol for d in var_decl],
-                                           var_decl)))
+                                       var_decl)))
 
                 # 3) Append the node at the right level in the loop nest
-                new_block = var_decl + [inv_for] + place.children[0].children
-                place.children[0].children = new_block
+                new_block = var_decl + [inv_for] + place.children[ofs:]
+                place.children = place.children[:ofs] + new_block
 
                 # 4) Replace invariant sub-trees with the proper tmp variable
                 replace_const(s.children[1], dict(zip(expr, for_sym)))
 
-    def interchange(self):
-        pass
+    def interchange(self, perm):
+        """Interchange the loops according to the encoding in perm.
+        perm is a tuple in which each entry represents a loop. For
+        example, if perm[0] = 1, then loop 0 (the outermost) is moved
+        down by a level. """
+
+        def find_perm(node, perm, idx, fors, nw_fors):
+            if perf_stmt(node):
+                return
+            elif isinstance(node, For):
+                node.init = fors[perm[idx]].init
+                node.cond = fors[perm[idx]].cond
+                node.incr = fors[perm[idx]].incr
+                node.pragma = fors[perm[idx]].pragma
+                nw_fors.append(node)
+                return find_perm(node.children[0], perm, idx + 1, fors, nw_fors)
+            elif isinstance(node, Block):
+                for n in node.children:
+                    return find_perm(n, perm, idx, fors, nw_fors)
+
+        # Check if the provided permutation is legal
+        if len(perm) != len(set(perm)):
+            # Handle error
+            return
+
+        old_fors = dcopy(self.fors)
+        nw_fors = []
+        find_perm(self.loop_nest, perm, 0, old_fors, nw_fors)
+
+        self.fors = nw_fors
