@@ -73,7 +73,10 @@ class LoopVectoriser(object):
             opts = 3 : set unroll_and_jam factor
         """
 
-        for stmt, loops in self.lo.out_prods.items():
+        for stmt, it_vars in self.lo.out_prods.items():
+            # First, find outer product loops in the nest
+            loops = [l for l in self.lo.fors if l.it_var() in it_vars]
+
             vect_len = self.intr["dp_reg"]
             rows = loops[0].size()
 

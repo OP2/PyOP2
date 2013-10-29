@@ -35,27 +35,39 @@ class KernelPlan(object):
 
         return (decls, fors, dlabs)
 
-    def plan_cpu(self, isa, compiler):
+    def plan_cpu(self, isa, compiler, opts):
+        """Optimize the kernel for cpu execution. """
+
+        # Fetch user-provided options/hints on how to transform the kernel
+        perm = opts["interchange"]
+        licm = opts["licm"]
+        layout = opts["pad_and_align"]
+        out_vect = opts["outer-product vectorisation"]
+
         lo = [LoopOptimiser(l, pre_l) for l, pre_l in self.fors]
-
         for nest in lo:
-            # 1) Loop optimisations
-            nest.interchange((1, 2, 0))
-            inv_outer_loops = nest.licm()
+            # 1) Loop interchange
+            if perm:
+                nest.interchange(perm)
 
-            # Update declarations due to licm
-            self.decl.update(nest.decls)
+            # 2) Loop invariant code motion
+            if licm:
+                inv_outer_loops = nest.licm()
+                self.decl.update(nest.decls)
+                # Optimisation of invariant loops
+                for l in inv_outer_loops:
+                    opt_l = LoopOptimiser(l, self.kernel_ast)
+                    vect = LoopVectoriser(opt_l, isa, compiler)
+                    vect.adjust_loop(True)
 
-            # 2) Vectorisation
             vect = LoopVectoriser(nest, isa, compiler)
-            vect.pad_and_align(self.decl)
-            vect.adjust_loop(False)
-            #vect.set_alignment(self.decl, True)
-            #vect.outer_product(3)
 
-            # 3) Vectorisation of loops produced while transforming the
-            # original loop nest
-            for l in inv_outer_loops:
-                opt_l = LoopOptimiser(l, self.kernel_ast)
-                vect = LoopVectoriser(opt_l, isa, compiler)
+            # 3) Padding and data alignment
+            if layout:
+                vect.pad_and_align(self.decl)
                 vect.adjust_loop(False)
+                vect.set_alignment(self.decl, True)
+
+            # 4) Outer-product vectorisation
+            if out_vect:
+                vect.outer_product(out_vect)

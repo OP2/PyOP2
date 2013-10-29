@@ -25,7 +25,16 @@ def main():
 
     # Create a plan for executing this kernel
     plan = KernelPlan(kernel)
-    plan.plan_cpu("AVX", "INTEL")  # FIXME: backend
+
+    opts = {}
+    opts["interchange"] = (1, 2, 0)
+    opts["licm"] = True
+    opts["pad_and_align"] = True
+    opts["outer-product vectorisation"] = 3
+
+    plan.plan_cpu("AVX", "INTEL", opts)  # FIXME: backend
+
+    embed()
 
 
 if __name__ == '__main__':

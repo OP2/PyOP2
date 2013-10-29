@@ -32,7 +32,7 @@ class LoopOptimiser(object):
             - ...
         ."""
 
-        def check_opts(node, loops):
+        def check_opts(node):
             """Check if node is associated some pragma. If that is the case,
             it saves this info so as to enable pyop2 optimising such node. """
             if node.pragma:
@@ -45,9 +45,8 @@ class LoopOptimiser(object):
                     opt_par = opts[2][delim:].replace(" ", "")
                     # Found high-level optimisation
                     if opt_name == "outerproduct":
-                        # Find outer product loops
-                        self.out_prods[node] = [l for l in loops
-                                                if l.it_var() in [opt_par[1], opt_par[3]]]
+                        # Find outer product iteration variables
+                        self.out_prods[node] = [opt_par[1], opt_par[3]]
                     else:
                         # TODO: return a proper error
                         print "Unrecognised opt %s - skipping it", opt_name
@@ -76,7 +75,7 @@ class LoopOptimiser(object):
                 inspect(node.children[1], fors, decls, symbols)
                 return (fors, decls, symbols)
             elif perf_stmt(node):
-                check_opts(node, fors)
+                check_opts(node)
                 inspect(node.children[0], fors, decls, symbols)
                 inspect(node.children[1], fors, decls, symbols)
                 return (fors, decls, symbols)
