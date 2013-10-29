@@ -107,8 +107,6 @@ class LoopVectoriser(object):
 
                     # TODO opts == 2:
                     # body_peel, layout_peel = op.generate(extra_its)
-
-                    # TODO: Need to modify bound of layout loop
             else:
                 body, layout = op.generate(rows)
 

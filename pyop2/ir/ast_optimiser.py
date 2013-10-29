@@ -12,16 +12,11 @@ class LoopOptimiser(object):
         here, a slightly different algorithm is employed: only const values are
         searched in a statement (i.e. read-only values), but their motion
         takes into account the whole loop nest. Therefore, this is licm
-        tailored to assembly routines
+        tailored to assembly routines.
         * register tiling:
         -
         * interchange:
-        permute the loops in the nest
-        * unroll-and-jam:
-        unroll outer loops and jam unrolled bodies
-
-        * peeling:
-        - """
+        permute the loops in the nest. """
 
     def __init__(self, loop_nest, pre_header):
         self.loop_nest = loop_nest
