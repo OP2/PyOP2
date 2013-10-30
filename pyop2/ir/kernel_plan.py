@@ -42,7 +42,7 @@ class KernelPlan(object):
         perm = opts["interchange"]
         licm = opts["licm"]
         layout = opts["pad_and_align"]
-        out_vect = opts["outer-product vectorisation"]
+        out_vect = opts["outer-product tiling"]
 
         lo = [LoopOptimiser(l, pre_l) for l, pre_l in self.fors]
         for nest in lo:
@@ -59,6 +59,7 @@ class KernelPlan(object):
                     opt_l = LoopOptimiser(l, self.kernel_ast)
                     vect = LoopVectoriser(opt_l, isa, compiler)
                     vect.adjust_loop(True)
+                    #vect.set_alignment(self.decl, True)
 
             vect = LoopVectoriser(nest, isa, compiler)
 
@@ -69,5 +70,7 @@ class KernelPlan(object):
                 vect.set_alignment(self.decl, True)
 
             # 4) Outer-product vectorisation
-            if out_vect:
+            if out_vect in [0, 1, 2, 3]:
                 vect.outer_product(out_vect)
+            elif out_vect == 4:
+                nest.tiling_outer_product()

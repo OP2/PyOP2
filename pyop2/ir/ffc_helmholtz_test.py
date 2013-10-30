@@ -8,7 +8,7 @@ from kernel_plan import KernelPlan
 def main():
 
     # Set up Helmholtz problem (only left hand side)
-    P = FiniteElement("Lagrange", "triangle", 1)
+    P = FiniteElement("Lagrange", "triangle", 2)
 
     v = TestFunction(P)
     u = TrialFunction(P)
@@ -27,10 +27,10 @@ def main():
     plan = KernelPlan(kernel)
 
     opts = {}
-    opts["interchange"] = (1, 2, 0)
+    opts["interchange"] = ()  # (1, 2, 0)
     opts["licm"] = True
     opts["pad_and_align"] = True
-    opts["outer-product vectorisation"] = 3
+    opts["outer-product tiling"] = 4
 
     plan.plan_cpu("AVX", "INTEL", opts)  # FIXME: backend
 

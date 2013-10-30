@@ -22,9 +22,11 @@ class LoopOptimiser(object):
         self.loop_nest = loop_nest
         self.pre_header = pre_header
         self.out_prods = {}
-        self.fors, self.decls, self.sym = self._explore_perfect_nest(loop_nest)
+        fors_loc, self.decls, self.sym = self._explore_nest(loop_nest)
+        self.fors = [l for l, p in fors_loc]
+        self.for_parents = [p for l, p in fors_loc]
 
-    def _explore_perfect_nest(self, node):
+    def _explore_nest(self, node):
         """Explore the loop nest and collect various info like:
             - which loops are in the nest
             - declarations
@@ -47,7 +49,8 @@ class LoopOptimiser(object):
                     if opt_name == "outerproduct":
                         # Find outer product iteration variables and store the
                         # parent for future manipulation
-                        self.out_prods[node] = ([opt_par[1], opt_par[3]], parent)
+                        self.out_prods[node] = (
+                            [opt_par[1], opt_par[3]], parent)
                     else:
                         # TODO: return a proper error
                         print "Unrecognised opt %s - skipping it", opt_name
@@ -62,7 +65,7 @@ class LoopOptimiser(object):
                     inspect(n, node, fors, decls, symbols)
                 return (fors, decls, symbols)
             elif isinstance(node, For):
-                fors.append(node)
+                fors.append((node, parent))
                 return inspect(node.children[0], node, fors, decls, symbols)
             elif isinstance(node, Par):
                 return inspect(node.children[0], node, fors, decls, symbols)
@@ -211,8 +214,6 @@ class LoopOptimiser(object):
                     inv_for = For(dcopy(l.init), dcopy(l.cond),
                                   dcopy(l.incr), block)
                     block = Block([inv_for], open_scope=True)
-                inv_block = Block(var_decl + [inv_for])
-                print inv_block
 
                 # Update the lists of symbols accessed and of decls
                 self.sym += [d.sym.symbol for d in var_decl]
@@ -263,3 +264,44 @@ class LoopOptimiser(object):
         find_perm(self.loop_nest, perm, 0, old_fors, nw_fors)
 
         self.fors = nw_fors
+
+    def tiling_outer_product(self):
+        """Perform tiling at the register level for this nest.
+        This function only slices the iteration space, and relies
+        on the backend compiler for unrolling and vector-promoting
+        the tiled loops.
+        By default, it slices the outer product loops. """
+
+        # TODO: need to set properly the blocking factor
+        tile_sz = 4
+
+        for loop_vars in set([tuple(x) for x, y in self.out_prods.values()]):
+            # First, find outer product loops in the nest
+            loops = [l for l in self.fors if l.it_var() in loop_vars]
+
+            tiled_loops = []
+
+            # Build tiled loops
+            n_loops = loops[1].cond.children[1].symbol / tile_sz
+            rem_loop_sz = loops[1].cond.children[1].symbol % tile_sz
+            init = 0
+            for i in range(n_loops):
+                loop = dcopy(loops[1])
+                loop.init.init = Symbol(init, ())
+                loop.cond.children[1] = Symbol(tile_sz * (i + 1), ())
+                init += tile_sz
+                tiled_loops.append(loop)
+
+            # Build remainder loop
+            if rem_loop_sz > 0:
+                init = tile_sz * n_loops
+                loop = dcopy(loops[1])
+                loop.init.init = Symbol(init, ())
+                loop.cond.children[1] = Symbol(rem_loop_sz, ())
+                tiled_loops.append(loop)
+
+            # Append tiled loops at the right point in the nest
+            par_block = self.for_parents[self.fors.index(loops[1])]
+            pb = par_block.children
+            idx = pb.index(loops[1])
+            par_block.children = pb[:idx] + tiled_loops + pb[idx + 1:]
