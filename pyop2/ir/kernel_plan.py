@@ -65,7 +65,7 @@ class KernelPlan(object):
             # 3) Padding and data alignment
             if layout:
                 vect.pad_and_align(self.decl)
-                vect.adjust_loop(False)
+                vect.adjust_loop(True)
                 vect.set_alignment(self.decl, True)
 
             # 4) Outer-product vectorisation

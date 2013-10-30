@@ -113,13 +113,10 @@ class LoopVectoriser(object):
             else:
                 body, layout = op.generate(rows)
 
-            # TODO: this works only for FFC. If we have multiple outer product
-            # statements, we need to insert the vectorized code at the right
-            # point in the outer product loops
+            # Insert the vectorized code at the right point in the loop nest
             blk = parent.children
             ofs = blk.index(stmt)
-            parent.children = blk[:ofs] + body + blk[ofs+1:]
-            #loops[1].children[0].children = body
+            parent.children = blk[:ofs] + body + blk[ofs + 1:]
 
             # Append the layout code after the loop nest
             parent = self.lo.pre_header.children
@@ -340,8 +337,9 @@ class OuterProduct(object):
         # Get source-level variables
         regs = self.Alloc(self.intr, 1)  # TODO: set appropriate factor
 
-        # Adjust outer loop increment
+        # Adjust loops increment
         self.loops[0].incr.children[1] = c_sym(rows)
+        self.loops[1].incr.children[1] = c_sym(cols)
 
         stmt = []
         decls = {}
