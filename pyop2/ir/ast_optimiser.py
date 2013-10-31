@@ -271,6 +271,9 @@ class LoopOptimiser(object):
         if len(perm) != len(set(perm)):
             # Handle error
             return
+        if len(perm) != len(self.fors):
+            # Handle error
+            return
 
         old_fors = dcopy(self.fors)
         nw_fors = []
