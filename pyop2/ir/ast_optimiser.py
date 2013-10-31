@@ -177,14 +177,27 @@ class LoopOptimiser(object):
             # after i). The expression is then wrapped with all the inner
             # loops it depends on (in order to be autovectorized).
             for dep, expr in expr_dep.items():
-                # 1) Find the loops that should wrap invariant statement
+
+                # 1) Find the loops that should wrap invariant statements
                 # and where the new for block should be placed in the original
                 # loop nest (in a pre-header block if out of the outermost).
+                fast_for = None
+                n_dep_for = None
+                for l in self.fors:
+                    # Invariant code must be out of the fastest varying
+                    # dimension
+                    if l.it_var() == dep[-1]:
+                        fast_for = l
+                        break
+                for l in self.fors:
+                    # Invariant code must be out of the outermost non-depending
+                    # dim
+                    if l.it_var() not in dep:
+                        n_dep_for = l
+                        break
 
-                # Invariant code must be out of the faster varying dimension
-                fast_for = [l for l in self.fors if l.it_var() == dep[-1]][0]
-                # Invariant code must be out of the outermost non-depending dim
-                n_dep_for = [l for l in self.fors if l.it_var() not in dep][0]
+                if not fast_for or not n_dep_for:
+                    continue
 
                 # Find where to put the new invariant for
                 pre_loop = None
