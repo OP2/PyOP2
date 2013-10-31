@@ -27,10 +27,10 @@ def main():
     plan = KernelPlan(kernel)
 
     opts = {}
-    opts["interchange"] = ()  # (1, 2, 0)
+    opts["interchange"] = (1, 2, 0)
     opts["licm"] = True
     opts["pad_and_align"] = True
-    opts["outer-product tiling"] = 4
+    opts["outer-product tiling"] = 3
 
     plan.plan_cpu("AVX", "INTEL", opts)  # FIXME: backend
 

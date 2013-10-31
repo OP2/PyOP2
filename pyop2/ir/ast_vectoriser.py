@@ -67,9 +67,8 @@ class LoopVectoriser(object):
 
     def outer_product(self, opts=0):
         """Compute outer products according to opts.
-            opts = 0 : no peeling, just use padding
             opts = 1 : peeling for autovectorisation
-            opts = 2 : peeling for outer product
+            opts = 2 : no peeling, just use padding
             opts = 3 : set unroll_and_jam factor
         """
 
@@ -82,7 +81,7 @@ class LoopVectoriser(object):
             rows = loops[0].size()
 
             # Vectorisation
-            op = OuterProduct(stmt, loops, self.intr)
+            op = OuterProduct(stmt, loops, self.intr, self.lo)
             extra_its = rows - vect_len
             if opts == 3:
                 body, layout = op.generate(rows)
@@ -107,9 +106,6 @@ class LoopVectoriser(object):
                         else:
                             parent_loop = l
                     parent_loop.children[0].children.append(loop_peel[0])
-
-                    # TODO opts == 2:
-                    # body_peel, layout_peel = op.generate(extra_its)
             else:
                 body, layout = op.generate(rows)
 
@@ -119,8 +115,9 @@ class LoopVectoriser(object):
             parent.children = blk[:ofs] + body + blk[ofs + 1:]
 
             # Append the layout code after the loop nest
-            parent = self.lo.pre_header.children
-            parent.insert(parent.index(self.lo.loop_nest) + 1, layout)
+            if layout:
+                parent = self.lo.pre_header.children
+                parent.insert(parent.index(self.lo.loop_nest) + 1, layout)
 
     # Utilities
     def _inner_loops(self, node, loops):
@@ -146,7 +143,7 @@ class LoopVectoriser(object):
                 "dp_reg": 4,  # Number of double values per register
                 "reg": lambda n: "ymm%s" % n,
                 "zeroall": "_mm256_zeroall ()",
-                "setzero": "_mm256_setzero_pd ()",
+                "setzero": AVXSetZero(),
                 "decl_var": "__m256d",
                 "align_array": lambda p: "__attribute__((aligned(%s)))" % p,
                 "symbol": lambda s, r: AVXLoad(s, r),
@@ -180,18 +177,20 @@ class OuterProduct(object):
 
     """Compute outer product vectorisation of a statement. """
 
-    def __init__(self, stmt, loops, intr):
+    def __init__(self, stmt, loops, intr, nest):
         self.stmt = stmt
-        self.loops = loops
         self.intr = intr
+        # Outer product loops
+        self.loops = loops
+        # The whole loop nest in which outer product loops live
+        self.nest = nest
 
     class Alloc(object):
 
         """Handle allocation of register variables. """
 
-        def __init__(self, intr, factor):
-            # TODO Use factor when unrolling...
-            nres = intr["dp_reg"]
+        def __init__(self, intr, tensor_size):
+            nres = max(intr["dp_reg"], tensor_size)
             self.ntot = intr["avail_reg"]
             self.res = [intr["reg"](v) for v in range(nres)]
             self.var = [intr["reg"](v) for v in range(nres, self.ntot)]
@@ -204,8 +203,9 @@ class OuterProduct(object):
                 self.ntot = l
             return self.var.pop(0)
 
-        def free_reg(self, reg):
-            self.var.insert(0, reg)
+        def free_regs(self, regs):
+            for r in reversed(regs):
+                self.var.insert(0, r)
 
         def get_tensor(self):
             return self.res
@@ -270,39 +270,48 @@ class OuterProduct(object):
             elif isinstance(node, Div):
                 return (self.intr["div"](left, right), vrs)
 
-    def _incr_tensor(self, tensor, ofs, out_reg, mode):
+    def _incr_tensor(self, tensor, ofs, regs, out_reg, mode):
         """Add the right hand side contained in out_reg to tensor."""
         if mode == 0:
             # Store in memory
             loc = (tensor.rank[0] + "+" + str(ofs), tensor.rank[1])
             return self.intr["store"](Symbol(tensor.symbol, loc), out_reg)
+        elif mode == 1:
+            # Accumulate on a vector register
+            reg = Symbol(regs.get_tensor()[ofs], ())
+            return Assign(reg, self.intr["add"](reg, out_reg))
 
-    def _restore_layout(self, rows, regs, tensor, mode):
+    def _restore_layout(self, regs, tensor, mode):
         """Restore the storage layout of the tensor. """
-
-        # Determine tensor symbols
-        tensor_syms = []
-        for i in range(rows):
-            rank = (tensor.rank[0] + "+" + str(i), tensor.rank[1])
-            tensor_syms.append(Symbol(tensor.symbol, rank))
 
         code = []
         t_regs = [Symbol(r, ()) for r in regs.get_tensor()]
+        n_regs = len(t_regs)
+
+        # Determine tensor symbols
+        tensor_syms = []
+        for i in range(n_regs):
+            rank = (tensor.rank[0] + "+" + str(i), tensor.rank[1])
+            tensor_syms.append(Symbol(tensor.symbol, rank))
 
         # Load LHS values from memory
-        for i, j in zip(tensor_syms, t_regs):
-            load_sym = self.intr["symbol"](i.symbol, i.rank)
-            code.append(Decl(self.intr["decl_var"], j, load_sym))
+        if mode == 0:
+            for i, j in zip(tensor_syms, t_regs):
+                load_sym = self.intr["symbol"](i.symbol, i.rank)
+                code.append(Decl(self.intr["decl_var"], j, load_sym))
 
         # In-register restoration of the tensor
         # TODO: AVX only at the present moment
+        # TODO: here some __m256 vars could not be declared if rows < 4
         perm = self.intr["g_perm"]
         uphi = self.intr["unpck_hi"]
         uplo = self.intr["unpck_lo"]
         typ = self.intr["decl_var"]
-        n_reg = self.intr["dp_reg"]
-        if mode == 0:
-            tmp = [Symbol(regs.get_reg(), ()) for i in range(n_reg)]
+        vect_len = self.intr["dp_reg"]
+        spins = int(ceil(n_regs / float(vect_len)))
+        for i in range(spins):
+            # In-register permutations
+            tmp = [Symbol(regs.get_reg(), ()) for r in range(vect_len)]
             code.append(Decl(typ, tmp[0], uphi(t_regs[1], t_regs[0])))
             code.append(Decl(typ, tmp[1], uplo(t_regs[0], t_regs[1])))
             code.append(Decl(typ, tmp[2], uphi(t_regs[2], t_regs[3])))
@@ -311,31 +320,41 @@ class OuterProduct(object):
             code.append(Assign(t_regs[1], perm(tmp[0], tmp[2], 32)))
             code.append(Assign(t_regs[2], perm(tmp[3], tmp[1], 49)))
             code.append(Assign(t_regs[3], perm(tmp[2], tmp[0], 49)))
+            regs.free_regs([s.symbol for s in tmp])
 
-        # TODO: here some __m256 vars could not be declared if rows < 4
-
-        # Store LHS values in memory
-        for i, j in zip(tensor_syms, t_regs):
-            code.append(self.intr["store"](i, j))
+            # Store LHS values in memory
+            for j in range(min(vect_len, n_regs - i * vect_len)):
+                ofs = i * vect_len + j
+                code.append(self.intr["store"](tensor_syms[ofs], t_regs[ofs]))
 
         return code
 
     def generate(self, rows):
         """Generate the outer-product intrinsics-based vectorisation code. """
 
-        # TODO: need to determine order of loops w.r.t. the local tensor
-        # entries. E.g. if j-k inner loops and A[j][k], then increments of
-        # A are performed within the k loop. On the other hand, if ip is
-        # the innermost loop, stores in memory are done outside of ip
-        mode = 0  # 0 == Stores, 1 == Local incrs
-
         cols = self.intr["dp_reg"]
+
+        # Determine order of loops w.r.t. the local tensor entries.
+        # If j-k are the inner loops and A[j][k], then increments of
+        # A are performed within the k loop, otherwise we would lose too many
+        # vector registers for keeping tmp values. On the other hand, if i is
+        # the innermost loop (i.e. loop nest is j-k-i), stores in memory are
+        # done outside of ip, i.e. immediately before the outer product's
+        # inner loop terminates.
+        if self.loops[1].it_var() == self.nest.fors[-1].it_var():
+            # Stores
+            mode = 0
+            tensor_size = cols
+        else:
+            # Local increments
+            mode = 1
+            tensor_size = rows
 
         tensor = self.stmt.children[0]
         expr = self.stmt.children[1]
 
         # Get source-level variables
-        regs = self.Alloc(self.intr, 1)  # TODO: set appropriate factor
+        regs = self.Alloc(self.intr, tensor_size)
 
         # Adjust loops increment
         self.loops[0].incr.children[1] = c_sym(rows)
@@ -358,16 +377,30 @@ class OuterProduct(object):
                 ofs = j * cols
                 v_expr, vrs = self._vect_expr(expr, ofs, regs, decls)
                 stmt.extend(self._vect_mem(expr, vrs, decls))
-                stmt.append(self._incr_tensor(tensor, i + ofs, v_expr, mode))
+                incr = self._incr_tensor(tensor, i + ofs, regs, v_expr, mode)
+                stmt.append(incr)
             # Register shuffles
             if rows_per_col + (rows_to_peel - peeling) > 0:
                 stmt.extend(self._swap_reg(i, vrs))
 
-        # Restore the tensor layout
-        regs = self.Alloc(self.intr, 1)
-        layout = self._restore_layout(cols, regs, tensor, mode)
-        layout_loops = dcopy(self.loops)
-        layout_loops[0].incr.children[1] = c_sym(cols)
-        layout_loops[0].children = [Block([layout_loops[1]], open_scope=True)]
-        layout_loops[1].children = [Block(layout, open_scope=True)]
-        return (stmt, layout_loops[0])
+        # Set initialising and tensor layout code
+        layout = self._restore_layout(regs, tensor, mode)
+        if mode == 0:
+            # Tensor layout
+            layout_loops = dcopy(self.loops)
+            layout_loops[0].incr.children[1] = c_sym(cols)
+            layout_loops[0].children = [
+                Block([layout_loops[1]], open_scope=True)]
+            layout_loops[1].children = [Block(layout, open_scope=True)]
+            layout = layout_loops[0]
+        elif mode == 1:
+            # Initialiser
+            for r in regs.get_tensor():
+                decl = Decl(self.intr["decl_var"], Symbol(r, ()),
+                            self.intr["setzero"])
+                self.loops[1].children[0].children.insert(0, decl)
+            # Tensor layout
+            self.loops[1].children[0].children.extend(layout)
+            layout = None
+
+        return (stmt, layout)

@@ -146,7 +146,7 @@ class Symbol(Expr):
 
 class AVXSum(Sum):
 
-    def gencode(self):
+    def gencode(self, scope=False):
         op1, op2 = (self.children[0], self.children[1])
         return "_mm256_add_pd (%s, %s)" % (op1.gencode(), op2.gencode())
 
@@ -393,7 +393,13 @@ class AVXUnpackLo(Statement):
         return "_mm256_unpacklo_pd (%s, %s)" % (op1, op2) + semicolon(scope)
 
 
-# Utility functions ###
+class AVXSetZero(Statement):
+
+    def gencode(self, scope=True):
+        return "_mm256_setzero_pd ()" + semicolon(scope)
+
+
+### Utility functions ###
 
 def indent(block):
     """Indent each row of the given string block with n*4 spaces."""

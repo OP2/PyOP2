@@ -70,7 +70,7 @@ class KernelPlan(object):
                 vect.set_alignment(self.decl, True)
 
             # 4) Outer-product vectorisation
-            if out_vect in [0, 1, 2, 3]:
+            if out_vect in [1, 2, 3]:
                 vect.outer_product(out_vect)
             elif out_vect == 4:
                 nest.tiling_outer_product()
