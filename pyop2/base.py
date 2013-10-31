@@ -559,6 +559,11 @@ class Set(object):
         """Number of layers in the extruded mesh"""
         return self._layers
 
+    @layers.setter
+    def layers(self, layers):
+        """Set the layers"""
+        self._layers = layers
+
     @property
     def partition_size(self):
         """Default partition size"""
