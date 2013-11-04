@@ -30,7 +30,7 @@ def main():
     opts = {}
     opts["interchange"] = (1, 2, 0)
     opts["licm"] = True
-    opts["pad_and_align"] = True
+    opts["pad_and_align"] = False
     opts["outer-product tiling"] = 3
 
     plan.plan_cpu("AVX", "INTEL", opts)  # FIXME: backend
