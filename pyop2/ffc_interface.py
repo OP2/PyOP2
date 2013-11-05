@@ -48,6 +48,8 @@ from caching import DiskCached
 from op2 import Kernel
 from mpi import MPI
 
+# from ir.ast_base import PreprocessNode, Root
+
 _form_cache = {}
 
 # Silence FFC
@@ -84,11 +86,18 @@ class FFCKernel(DiskCached):
                    constants.FFC_VERSION + constants.PYOP2_VERSION).hexdigest()
 
     def __init__(self, form, name):
-        if self._initialized:
-            return
+        # If in cache, return
+        # if self._initialized:
+        #    return
 
         code = '#include "pyop2_geometry.h"\n'
+        # incl = PreprocessNode('#include "pyop2_geometry.h"\n')
         code += ffc_compile_form(form, prefix=name, parameters=ffc_parameters)
+        #ffc_tree = ffc_compile_form(form, prefix=name, parameters=ffc_parameters)
+        #ast = Root([incl, ffc_tree])
+        # TODO: deal with transformations here
+        #code = ast.gencode()
+        # print code
         form_data = form.form_data()
 
         self.kernels = tuple([Kernel(code, '%s_%s_integral_0_%s' %
