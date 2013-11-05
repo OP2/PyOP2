@@ -56,6 +56,7 @@ set_level(ERROR)
 ffc_parameters = default_parameters()
 ffc_parameters['write_file'] = False
 ffc_parameters['format'] = 'pyop2'
+ffc_parameters['pyop2-ir'] = False
 
 
 def _check_version():

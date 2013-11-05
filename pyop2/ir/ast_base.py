@@ -403,7 +403,7 @@ class AVXSetZero(Statement):
 
 class PreprocessNode(Node):
 
-    """Represent all strings which handled by the C's preprocessor. """
+    """Represent directives which are handled by the C's preprocessor. """
 
     def __init__(self, prep):
         Node.__init__(self)
