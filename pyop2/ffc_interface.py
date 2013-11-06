@@ -48,7 +48,7 @@ from caching import DiskCached
 from op2 import Kernel
 from mpi import MPI
 
-# from ir.ast_base import PreprocessNode, Root
+from ir.ast_base import PreprocessNode, Root
 
 _form_cache = {}
 
@@ -58,7 +58,12 @@ set_level(ERROR)
 ffc_parameters = default_parameters()
 ffc_parameters['write_file'] = False
 ffc_parameters['format'] = 'pyop2'
-ffc_parameters['pyop2-ir'] = False
+
+AST = False
+if AST:
+    ffc_parameters['pyop2-ir'] = True
+else:
+    ffc_parameters['pyop2-ir'] = False
 
 
 def _check_version():
@@ -90,14 +95,19 @@ class FFCKernel(DiskCached):
         # if self._initialized:
         #    return
 
-        code = '#include "pyop2_geometry.h"\n'
-        # incl = PreprocessNode('#include "pyop2_geometry.h"\n')
-        code += ffc_compile_form(form, prefix=name, parameters=ffc_parameters)
-        #ffc_tree = ffc_compile_form(form, prefix=name, parameters=ffc_parameters)
-        #ast = Root([incl, ffc_tree])
-        # TODO: deal with transformations here
-        #code = ast.gencode()
-        # print code
+        if AST:
+            incl = PreprocessNode('#include "pyop2_geometry.h"\n')
+            ffc_tree = ffc_compile_form(
+                form, prefix=name, parameters=ffc_parameters)
+            ast = Root([incl] + [subtree for subtree in ffc_tree])
+            code = ast.gencode()
+            # print code
+        else:
+            code = '#include "pyop2_geometry.h"\n'
+            code += ffc_compile_form(form, prefix=name,
+                                     parameters=ffc_parameters)
+            # print code
+
         form_data = form.form_data()
 
         self.kernels = tuple([Kernel(code, '%s_%s_integral_0_%s' %
