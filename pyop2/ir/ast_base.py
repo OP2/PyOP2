@@ -5,19 +5,21 @@
 util = {}
 
 util.update({
-    "point": lambda p: "[%s]" % p,
-    "assign": lambda s, e: "%s = %s" % (s, e),
-    "incr": lambda s, e: "%s += %s" % (s, e),
-    "incr++": lambda s: "%s++" % s,
-    "wrap": lambda e: "(%s)" % e,
-    "bracket": lambda s: "{%s}" % s,
-    "decl": lambda q, t, s, a: "%s%s %s%s;" % (q, t, s, a),
-    "decl_init": lambda q, t, s, a, e: "%s%s %s%s = %s" % (q, t, s, a, e),
-    "for": lambda s1, e, s2, s3: "for (%s; %s; %s)\n%s" % (s1, e, s2, s3)
+    "point":        lambda p: "[%s]" % p,
+    "assign":       lambda s, e: "%s = %s" % (s, e),
+    "incr":         lambda s, e: "%s += %s" % (s, e),
+    "incr++":       lambda s: "%s++" % s,
+    "wrap":         lambda e: "(%s)" % e,
+    "bracket":      lambda s: "{%s}" % s,
+    "decl":         lambda q, t, s, a: "%s%s %s%s" % (q, t, s, a),
+    "decl_init":    lambda q, t, s, a, e: "%s%s %s%s = %s" % (q, t, s, a, e),
+    "for" :         lambda s1, e, s2, s3: "for (%s; %s; %s)\n%s" % (s1, e, s2, s3)
 })
 
-# Base classes of the AST ###
+# This dictionary is used to store typ and qualifiers of declared variables
+decl = {}
 
+### Base classes of the AST ###
 
 class Node(object):
 
@@ -158,9 +160,9 @@ class Assign(Statement):
         self.children.append(sym)
         self.children.append(exp)
 
-    def gencode(self, for_scope=False):
-        return util["assign"](self.children[0].gencode(),
-                              self.children[1].gencode()) + semicolon(for_scope)
+    def gencode(self, scope=False):
+        return util["assign"](self.children[0].gencode(), \
+                           self.children[1].gencode()) + semicolon(scope)
 
 
 class Incr(Statement):
@@ -170,12 +172,12 @@ class Incr(Statement):
         self.children.append(sym)
         self.children.append(exp)
 
-    def gencode(self, for_scope=False):
+    def gencode(self, scope=False):
         if type(self.children[1]) == Symbol and self.children[1].symbol == 1:
             return util["incr++"](self.children[0].gencode())
         else:
-            return util["incr"](self.children[0].gencode(),
-                                self.children[1].gencode()) + semicolon(for_scope)
+            return util["incr"](self.children[0].gencode(), \
+                           self.children[1].gencode()) + semicolon(scope)
 
 
 class Decl(Statement):
@@ -194,9 +196,10 @@ class Decl(Statement):
             self.init = EmptyStatement()
         else:
             self.init = init
+        decl[sym.symbol] = (typ, qualifiers, attributes)
 
-    def gencode(self, for_scope=False):
-
+    def gencode(self, scope=False):
+        
         def spacer(v):
             if v:
                 return " ".join(self.qual) + " "
@@ -204,12 +207,12 @@ class Decl(Statement):
                 return ""
 
         if type(self.init) == EmptyStatement:
-            return util["decl"](spacer(self.qual), self.typ,
-                                self.sym.gencode(), spacer(self.att))
+            return util["decl"](spacer(self.qual), self.typ, \
+                   self.sym.gencode(), spacer(self.att)) + semicolon(scope)
         else:
-            return util["decl_init"](spacer(self.qual), self.typ,
-                                     self.sym.gencode(), spacer(self.att),
-                                     self.init.gencode()) + semicolon(for_scope)
+            return util["decl_init"](spacer(self.qual), self.typ, \
+                   self.sym.gencode(), spacer(self.att), \
+                   self.init.gencode()) + semicolon(scope)
 
 
 class Block(Statement):
@@ -219,8 +222,8 @@ class Block(Statement):
         self.children = stmts
         self.open_scope = open_scope
 
-    def gencode(self):
-        code = "\n".join([n.gencode() for n in self.children])
+    def gencode(self, scope=False):
+        code = "".join([n.gencode(scope) for n in self.children])
         if self.open_scope:
             code = "{\n%s\n}" % indent(code)
         return code
@@ -235,19 +238,21 @@ class For(Statement):
         self.cond = cond
         self.incr = incr
 
-    def gencode(self):
-        return util["for"](self.init.gencode(for_scope=True),
-                           self.cond.gencode(), self.incr.gencode(),
-                           self.children[0].gencode())
-
-
+    def size(self):
+        return self.cond.children[1].symbol - self.init.init.symbol
+    
+    def gencode(self, scope=False):
+        return util["for"](self.init.gencode(True), \
+                            self.cond.gencode(), self.incr.gencode(), \
+                            self.children[0].gencode())
+    
 class FunCall(Statement):
 
     def __init__(self, funcall):
         Statement.__init__(self)
         self.funcall = funcall
 
-    def gencode(self):
+    def gencode(self, scope=False):
         return self.funcall
 
 
@@ -262,7 +267,8 @@ class FunDecl(Statement):
         self.args = args
 
     def gencode(self):
-        sign_list = self.pred + [self.ret, self.name, util["wrap"](self.args)]
+        sign_list = self.pred + [self.ret, self.name, \
+            util["wrap"](", ".join([arg.gencode() for arg in self.args]))]
         return " ".join(sign_list) + \
                "\n{\n%s\n}" % indent(self.children[0].gencode())
 

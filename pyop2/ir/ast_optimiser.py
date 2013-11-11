@@ -12,6 +12,7 @@
 #   trip count/bound adjustment is for auto-vectorisation
 
 from collections import defaultdict
+from copy import deepcopy as dcopy
 
 from pyop2.ir.ast_base import *
 
@@ -22,19 +23,19 @@ class LoopOptimiser(object):
 
     def __init__(self, loop_nest):
         self.loop_nest = loop_nest
-        self.it_vars = self._explore_perfect_nest(loop_nest)
+        self.fors = self._explore_perfect_nest(loop_nest)
 
-    def _explore_perfect_nest(self, node, it_vars=[]):
+    def _explore_perfect_nest(self, node, fors=[]):
         """Explore perfect loop nests."""
 
         if isinstance(node, Block):
             self.block = node
             return self._explore_perfect_nest(node.children[0])
         elif isinstance(node, For):
-            it_vars.append(node.init.sym)
+            fors.append(node)
             return self._explore_perfect_nest(node.children[0])
         else:
-            return it_vars
+            return fors
 
     def licm(self):
         """Loop-invariant code motion."""
@@ -88,7 +89,31 @@ class LoopOptimiser(object):
         for s in self.block.children:
             expr_dep = defaultdict(list)
             if type(s) in [Assign, Incr]:
+                typ = decl[s.children[0].symbol][0]
                 extract_const(s.children[1], expr_dep)
+
+            # Create a new sub-tree for each invariant sub-expression
+            # The logic is: the invariant expression goes after the outermost
+            # depending loop (e.g if exp depends on i,j and the nest is i-j-k,
+            # the exp goes after i). The expression is then wrapped with all
+            # the inner loops it depends on (in order to be autovectorized).
+            for dep, expr in expr_dep.items():
+                # Create the new loop
+                il = dep[-1]
+                loop = [l for l in self.fors if l.init.sym.symbol == il][0]
+                var_decl = [Decl(typ, Symbol("LI%s" % i, (loop.size(),))) \
+                                for i, e in zip(range(len(expr)), expr)]
+                var_sym = [Symbol(s.sym.symbol, (loop.init.sym.symbol)) \
+                                for s in var_decl]
+                var_ass = [Assign(s, e) for s, e in zip(var_sym, expr)]
+                inv_for = For(dcopy(loop.init), dcopy(loop.cond), \
+                    dcopy(loop.incr), Block(var_ass, open_scope=True))
+                inv_block = Block(var_decl + [inv_for])
+                
+                # Append the node at the right level in the loop nest
+
+                # Replace invariant sub-trees with the proper temp variable
+
 
     def interchange(self):
         pass
