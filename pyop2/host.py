@@ -545,16 +545,36 @@ class JITModule(base.JITModule):
         strip = lambda code: '\n'.join([l for l in code.splitlines()
                                         if l.strip() and l.strip() != ';'])
 
+        self.timer_function = """
+        #include <stdint.h>
+        #include <sys/time.h>
+        #include <time.h>
+        #include <unistd.h>
+        #include <likwid.h>
+        long stamp()
+        {
+          struct timespec  tv;
+          long        _stamp;
+          clock_gettime(CLOCK_REALTIME, &tv);
+          _stamp = tv.tv_sec * 1000 * 1000 * 1000+ tv.tv_nsec;
+          return _stamp;
+        }
+        """
+
         if any(arg._is_soa for arg in self._args):
             kernel_code = """
             #define OP2_STRIDE(a, idx) a[idx]
+            %(timer)s
             %(code)s
             #undef OP2_STRIDE
-            """ % {'code': self._kernel.code}
+            """ % {'code': self._kernel.code,
+                   'timer': self.timer_function}
         else:
             kernel_code = """
+            %(timer)s
             %(code)s
-            """ % {'code': self._kernel.code}
+            """ % {'code': self._kernel.code,
+                   'timer': self.timer_function}
         code_to_compile = strip(dedent(self._wrapper) % self.generate_code())
         if configuration["debug"]:
             self._wrapper_code = code_to_compile
@@ -569,13 +589,13 @@ class JITModule(base.JITModule):
         self._fun = inline_with_numpy(
             code_to_compile, additional_declarations=kernel_code,
             additional_definitions=_const_decs + kernel_code,
-            cppargs=self._cppargs + (['-O0', '-g'] if configuration["debug"] else []),
-            include_dirs=[d + '/include' for d in get_petsc_dir()],
+            cppargs=self._cppargs + (['-Ofast', '-g', 'pthread'] if base.configuration["debug"] else ['-Ofast', '-pthread']),
+            include_dirs=[d + '/include' for d in get_petsc_dir()]+["/usr/local/include"],
             source_directory=os.path.dirname(os.path.abspath(__file__)),
             wrap_headers=["mat_utils.h"],
             system_headers=self._system_headers,
-            library_dirs=[d + '/lib' for d in get_petsc_dir()],
-            libraries=['petsc'] + self._libraries,
+            library_dirs=[d + '/lib' for d in get_petsc_dir()]+["/usr/local/lib"],
+            libraries=['petsc', 'rt', 'likwid'] + self._libraries,
             sources=["mat_utils.cxx"],
             modulename=self._kernel.name if configuration["debug"] else None)
         if cc:

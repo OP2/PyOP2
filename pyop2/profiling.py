@@ -62,8 +62,11 @@ class Timer(object):
         self._name = n
         self._timer = timer
         self._start = None
+        self._start_call = None
         self._timings = []
         self._data_volumes = []
+        self._times = []
+        self._timings_call = []
         self._timers[n] = self
 
     def start(self):
@@ -76,9 +79,23 @@ class Timer(object):
         self._timings.append(self._timer() - self._start)
         self._start = None
 
+    def start_call(self):
+        """Start the timer."""
+        self._start_call = self._timer()
+
+    def stop_call(self):
+        """Stop the timer."""
+        assert self._start_call, "Timer %s has not been started yet." % self._name
+        self._timings_call.append(self._timer() - self._start_call)
+        self._start_call = None
+
     def data_volume(self, volume):
         """Record the ideal data volume."""
         self._data_volumes.append(volume)
+
+    def time(self, time):
+        """Record the time."""
+        self._times.append(time)
 
     @property
     def name(self):
@@ -102,6 +119,16 @@ class Timer(object):
         return sum(self._timings)
 
     @property
+    def total_times(self):
+        """Total time spent for all recorded events."""
+        return sum(self._times)
+
+    @property
+    def total_call_times(self):
+        """Total time spent for all recorded events."""
+        return sum(self._timings_call)
+
+    @property
     def total_vol(self):
         """Total data_volume for all recorded events."""
         return sum(self._data_volumes)
@@ -117,16 +144,28 @@ class Timer(object):
         return np.average(self._data_volumes)
 
     @property
+    def average_call_times(self):
+        """Average time spent per recorded event."""
+        return np.average(self._timings_call)
+
+    @property
+    def average_times(self):
+        """Average time per recorded event."""
+        return np.average(self._times)
+
+    @property
     def average_bw(self):
         """Average data volume per recorded event."""
-        return self.total_vol / self.total / 1000000
+        return self.total_vol / self.total_times / 1000000
 
     @classmethod
     def summary(cls, filename=None):
         """Print a summary table for all timers or write CSV to filename."""
         if not cls._timers:
             return
-        column_heads = ("Timer", "Total time", "Calls", "Average time", "Valuable BW")
+        column_heads = (
+            "Timer", "Total time", "Calls", "Average time", "Loop call",
+            "Avg loop call", "Loop time", "Avg loop time", "Valuable BW")
         if isinstance(filename, str):
             import csv
             with open(filename, 'wb') as f:
@@ -145,15 +184,27 @@ class Timer(object):
                             for t in cls._timers.values()])
             averagecol = max([len(column_heads[3])] + [len('%g' % t.average)
                              for t in cls._timers.values()])
-            bwcol = max([len(column_heads[4])] + [len('%g' % t.average_bw)
-                        for t in cls._timers.values()])
-            fmt = "%%%ds | %%%ds | %%%ds | %%%ds | %%%ds" % (
-                namecol, totalcol, ncallscol, averagecol, bwcol)
+            totalloopcall = max([len(column_heads[4])] + [len('%g' % t.total_call_times)
+                                                          for t in cls._timers.values()])
+            averageloopcall = max([len(column_heads[5])] + [len('%g' % t.average_call_times)
+                                                            for t in cls._timers.values()])
+            totalloopcol = max([len(column_heads[6])] + [len('%g' % t.total_times)
+                                                         for t in cls._timers.values()])
+            averageloopcol = max([len(column_heads[7])] + [len('%g' % t.average_times)
+                                                           for t in cls._timers.values()])
+            bwcol = max([len(column_heads[8])] + [len('%g' % t.average_bw)
+                                                  for t in cls._timers.values()])
+            fmt = "%%%ds | %%%ds | %%%ds | %%%ds | %%%ds | %%%ds | %%%ds | %%%ds | %%%ds" % (
+                namecol, totalcol, ncallscol, averagecol, totalloopcall, averageloopcall, totalloopcol,
+                averageloopcol, bwcol)
             print fmt % column_heads
-            fmt = "%%%ds | %%%dg | %%%dd | %%%dg | %%%dg" % (
-                namecol, totalcol, ncallscol, averagecol, bwcol)
+            fmt = "%%%ds | %%%dg | %%%dd | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg" % (
+                namecol, totalcol, ncallscol, averagecol, totalloopcall,
+                averageloopcall, totalloopcol, averageloopcol, bwcol)
             for t in cls._timers.values():
-                print fmt % (t.name, t.total, t.ncalls, t.average, t.average_bw)
+                print fmt % (
+                    t.name, t.total, t.ncalls, t.average, t.total_call_times,
+                    t.average_call_times, t.total_times, t.average_times, t.average_bw)
 
     @classmethod
     def get_timers(cls):
@@ -193,9 +244,24 @@ def toc(name):
     Timer(name).stop()
 
 
+def tic_call(name):
+    """Start a timer with the given name."""
+    Timer(name).start_call()
+
+
+def toc_call(name):
+    """Stop a timer with the given name."""
+    Timer(name).stop_call()
+
+
 def data_volume(name, volume):
     """Record the ideal data volume for a given loop."""
     Timer(name).data_volume(volume)
+
+
+def time(name, time):
+    """Record the time for a given loop."""
+    Timer(name).time(time)
 
 
 def summary(filename=None):
