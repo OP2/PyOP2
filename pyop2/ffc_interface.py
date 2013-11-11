@@ -59,7 +59,7 @@ ffc_parameters = default_parameters()
 ffc_parameters['write_file'] = False
 ffc_parameters['format'] = 'pyop2'
 
-AST = False
+AST = True
 if AST:
     ffc_parameters['pyop2-ir'] = True
 else:
