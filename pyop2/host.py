@@ -506,6 +506,7 @@ class JITModule(base.JITModule):
             _addtos_vector_field = ';\n'.join([arg.c_addto_vector_field(i, j) for arg in self._args
                                                if arg._is_mat and arg.data._is_vector_field])
             _itspace_loop_close = '\n'.join('  ' * n + '}' for n in range(nloops - 1, -1, -1))
+            from IPython import embed; embed()
             _apply_offset = ""
             if self._itspace.layers > 1:
                 _map_init = ';\n'.join([arg.c_map_init() for arg in self._args
