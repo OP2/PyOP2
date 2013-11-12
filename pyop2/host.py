@@ -399,6 +399,7 @@ class JITModule(base.JITModule):
         _const_decs = '\n'.join([const._format_declaration()
                                 for const in Const._definitions()]) + '\n'
 
+        #from IPython import embed; embed()
         self._dump_generated_code(code_to_compile)
         # We need to build with mpicc since that's required by PETSc
         cc = os.environ.get('CC')

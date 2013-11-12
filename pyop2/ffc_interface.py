@@ -58,12 +58,7 @@ set_level(ERROR)
 ffc_parameters = default_parameters()
 ffc_parameters['write_file'] = False
 ffc_parameters['format'] = 'pyop2'
-
-AST = False
-if AST:
-    ffc_parameters['pyop2-ir'] = True
-else:
-    ffc_parameters['pyop2-ir'] = False
+ffc_parameters['pyop2-ir'] = True
 
 
 def _check_version():
@@ -91,21 +86,13 @@ class FFCKernel(DiskCached):
                    constants.FFC_VERSION + constants.PYOP2_VERSION).hexdigest()
 
     def __init__(self, form, name):
-        #if self._initialized:
-        #    return
+        if self._initialized:
+            return
 
-        if AST:
-            incl = PreprocessNode('#include "pyop2_geometry.h"\n')
-            ffc_tree = ffc_compile_form(form, prefix=name, parameters=ffc_parameters)
-            ast = Root([incl] + [subtree for subtree in ffc_tree])
-            code = ast.gencode()
-            #print code
-        else:
-            code = '#include "pyop2_geometry.h"\n'
-            code += ffc_compile_form(form, prefix=name, parameters=ffc_parameters)
-            print code
-        
-        #from IPython import embed; embed()
+        incl = PreprocessNode('#include "pyop2_geometry.h"\n')
+        ffc_tree = ffc_compile_form(form, prefix=name, parameters=ffc_parameters)
+        ast = Root([incl] + [subtree for subtree in ffc_tree])
+        code = ast.gencode()
 
         form_data = form.form_data()
 
