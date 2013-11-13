@@ -86,8 +86,8 @@ class FFCKernel(DiskCached):
                    constants.FFC_VERSION + constants.PYOP2_VERSION).hexdigest()
 
     def __init__(self, form, name):
-        if self._initialized:
-            return
+        #if self._initialized:
+        #    return
 
         incl = PreprocessNode('#include "pyop2_geometry.h"\n')
         ffc_tree = ffc_compile_form(form, prefix=name, parameters=ffc_parameters)

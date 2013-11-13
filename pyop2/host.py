@@ -108,7 +108,7 @@ class Arg(base.Arg):
         return val
 
     def c_ind_data(self, idx, i, j=0):
-        return "%(name)s + %(map_name)s[i * %(arity)s + %(idx)s] * %(dim)s%(off)s" % \
+        return "%(name)s + %(map_name)s[i * %(arity)s] * %(dim)s%(off)s" % \
             {'name': self.c_arg_name(i),
              'map_name': self.c_map_name(i, 0),
              'arity': self.map.split[i].arity,
@@ -133,23 +133,23 @@ class Arg(base.Arg):
     def c_local_tensor_name(self, i, j):
         return self.c_kernel_arg_name(i, j)
 
-    def c_kernel_arg(self, count, i, j):
+    def c_kernel_arg(self, count, i, j, shape):
         if self._uses_itspace:
             if self._is_mat:
                 if self.data._is_vector_field:
                     return self.c_kernel_arg_name(i, j)
                 elif self.data._is_scalar_field:
-                    idx = ''.join(["[i_%d]" % n for n in range(len(self.data.dims))])
-                    return "(%(t)s (*)[1])&%(name)s%(idx)s" % \
+                    return "(%(t)s (*)[%(dim)d])&%(name)s" % \
                         {'t': self.ctype,
-                         'name': self.c_kernel_arg_name(i, j),
-                         'idx': idx}
+                         'dim': shape[0],
+                         'name': self.c_kernel_arg_name(i, j)}
                 else:
                     raise RuntimeError("Don't know how to pass kernel arg %s" % self)
             else:
                 if self.data is not None and self.data.dataset.set.layers > 1:
                     return self.c_ind_data_xtr("i_%d" % self.idx.index, i)
                 elif self._flatten:
+                    # TODO AST: need to support this case
                     return "%(name)s + %(map_name)s[i * %(arity)s + i_0 %% %(arity)d] * %(dim)s + (i_0 / %(arity)d)" % \
                         {'name': self.c_arg_name(),
                          'map_name': self.c_map_name(0, i),
@@ -399,7 +399,6 @@ class JITModule(base.JITModule):
         _const_decs = '\n'.join([const._format_declaration()
                                 for const in Const._definitions()]) + '\n'
 
-        #from IPython import embed; embed()
         self._dump_generated_code(code_to_compile)
         # We need to build with mpicc since that's required by PETSc
         cc = os.environ.get('CC')
@@ -498,16 +497,16 @@ class JITModule(base.JITModule):
                 [arg.c_local_tensor_dec(shape, i, j) for arg in self._args if arg._is_mat])
             _itspace_loops = '\n'.join(['  ' * n + itspace_loop(n, e)
                                        for n, e in enumerate(shape)])
-            _zero_tmps = ';\n'.join([arg.c_zero_tmp(i, j) for arg in self._args if arg._is_mat])
-            _kernel_it_args = ["i_%d + %d" % (d, offsets[d]) for d in range(len(shape))]
-            _kernel_user_args = [arg.c_kernel_arg(count, i, j)
+            _kernel_user_args = [arg.c_kernel_arg(count, i, j, shape)
                                  for count, arg in enumerate(self._args)]
-            _kernel_args = ', '.join(_kernel_user_args + _kernel_it_args)
+            _kernel_args = ', '.join(_kernel_user_args)
             _addtos_vector_field = ';\n'.join([arg.c_addto_vector_field(i, j) for arg in self._args
                                                if arg._is_mat and arg.data._is_vector_field])
             _itspace_loop_close = '\n'.join('  ' * n + '}' for n in range(nloops - 1, -1, -1))
-            from IPython import embed; embed()
             _apply_offset = ""
+            if not _addtos_vector_field:
+                _itspace_loops = ''
+                _itspace_loop_close = ''
             if self._itspace.layers > 1:
                 _map_init = ';\n'.join([arg.c_map_init() for arg in self._args
                                         if arg._uses_itspace])
@@ -532,9 +531,8 @@ class JITModule(base.JITModule):
     %(local_tensor_decs)s;
     %(map_init)s;
     %(extr_loop)s
+    %(kernel_name)s(%(kernel_args)s);
     %(itspace_loops)s
-    %(ind)s%(zero_tmps)s;
-    %(ind)s%(kernel_name)s(%(kernel_args)s);
     %(ind)s%(addtos_vector_field)s;
     %(itspace_loop_close)s
     %(ind)s%(addtos_scalar_field_extruded)s;
@@ -549,7 +547,6 @@ class JITModule(base.JITModule):
                 'map_init': indent(_map_init, 5),
                 'itspace_loops': indent(_itspace_loops, 2),
                 'extr_loop': indent(_extr_loop, 5),
-                'zero_tmps': indent(_zero_tmps, 2 + nloops),
                 'kernel_name': self._kernel.name,
                 'kernel_args': _kernel_args,
                 'addtos_vector_field': indent(_addtos_vector_field, 2 + nloops),
