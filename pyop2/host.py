@@ -144,7 +144,8 @@ class Arg(base.Arg):
                          'dim': shape[0],
                          'name': self.c_kernel_arg_name(i, j)}
                 else:
-                    raise RuntimeError("Don't know how to pass kernel arg %s" % self)
+                    raise RuntimeError(
+                        "Don't know how to pass kernel arg %s" % self)
             else:
                 if self.data is not None and self.data.dataset.set.layers > 1:
                     return self.c_ind_data_xtr("i_%d" % self.idx.index, i)
@@ -156,9 +157,9 @@ class Arg(base.Arg):
                          'dim': self.data.cdim}
                 else:
                     buffer_name = "buffer_" + self.c_arg_name(i)
-                    buffers[buffer_name] = (self.c_ind_data("i_%d" % self.idx.index, i), self._access._mode)
+                    buffers[buffer_name] = self
                     return buffer_name
-                    #return self.c_ind_data("i_%d" % self.idx.index, i)
+                    # return self.c_ind_data("i_%d" % self.idx.index, i)
         elif self._is_indirect:
             if self._is_vec_map:
                 return self.c_vec_name()
@@ -256,7 +257,8 @@ class Arg(base.Arg):
             if self._flatten:
                 dims = '[1][1]'
         else:
-            raise RuntimeError("Don't know how to declare temp array for %s" % self)
+            raise RuntimeError(
+                "Don't know how to declare temp array for %s" % self)
         return "%s %s%s" % (t, self.c_local_tensor_name(i, j), dims)
 
     def c_zero_tmp(self, i, j):
@@ -273,7 +275,8 @@ class Arg(base.Arg):
             return "memset(%(name)s, 0, sizeof(%(t)s) * %(size)s)" % \
                 {'name': self.c_kernel_arg_name(i, j), 't': t, 'size': size}
         else:
-            raise RuntimeError("Don't know how to zero temp array for %s" % self)
+            raise RuntimeError(
+                "Don't know how to zero temp array for %s" % self)
 
     def c_add_offset(self):
         return '\n'.join(["%(name)s[%(j)d] += _off%(num)s[%(j)d] * %(dim)s;" %
@@ -408,7 +411,8 @@ class JITModule(base.JITModule):
         self._fun = inline_with_numpy(
             code_to_compile, additional_declarations=kernel_code,
             additional_definitions=_const_decs + kernel_code,
-            cppargs=self._cppargs + (['-O0', '-g'] if configuration["debug"] else []),
+            cppargs=self._cppargs +
+            (['-O0', '-g'] if configuration["debug"] else []),
             include_dirs=[d + '/include' for d in get_petsc_dir()],
             source_directory=os.path.dirname(os.path.abspath(__file__)),
             wrap_headers=["mat_utils.h"],
@@ -456,10 +460,12 @@ class JITModule(base.JITModule):
 
         if len(Const._defs) > 0:
             _const_args = ', '
-            _const_args += ', '.join([c_const_arg(c) for c in Const._definitions()])
+            _const_args += ', '.join([c_const_arg(c)
+                                     for c in Const._definitions()])
         else:
             _const_args = ''
-        _const_inits = ';\n'.join([c_const_init(c) for c in Const._definitions()])
+        _const_inits = ';\n'.join([c_const_init(c)
+                                  for c in Const._definitions()])
 
         _intermediate_globals_decl = ';\n'.join(
             [arg.c_intermediate_globals_decl(count)
@@ -505,20 +511,30 @@ class JITModule(base.JITModule):
             _kernel_args = ', '.join(_kernel_user_args)
             _addtos_vector_field = ';\n'.join([arg.c_addto_vector_field(i, j) for arg in self._args
                                                if arg._is_mat and arg.data._is_vector_field])
-            _itspace_loop_close = '\n'.join('  ' * n + '}' for n in range(nloops - 1, -1, -1))
+            _itspace_loop_close = '\n'.join(
+                '  ' * n + '}' for n in range(nloops - 1, -1, -1))
             _apply_offset = ""
-            _buffer_decls = ["double %s%s" % (name, list(shape,)) for name in _extra_vars.keys()]
-            _buffer_decls = ";\n".join(_buffer_decls)
+            _buffer_decls = []
             _buffer_scatter = []
-            for _entry, _buf_var in _extra_vars.items():
-                _buf, _mode = _buf_var
-                if _mode == 'WRITE':
+            for _entry, _arg in _extra_vars.items():
+                if _arg._access._mode == 'WRITE':
                     _op = '='
-                elif _mode == 'INC':
+                elif _arg._access._mode == 'INC':
                     _op = '+='
                 else:
-                    raise RuntimeError("Don't know how to scatter data for %s access mode" % _mode)
-                _buffer_scatter.append("*(%s) %s %s[i_0]" % (_buf, _op, _entry))
+                    raise RuntimeError(
+                        "Don't know how to scatter data for %s access mode" % _mode)
+                size = _arg.data.split[i].cdim
+                _buffer_decls.append("double %s%s" %
+                                     (_entry, [_arg.map.arity * size]))
+                _buffer_scatter.extend(
+                    ["*(%(ind)s) %(op)s %(val)s[%(dim)s%(ofs)s]" %
+                     {"ind": _arg.c_ind_data("i_%d" % _arg.idx.index, i, j),
+                      "op": _op,
+                      "val": _entry,
+                      "dim": "i_%d*%d" % (_arg.idx.index, size),
+                      "ofs": " + %d" % o if o else ""} for o in range(size)])
+            _buffer_decls = ";\n".join(_buffer_decls)
             _buffer_scatter = ";\n".join(_buffer_scatter)
             if not _addtos_vector_field and not _buffer_scatter:
                 _itspace_loops = ''
