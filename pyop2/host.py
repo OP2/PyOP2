@@ -116,6 +116,13 @@ class Arg(base.Arg):
              'dim': self.data.split[i].cdim,
              'off': ' + %d' % j if j else ''}
 
+    def c_ind_flatten_data(self, i):
+        return "%(name)s + %(map_name)s[i * %(arity)s + i_0 %% %(arity)d] * %(dim)s + (i_0 / %(arity)d)" % \
+            {'name': self.c_arg_name(),
+             'map_name': self.c_map_name(0, i),
+             'arity': self.map.arity,
+             'dim': self.data.cdim}
+
     def c_ind_data_xtr(self, idx, i, j=0):
         return "%(name)s + xtr_%(map_name)s[%(idx)s] * %(dim)s%(off)s" % \
             {'name': self.c_arg_name(),
@@ -150,16 +157,13 @@ class Arg(base.Arg):
                 if self.data is not None and self.data.dataset.set.layers > 1:
                     return self.c_ind_data_xtr("i_%d" % self.idx.index, i)
                 elif self._flatten:
-                    return "%(name)s + %(map_name)s[i * %(arity)s + i_0 %% %(arity)d] * %(dim)s + (i_0 / %(arity)d)" % \
-                        {'name': self.c_arg_name(),
-                         'map_name': self.c_map_name(0, i),
-                         'arity': self.map.arity,
-                         'dim': self.data.cdim}
+                    buffer_name = "buffer_" + self.c_arg_name()
+                    buffers[buffer_name] = self
+                    return buffer_name
                 else:
                     buffer_name = "buffer_" + self.c_arg_name(i)
                     buffers[buffer_name] = self
                     return buffer_name
-                    # return self.c_ind_data("i_%d" % self.idx.index, i)
         elif self._is_indirect:
             if self._is_vec_map:
                 return self.c_vec_name()
@@ -404,6 +408,8 @@ class JITModule(base.JITModule):
         _const_decs = '\n'.join([const._format_declaration()
                                 for const in Const._definitions()]) + '\n'
 
+        from IPython import embed
+        embed()
         self._dump_generated_code(code_to_compile)
         # We need to build with mpicc since that's required by PETSc
         cc = os.environ.get('CC')
@@ -516,7 +522,7 @@ class JITModule(base.JITModule):
             _apply_offset = ""
             _buffer_decls = []
             _buffer_scatter = []
-            for _entry, _arg in _extra_vars.items():
+            for _varname, _arg in _extra_vars.items():
                 if _arg._access._mode == 'WRITE':
                     _op = '='
                 elif _arg._access._mode == 'INC':
@@ -524,16 +530,22 @@ class JITModule(base.JITModule):
                 else:
                     raise RuntimeError(
                         "Don't know how to scatter data for %s access mode" % _mode)
-                size = _arg.data.split[i].cdim
+                if _arg._flatten:
+                    size = _arg.data.cdim
+                    _ind = _arg.c_ind_flatten_data(i)
+                    _buffer_scatter.append(
+                        "*(%s) %s %s[i_0]" % (_ind, _op, _varname))
+                else:
+                    size = _arg.data.split[i].cdim
+                    _buffer_scatter.extend(
+                        ["*(%(ind)s) %(op)s %(val)s[%(dim)s%(ofs)s]" %
+                         {"ind": _arg.c_ind_data("i_%d" % _arg.idx.index, i, j),
+                          "op": _op,
+                          "val": _varname,
+                          "dim": "i_%d*%d" % (_arg.idx.index, size),
+                          "ofs": " + %d" % o if o else ""} for o in range(size)])
                 _buffer_decls.append("double %s%s" %
-                                     (_entry, [_arg.map.arity * size]))
-                _buffer_scatter.extend(
-                    ["*(%(ind)s) %(op)s %(val)s[%(dim)s%(ofs)s]" %
-                     {"ind": _arg.c_ind_data("i_%d" % _arg.idx.index, i, j),
-                      "op": _op,
-                      "val": _entry,
-                      "dim": "i_%d*%d" % (_arg.idx.index, size),
-                      "ofs": " + %d" % o if o else ""} for o in range(size)])
+                                     (_varname, [_arg.map.arity * size]))
             _buffer_decls = ";\n".join(_buffer_decls)
             _buffer_scatter = ";\n".join(_buffer_scatter)
             if not _addtos_vector_field and not _buffer_scatter:
