@@ -140,7 +140,7 @@ class Arg(base.Arg):
     def c_local_tensor_name(self, i, j):
         return self.c_kernel_arg_name(i, j)
 
-    def c_kernel_arg(self, count, i, j, shape, buffers):
+    def c_kernel_arg(self, count, i=0, j=0, shape=(0,)):
         if self._uses_itspace:
             if self._is_mat:
                 if self.data._is_vector_field:
@@ -157,13 +157,13 @@ class Arg(base.Arg):
                 if self.data is not None and self.data.dataset.set.layers > 1:
                     return self.c_ind_data_xtr("i_%d" % self.idx.index, i)
                 elif self._flatten:
-                    buffer_name = "buffer_" + self.c_arg_name()
-                    buffers[buffer_name] = self
-                    return buffer_name
+                    return "%(name)s + %(map_name)s[i * %(arity)s + i_0 %% %(arity)d] * %(dim)s + (i_0 / %(arity)d)" % \
+                        {'name': self.c_arg_name(),
+                         'map_name': self.c_map_name(0, i),
+                         'arity': self.map.arity,
+                         'dim': self.data.cdim}
                 else:
-                    buffer_name = "buffer_" + self.c_arg_name(i)
-                    buffers[buffer_name] = self
-                    return buffer_name
+                    return self.c_ind_data("i_%d" % self.idx.index, i)
         elif self._is_indirect:
             if self._is_vec_map:
                 return self.c_vec_name()
@@ -207,7 +207,7 @@ class Arg(base.Arg):
 
         return 'addto_vector(%(mat)s, %(vals)s, %(nrows)s, %(rows)s, %(ncols)s, %(cols)s, %(insert)d)' % \
             {'mat': self.c_arg_name(i, j),
-             'vals': self.c_kernel_arg_name(i, j),
+             'vals': 'buffer',
              'nrows': nrows,
              'ncols': ncols,
              'rows': rows_str,
@@ -253,17 +253,7 @@ class Arg(base.Arg):
         return ';\n'.join(s)
 
     def c_local_tensor_dec(self, extents, i, j):
-        t = self.data.ctype
-        if self.data._is_scalar_field:
-            dims = ''.join(["[%d]" % d for d in extents])
-        elif self.data._is_vector_field:
-            dims = ''.join(["[%d]" % d for d in self.data[i, j].dims])
-            if self._flatten:
-                dims = '[1][1]'
-        else:
-            raise RuntimeError(
-                "Don't know how to declare temp array for %s" % self)
-        return "%s %s%s" % (t, self.c_local_tensor_name(i, j), dims)
+        return tuple([d for d in extents])
 
     def c_zero_tmp(self, i, j):
         t = self.ctype
@@ -408,8 +398,6 @@ class JITModule(base.JITModule):
         _const_decs = '\n'.join([const._format_declaration()
                                 for const in Const._definitions()]) + '\n'
 
-        from IPython import embed
-        embed()
         self._dump_generated_code(code_to_compile)
         # We need to build with mpicc since that's required by PETSc
         cc = os.environ.get('CC')
@@ -505,50 +493,42 @@ class JITModule(base.JITModule):
             _off_args = ""
             _off_inits = ""
 
+        # Build kernel invokation
+        if self._itspace._extents:
+            _buf_size = []
+            for i, j, shape, offsets in self._itspace:
+                _buf_size.extend([arg.c_local_tensor_dec(shape, i, j)
+                                 for arg in self._args if arg._uses_itspace])
+            _buf_size = [sum(x) for x in zip(*_buf_size)]
+            _buf_decl = "double buffer%s" % "".join(
+                ["[%d]" % d for d in _buf_size])
+            _kernel_args = ', '.join(["buffer"] + [arg.c_kernel_arg(count)
+                                                   for count, arg in enumerate(self._args) if not arg._uses_itspace])
+        else:
+            _buf_decl = ""
+            _kernel_args = ', '.join([arg.c_kernel_arg(count)
+                                      for count, arg in enumerate(self._args)])
+
         def itset_loop_body(i, j, shape, offsets):
             nloops = len(shape)
-            _local_tensor_decs = ';\n'.join(
-                [arg.c_local_tensor_dec(shape, i, j) for arg in self._args if arg._is_mat])
             _itspace_loops = '\n'.join(['  ' * n + itspace_loop(n, e)
                                        for n, e in enumerate(shape)])
-            _extra_vars = {}
-            _kernel_user_args = [arg.c_kernel_arg(count, i, j, shape, _extra_vars)
-                                 for count, arg in enumerate(self._args)]
-            _kernel_args = ', '.join(_kernel_user_args)
             _addtos_vector_field = ';\n'.join([arg.c_addto_vector_field(i, j) for arg in self._args
                                                if arg._is_mat and arg.data._is_vector_field])
+            _apply_offset = ""
+            _itspace_args = [(count, arg) for count, arg in enumerate(self._args)
+                             if arg._uses_itspace and not arg._is_mat]
+            _buf_scatter = ""
+            for count, arg in _itspace_args:
+                size = 0 if arg._flatten else arg.data.split[i].cdim
+                _buf_scatter = "*(%(ind)s) %(op)s buffer[i_0*%(dim)d%(ofs)s]" % \
+                    {"ind": arg.c_kernel_arg(count, i, j),
+                     "op": "=" if arg._access._mode == "WRITE" else "+=",
+                     "dim": size if not arg._flatten else 1,
+                     "ofs": " + %d" % offsets[0] if offsets[0] else ""}
             _itspace_loop_close = '\n'.join(
                 '  ' * n + '}' for n in range(nloops - 1, -1, -1))
-            _apply_offset = ""
-            _buffer_decls = []
-            _buffer_scatter = []
-            for _varname, _arg in _extra_vars.items():
-                if _arg._access._mode == 'WRITE':
-                    _op = '='
-                elif _arg._access._mode == 'INC':
-                    _op = '+='
-                else:
-                    raise RuntimeError(
-                        "Don't know how to scatter data for %s access mode" % _mode)
-                if _arg._flatten:
-                    size = _arg.data.cdim
-                    _ind = _arg.c_ind_flatten_data(i)
-                    _buffer_scatter.append(
-                        "*(%s) %s %s[i_0]" % (_ind, _op, _varname))
-                else:
-                    size = _arg.data.split[i].cdim
-                    _buffer_scatter.extend(
-                        ["*(%(ind)s) %(op)s %(val)s[%(dim)s%(ofs)s]" %
-                         {"ind": _arg.c_ind_data("i_%d" % _arg.idx.index, i, j),
-                          "op": _op,
-                          "val": _varname,
-                          "dim": "i_%d*%d" % (_arg.idx.index, size),
-                          "ofs": " + %d" % o if o else ""} for o in range(size)])
-                _buffer_decls.append("double %s%s" %
-                                     (_varname, [_arg.map.arity * size]))
-            _buffer_decls = ";\n".join(_buffer_decls)
-            _buffer_scatter = ";\n".join(_buffer_scatter)
-            if not _addtos_vector_field and not _buffer_scatter:
+            if not _addtos_vector_field and not _buf_scatter:
                 _itspace_loops = ''
                 _itspace_loop_close = ''
             if self._itspace.layers > 1:
@@ -572,11 +552,8 @@ class JITModule(base.JITModule):
                 _extr_loop_close = ""
 
             template = """
-    %(local_tensor_decs)s;
     %(map_init)s;
     %(extr_loop)s
-    %(buffer_decls)s;
-    %(kernel_name)s(%(kernel_args)s);
     %(itspace_loops)s
     %(ind)s%(buffer_scatter)s;
     %(ind)s%(addtos_vector_field)s;
@@ -589,20 +566,16 @@ class JITModule(base.JITModule):
 
             return template % {
                 'ind': '  ' * nloops,
-                'local_tensor_decs': indent(_local_tensor_decs, 1),
                 'map_init': indent(_map_init, 5),
-                'itspace_loops': indent(_itspace_loops, 2),
                 'extr_loop': indent(_extr_loop, 5),
-                'buffer_decls': _buffer_decls,
-                'buffer_scatter': _buffer_scatter,
-                'kernel_name': self._kernel.name,
-                'kernel_args': _kernel_args,
+                'itspace_loops': indent(_itspace_loops, 2),
+                'buffer_scatter': _buf_scatter,
                 'addtos_vector_field': indent(_addtos_vector_field, 2 + nloops),
+                'itspace_loop_close': indent(_itspace_loop_close, 2),
+                'addtos_scalar_field_extruded': indent(_addtos_scalar_field_extruded, 2 + nloops),
                 'apply_offset': indent(_apply_offset, 3),
                 'extr_loop_close': indent(_extr_loop_close, 2),
-                'itspace_loop_close': indent(_itspace_loop_close, 2),
-                'addtos_scalar_field': indent(_addtos_scalar_field, 2),
-                'addtos_scalar_field_extruded': indent(_addtos_scalar_field_extruded, 2 + nloops),
+                'addtos_scalar_field': indent(_addtos_scalar_field, 2)
             }
 
         return {'kernel_name': self._kernel.name,
@@ -620,4 +593,6 @@ class JITModule(base.JITModule):
                 'interm_globals_decl': indent(_intermediate_globals_decl, 3),
                 'interm_globals_init': indent(_intermediate_globals_init, 3),
                 'interm_globals_writeback': indent(_intermediate_globals_writeback, 3),
+                'buffer_decl': _buf_decl,
+                'kernel_args': _kernel_args,
                 'itset_loop_body': '\n'.join([itset_loop_body(i, j, shape, offsets) for i, j, shape, offsets in self._itspace])}

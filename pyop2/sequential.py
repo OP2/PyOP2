@@ -58,6 +58,8 @@ void wrap_%(kernel_name)s__(PyObject *_start, PyObject *_end,
   for ( int n = start; n < end; n++ ) {
     int i = %(index_expr)s;
     %(vec_inits)s;
+    %(buffer_decl)s;
+    %(kernel_name)s(%(kernel_args)s);
     %(itset_loop_body)s
   }
 }
