@@ -253,7 +253,11 @@ class Arg(base.Arg):
         return ';\n'.join(s)
 
     def c_local_tensor_dec(self, extents, i, j):
-        return tuple([d for d in extents])
+        if self._is_mat:
+            size = 1
+        else:
+            size = self.data.split[i].cdim
+        return tuple([d * size for d in extents])
 
     def c_zero_tmp(self, i, j):
         t = self.ctype
@@ -520,12 +524,15 @@ class JITModule(base.JITModule):
                              if arg._uses_itspace and not arg._is_mat]
             _buf_scatter = ""
             for count, arg in _itspace_args:
-                size = 0 if arg._flatten else arg.data.split[i].cdim
-                _buf_scatter = "*(%(ind)s) %(op)s buffer[i_0*%(dim)d%(ofs)s]" % \
-                    {"ind": arg.c_kernel_arg(count, i, j),
-                     "op": "=" if arg._access._mode == "WRITE" else "+=",
-                     "dim": size if not arg._flatten else 1,
-                     "ofs": " + %d" % offsets[0] if offsets[0] else ""}
+                size = 1 if arg._flatten else arg.data.split[i].cdim
+                _buf_scatter = ";\n".join(["*(%(ind)s) %(op)s buffer[i_0*%(dim)d%(nfofs)s%(mxofs)s]" %
+                                           {"ind": arg.c_kernel_arg(count, i, j),
+                                            "op": "=" if arg._access._mode == "WRITE" else "+=",
+                                            "dim": size,
+                                            "nfofs": " + %d" % o if o else "",
+                                            "mxofs": " + %d" % offsets[0] if offsets[0] else ""}
+                                           for o in range(size)])
+
             _itspace_loop_close = '\n'.join(
                 '  ' * n + '}' for n in range(nloops - 1, -1, -1))
             if not _addtos_vector_field and not _buf_scatter:
