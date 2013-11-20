@@ -525,7 +525,7 @@ class JITModule(base.JITModule):
             _buf_scatter = ""
             for count, arg in _itspace_args:
                 size = 1 if arg._flatten else arg.data.split[i].cdim
-                _buf_scatter = ";\n".join(["*(%(ind)s) %(op)s buffer[i_0*%(dim)d%(nfofs)s%(mxofs)s]" %
+                _buf_scatter = ";\n".join(["*(%(ind)s%(nfofs)s) %(op)s buffer[i_0*%(dim)d%(nfofs)s%(mxofs)s]" %
                                            {"ind": arg.c_kernel_arg(count, i, j),
                                             "op": "=" if arg._access._mode == "WRITE" else "+=",
                                             "dim": size,
