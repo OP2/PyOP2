@@ -116,13 +116,6 @@ class Arg(base.Arg):
              'dim': self.data.split[i].cdim,
              'off': ' + %d' % j if j else ''}
 
-    def c_ind_flatten_data(self, i):
-        return "%(name)s + %(map_name)s[i * %(arity)s + i_0 %% %(arity)d] * %(dim)s + (i_0 / %(arity)d)" % \
-            {'name': self.c_arg_name(),
-             'map_name': self.c_map_name(0, i),
-             'arity': self.map.arity,
-             'dim': self.data.cdim}
-
     def c_ind_data_xtr(self, idx, i, j=0):
         return "%(name)s + xtr_%(map_name)s[%(idx)s] * %(dim)s%(off)s" % \
             {'name': self.c_arg_name(),
