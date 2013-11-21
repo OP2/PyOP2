@@ -180,6 +180,7 @@ void wrap_%(kernel_name)s__(PyObject* _boffset,
         int i = %(index_expr)s;
         %(vec_inits)s;
         %(buffer_decl)s;
+        %(buffer_gather)s
         %(kernel_name)s(%(kernel_args)s);
         %(itset_loop_body)s;
       }

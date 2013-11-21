@@ -88,7 +88,7 @@ class TestIterationSpaceDats:
     Test IterationSpace access to Dat objects
     """
 
-    def ntest_sum_nodes_to_edges(self, backend):
+    def test_sum_nodes_to_edges(self, backend):
         """Creates a 1D grid with edge values numbered consecutively.
         Iterates over edges, summing the node values."""
 
@@ -105,10 +105,16 @@ class TestIterationSpaceDats:
                             for i in range(nedges)], dtype=numpy.uint32)
         edge2node = op2.Map(edges, nodes, 2, e_map, "edge2node")
 
-        kernel_sum = """
-void kernel_sum(unsigned int* nodes, unsigned int *edge%s)
-{ *edge += nodes[0]; }
-""" % (", int i" if backend in ['cuda', 'opencl'] else '')
+        if backend in ['cuda', 'opencl']:
+            kernel_sum = """
+            void kernel_sum(unsigned int* nodes, unsigned int *edge, int i)
+            { *edge += nodes[0]; }
+            """
+        else:
+            kernel_sum = """
+            void kernel_sum(unsigned int* nodes, unsigned int *edge)
+            { *edge += nodes[0]; *edge += nodes[1]; }
+            """
 
         op2.par_loop(op2.Kernel(kernel_sum, "kernel_sum"), edges,
                      node_vals(op2.READ, edge2node[op2.i[0]]),
@@ -129,7 +135,7 @@ void kernel_sum(unsigned int* nodes, unsigned int *edge%s)
         assert all(d1.data[::2] == vd1.data)
         assert all(d1.data[1::2] == vd1.data)
 
-    def ntest_write_1d_itspace_map(self, backend, node, vd1, node2ele):
+    def test_write_1d_itspace_map(self, backend, node, vd1, node2ele):
         k = """
         void k(int *vd%s) {
         vd[0] = 2;
@@ -140,7 +146,7 @@ void kernel_sum(unsigned int* nodes, unsigned int *edge%s)
                      vd1(op2.WRITE, node2ele[op2.i[0]]))
         assert all(vd1.data == 2)
 
-    def ntest_inc_1d_itspace_map(self, backend, node, d1, vd1, node2ele):
+    def test_inc_1d_itspace_map(self, backend, node, d1, vd1, node2ele):
         vd1.data[:] = 3
         d1.data[:] = numpy.arange(nnodes).reshape(d1.data.shape)
 
@@ -159,7 +165,7 @@ void kernel_sum(unsigned int* nodes, unsigned int *edge%s)
             start=1, stop=nnodes, step=2).reshape(expected.shape)
         assert all(vd1.data == expected)
 
-    def ntest_read_2d_itspace_map(self, backend, d2, vd2, node2ele, node):
+    def test_read_2d_itspace_map(self, backend, d2, vd2, node2ele, node):
         vd2.data[:] = numpy.arange(nele * 2).reshape(nele, 2)
         k = """
         void k(int *d, int *vd%s) {
@@ -174,7 +180,7 @@ void kernel_sum(unsigned int* nodes, unsigned int *edge%s)
         assert all(d2.data[1::2, 0] == vd2.data[:, 0])
         assert all(d2.data[1::2, 1] == vd2.data[:, 1])
 
-    def ntest_write_2d_itspace_map(self, backend, vd2, node2ele, node):
+    def test_write_2d_itspace_map(self, backend, vd2, node2ele, node):
         k = """
         void k(int *vd%s) {
         vd[0] = 2;
@@ -186,7 +192,7 @@ void kernel_sum(unsigned int* nodes, unsigned int *edge%s)
         assert all(vd2.data[:, 0] == 2)
         assert all(vd2.data[:, 1] == 3)
 
-    def ntest_inc_2d_itspace_map(self, backend, d2, vd2, node2ele, node):
+    def test_inc_2d_itspace_map(self, backend, d2, vd2, node2ele, node):
         vd2.data[:, 0] = 3
         vd2.data[:, 1] = 4
         d2.data[:] = numpy.arange(2 * nnodes).reshape(d2.data.shape)

@@ -354,6 +354,36 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                            % {'cnt': self.c_offset(i)}
                            for i in range(len(as_tuple(self.map, Map)))])
 
+    def c_buffer_decl(self, size, idx):
+        buf_type = self.data.ctype
+        buf_name = "buffer_" + self.c_arg_name(idx)
+        dim = len(size)
+        return (buf_name, "%(typ)s %(name)s%(dim)s%(init)s" %
+                {"typ": buf_type,
+                 "name": buf_name,
+                 "dim": "".join(["[%d]" % d for d in size]),
+                 "init": " = " + "{" * dim + "0" + "}" * dim if self.access._mode in ['WRITE', 'INC'] else ""})
+
+    def c_buffer_gather(self, size, idx):
+        buf_name = "buffer_" + self.c_arg_name(idx)
+        dim = 1 if self._flatten else self.data.cdim
+        return ";\n".join(["%(name)s[i_0*%(dim)d%(ofs)s] = *(%(ind)s%(ofs)s);\n" %
+                           {"name": buf_name,
+                            "dim": dim,
+                            "ind": self.c_kernel_arg(idx),
+                            "ofs": " + %s" % j if j else ""} for j in range(dim)])
+
+    def c_buffer_scatter(self, count, i, j, mxofs):
+        dim = 1 if self._flatten else self.data.split[i].cdim
+        return ";\n".join(["*(%(ind)s%(nfofs)s) %(op)s %(name)s[i_0*%(dim)d%(nfofs)s%(mxofs)s]" %
+                           {"ind": self.c_kernel_arg(count, i, j),
+                            "op": "=" if self._access._mode == "WRITE" else "+=",
+                            "name": "buffer_" + self.c_arg_name(count),
+                            "dim": dim,
+                            "nfofs": " + %d" % o if o else "",
+                            "mxofs": " + %d" % mxofs if mxofs else ""}
+                           for o in range(dim)])
+
 
 class JITModule(base.JITModule):
 
@@ -395,8 +425,6 @@ class JITModule(base.JITModule):
         _const_decs = '\n'.join([const._format_declaration()
                                 for const in Const._definitions()]) + '\n'
 
-        from IPython import embed
-        embed()
         self._dump_generated_code(code_to_compile)
         # We need to build with mpicc since that's required by PETSc
         cc = os.environ.get('CC')
@@ -492,30 +520,30 @@ class JITModule(base.JITModule):
             _off_args = ""
             _off_inits = ""
 
-        # Build kernel invokation
-        _itspace_args = [arg for arg in self._args if arg._uses_itspace]
-        _buf_decl = []
-        for arg in _itspace_args:
-            _buf_type = arg.data.ctype
-            _buf_name = "buffer_" + arg.c_arg_name()
+        # Build kernel invokation s.t. a variable X that depends on the kernels's iteration
+        # space is replaced by a temporary array BUFFER.
+        # * if X is written or incremented in the kernel, then BUFFER is initialized to 0
+        # * if X in read in the kernel, then BUFFER gathers all of the read data
+        _itspace_args = [(count, arg)
+                         for count, arg in enumerate(self._args) if arg._uses_itspace]
+        _buf_gather = ""
+        _buf_decl = {}
+        for count, arg in _itspace_args:
             _buf_size = [arg.c_local_tensor_dec(shape, i, j)
                          for i, j, shape, offsets in self._itspace]
             _buf_size = [sum(x) for x in zip(*_buf_size)]
-            if arg.access._mode in ['WRITE', 'INC']:
-                _buf_init = "%s"
-                for i in _buf_size:
-                    _buf_init = _buf_init % "{%s}"
-                _buf_init = " = " + _buf_init % "0"
-            else:
-                _buf_init = ""
-            _buf_decl.append("%(typ)s %(name)s%(dim)s%(init)s" %
-                             {"typ": _buf_type,
-                              "name": _buf_name,
-                              "dim": "".join(["[%d]" % d for d in _buf_size]),
-                              "init": _buf_init})
-        _buf_decl = ";\n".join(_buf_decl)
-        _kernel_args = ', '.join([arg.c_kernel_arg(count) if not arg._uses_itspace else _buf_name
+            if arg.access._mode not in ['WRITE', 'INC']:
+                _itspace_loops = '\n'.join(['  ' * n + itspace_loop(n, e)
+                                           for n, e in enumerate(_buf_size)])
+                _buf_gather = arg.c_buffer_gather(_buf_size, count)
+                _itspace_loop_close = '\n'.join(
+                    '  ' * n + '}' for n in range(len(_buf_size) - 1, -1, -1))
+                _buf_gather = "\n".join(
+                    [_itspace_loops, _buf_gather, _itspace_loop_close])
+            _buf_decl[arg] = arg.c_buffer_decl(_buf_size, count)
+        _kernel_args = ', '.join([arg.c_kernel_arg(count) if not arg._uses_itspace else _buf_decl[arg][0]
                                   for count, arg in enumerate(self._args)])
+        _buf_decl = ";\n".join([decl for name, decl in _buf_decl.values()])
 
         def itset_loop_body(i, j, shape, offsets):
             nloops = len(shape)
@@ -528,15 +556,7 @@ class JITModule(base.JITModule):
                              if arg.access._mode in ['WRITE', 'INC'] and arg._uses_itspace and not arg._is_mat]
             _buf_scatter = ""
             for count, arg in _itspace_args:
-                size = 1 if arg._flatten else arg.data.split[i].cdim
-                _buf_scatter = ";\n".join(["*(%(ind)s%(nfofs)s) %(op)s %(name)s[i_0*%(dim)d%(nfofs)s%(mxofs)s]" %
-                                           {"ind": arg.c_kernel_arg(count, i, j),
-                                            "op": "=" if arg._access._mode == "WRITE" else "+=",
-                                            "name": "buffer_" + arg.c_arg_name(),
-                                            "dim": size,
-                                            "nfofs": " + %d" % o if o else "",
-                                            "mxofs": " + %d" % offsets[0] if offsets[0] else ""}
-                                           for o in range(size)])
+                _buf_scatter = arg.c_buffer_scatter(count, i, j, offsets[0])
 
             _itspace_loop_close = '\n'.join(
                 '  ' * n + '}' for n in range(nloops - 1, -1, -1))
@@ -606,5 +626,6 @@ class JITModule(base.JITModule):
                 'interm_globals_init': indent(_intermediate_globals_init, 3),
                 'interm_globals_writeback': indent(_intermediate_globals_writeback, 3),
                 'buffer_decl': _buf_decl,
+                'buffer_gather': _buf_gather,
                 'kernel_args': _kernel_args,
                 'itset_loop_body': '\n'.join([itset_loop_body(i, j, shape, offsets) for i, j, shape, offsets in self._itspace])}
