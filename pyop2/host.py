@@ -200,7 +200,7 @@ class Arg(base.Arg):
 
         return 'addto_vector(%(mat)s, %(vals)s, %(nrows)s, %(rows)s, %(ncols)s, %(cols)s, %(insert)d)' % \
             {'mat': self.c_arg_name(i, j),
-             'vals': 'buffer',
+             'vals': 'buffer_' + self.c_arg_name(),
              'nrows': nrows,
              'ncols': ncols,
              'rows': rows_str,
@@ -395,6 +395,8 @@ class JITModule(base.JITModule):
         _const_decs = '\n'.join([const._format_declaration()
                                 for const in Const._definitions()]) + '\n'
 
+        from IPython import embed
+        embed()
         self._dump_generated_code(code_to_compile)
         # We need to build with mpicc since that's required by PETSc
         cc = os.environ.get('CC')
@@ -491,20 +493,29 @@ class JITModule(base.JITModule):
             _off_inits = ""
 
         # Build kernel invokation
-        if self._itspace._extents:
-            _buf_size = []
-            for i, j, shape, offsets in self._itspace:
-                _buf_size.extend([arg.c_local_tensor_dec(shape, i, j)
-                                 for arg in self._args if arg._uses_itspace])
+        _itspace_args = [arg for arg in self._args if arg._uses_itspace]
+        _buf_decl = []
+        for arg in _itspace_args:
+            _buf_type = arg.data.ctype
+            _buf_name = "buffer_" + arg.c_arg_name()
+            _buf_size = [arg.c_local_tensor_dec(shape, i, j)
+                         for i, j, shape, offsets in self._itspace]
             _buf_size = [sum(x) for x in zip(*_buf_size)]
-            _buf_decl = "double buffer%s" % "".join(
-                ["[%d]" % d for d in _buf_size])
-            _kernel_args = ', '.join(["buffer"] + [arg.c_kernel_arg(count)
-                                                   for count, arg in enumerate(self._args) if not arg._uses_itspace])
-        else:
-            _buf_decl = ""
-            _kernel_args = ', '.join([arg.c_kernel_arg(count)
-                                      for count, arg in enumerate(self._args)])
+            if arg.access._mode in ['WRITE', 'INC']:
+                _buf_init = "%s"
+                for i in _buf_size:
+                    _buf_init = _buf_init % "{%s}"
+                _buf_init = " = " + _buf_init % "0"
+            else:
+                _buf_init = ""
+            _buf_decl.append("%(typ)s %(name)s%(dim)s%(init)s" %
+                             {"typ": _buf_type,
+                              "name": _buf_name,
+                              "dim": "".join(["[%d]" % d for d in _buf_size]),
+                              "init": _buf_init})
+        _buf_decl = ";\n".join(_buf_decl)
+        _kernel_args = ', '.join([arg.c_kernel_arg(count) if not arg._uses_itspace else _buf_name
+                                  for count, arg in enumerate(self._args)])
 
         def itset_loop_body(i, j, shape, offsets):
             nloops = len(shape)
@@ -514,13 +525,14 @@ class JITModule(base.JITModule):
                                                if arg._is_mat and arg.data._is_vector_field])
             _apply_offset = ""
             _itspace_args = [(count, arg) for count, arg in enumerate(self._args)
-                             if arg._uses_itspace and not arg._is_mat]
+                             if arg.access._mode in ['WRITE', 'INC'] and arg._uses_itspace and not arg._is_mat]
             _buf_scatter = ""
             for count, arg in _itspace_args:
                 size = 1 if arg._flatten else arg.data.split[i].cdim
-                _buf_scatter = ";\n".join(["*(%(ind)s%(nfofs)s) %(op)s buffer[i_0*%(dim)d%(nfofs)s%(mxofs)s]" %
+                _buf_scatter = ";\n".join(["*(%(ind)s%(nfofs)s) %(op)s %(name)s[i_0*%(dim)d%(nfofs)s%(mxofs)s]" %
                                            {"ind": arg.c_kernel_arg(count, i, j),
                                             "op": "=" if arg._access._mode == "WRITE" else "+=",
+                                            "name": "buffer_" + arg.c_arg_name(),
                                             "dim": size,
                                             "nfofs": " + %d" % o if o else "",
                                             "mxofs": " + %d" % offsets[0] if offsets[0] else ""}
