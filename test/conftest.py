@@ -148,8 +148,8 @@ def pytest_generate_tests(metafunc):
         if not 'skip_greedy' in metafunc.fixturenames:
             lazy.append('greedy')
         # Skip lazy execution by passing skip_greedy as a parameter
-        if not 'skip_lazy' in metafunc.fixturenames:
-            lazy.append('lazy')
+        #if not 'skip_lazy' in metafunc.fixturenames:
+        #    lazy.append('lazy')
         # Allow skipping individual backends by passing skip_<backend> as a
         # parameter
         backend = [b for b in backend.difference(skip_backends)
