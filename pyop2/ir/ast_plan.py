@@ -32,7 +32,7 @@ class ASTKernel(object):
 
     def plan_gpu(self):
         """Transform the kernel suitably for GPU execution. """
-        
+
         lo = [LoopOptimiser(l, pre_l) for l, pre_l in self.fors]
         for nest in lo:
-            nest.extract_itspace()    
+            nest.extract_itspace()
