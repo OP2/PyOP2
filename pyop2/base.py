@@ -48,6 +48,8 @@ from backends import _make_object
 from mpi import MPI, _MPI, _check_comm, collective
 from sparsity import build_sparsity
 
+from ir.ast_base import Node
+
 
 class LazyComputation(object):
 
@@ -245,7 +247,8 @@ class Arg(object):
         self._indirect_position = None
 
         if self._is_mixed_mat and flatten:
-            raise MatTypeError("A Mat Arg on a mixed space cannot be flattened!")
+            raise MatTypeError(
+                "A Mat Arg on a mixed space cannot be flattened!")
         if self._is_mixed_dat and flatten:
             raise DatTypeError("A MixedDat Arg cannot be flattened!")
 
@@ -263,7 +266,8 @@ class Arg(object):
 
         # Determine the iteration space extents, if any
         if self._is_mat and flatten:
-            self._extents = (((map[0].arity * data.dims[0], map[1].arity * data.dims[1]),),)
+            self._extents = (
+                ((map[0].arity * data.dims[0], map[1].arity * data.dims[1]),),)
             self._offsets = (((0, 0),),)
         elif self._is_mat:
             self._extents = tuple(tuple((mr.arity, mc.arity) for mc in map[1])
@@ -694,7 +698,8 @@ class Subset(Set):
             # Unroll indices to point to those in the parent
             indices = superset.indices[indices]
             superset = superset.superset
-        assert type(superset) is Set, 'Subset construction failed, should not happen'
+        assert type(
+            superset) is Set, 'Subset construction failed, should not happen'
 
         self._superset = superset
         self._indices = verify_reshape(indices, np.int32, (len(indices),))
@@ -717,7 +722,8 @@ class Subset(Set):
 
     def __pow__(self, e):
         """Derive a :class:`DataSet` with dimension ``e``"""
-        raise NotImplementedError("Deriving a DataSet from a Subset is unsupported")
+        raise NotImplementedError(
+            "Deriving a DataSet from a Subset is unsupported")
 
     def __call__(self, *indices):
         """Build a :class:`Subset` from this :class:`Subset`
@@ -744,6 +750,7 @@ class Subset(Set):
 
 
 class SetPartition(object):
+
     def __init__(self, set, offset, size):
         self.set = set
         self.offset = offset
@@ -751,6 +758,7 @@ class SetPartition(object):
 
 
 class MixedSet(Set):
+
     """A container for a bag of :class:`Set`\s."""
 
     def __init__(self, sets):
@@ -844,6 +852,7 @@ class MixedSet(Set):
 
 
 class DataSet(object):
+
     """PyOP2 Data Set
 
     Set used in the op2.Dat structures to specify the dimension of the data.
@@ -855,7 +864,8 @@ class DataSet(object):
                    ('name', str, NameTypeError))
     def __init__(self, iter_set, dim=1, name=None):
         if isinstance(iter_set, Subset):
-            raise NotImplementedError("Deriving a DataSet from a Subset is unsupported")
+            raise NotImplementedError(
+                "Deriving a DataSet from a Subset is unsupported")
         self._set = iter_set
         self._dim = as_tuple(dim, int)
         self._cdim = np.asscalar(np.prod(self._dim))
@@ -927,6 +937,7 @@ class DataSet(object):
 
 
 class MixedDataSet(DataSet):
+
     """A container for a bag of :class:`DataSet`\s.
 
     Initialized either from a :class:`MixedSet` and an iterable or iterator of
@@ -977,7 +988,8 @@ class MixedDataSet(DataSet):
             # If arg is a MixedSet, get its Sets tuple
             sets = arg.split if isinstance(arg, MixedSet) else tuple(arg)
             # If dims is a scalar, turn it into a tuple of right length
-            dims = (dims,) * len(sets) if isinstance(dims, int) else tuple(dims)
+            dims = (dims,) * \
+                len(sets) if isinstance(dims, int) else tuple(dims)
             if len(sets) != len(dims):
                 raise ValueError("Got MixedSet of %d Sets but %s dims" %
                                  (len(sets), len(dims)))
@@ -1343,6 +1355,7 @@ class DataCarrier(object):
 
 
 class _EmptyDataMixin(object):
+
     """A mixin for :class:`Dat` and :class:`Global` objects that takes
     care of allocating data on demand if the user has passed nothing
     in.
@@ -1350,6 +1363,7 @@ class _EmptyDataMixin(object):
     Accessing the :attr:`_data` property allocates a zeroed data array
     if it does not already exist.
     """
+
     def __init__(self, data, dtype, shape):
         if data is None:
             self._dtype = np.dtype(dtype if dtype is not None else np.float64)
@@ -1430,7 +1444,8 @@ class Dat(DataCarrier, _EmptyDataMixin):
             # If a Set, rather than a dataset is passed in, default to
             # a dataset dimension of 1.
             dataset = dataset ** 1
-        self._shape = (dataset.total_size,) + (() if dataset.cdim == 1 else dataset.dim)
+        self._shape = (dataset.total_size,) + \
+            (() if dataset.cdim == 1 else dataset.dim)
         _EmptyDataMixin.__init__(self, data, dtype, self._shape)
         self._dataset = dataset
         # Are these data to be treated as SoA on the device?
@@ -1501,7 +1516,8 @@ class Dat(DataCarrier, _EmptyDataMixin):
         """
         _trace.evaluate(set([self]), set([self]))
         if self.dataset.total_size > 0 and self._data.size == 0:
-            raise RuntimeError("Illegal access: no data associated with this Dat!")
+            raise RuntimeError(
+                "Illegal access: no data associated with this Dat!")
         maybe_setflags(self._data, write=True)
         v = self._data[:self.dataset.size].view()
         self.needs_halo_update = True
@@ -1539,7 +1555,8 @@ class Dat(DataCarrier, _EmptyDataMixin):
         """
         _trace.evaluate(set([self]), set())
         if self.dataset.total_size > 0 and self._data.size == 0:
-            raise RuntimeError("Illegal access: no data associated with this Dat!")
+            raise RuntimeError(
+                "Illegal access: no data associated with this Dat!")
         v = self._data[:self.dataset.size].view()
         v.setflags(write=False)
         return v
@@ -1837,6 +1854,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
 
 
 class MixedDat(Dat):
+
     """A container for a bag of :class:`Dat`\s.
 
     Initialized either from a :class:`MixedDataSet`, a :class:`MixedSet`, or
@@ -1855,7 +1873,8 @@ class MixedDat(Dat):
         self._dats = tuple(d if isinstance(d, Dat) else _make_object('Dat', d)
                            for d in mdset_or_dats)
         if not all(d.dtype == self._dats[0].dtype for d in self._dats):
-            raise DataValueError('MixedDat with different dtypes is not supported')
+            raise DataValueError(
+                'MixedDat with different dtypes is not supported')
 
     def __getitem__(self, idx):
         """Return :class:`Dat` with index ``idx`` or a given slice of Dats."""
@@ -1979,7 +1998,8 @@ class Const(DataCarrier):
     def data(self):
         """Data array."""
         if len(self._data) is 0:
-            raise RuntimeError("Illegal access: No data associated with this Const!")
+            raise RuntimeError(
+                "Illegal access: No data associated with this Const!")
         return self._data
 
     @data.setter
@@ -2112,7 +2132,8 @@ class Global(DataCarrier, _EmptyDataMixin):
         """Data array."""
         _trace.evaluate(set([self]), set())
         if len(self._data) is 0:
-            raise RuntimeError("Illegal access: No data associated with this Global!")
+            raise RuntimeError(
+                "Illegal access: No data associated with this Global!")
         return self._data
 
     @property
@@ -2135,7 +2156,8 @@ class Global(DataCarrier, _EmptyDataMixin):
         objects."""
         return False
 
-# FIXME: Part of kernel API, but must be declared before Map for the validation.
+# FIXME: Part of kernel API, but must be declared before Map for the
+# validation.
 
 
 class IterationIndex(object):
@@ -2199,14 +2221,16 @@ class Map(object):
 
     _globalcount = 0
 
-    @validate_type(('iterset', Set, SetTypeError), ('toset', Set, SetTypeError),
-                  ('arity', int, ArityTypeError), ('name', str, NameTypeError))
+    @validate_type(
+        ('iterset', Set, SetTypeError), ('toset', Set, SetTypeError),
+        ('arity', int, ArityTypeError), ('name', str, NameTypeError))
     def __init__(self, iterset, toset, arity, values=None, name=None, offset=None, parent=None):
         self._iterset = iterset
         self._toset = toset
         self._arity = arity
-        self._values = verify_reshape(values, np.int32, (iterset.total_size, arity),
-                                      allow_none=True)
+        self._values = verify_reshape(
+            values, np.int32, (iterset.total_size, arity),
+            allow_none=True)
         self._name = name or "map_%d" % Map._globalcount
         self._offset = offset
         # This is intended to be used for modified maps, for example
@@ -2218,7 +2242,8 @@ class Map(object):
     @validate_type(('index', (int, IterationIndex), IndexTypeError))
     def __getitem__(self, index):
         if isinstance(index, int) and not (0 <= index < self.arity):
-            raise IndexValueError("Index must be in interval [0,%d]" % (self._arity - 1))
+            raise IndexValueError(
+                "Index must be in interval [0,%d]" % (self._arity - 1))
         if isinstance(index, IterationIndex) and index.index not in [0, 1]:
             raise IndexValueError("IterationIndex must be in interval [0,1]")
         return _make_object('Arg', map=self, idx=index)
@@ -2334,6 +2359,7 @@ class Map(object):
 
 
 class MixedMap(Map):
+
     """A container for a bag of :class:`Map`\s."""
 
     def __init__(self, maps):
@@ -2341,7 +2367,8 @@ class MixedMap(Map):
         self._maps = as_tuple(maps, type=Map)
         # Make sure all itersets are identical
         if not all(m.iterset == self._maps[0].iterset for m in self._maps):
-            raise MapTypeError("All maps in a MixedMap need to share the same iterset")
+            raise MapTypeError(
+                "All maps in a MixedMap need to share the same iterset")
 
     @property
     def split(self):
@@ -2460,14 +2487,16 @@ class Sparsity(Cached):
         "Turn maps argument into a canonical tuple of pairs."
 
         # A single data set becomes a pair of identical data sets
-        dsets = [dsets, dsets] if isinstance(dsets, (Set, DataSet)) else list(dsets)
+        dsets = [dsets, dsets] if isinstance(
+            dsets, (Set, DataSet)) else list(dsets)
         # Upcast Sets to DataSets
         dsets = [s ** 1 if isinstance(s, Set) else s for s in dsets]
 
         # Check data sets are valid
         for dset in dsets:
             if not isinstance(dset, DataSet):
-                raise DataSetTypeError("All data sets must be of type DataSet, not type %r" % type(dset))
+                raise DataSetTypeError(
+                    "All data sets must be of type DataSet, not type %r" % type(dset))
 
         # A single map becomes a pair of identical maps
         maps = (maps, maps) if isinstance(maps, Map) else maps
@@ -2487,11 +2516,13 @@ class Sparsity(Cached):
             # the corresponding DataSet set
             if not (pair[0].toset == dsets[0].set and
                     pair[1].toset == dsets[1].set):
-                raise RuntimeError("Map to set must be the same as corresponding DataSet set")
+                raise RuntimeError(
+                    "Map to set must be the same as corresponding DataSet set")
 
             # Each pair of maps must have the same from-set (iteration set)
             if not pair[0].iterset == pair[1].iterset:
-                raise RuntimeError("Iterset of both maps in a pair must be the same")
+                raise RuntimeError(
+                    "Iterset of both maps in a pair must be the same")
 
         rmaps, cmaps = zip(*maps)
 
@@ -2547,7 +2578,8 @@ class Sparsity(Cached):
             for i, rds in enumerate(dsets[0]):
                 row = []
                 for j, cds in enumerate(dsets[1]):
-                    row.append(Sparsity((rds, cds), [(rm.split[i], cm.split[j]) for rm, cm in maps]))
+                    row.append(
+                        Sparsity((rds, cds), [(rm.split[i], cm.split[j]) for rm, cm in maps]))
                 self._blocks.append(row)
             self._rowptr = tuple(s._rowptr for s in self)
             self._colidx = tuple(s._colidx for s in self)
@@ -2763,7 +2795,8 @@ class Mat(DataCarrier):
             probably not a good idea to access this property if your
             matrix has more than around 10000 degrees of freedom.
         """
-        raise NotImplementedError("Abstract base Mat does not implement values()")
+        raise NotImplementedError(
+            "Abstract base Mat does not implement values()")
 
     @property
     def dtype(self):
@@ -2776,7 +2809,8 @@ class Mat(DataCarrier):
 
     def __mul__(self, other):
         """Multiply this :class:`Mat` with the vector ``other``."""
-        raise NotImplementedError("Abstract base Mat does not implement multiplication")
+        raise NotImplementedError(
+            "Abstract base Mat does not implement multiplication")
 
     def __str__(self):
         return "OP2 Mat: %s, sparsity (%s), datatype %s" \
@@ -2799,15 +2833,18 @@ class Kernel(Cached):
     @classmethod
     @validate_type(('name', str, NameTypeError))
     def _cache_key(cls, code, name):
+        if isinstance(code, Node):
+            code = code.gencode()
         # Both code and name are relevant since there might be multiple kernels
         # extracting different functions from the same code
         return md5(code + name).hexdigest()
 
-    def __init__(self, code, name):
+    def __init__(self, ast, name):
         # Protect against re-initialization when retrieved from cache
         if self._initialized:
             return
         self._name = name or "kernel_%d" % Kernel._globalcount
+        code = self._transform_ast(ast)
         self._code = preprocess(code)
         Kernel._globalcount += 1
         self._initialized = True
@@ -2822,6 +2859,11 @@ class Kernel(Cached):
         """String containing the c code for this kernel routine. This
         code must conform to the OP2 user kernel API."""
         return self._code
+
+    def _transform_ast(self, ast):
+        if not isinstance(ast, Node):
+            return ast
+        return ast.gencode()
 
     def __str__(self):
         return "OP2 Kernel: %s" % self._name
@@ -2848,7 +2890,8 @@ class JITModule(Cached):
                 else:
                     idx = arg.idx
                 map_arity = arg.map.arity if arg.map else None
-                key += (arg.data.dim, arg.data.dtype, map_arity, idx, arg.access)
+                key += (arg.data.dim, arg.data.dtype,
+                        map_arity, idx, arg.access)
             elif arg._is_mat:
                 idxs = (arg.idx[0].__class__, arg.idx[0].index,
                         arg.idx[1].index)
@@ -2882,13 +2925,15 @@ class JITModule(Cached):
             fname = "%s-%s.%s" % (self._kernel.name,
                                   hashlib.md5(src).hexdigest(),
                                   ext if ext is not None else "c")
-            output = os.path.abspath(os.path.join(configuration['dump_gencode_path'],
-                                                  fname))
+            output = os.path.abspath(
+                os.path.join(configuration['dump_gencode_path'],
+                             fname))
             with open(output, "w") as f:
                 f.write(src)
 
 
 class ParLoop(LazyComputation):
+
     """Represents the kernel, iteration space and arguments of a parallel loop
     invocation.
 
@@ -2902,7 +2947,8 @@ class ParLoop(LazyComputation):
                    ('iterset', Set, SetTypeError))
     def __init__(self, kernel, iterset, *args):
         LazyComputation.__init__(self,
-                                 set([a.data for a in args if a.access in [READ, RW]]) | Const._defs,
+                                 set([a.data for a in args if a.access in [READ, RW]]
+                                     ) | Const._defs,
                                  set([a.data for a in args if a.access in [RW, WRITE, MIN, MAX, INC]]))
         # Always use the current arguments, also when we hit cache
         self._actual_args = args
@@ -3026,7 +3072,8 @@ class ParLoop(LazyComputation):
                 _extents = arg._extents
                 itspace = tuple(m.arity for m in arg.map)
                 if extents and extents != _extents:
-                    raise IndexValueError("Mismatching iteration space size for argument %d" % i)
+                    raise IndexValueError(
+                        "Mismatching iteration space size for argument %d" % i)
                 extents = _extents
                 offsets = arg._offsets
         return IterationSpace(iterset, itspace, extents, offsets)
@@ -3130,7 +3177,8 @@ class Solver(object):
     def __init__(self, parameters=None, **kwargs):
         self.parameters = DEFAULT_SOLVER_PARAMETERS.copy()
         if parameters and kwargs:
-            raise RuntimeError("Solver options are set either by parameters or kwargs")
+            raise RuntimeError(
+                "Solver options are set either by parameters or kwargs")
         if parameters:
             self.parameters.update(parameters)
         else:

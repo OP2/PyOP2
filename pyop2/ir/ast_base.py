@@ -207,6 +207,7 @@ class EmptyStatement(Statement):
 
 
 class FlatBlock(Statement):
+
     """Treat a chunk of code as a single statement, i.e. a C string"""
 
     def __init__(self, code, pragma=None):
@@ -418,10 +419,10 @@ class PreprocessNode(Node):
 
     def __init__(self, prep):
         Node.__init__(self)
-        self.children.append(prep)
+        self.directive = prep
 
     def gencode(self, scope=False):
-        return self.children[0]
+        return self.directive
 
 # Utility functions ###
 
