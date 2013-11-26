@@ -5,6 +5,7 @@
 util = {}
 util.update({
     "point": lambda p: "[%s]" % p,
+    "point_ofs": lambda p, o: "[%s*%d+%d]" % (p, o[0], o[1]),
     "assign": lambda s, e: "%s = %s" % (s, e),
     "incr": lambda s, e: "%s += %s" % (s, e),
     "incr++": lambda s: "%s++" % s,
@@ -128,16 +129,21 @@ class Symbol(Expr):
     depends on or explicit numbers representing the entry of a tensor the
     symbol is accessing. """
 
-    def __init__(self, symbol, rank):
+    def __init__(self, symbol, rank, offset=None):
         Expr.__init__(self)
         self.symbol = symbol
         self.rank = rank
+        self.offset = offset
         self.loop_dep = tuple([i for i in rank if not str(i).isdigit()])
 
     def gencode(self):
         points = ""
-        for p in self.rank:
-            points += util["point"](p)
+        if not self.offset:
+            for p in self.rank:
+                points += util["point"](p)
+        else:
+            for p, ofs in zip(self.rank, self.offset):
+                points += util["point_ofs"](p, ofs)
         return str(self.symbol) + points
 
 

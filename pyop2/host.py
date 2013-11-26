@@ -392,7 +392,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                                 "name": "buffer_" + self.c_arg_name(count),
                                 "dim": dim,
                                 "nfofs": " + %d" % o if o else "",
-                                "mxofs": " + %d" % mxofs[0] if mxofs else ""}
+                                "mxofs": " + %d" % (mxofs[0] * dim) if mxofs else ""}
                                for o in range(dim)])
         else:
             return ""
@@ -545,7 +545,6 @@ class JITModule(base.JITModule):
             _buf_size = [arg.c_local_tensor_dec(shape, i, j)
                          for i, j, shape, offsets in self._itspace]
             #_buf_size = [sum(x) for x in zip(*_buf_size)]
-            #from IPython import embed; embed()
             if len(_buf_size) > 1:
                 _buf_size = [_buf_size[0], _buf_size[-1]]
             _buf_size = [sum(x) for x in zip(*_buf_size)]
