@@ -36,6 +36,7 @@ import numpy as np
 
 from pyop2 import op2
 
+from pyop2.ir.ast_base import *
 
 backends = ['sequential', 'openmp', 'opencl', 'cuda']
 
@@ -57,7 +58,8 @@ class TestSubSet:
 
     def test_direct_loop(self, backend, iterset):
         """Test a direct ParLoop on a subset"""
-        indices = np.array([i for i in range(nelems) if not i % 2], dtype=np.int)
+        indices = np.array(
+            [i for i in range(nelems) if not i % 2], dtype=np.int)
         ss = op2.Subset(iterset, indices)
 
         d = op2.Dat(iterset ** 1, data=None, dtype=np.uint32)
@@ -106,7 +108,7 @@ class TestSubSet:
     def test_direct_loop_sub_subset(self, backend, iterset):
         indices = np.arange(0, nelems, 2, dtype=np.int)
         ss = op2.Subset(iterset, indices)
-        indices = np.arange(0, nelems/2, 2, dtype=np.int)
+        indices = np.arange(0, nelems / 2, 2, dtype=np.int)
         sss = op2.Subset(ss, indices)
 
         d = op2.Dat(iterset ** 1, data=None, dtype=np.uint32)
@@ -123,7 +125,7 @@ class TestSubSet:
     def test_direct_loop_sub_subset_with_indexing(self, backend, iterset):
         indices = np.arange(0, nelems, 2, dtype=np.int)
         ss = iterset(indices)
-        indices = np.arange(0, nelems/2, 2, dtype=np.int)
+        indices = np.arange(0, nelems / 2, 2, dtype=np.int)
         sss = ss(indices)
 
         d = op2.Dat(iterset ** 1, data=None, dtype=np.uint32)
@@ -139,11 +141,13 @@ class TestSubSet:
 
     def test_indirect_loop(self, backend, iterset):
         """Test a indirect ParLoop on a subset"""
-        indices = np.array([i for i in range(nelems) if not i % 2], dtype=np.int)
+        indices = np.array(
+            [i for i in range(nelems) if not i % 2], dtype=np.int)
         ss = op2.Subset(iterset, indices)
 
         indset = op2.Set(2, "indset")
-        map = op2.Map(iterset, indset, 1, [(1 if i % 2 else 0) for i in range(nelems)])
+        map = op2.Map(iterset, indset, 1, [(1 if i % 2 else 0)
+                      for i in range(nelems)])
         d = op2.Dat(indset ** 1, data=None, dtype=np.uint32)
 
         k = op2.Kernel("void inc(unsigned int* v) { *v += 1;}", "inc")
@@ -156,7 +160,8 @@ class TestSubSet:
         ss = op2.Subset(iterset, [])
 
         indset = op2.Set(2, "indset")
-        map = op2.Map(iterset, indset, 1, [(1 if i % 2 else 0) for i in range(nelems)])
+        map = op2.Map(iterset, indset, 1, [(1 if i % 2 else 0)
+                      for i in range(nelems)])
         d = op2.Dat(indset ** 1, data=None, dtype=np.uint32)
 
         k = op2.Kernel("void inc(unsigned int* v) { *v += 1;}", "inc")
@@ -167,18 +172,21 @@ class TestSubSet:
 
     def test_indirect_loop_with_direct_dat(self, backend, iterset):
         """Test a indirect ParLoop on a subset"""
-        indices = np.array([i for i in range(nelems) if not i % 2], dtype=np.int)
+        indices = np.array(
+            [i for i in range(nelems) if not i % 2], dtype=np.int)
         ss = op2.Subset(iterset, indices)
 
         indset = op2.Set(2, "indset")
-        map = op2.Map(iterset, indset, 1, [(1 if i % 2 else 0) for i in range(nelems)])
+        map = op2.Map(iterset, indset, 1, [(1 if i % 2 else 0)
+                      for i in range(nelems)])
 
         values = [2976579765] * nelems
-        values[::2] = [i/2 for i in range(nelems)][::2]
+        values[::2] = [i / 2 for i in range(nelems)][::2]
         dat1 = op2.Dat(iterset ** 1, data=values, dtype=np.uint32)
         dat2 = op2.Dat(indset ** 1, data=None, dtype=np.uint32)
 
-        k = op2.Kernel("void inc(unsigned* s, unsigned int* d) { *d += *s;}", "inc")
+        k = op2.Kernel(
+            "void inc(unsigned* s, unsigned int* d) { *d += *s;}", "inc")
         op2.par_loop(k, ss, dat1(op2.READ), dat2(op2.INC, map[0]))
 
         assert dat2.data[0] == sum(values[::2])
@@ -225,11 +233,14 @@ inc(unsigned int* v1, unsigned int* v2) {
         mat01 = op2.Mat(sparsity, np.float64)
         mat10 = op2.Mat(sparsity, np.float64)
 
-        k = op2.Kernel("""\
-void
-unique_id(double* dat, double mat[1][1], int i, int j) {
-  mat[0][0] += (*dat) * 16 + i * 4 + j;
-}""", "unique_id")
+        assembly = c_for("i", 4,
+                         c_for("j", 4,
+                               Incr(Symbol("mat", ("i", "j")), FlatBlock("(*dat)*16+i*4+j"))))
+        kernel_code = FunDecl("void", "unique_id",
+                              [Decl("double*", c_sym("dat")),
+                               Decl("double", Symbol("mat", (4, 4)))],
+                              Block([assembly], open_scope=False))
+        k = op2.Kernel(kernel_code, "unique_id")
 
         mat.zero()
         mat01.zero()

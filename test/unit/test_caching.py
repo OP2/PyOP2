@@ -37,6 +37,8 @@ import random
 from pyop2 import plan
 from pyop2 import op2
 
+from pyop2.ir.ast_base import *
+
 
 def _seed():
     return 0.02041724
@@ -120,7 +122,8 @@ class TestPlanCache:
 
     @pytest.fixture
     def mat(cls, iter2ind1, dindset):
-        sparsity = op2.Sparsity((dindset, dindset), (iter2ind1, iter2ind1), "sparsity")
+        sparsity = op2.Sparsity(
+            (dindset, dindset), (iter2ind1, iter2ind1), "sparsity")
         return op2.Mat(sparsity, 'float64', "mat")
 
     @pytest.fixture
@@ -137,11 +140,12 @@ class TestPlanCache:
         self.cache.clear()
         assert len(self.cache) == 0
 
-        op2.par_loop(op2.Kernel("void assign(int* src, int* dst) { *dst = *src; }",
-                                "assign"),
-                     set,
-                     dat(op2.READ),
-                     inddat(op2.WRITE, map[0]))
+        op2.par_loop(
+            op2.Kernel("void assign(int* src, int* dst) { *dst = *src; }",
+                       "assign"),
+            set,
+            dat(op2.READ),
+            inddat(op2.WRITE, map[0]))
         assert (dat.data == inddat.data).all()
         assert len(self.cache) == 2
 
@@ -537,7 +541,10 @@ void kernel_swap(unsigned int* x[2])
     def test_same_iteration_space_works(self, backend, iterset, x2, iter2ind2):
         self.cache.clear()
         assert len(self.cache) == 0
-        k = op2.Kernel("""void k(unsigned int *x, int i) {}""", 'k')
+        kernel_code = FunDecl("void", "k",
+                              [Decl("int*", c_sym("x"), qualifiers=["unsigned"])],
+                              c_for("i", 1, ""))
+        k = op2.Kernel(kernel_code, 'k')
 
         op2.par_loop(k, iterset,
                      x2(op2.INC, iter2ind2[op2.i[0]]))
