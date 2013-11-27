@@ -98,9 +98,9 @@ class ParLoop(host.ParLoop):
             for c in Const._definitions():
                 self._jit_args.append(c.data)
 
-            self._jit_args.extend(self.offset_args())
+            self._jit_args.extend(self.offset_args)
 
-            self._jit_args.extend(self.layer_arg())
+            self._jit_args.extend(self.layer_arg)
 
         if part.size > 0:
             self._jit_args[0] = part.offset
