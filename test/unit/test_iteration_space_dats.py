@@ -112,7 +112,7 @@ class TestIterationSpaceDats:
                                  "int*", c_sym("nodes"), qualifiers=["unsigned"]),
                               Decl(
                                   "int*", c_sym("edge"), qualifiers=["unsigned"])],
-                             Block([c_for("i", 2, "*edge += nodes[i];")], open_scope=True))
+                             c_for("i", 2, "*edge += nodes[i];"))
 
         op2.par_loop(op2.Kernel(kernel_sum, "kernel_sum"), edges,
                      node_vals(op2.READ, edge2node[op2.i[0]]),
@@ -125,7 +125,7 @@ class TestIterationSpaceDats:
         vd1.data[:] = numpy.arange(nele)
         k = FunDecl("void", "k",
                     [Decl("int*", c_sym("d")), Decl("int*", c_sym("vd"))],
-                    Block([c_for("i", 1, "d[0] += vd[i];")], open_scope=True))
+                    c_for("i", 1, "d[0] += vd[i];"))
 
         op2.par_loop(op2.Kernel(k, 'k'), node,
                      d1(op2.WRITE),
@@ -136,7 +136,7 @@ class TestIterationSpaceDats:
     def test_write_1d_itspace_map(self, backend, node, vd1, node2ele):
         k = FunDecl("void", "k",
                     [Decl("int*", c_sym("vd"))],
-                    Block([c_for("i", 1, "vd[i] = 2;")], open_scope=True))
+                    c_for("i", 1, "vd[i] = 2;"))
 
         op2.par_loop(op2.Kernel(k, 'k'), node,
                      vd1(op2.WRITE, node2ele[op2.i[0]]))
@@ -148,7 +148,7 @@ class TestIterationSpaceDats:
 
         k = FunDecl("void", "k",
                     [Decl("int*", c_sym("d")), Decl("int*", c_sym("vd"))],
-                    Block([c_for("i", 1, "vd[i] += *d;")], open_scope=True))
+                    c_for("i", 1, "vd[i] += *d;"))
         op2.par_loop(op2.Kernel(k, 'k'), node,
                      d1(op2.READ),
                      vd1(op2.INC, node2ele[op2.i[0]]))
@@ -164,7 +164,7 @@ class TestIterationSpaceDats:
         vd2.data[:] = numpy.arange(nele * 2).reshape(nele, 2)
         k = FunDecl("void", "k",
                     [Decl("int*", c_sym("d")), Decl("int*", c_sym("vd"))],
-                    Block([c_for("i", 2, "d[i] = vd[i];")], open_scope=True))
+                    c_for("i", 2, "d[i] = vd[i];"))
         op2.par_loop(op2.Kernel(k, 'k'), node,
                      d2(op2.WRITE),
                      vd2(op2.READ, node2ele[op2.i[0]]))
@@ -176,7 +176,7 @@ class TestIterationSpaceDats:
     def test_write_2d_itspace_map(self, backend, vd2, node2ele, node):
         k = FunDecl("void", "k",
                     [Decl("int*", c_sym("vd"))],
-                    Block([c_for("i", 1, "vd[0] = 2; vd[1] = 3;")], open_scope=True))
+                    c_for("i", 1, "vd[0] = 2; vd[1] = 3;"))
         op2.par_loop(op2.Kernel(k, 'k'), node,
                      vd2(op2.WRITE, node2ele[op2.i[0]]))
         assert all(vd2.data[:, 0] == 2)
@@ -189,7 +189,7 @@ class TestIterationSpaceDats:
 
         k = FunDecl("void", "k",
                     [Decl("int*", c_sym("d")), Decl("int*", c_sym("vd"))],
-                    Block([c_for("i", 2, "vd[i] = d[i];")], open_scope=True))
+                    c_for("i", 2, "vd[i] = d[i];"))
 
         op2.par_loop(op2.Kernel(k, 'k'), node,
                      d2(op2.READ),
