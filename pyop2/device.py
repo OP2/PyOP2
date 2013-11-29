@@ -33,7 +33,22 @@
 
 import base
 from base import *
+from pyop2.ir.ast_base import Node
+from pyop2.ir.ast_plan import ASTKernel
 from mpi import collective
+
+
+class Kernel(base.Kernel):
+
+    @classmethod
+    def _ast_to_c(cls, ast, name):
+        """Transform an Abstract Syntax Tree representing the kernel into a
+        string of code (C syntax) suitable to GPU execution."""
+        if not isinstance(ast, Node):
+            return ast
+        ast_handler = ASTKernel(ast)
+        ast_handler.plan_gpu()
+        return ast.gencode()
 
 
 class Arg(base.Arg):
@@ -129,7 +144,8 @@ class DeviceDataMixin(object):
         """Numpy array containing the data values."""
         base._trace.evaluate(self, self)
         if len(self._data) is 0 and self.dataset.total_size > 0:
-            raise RuntimeError("Illegal access: No data associated with this Dat!")
+            raise RuntimeError(
+                "Illegal access: No data associated with this Dat!")
         maybe_setflags(self._data, write=True)
         self.needs_halo_update = True
         self._from_device()
@@ -152,7 +168,8 @@ class DeviceDataMixin(object):
         """Numpy array containing the data values.  Read-only"""
         base._trace.evaluate(reads=self)
         if len(self._data) is 0 and self.dataset.total_size > 0:
-            raise RuntimeError("Illegal access: No data associated with this Dat!")
+            raise RuntimeError(
+                "Illegal access: No data associated with this Dat!")
         maybe_setflags(self._data, write=True)
         self._from_device()
         if self.state is not DeviceDataMixin.DEVICE_UNALLOCATED:
