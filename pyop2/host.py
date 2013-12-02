@@ -564,6 +564,7 @@ class JITModule(base.JITModule):
         _const_decs = '\n'.join([const._format_declaration()
                                 for const in Const._definitions()]) + '\n'
 
+        #from IPython import embed; embed()
         self._dump_generated_code(code_to_compile)
         # We need to build with mpicc since that's required by PETSc
         cc = os.environ.get('CC')
@@ -699,12 +700,12 @@ class JITModule(base.JITModule):
         _buf_gather = ""
         _buf_decl = {}
         for count, arg in _itspace_args:
-            _buf_size = [arg.c_local_tensor_dec(shape, i, j)
-                         for i, j, shape, offsets in self._itspace]
-            #_buf_size = [sum(x) for x in zip(*_buf_size)]
-            if len(_buf_size) > 1:
-                _buf_size = [_buf_size[0], _buf_size[-1]]
-            _buf_size = [sum(x) for x in zip(*_buf_size)]
+            if arg._is_mat:
+                _buf_size = list(self._itspace._extents)
+            else:
+                dim = arg.data.dim
+                size = [s[0] for s in dim] if len(arg.data.dim) > 1 else dim
+                _buf_size = [sum([e*d for e, d in zip(self._itspace._extents, size)])]
             if arg.access._mode not in ['WRITE', 'INC']:
                 _itspace_loops = '\n'.join(['  ' * n + itspace_loop(n, e)
                                            for n, e in enumerate(_buf_size)])
