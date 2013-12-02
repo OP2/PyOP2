@@ -37,6 +37,7 @@ import random
 
 from pyop2 import op2
 from pyop2.exceptions import MapValueError, IndexValueError
+from pyop2.ir.ast_base import *
 
 
 # Large enough that there is more than one block and more than one
@@ -222,6 +223,52 @@ class TestIndirectLoop:
 
         expected = np.arange(1, nedges * 2 + 1, 2)
         assert all(expected == edge_vals.data)
+
+
+@pytest.fixture
+def mset(indset, unitset):
+    return op2.MixedSet((indset, unitset))
+
+
+@pytest.fixture
+def mdat(mset):
+    return op2.MixedDat(mset)
+
+
+@pytest.fixture
+def mmap(iterset2indset, iterset2unitset):
+    return op2.MixedMap((iterset2indset, iterset2unitset))
+
+
+class TestMixedIndirectLoop:
+    """Mixed indirect loop tests."""
+
+    backends = ['sequential']
+
+    def test_mixed_non_mixed_dat(self, backend, mdat, mmap, iterset):
+        """Increment into a MixedDat from a non-mixed Dat."""
+        d = op2.Dat(iterset, np.ones(iterset.size))
+        kernel_inc = """void kernel_inc(double **d, double *x) {
+          d[0][0] += x[0]; d[1][0] += x[0];
+        }"""
+        op2.par_loop(op2.Kernel(kernel_inc, "kernel_inc"), iterset,
+                     mdat(op2.INC, mmap),
+                     d(op2.READ))
+        assert all(mdat[0].data == 1.0) and mdat[1].data == 4096.0
+
+    def test_mixed_non_mixed_dat_itspace(self, backend, mdat, mmap, iterset):
+        """Increment into a MixedDat from a Dat using iteration spaces."""
+        d = op2.Dat(iterset, np.ones(iterset.size))
+        assembly = Incr(Symbol("d", ("j",)), Symbol("x", (0,)))
+        assembly = c_for("j", 2, assembly)
+        kernel_code = FunDecl("void", "kernel_inc",
+                              [Decl("double", c_sym("*d")),
+                               Decl("double", c_sym("*x"))],
+                              Block([assembly], open_scope=False))
+        op2.par_loop(op2.Kernel(kernel_code, "kernel_inc"), iterset,
+                     mdat(op2.INC, mmap[op2.i[0]]),
+                     d(op2.READ))
+        assert all(mdat[0].data == 1.0) and mdat[1].data == 4096.0
 
 if __name__ == '__main__':
     import os

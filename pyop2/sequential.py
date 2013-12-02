@@ -47,21 +47,28 @@ class JITModule(host.JITModule):
     _wrapper = """
 void wrap_%(kernel_name)s__(PyObject *_start, PyObject *_end,
                             %(ssinds_arg)s
-                            %(wrapper_args)s %(const_args)s %(off_args)s) {
+                            %(wrapper_args)s %(const_args)s %(off_args)s %(layer_arg)s) {
   int start = (int)PyInt_AsLong(_start);
   int end = (int)PyInt_AsLong(_end);
   %(ssinds_dec)s
   %(wrapper_decs)s;
   %(const_inits)s;
   %(off_inits)s;
+  %(layer_arg_init)s;
   %(map_decl)s
   for ( int n = start; n < end; n++ ) {
     int i = %(index_expr)s;
     %(vec_inits)s;
+    %(map_init)s;
+    %(extr_loop)s
+    %(map_bcs_m)s;
     %(buffer_decl)s;
     %(buffer_gather)s
     %(kernel_name)s(%(kernel_args)s);
     %(itset_loop_body)s
+    %(map_bcs_p)s;
+    %(apply_offset)s;
+    %(extr_loop_close)s
   }
 }
 """
@@ -73,7 +80,7 @@ class ParLoop(host.ParLoop):
         host.ParLoop.__init__(self, *args, **kwargs)
 
     def _compute(self, part):
-        fun = JITModule(self.kernel, self.it_space, *self.args)
+        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct)
         if not hasattr(self, '_jit_args'):
             self._jit_args = [0, 0]
             if isinstance(self._it_space._iterset, Subset):
@@ -96,7 +103,9 @@ class ParLoop(host.ParLoop):
             for c in Const._definitions():
                 self._jit_args.append(c.data)
 
-            self._jit_args.extend(self.offset_args())
+            self._jit_args.extend(self.offset_args)
+
+            self._jit_args.extend(self.layer_arg)
 
         if part.size > 0:
             self._jit_args[0] = part.offset

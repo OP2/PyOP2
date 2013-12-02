@@ -143,7 +143,8 @@ void wrap_%(kernel_name)s__(PyObject* _boffset,
                             %(ssinds_arg)s
                             %(wrapper_args)s
                             %(const_args)s
-                            %(off_args)s) {
+                            %(off_args)s
+                            %(layer_arg)s) {
 
   int boffset = (int)PyInt_AsLong(_boffset);
   int nblocks = (int)PyInt_AsLong(_nblocks);
@@ -155,6 +156,7 @@ void wrap_%(kernel_name)s__(PyObject* _boffset,
   %(wrapper_decs)s;
   %(const_inits)s;
   %(off_inits)s;
+  %(layer_arg_init)s;
   %(map_decl)s
 
   #ifdef _OPENMP
@@ -179,10 +181,16 @@ void wrap_%(kernel_name)s__(PyObject* _boffset,
       {
         int i = %(index_expr)s;
         %(vec_inits)s;
+        %(map_init)s;
+        %(map_bcs_m)s;
+        %(extr_loop)s
         %(buffer_decl)s;
         %(buffer_gather)s
         %(kernel_name)s(%(kernel_args)s);
         %(itset_loop_body)s;
+        %(map_bcs_p)s;
+        %(apply_offset)s;
+        %(extr_loop_close)s
       }
     }
     %(interm_globals_writeback)s;
@@ -212,7 +220,7 @@ void wrap_%(kernel_name)s__(PyObject* _boffset,
 class ParLoop(device.ParLoop, host.ParLoop):
 
     def _compute(self, part):
-        fun = JITModule(self.kernel, self.it_space, *self.args)
+        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct)
         if not hasattr(self, '_jit_args'):
             self._jit_args = [None] * 5
             if isinstance(self._it_space._iterset, Subset):
@@ -232,7 +240,9 @@ class ParLoop(device.ParLoop, host.ParLoop):
                 self._jit_args.append(c.data)
 
             # offset_args returns an empty list if there are none
-            self._jit_args.extend(self.offset_args())
+            self._jit_args.extend(self.offset_args)
+
+            self._jit_args.extend(self.layer_arg)
 
         if part.size > 0:
             #TODO: compute partition size

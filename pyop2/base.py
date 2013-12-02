@@ -558,6 +558,7 @@ class Set(object):
         self._halo = halo
         self._layers = layers if layers is not None else 1
         self._partition_size = 1024
+        self._ext_tb_bcs = None
         if self.halo:
             self.halo.verify(self)
         Set._globalcount += 1
@@ -615,6 +616,23 @@ class Set(object):
     def partition_size(self, partition_value):
         """Set the partition size"""
         self._partition_size = partition_value
+
+    @property
+    def _extruded_bcs(self):
+        """A tuple indicating whether the extruded problem should have boundary conditions applied.
+
+        If the first entry is True, boundary conditions will be applied at the bottom.
+        If the second entry is True, boundary conditions will be applied at the top."""
+        return self._ext_tb_bcs
+
+    @_extruded_bcs.setter
+    def _extruded_bcs(self, value):
+        """Set the boundary conditions on the extruded problem.
+
+        :arg value: a tuple with of two boolean values.
+            The first entry indicates whether a boundary condition will be applied at the bottom.
+            The second entry indicates whether a boundary condition will be applied at the top."""
+        self._ext_tb_bcs = value
 
     def __iter__(self):
         """Yield self when iterated over."""
@@ -1289,7 +1307,8 @@ class IterationSpace(object):
     @property
     def cache_key(self):
         """Cache key used to uniquely identify the object in the cache."""
-        return self._extents, self._block_shape, self.iterset.layers, isinstance(self._iterset, Subset)
+        return self._extents, self._block_shape, self.iterset.layers, \
+            isinstance(self._iterset, Subset), self.iterset._extruded_bcs
 
 
 class DataCarrier(object):
@@ -2215,14 +2234,22 @@ class Map(object):
       will take each value from ``0`` to ``e-1`` where ``e`` is the
       ``n`` th extent passed to the iteration space for this
       :func:`pyop2.op2.par_loop`. See also :data:`i`.
+
+
+    For extruded problems (where `iterset.layers > 1`) with boundary
+    conditions applied at the top and bottom of the domain, one needs
+    to provide a list of which of the `arity` values in each map entry
+    correspond to values on the bottom boundary and which correspond
+    to the top.  This is done by supplying two lists of indices in
+    `bt_masks`, the first provides indices for the bottom, the second
+    for the top.
     """
 
     _globalcount = 0
 
-    @validate_type(
-        ('iterset', Set, SetTypeError), ('toset', Set, SetTypeError),
-        ('arity', int, ArityTypeError), ('name', str, NameTypeError))
-    def __init__(self, iterset, toset, arity, values=None, name=None, offset=None, parent=None):
+    @validate_type(('iterset', Set, SetTypeError), ('toset', Set, SetTypeError),
+                  ('arity', int, ArityTypeError), ('name', str, NameTypeError))
+    def __init__(self, iterset, toset, arity, values=None, name=None, offset=None, parent=None, bt_masks=None):
         self._iterset = iterset
         self._toset = toset
         self._arity = arity
@@ -2235,6 +2262,13 @@ class Map(object):
         # where a boundary condition is imposed by setting some map
         # entries negative.
         self._parent = parent
+        # Which indices in the extruded map should be masked out for
+        # the application of strong boundary conditions
+        self._bottom_mask = np.zeros(len(offset)) if offset is not None else []
+        self._top_mask = np.zeros(len(offset)) if offset is not None else []
+        if bt_masks is not None:
+            self._bottom_mask[bt_masks[0]] = -1
+            self._top_mask[bt_masks[1]] = -1
         Map._globalcount += 1
 
     @validate_type(('index', (int, IterationIndex), IndexTypeError))
@@ -2320,6 +2354,16 @@ class Map(object):
         """The vertical offset."""
         return self._offset
 
+    @property
+    def top_mask(self):
+        """The top layer mask to be applied on a mesh cell."""
+        return self._top_mask
+
+    @property
+    def bottom_mask(self):
+        """The bottom layer mask to be applied on a mesh cell."""
+        return self._bottom_mask
+
     def __str__(self):
         return "OP2 Map: %s from (%s) to (%s) with arity %s" \
                % (self._name, self._iterset, self._toset, self._arity)
@@ -2342,7 +2386,6 @@ class Map(object):
 
     def __le__(self, o):
         """o<=self if o equals self or its parent equals self."""
-
         return self == o or (isinstance(self._parent, Map) and self._parent <= o)
 
     @classmethod
@@ -2451,6 +2494,10 @@ class MixedMap(Map):
         """:class:`MixedMap`\s are equal if all their contained :class:`Map`\s
         are."""
         return not self == other
+
+    def __le__(self, o):
+        """o<=self if o equals self or its parent equals self."""
+        return self == o or all(m <= om for m, om in zip(self, o))
 
     def __str__(self):
         return "OP2 MixedMap composed of Maps: %s" % (self._maps,)
@@ -2778,7 +2825,9 @@ class Mat(DataCarrier):
 
     @property
     def _is_scalar_field(self):
-        return np.prod(self.dims) == 1
+        # Sparsity from Dat to MixedDat has a shape like (1, (1, 1))
+        # (which you can't take the product of)
+        return all(np.prod(d) == 1 for d in self.dims)
 
     @property
     def _is_vector_field(self):
@@ -3052,7 +3101,12 @@ class ParLoop(LazyComputation):
         extents = None
         offsets = None
         for i, arg in enumerate(self._actual_args):
-            if arg._is_global or arg.map is None:
+            if arg._is_global:
+                continue
+            if arg._is_direct:
+                if arg.data.dataset.set != _iterset:
+                    raise MapValueError(
+                        "Iterset of direct arg %s doesn't match ParLoop iterset." % i)
                 continue
             for j, m in enumerate(arg._map):
                 if m.iterset != _iterset:
@@ -3068,6 +3122,7 @@ class ParLoop(LazyComputation):
                 offsets = arg._offsets
         return IterationSpace(iterset, itspace, extents, offsets)
 
+    @property
     def offset_args(self):
         """The offset args that need to be added to the argument list."""
         _args = []
@@ -3075,9 +3130,18 @@ class ParLoop(LazyComputation):
             if arg._is_indirect or arg._is_mat:
                 maps = as_tuple(arg.map, Map)
                 for map in maps:
-                    if map.iterset.layers is not None and map.iterset.layers > 1:
-                        _args.append(map.offset)
+                    for m in map:
+                        if m.iterset.layers is not None and \
+                           m.iterset.layers > 1:
+                            _args.append(m.offset)
         return _args
+
+    @property
+    def layer_arg(self):
+        """The layer arg that needs to be added to the argument list."""
+        if self._is_layered:
+            return [self._it_space.layers]
+        return []
 
     @property
     def it_space(self):
