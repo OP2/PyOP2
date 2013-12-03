@@ -564,7 +564,6 @@ class JITModule(base.JITModule):
         _const_decs = '\n'.join([const._format_declaration()
                                 for const in Const._definitions()]) + '\n'
 
-        #from IPython import embed; embed()
         self._dump_generated_code(code_to_compile)
         # We need to build with mpicc since that's required by PETSc
         cc = os.environ.get('CC')
@@ -700,6 +699,10 @@ class JITModule(base.JITModule):
         _buf_gather = ""
         _buf_decl = {}
         for count, arg in _itspace_args:
+            #_buf_size = [arg.c_local_tensor_dec(shape, i, j) for i, j, shape, offsets in self._itspace]
+            #if len(_buf_size) > 1:
+            #    _buf_size = [_buf_size[0], _buf_size[-1]]
+            #_buf_size2 = [sum(x) for x in zip(*_buf_size)]
             if arg._is_mat:
                 _buf_size = list(self._itspace._extents)
             else:
@@ -724,7 +727,7 @@ class JITModule(base.JITModule):
             _itspace_loops = '\n'.join(['  ' * n + itspace_loop(n, e)
                                        for n, e in enumerate(shape)])
             _itspace_args = [(count, arg) for count, arg in enumerate(self._args)
-                             if arg.access._mode in ['WRITE', 'INC'] and arg._uses_itspace]  # and not arg._is_mat]
+                             if arg.access._mode in ['WRITE', 'INC'] and arg._uses_itspace]
             _buf_scatter = ""
             for count, arg in _itspace_args:
                 _buf_decl_scatter = arg.data.ctype + " scatter_buffer_" + \
