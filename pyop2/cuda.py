@@ -88,9 +88,9 @@ class Arg(op2.Arg):
                  'size': size,
                  '0': ridx.index,
                  '1': cidx.index,
-                 'lcdim': self.data.dims[1],
-                 'roff': cmap.arity * esize,
-                 'coff': esize}
+                 'lcdim': self.data.dims[1] if not self._flatten else 1,
+                 'roff': cmap.arity * (self.data.dims[0] if self._flatten else esize),
+                 'coff': 1 if self._flatten else esize}
             # We walk through the lma-data in order of the
             # alphabet:
             #  A B C
