@@ -78,20 +78,38 @@ class Arg(op2.Arg):
             rmap, cmap = self.map
             ridx, cidx = self.idx
             rmult, cmult = self.data.dims
-            esize = np.prod(self.data.dims)
+            esize = rmult * cmult
             size = esize * rmap.arity * cmap.arity
-            if self._flatten:
-                pos = lambda i0, i1: '(%(rmult)d * (i%(i0)s * %(rsize)d + i%(i0)s / %(rarity)d + %(cmult)d * (i%(i1)s %% %(carity)d)) + i%(i1)s / %(carity)d) %% %(size)d' \
-                    % {'i0': i0, 'i1': i1, 'rmult': rmult, 'rsize': rmult * rmap.arity, 'rarity': rmap.arity, 'cmult': cmult, 'carity': cmap.arity, 'size': size}
+            if self._flatten and esize > 1:
+                # In the case of rmap and cmap arity 3 and rmult and cmult 2 we
+                # need the local block numbering to be:
+                #
+                #  0  4  8 |  1  5  9   The 3 x 3 blocks have the same
+                # 12 16 20 | 13 17 22   numbering with an offset of:
+                # 24 28 32 | 25 29 33
+                # -------------------     0 1
+                #  2  6 10 |  3  7 11     2 3
+                # 14 18 22 | 15 19 33
+                # 26 30 24 | 27 31 35
+
+                # Numbering of the base block
+                block00 = '((i%(i0)s %% %(rarity)d) * %(carity)d + (i%(i1)s %% %(carity)d)) * %(esize)d'
+                # Offset along the rows (2 for the lower half)
+                roffs = ' + %(rmult)d * (i%(i0)s / %(rarity)d)'
+                # Offset along the columns (1 for the right half)
+                coffs = ' + i%(i1)s / %(carity)d'
+                pos = lambda i0, i1: (block00 + roffs + coffs) % \
+                    {'i0': i0, 'i1': i1, 'rarity': rmap.arity,
+                     'carity': cmap.arity, 'esize': esize, 'rmult': rmult}
             else:
-                pos = lambda i0, i1: 'i%(i0)d * %(rsize)d + %(i1)s * %(csize)d' % \
-                    {'i0': i0, 'i1': i1, 'rsize': rmap.arity * esize, 'csize': esize}
+                pos = lambda i0, i1: 'i%(i0)s * %(rsize)d + i%(i1)s * %(csize)d' % \
+                    {'i0': i0, 'i1': i1, 'rsize': cmap.arity * esize, 'csize': esize}
             d = {'n': self.name,
                  'offset': self._lmaoffset_name,
                  'idx': self._subset_index("ele_offset + %s" % idx, subset),
                  't': self.ctype,
                  'size': size,
-                 'lcdim': self.data.dims[1] if not self._flatten else 1,
+                 'lcdim': 1 if self._flatten else cmult,
                  'pos': pos(ridx.index, cidx.index)}
             # We walk through the lma-data in order of the
             # alphabet:
