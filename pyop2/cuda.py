@@ -75,28 +75,24 @@ class Arg(op2.Arg):
 
     def _indirect_kernel_arg_name(self, idx, subset):
         if self._is_mat:
-            rmap = self.map[0]
-            ridx = self.idx[0]
-            cmap = self.map[1]
-            cidx = self.idx[1]
+            rmap, cmap = self.map
+            ridx, cidx = self.idx
+            rmult, cmult = self.data.dims
             esize = np.prod(self.data.dims)
             size = esize * rmap.arity * cmap.arity
             if self._flatten:
-                row = lambda idx: '((i%(idx)d %% %(arity)d) * %(dim)d + i%(idx)d / %(arity)s)' \
-                    % {'idx': idx, 'dim': self.data.dims[idx], 'arity': self.map[idx].arity}
-                col = row
+                pos = lambda i0, i1: '(%(rmult)d * (i%(i0)s * %(rsize)d + i%(i0)s / %(rarity)d + %(cmult)d * (i%(i1)s %% %(carity)d)) + i%(i1)s / %(carity)d) %% %(size)d' \
+                    % {'i0': i0, 'i1': i1, 'rmult': rmult, 'rsize': rmult * rmap.arity, 'rarity': rmap.arity, 'cmult': cmult, 'carity': cmap.arity, 'size': size}
             else:
-                row = lambda idx: 'i%(idx)d' % {'idx': idx}
-                col = lambda idx: 'i%(idx)d * %(dim)d' % {'idx': idx, 'dim': esize}
+                pos = lambda i0, i1: 'i%(i0)d * %(rsize)d + %(i1)s * %(csize)d' % \
+                    {'i0': i0, 'i1': i1, 'rsize': rmap.arity * esize, 'csize': esize}
             d = {'n': self.name,
                  'offset': self._lmaoffset_name,
                  'idx': self._subset_index("ele_offset + %s" % idx, subset),
                  't': self.ctype,
                  'size': size,
                  'lcdim': self.data.dims[1] if not self._flatten else 1,
-                 'rsize': rmap.arity * (self.data.dims[0] if self._flatten else esize),
-                 'row': row(ridx.index),
-                 'col': col(cidx.index)}
+                 'pos': pos(ridx.index, cidx.index)}
             # We walk through the lma-data in order of the
             # alphabet:
             #  A B C
@@ -107,8 +103,7 @@ class Arg(op2.Arg):
             #  where each sub-block is walked in the same order:
             #  A1 A2
             #  A3 A4
-            return """(%(t)s (*)[%(lcdim)s])(%(n)s + %(offset)s +
-            %(idx)s * %(size)s + %(row)s * %(rsize)d + %(col)s)""" % d
+            return """(%(t)s (*)[%(lcdim)s])(%(n)s + %(offset)s + %(idx)s * %(size)s + %(pos)s)""" % d
         if self._is_global:
             if self._is_global_reduction:
                 return self._reduction_local_name
