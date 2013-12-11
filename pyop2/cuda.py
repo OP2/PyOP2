@@ -81,16 +81,22 @@ class Arg(op2.Arg):
             cidx = self.idx[1]
             esize = np.prod(self.data.dims)
             size = esize * rmap.arity * cmap.arity
+            if self._flatten:
+                row = lambda idx: '((i%(idx)d %% %(arity)d) * %(dim)d + i%(idx)d / %(arity)s)' \
+                    % {'idx': idx, 'dim': self.data.dims[idx], 'arity': self.map[idx].arity}
+                col = row
+            else:
+                row = lambda idx: 'i%(idx)d' % {'idx': idx}
+                col = lambda idx: 'i%(idx)d * %(dim)d' % {'idx': idx, 'dim': esize}
             d = {'n': self.name,
                  'offset': self._lmaoffset_name,
                  'idx': self._subset_index("ele_offset + %s" % idx, subset),
                  't': self.ctype,
                  'size': size,
-                 '0': ridx.index,
-                 '1': cidx.index,
                  'lcdim': self.data.dims[1] if not self._flatten else 1,
-                 'roff': cmap.arity * (self.data.dims[0] if self._flatten else esize),
-                 'coff': 1 if self._flatten else esize}
+                 'rsize': rmap.arity * (self.data.dims[0] if self._flatten else esize),
+                 'row': row(ridx.index),
+                 'col': col(cidx.index)}
             # We walk through the lma-data in order of the
             # alphabet:
             #  A B C
@@ -102,8 +108,7 @@ class Arg(op2.Arg):
             #  A1 A2
             #  A3 A4
             return """(%(t)s (*)[%(lcdim)s])(%(n)s + %(offset)s +
-            %(idx)s * %(size)s +
-            i%(0)s * %(roff)s + i%(1)s * %(coff)s)""" % d
+            %(idx)s * %(size)s + %(row)s * %(rsize)d + %(col)s)""" % d
         if self._is_global:
             if self._is_global_reduction:
                 return self._reduction_local_name
