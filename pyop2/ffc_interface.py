@@ -136,12 +136,15 @@ class FormSplitter(ReuseTransformer):
         # append them to the results list
         return res + r
 
-    def inner(self, o, *operands):
+    def inner(self, o, l, r):
         def merge(l, r):
             "Yield the inner product of two (index, argument) pairs"
             idx, op1, op2 = fuse_ops(l, r)
             return (idx, o.reconstruct(op1, op2))
-        return [merge(l, r) for l, r in zip(*operands)]
+        if isinstance(l, list) and isinstance(r, list):
+            return [merge(op1, op2) for op1, op2 in zip(l, r)]
+        else:
+            return merge(l, r)
 
     def product(self, o, l, r):
         """Reconstruct a product on each of the component spaces."""
