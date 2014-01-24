@@ -95,6 +95,8 @@ def fuse_ops(l, r):
     else:
         return (j, i), op2, op1
 
+as_list = lambda o: o if isinstance(o, list) else [o]
+
 
 class FormSplitter(ReuseTransformer):
     """Split a form into a subtree for each component of the mixed space it is
@@ -105,12 +107,12 @@ class FormSplitter(ReuseTransformer):
         fd = form.form_data()
         # If there is no mixed element involved, return the unmodified form
         if all(isinstance(e, (FiniteElement, VectorElement)) for e in fd.unique_sub_elements):
-            return form
-        return [[(idx, f * i.measure()) for idx, f in self.visit(i.integrand())]
+            return [((0, 0), form)]
+        return [[(idx, f * i.measure())
+                 for idx, f in as_list(self.visit(i.integrand()))]
                 for i in form.integrals()]
 
     def sum(self, o, l, r):
-        as_list = lambda o: o if isinstance(o, list) else [o]
 
         def pop_index(l, idx):
             "Pop item with index idx from list l or return (None, None)."
