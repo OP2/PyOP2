@@ -37,9 +37,12 @@ generated code in order to make it suitable for passing to the backends."""
 from hashlib import md5
 import os
 import tempfile
+import numpy as np
 
-from ufl import Form
-from ufl.algorithms import as_form
+from ufl import Argument, Form, FiniteElement, VectorElement
+from ufl.algorithms import as_form, traverse_terminals, ReuseTransformer
+from ufl.indexed import Indexed
+from ufl.indexing import FixedIndex, MultiIndex
 from ffc import default_parameters, compile_form as ffc_compile_form
 from ffc import constants
 from ffc.log import set_level, ERROR
@@ -75,6 +78,134 @@ def _check_version():
         pass
     raise RuntimeError("Incompatible PyOP2 version %s and FFC PyOP2 version %s."
                        % (version, getattr(constants, 'PYOP2_VERSION', 'unknown')))
+
+
+def fuse_ops(l, r):
+    """Combine operands where one lives on a test and one on a trial
+    function. The combined index has the test function first."""
+    def find_count(e):
+        "Find the count of an argument: -2 test function, -1 trial function."
+        for t in traverse_terminals(e):
+            if isinstance(t, Argument):
+                return t.count()
+    i, op1 = l
+    j, op2 = r
+    if find_count(op1) < find_count(op2):
+        return (i, j), op1, op2
+    else:
+        return (j, i), op2, op1
+
+
+class FormSplitter(ReuseTransformer):
+    """Split a form into a subtree for each component of the mixed space it is
+    built on. This is a no-op on forms over non-mixed spaces."""
+
+    def split(self, form):
+        """Split the given form."""
+        fd = form.form_data()
+        # If there is no mixed element involved, return the unmodified form
+        if all(isinstance(e, (FiniteElement, VectorElement)) for e in fd.unique_sub_elements):
+            return form
+        return [[(idx, f * i.measure()) for idx, f in self.visit(i.integrand())]
+                for i in form.integrals()]
+
+    def sum(self, o, l, r):
+        as_list = lambda o: o if isinstance(o, list) else [o]
+
+        def pop_index(l, idx):
+            "Pop item with index idx from list l or return (None, None)."
+            for e in l:
+                if e[0] == idx:
+                    l.remove(e)
+                    return e
+            return None, None
+        l = as_list(l)
+        r = as_list(r)
+        res = []
+        # For each (index, argument) tuple in the left operand list, look for
+        # a tuple with corresponding index in the right operand list. If
+        # there is one, append the sum of the arguments with that index to the
+        # results list, otherwise just the tuple from the left operand list
+        for idx, s1 in l:
+            _, s2 = pop_index(r, idx)
+            if s2:
+                res.append((idx, o.reconstruct(s1, s2)))
+            else:
+                res.append((idx, s1))
+        # All remaining tuples in the right operand list had no matches, so we
+        # append them to the results list
+        return res + r
+
+    def inner(self, o, *operands):
+        def merge(l, r):
+            "Yield the inner product of two (index, argument) pairs"
+            idx, op1, op2 = fuse_ops(l, r)
+            return (idx, o.reconstruct(op1, op2))
+        return [merge(l, r) for l, r in zip(*operands)]
+
+    def product(self, o, l, r):
+        """Reconstruct a product on each of the component spaces."""
+        if isinstance(l, tuple) and isinstance(r, tuple):
+            idx, op1, op2 = fuse_ops(l, r)
+            return idx, o.reconstruct(op1, op2)
+        elif isinstance(l, tuple):
+            i, p1 = l
+            return i, o.reconstruct(p1, r)
+        elif isinstance(r, tuple):
+            j, p2 = r
+            return j, o.reconstruct(l, p2)
+        else:
+            return o.reconstruct(l, r)
+
+    def dot(self, o, l, r):
+        """Reconstruct a product on each of the component spaces."""
+        idx, op1, op2 = fuse_ops(l, r)
+        return idx, o.reconstruct(op1, op2)
+
+    def div(self, o, arg):
+        """Reconstruct argument of Div."""
+        i, op = arg
+        return (i, o.reconstruct(op))
+
+    def list_tensor(self, o, *ops):
+        """Pass through the ops of a list tensor."""
+        same_index = lambda ops: all(ops[0][0] == op[0] for op in ops[1:])
+        have_type = lambda typ, ops: all(isinstance(op, typ) for _, op in ops)
+        if have_type(Indexed, ops) and same_index(ops):
+            return (ops[0][0], o.reconstruct(*[op for _, op in ops]))
+        else:
+            raise NotImplementedError("No idea what to in %r with %r" % o, ops)
+
+    def indexed(self, o, arg, idx):
+        """Reconstruct the :class:`ufl.indexed.Indexed` only if the coefficient
+        is defined on a :class:`core_types.VectorFunctionSpace`."""
+        if isinstance(idx._indices[0], FixedIndex):
+            # Find the element to which the FixedIndex points. We might deal
+            # with coefficients on vector elements, in which case we need to
+            # reconstruct the indexed with an adjusted index space. Otherwise
+            # we can just return the coefficient.
+            i = idx._indices[0]._value
+            pos = 0
+            for j, op in arg:
+                # If the FixedIndex points at a scalar (shapeless) operand,
+                # return it
+                if not op.shape() and i == pos:
+                    return j, op
+                size = np.prod(op.shape() or 1)
+                # If the FixedIndex points at a component of the current
+                # operand, reconstruct an Indexed with an adjusted index space
+                if i < pos + size:
+                    return j, o.reconstruct(op, MultiIndex(FixedIndex(i - pos), {}))
+                # Otherwise update the position in the index space
+                pos += size
+            raise NotImplementedError("No idea what to in %r with %r" % (o, arg))
+        else:
+            return o.reconstruct(arg, idx)
+
+    def argument(self, o):
+        """Split an argument into its constituent spaces."""
+        return [(i, Argument(e, o.count()))
+                for i, e in enumerate(o.element().mixed_sub_elements())]
 
 
 class FFCKernel(DiskCached, KernelCached):
