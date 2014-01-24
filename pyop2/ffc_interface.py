@@ -80,21 +80,6 @@ def _check_version():
                        % (version, getattr(constants, 'PYOP2_VERSION', 'unknown')))
 
 
-def fuse_ops(l, r):
-    """Combine operands where one lives on a test and one on a trial
-    function. The combined index has the test function first."""
-    def find_count(e):
-        "Find the count of an argument: -2 test function, -1 trial function."
-        for t in traverse_terminals(e):
-            if isinstance(t, Argument):
-                return t.count()
-    i, op1 = l
-    j, op2 = r
-    if find_count(op1) < find_count(op2):
-        return (i, j), op1, op2
-    else:
-        return (j, i), op2, op1
-
 as_list = lambda o: o if isinstance(o, list) else [o]
 
 
@@ -138,34 +123,47 @@ class FormSplitter(ReuseTransformer):
         # append them to the results list
         return res + r
 
-    def inner(self, o, l, r):
-        def merge(l, r):
-            "Yield the inner product of two (index, argument) pairs"
-            idx, op1, op2 = fuse_ops(l, r)
-            return (idx, o.reconstruct(op1, op2))
-        if isinstance(l, list) and isinstance(r, list):
-            return [merge(op1, op2) for op1, op2 in zip(l, r)]
-        else:
-            return merge(l, r)
-
-    def product(self, o, l, r):
-        """Reconstruct a product on each of the component spaces."""
+    def _binop(self, o, l, r):
+        # Combine operands where one lives on a test and one on a trial
+        # function. The combined index has the test function first.
         if isinstance(l, tuple) and isinstance(r, tuple):
-            idx, op1, op2 = fuse_ops(l, r)
-            return idx, o.reconstruct(op1, op2)
+            def find_count(e):
+                "Find the count of an argument: -2 test function, -1 trial function."
+                for t in traverse_terminals(e):
+                    if isinstance(t, Argument):
+                        return t.count()
+            i, op1 = l
+            j, op2 = r
+            if find_count(op1) < find_count(op2):
+                return (i, j), o.reconstruct(op1, op2)
+            else:
+                return (j, i), o.reconstruct(op1, op2)
+        # Only the left operand contains an Argument. Use its block index.
         elif isinstance(l, tuple):
             i, p1 = l
             return i, o.reconstruct(p1, r)
+        # Only the right operand contains an Argument. Use its block index.
         elif isinstance(r, tuple):
             j, p2 = r
             return j, o.reconstruct(l, p2)
+        # None of the operands contains an Argument. Don't use a block index.
         else:
             return o.reconstruct(l, r)
 
+    def inner(self, o, l, r):
+        """Reconstruct an inner product on each of the component spaces."""
+        if isinstance(l, list) and isinstance(r, list):
+            return [self._binop(o, op1, op2) for op1, op2 in zip(l, r)]
+        else:
+            return self._binop(o, l, r)
+
+    def product(self, o, l, r):
+        """Reconstruct a product on each of the component spaces."""
+        return self._binop(o, l, r)
+
     def dot(self, o, l, r):
         """Reconstruct a product on each of the component spaces."""
-        idx, op1, op2 = fuse_ops(l, r)
-        return idx, o.reconstruct(op1, op2)
+        return self._binop(o, l, r)
 
     def div(self, o, arg):
         """Reconstruct argument of Div."""
