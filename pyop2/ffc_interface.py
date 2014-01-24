@@ -52,6 +52,7 @@ from op2 import Kernel
 from mpi import MPI
 
 from ir.ast_base import PreprocessNode, Root
+from utils import as_tuple
 
 _form_cache = {}
 
@@ -231,27 +232,31 @@ class FFCKernel(DiskCached, KernelCached):
                    _pyop2_geometry_md5 + constants.FFC_VERSION +
                    constants.PYOP2_VERSION).hexdigest()
 
-    def __init__(self, form, name):
+    def __init__(self, original_form, name):
         if self._initialized:
             return
 
         incl = PreprocessNode('#include "pyop2_geometry.h"\n')
-        ffc_tree = ffc_compile_form(form, prefix=name, parameters=ffc_parameters)
-
-        form_data = form.form_data()
-
         kernels = []
-        for ida, kernel in zip(form_data.integral_data, ffc_tree):
+        # Note that split forms are batched by integral i.e. they will only
+        # ever contain a single integral. We therefore always return the first
+        # element of any lists that contain different integrals.
+        for forms in FormSplitter().split(original_form):
+            blockid = lambda block: ''.join(["_%d" % i for i in as_tuple(block)])
+            trees = [ffc_compile_form(form, prefix=name + blockid(block),
+                                      parameters=ffc_parameters)[0]
+                     for block, form in forms]
+
+            ida = forms[0][1].form_data().integral_data[0]
             # Set optimization options
             opts = {} if ida.domain_type not in ['cell'] else \
                    {'licm': False,
                     'tile': None,
                     'vect': None,
                     'ap': False}
-            kernels.append(Kernel(Root([incl, kernel]), '%s_%s_integral_0_%s' %
-                          (name, ida.domain_type, ida.domain_id), opts))
+            kernels.append(Kernel(Root([incl] + trees), '%s_%s_integral_0_%s' %
+                          (name + blockid(block), ida.domain_type, ida.domain_id), opts))
         self.kernels = tuple(kernels)
-
         self._initialized = True
 
 
