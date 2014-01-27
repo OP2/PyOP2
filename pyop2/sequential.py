@@ -38,6 +38,7 @@ from utils import as_tuple
 from petsc_base import *
 import host
 from host import Arg  # noqa: needed by BackendSelector
+import profiling as p
 
 # Parallel loop API
 
@@ -45,7 +46,7 @@ from host import Arg  # noqa: needed by BackendSelector
 class JITModule(host.JITModule):
 
     _wrapper = """
-void wrap_%(kernel_name)s__(PyObject *_start, PyObject *_end,
+double wrap_%(kernel_name)s__(PyObject *_start, PyObject *_end,
                             %(ssinds_arg)s
                             %(wrapper_args)s %(const_args)s %(off_args)s %(layer_arg)s) {
   int start = (int)PyInt_AsLong(_start);
@@ -56,6 +57,11 @@ void wrap_%(kernel_name)s__(PyObject *_start, PyObject *_end,
   %(off_inits)s;
   %(layer_arg_init)s;
   %(map_decl)s
+  //likwid_markerInit();
+  long start_t, end_t;
+  //likwid_markerThreadInit();
+  //likwid_markerStartRegion("accumulate");
+  start_t = stamp();
   for ( int n = start; n < end; n++ ) {
     int i = %(index_expr)s;
     %(vec_inits)s;
@@ -70,6 +76,11 @@ void wrap_%(kernel_name)s__(PyObject *_start, PyObject *_end,
     %(apply_offset)s;
     %(extr_loop_close)s
   }
+  //likwid_markerStopRegion("accumulate");
+  end_t = stamp();
+  //likwid_markerClose();
+  //printf("Time for loop is = %%f\\n", (end_t-start_t)/(1000.0*1000.0* 1000));
+  return  (end_t-start_t)/(1000.0*1000.0* 1000);
 }
 """
 
@@ -110,7 +121,13 @@ class ParLoop(host.ParLoop):
         if part.size > 0:
             self._jit_args[0] = part.offset
             self._jit_args[1] = part.offset + part.size
-            fun(*self._jit_args)
+            if configuration["profile"]:
+                p.tic_call(self.loop_name)
+                loop_time = fun(*self._jit_args)
+                p.toc_call(self.loop_name)
+                p.time(self.loop_name, loop_time)
+            else:
+                loop_time = fun(*self._jit_args)
 
 
 def _setup():

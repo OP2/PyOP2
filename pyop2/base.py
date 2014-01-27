@@ -48,6 +48,7 @@ from backends import _make_object
 from mpi import MPI, _MPI, _check_comm, collective
 from sparsity import build_sparsity
 from version import __version__ as version
+import profiling as p
 
 
 class LazyComputation(object):
@@ -420,6 +421,10 @@ class Arg(object):
     @property
     def _is_MAX(self):
         return self._access == MAX
+
+    @property
+    def _is_RW(self):
+        return self._access == RW
 
     @property
     def _is_direct(self):
@@ -2900,6 +2905,9 @@ class Kernel(KernelCached):
         code must conform to the OP2 user kernel API."""
         return self._code
 
+    def _set_code(self, code):
+        self._code = preprocess(code)
+
     def __str__(self):
         return "OP2 Kernel: %s" % self._name
 
@@ -3001,7 +3009,25 @@ class ParLoop(LazyComputation):
         self._it_space = self.build_itspace(iterset)
 
     def _run(self):
-        return self.compute()
+        if configuration["profile"]:
+            self.loop_name = "_".join([self._kernel.name,
+                                      self.it_space.name.split("/")[-1],
+                                      self._kernel.cache_key])
+            vol1 = sum([arg.data.dataset.set.size * arg.data.cdim * arg.data.dtype.itemsize
+                       for arg in self.args if arg._is_dat])
+            vol3 = sum([arg.data.dataset.set.size * arg.data.cdim * arg.data.dtype.itemsize
+                       for arg in self.args if arg._is_dat and (arg._is_INC or arg._is_RW)])
+            vol2 = sum([(2 * arg.data._sparsity.onz + arg.data._sparsity.nz) *
+                        arg.dtype.itemsize
+                        for arg in self.args if arg._is_mat])
+            self.vol = vol1 + vol2 + vol3
+            p.data_volume(self.loop_name, self.vol)
+            p.tic(self.loop_name)
+            c = self.compute()
+            p.toc(loop_name)
+            return c
+        else:
+            return self.compute()
 
     @collective
     def compute(self):
@@ -3243,7 +3269,12 @@ class Solver(object):
         :arg b: The :class:`Dat` containing the RHS.
         """
         _trace.evaluate(set([A, b]), set([x]))
-        self._solve(A, x, b)
+        if configuration["profile"]:
+            p.tic("solve")
+            self._solve(A, x, b)
+            p.toc("solve")
+        else:
+            self._solve(A, x, b)
 
     def _solve(self, A, x, b):
         raise NotImplementedError("solve must be implemented by backend")

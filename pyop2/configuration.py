@@ -62,6 +62,7 @@ class Configuration(object):
     DEFAULTS = {
         "backend": ("PYOP2_BACKEND", str, "sequential"),
         "debug": ("PYOP2_DEBUG", int, 0),
+        "profile": ("PYOP2_PROFILE", int, 0),
         "log_level": ("PYOP2_LOG_LEVEL", (str, int), "WARNING"),
         "lazy_evaluation": ("PYOP2_LAZY", bool, True),
         "lazy_max_trace_length": ("PYOP2_MAX_TRACE_LENGTH", int, 0),
