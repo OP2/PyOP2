@@ -536,6 +536,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
 
 class JITModule(base.JITModule):
 
+    _globalcount = 0
     _cppargs = []
     _system_headers = []
     _libraries = []
@@ -604,11 +605,12 @@ class JITModule(base.JITModule):
                 library_dirs=[d + '/lib' for d in get_petsc_dir()],
                 libraries=['petsc'] + self._libraries,
                 sources=["mat_utils.cxx"],
-                modulename=self._kernel.name if configuration["debug"] else None)
+                modulename='pyop2_module_%d' % JITModule._globalcount if configuration["debug"] else None)
         if cc:
             os.environ['CC'] = cc
         else:
             os.environ.pop('CC')
+        JITModule._globalcount += 1
         return self._fun
 
     def generate_code(self):
