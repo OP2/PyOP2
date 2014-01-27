@@ -254,8 +254,13 @@ class FFCKernel(DiskCached, KernelCached):
                     'tile': None,
                     'vect': None,
                     'ap': False}
-            kernels.append(Kernel(Root([incl] + trees), '%s_%s_integral_0_%s' %
-                          (name + blockid(block), ida.domain_type, ida.domain_id), opts))
+
+            def fname(name, ida, blkid=''):
+                return '%s_%s_integral_0_%s' % (name + blkid, ida.domain_type,
+                                                ida.domain_id)
+            kernels.append(Kernel(Root([incl] + trees), fname(name, ida), opts,
+                                  [(block, fname(name, ida, blockid(block)))
+                                   for block, form in forms]))
         self.kernels = tuple(kernels)
         self._initialized = True
 
