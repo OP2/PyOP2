@@ -256,6 +256,7 @@ class TestMixedIndirectLoop:
                      d(op2.READ))
         assert all(mdat[0].data == 1.0) and mdat[1].data == 4096.0
 
+    @pytest.mark.xfail
     def test_mixed_non_mixed_dat_itspace(self, backend, mdat, mmap, iterset):
         """Increment into a MixedDat from a Dat using iteration spaces."""
         d = op2.Dat(iterset, np.ones(iterset.size))

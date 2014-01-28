@@ -800,6 +800,7 @@ class TestMixedMatrices:
                      mdat(op2.READ, mmap))
         return dat
 
+    @pytest.mark.xfail
     def test_assemble_mixed_mat(self, backend, mat):
         """Assemble into a matrix declared on a mixed sparsity."""
         eps = 1.e-12
@@ -808,12 +809,14 @@ class TestMixedMatrices:
         assert_allclose(mat[1, 0].values, self.od.T, eps)
         assert_allclose(mat[1, 1].values, self.ll, eps)
 
+    @pytest.mark.xfail
     def test_assemble_mixed_rhs(self, backend, dat):
         """Assemble a simple right-hand side over a mixed space and check result."""
         eps = 1.e-12
         assert_allclose(dat[0].data_ro, rdata(3), eps)
         assert_allclose(dat[1].data_ro, [1.0, 4.0, 6.0, 4.0], eps)
 
+    @pytest.mark.xfail
     def test_assemble_mixed_rhs_vector(self, backend, mset, mmap, mvdat):
         """Assemble a simple right-hand side over a mixed space and check result."""
         dat = op2.MixedDat(mset ** 2)
