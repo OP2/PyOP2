@@ -64,7 +64,6 @@ void wrap_%(kernel_name)s__(PyObject *_start, PyObject *_end,
     %(map_bcs_m)s;
     %(buffer_decl)s;
     %(buffer_gather)s
-    %(kernel_name)s(%(kernel_args)s);
     %(layout_decl)s;
     %(layout_loop)s
         %(layout_assign)s;
