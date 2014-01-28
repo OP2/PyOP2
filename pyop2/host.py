@@ -757,7 +757,10 @@ class JITModule(base.JITModule):
                                   for count, arg in enumerate(self._args)])
         _buf_decl = ";\n".join([decl for name, decl in _buf_decl.values()])
 
-        def itset_loop_body(i, j, shape, offsets):
+        def itset_loop_body(idx, kernel):
+            i, j = idx
+            shape = self._itspace._block_shape[i][j]
+            offsets = self._itspace._offsets[i][j]
             nloops = len(shape)
             _itspace_loops = '\n'.join(['  ' * n + itspace_loop(n, e) for n, e in enumerate(shape)])
             _itspace_args = [(count, arg) for count, arg in enumerate(self._args)
@@ -794,6 +797,7 @@ class JITModule(base.JITModule):
                 _itspace_loop_close = ''
 
             template = """
+    %(kernel_name)s(%(kernel_args)s);
     %(buffer_decl_scatter)s;
     %(itspace_loops)s
     %(ind)s%(buffer_scatter)s;
@@ -805,6 +809,8 @@ class JITModule(base.JITModule):
 
             return template % {
                 'ind': '  ' * nloops,
+                'kernel_name': kernel,
+                'kernel_args': _kernel_args,
                 'itspace_loops': indent(_itspace_loops, 2),
                 'buffer_decl_scatter': _buf_decl_scatter,
                 'buffer_scatter': _buf_scatter,
@@ -816,6 +822,10 @@ class JITModule(base.JITModule):
                 'addtos_scalar_field': indent(_addtos_scalar_field, 2)
             }
 
+        if self._kernel._blocks:
+            loop_body = '\n'.join([itset_loop_body(idx, kernel) for idx, kernel in self._kernel._blocks])
+        else:
+            loop_body = itset_loop_body((0, 0), self._kernel.name)
         return {'kernel_name': self._kernel.name,
                 'ssinds_arg': _ssinds_arg,
                 'ssinds_dec': _ssinds_dec,
@@ -845,5 +855,4 @@ class JITModule(base.JITModule):
                 'layout_loop': _layout_loops,
                 'layout_assign': _layout_assign,
                 'layout_loop_close': _layout_loops_close,
-                'kernel_args': _kernel_args,
-                'itset_loop_body': '\n'.join([itset_loop_body(i, j, shape, offsets) for i, j, shape, offsets in self._itspace])}
+                'itset_loop_body': loop_body}
