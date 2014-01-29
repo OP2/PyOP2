@@ -251,7 +251,10 @@ class ParLoop(device.ParLoop, host.ParLoop):
             # offset_args returns an empty list if there are none
             self._jit_args.extend(self.offset_args)
 
-            self._jit_args.extend(self.layer_arg)
+            if self._it_space._iterset._extruded_tb:
+                self._jit_args.extend([2])
+            else:
+                self._jit_args.extend(self.layer_arg)
 
         if part.size > 0:
             #TODO: compute partition size

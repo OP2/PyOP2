@@ -109,7 +109,10 @@ class ParLoop(host.ParLoop):
 
             self._jit_args.extend(self.offset_args)
 
-            self._jit_args.extend(self.layer_arg)
+            if self._it_space._iterset._extruded_tb:
+                self._jit_args.extend([2])
+            else:
+                self._jit_args.extend(self.layer_arg)
 
         if part.size > 0:
             self._jit_args[0] = part.offset

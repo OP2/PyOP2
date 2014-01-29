@@ -568,6 +568,8 @@ class Set(object):
         self._layers = layers if layers is not None else 1
         self._partition_size = 1024
         self._ext_tb_bcs = None
+        self._ext_tb = False
+        self._top = False
         if self.halo:
             self.halo.verify(self)
         Set._globalcount += 1
@@ -642,6 +644,35 @@ class Set(object):
             The first entry indicates whether a boundary condition will be applied at the bottom.
             The second entry indicates whether a boundary condition will be applied at the top."""
         self._ext_tb_bcs = value
+
+    @property
+    def _extruded_tb(self):
+        """A flag indicating whether the extruded problem is a horizontal facet integral.
+
+        True means horiozontal facet integrals will be applied at the top or bottom."""
+        return self._ext_tb
+
+    @_extruded_tb.setter
+    def _extruded_tb(self, value):
+        """Set the flag to signal a horizontal facet integral.
+
+        :arg value: a boolean value.
+           Indicates whether a horiozontal facet integral will be applied at the bottom or top."""
+        self._ext_tb = value
+
+    @property
+    def _is_top(self):
+        """A flag indicating whether the extruded problem is a horizontal facet integral
+        on the top facet."""
+        return self._top
+
+    @_is_top.setter
+    def _is_top(self, value):
+        """Set the flag to signal a horizontal facet integral on the top facet.
+
+        :arg value: a boolean value.
+           Indicates whether a horiozontal facet integral will be applied on the top."""
+        self._top = value
 
     def __iter__(self):
         """Yield self when iterated over."""
@@ -1318,7 +1349,8 @@ class IterationSpace(object):
     def cache_key(self):
         """Cache key used to uniquely identify the object in the cache."""
         return self._extents, self._block_shape, self.iterset.layers, \
-            isinstance(self._iterset, Subset), self.iterset._extruded_bcs
+            isinstance(self._iterset, Subset), self.iterset._extruded_bcs, \
+            self.iterset._extruded_tb, self.iterset._is_top
 
 
 class DataCarrier(object):
