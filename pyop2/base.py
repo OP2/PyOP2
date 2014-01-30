@@ -2947,6 +2947,10 @@ class JITModule(Cached):
                 key += (arg.data.dims, arg.data.dtype, idxs,
                         map_arities, arg.access)
 
+        iterate = kwargs.get("iterate", None)
+        if iterate is not None:
+            key += ((iterate,))
+
         # The currently defined Consts need to be part of the cache key, since
         # these need to be uploaded to the device before launching the kernel
         for c in Const._definitions():
