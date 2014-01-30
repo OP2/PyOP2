@@ -645,35 +645,6 @@ class Set(object):
             The second entry indicates whether a boundary condition will be applied at the top."""
         self._ext_tb_bcs = value
 
-    @property
-    def _extruded_tb(self):
-        """A flag indicating whether the extruded problem is a horizontal facet integral.
-
-        True means horiozontal facet integrals will be applied at the top or bottom."""
-        return self._ext_tb
-
-    @_extruded_tb.setter
-    def _extruded_tb(self, value):
-        """Set the flag to signal a horizontal facet integral.
-
-        :arg value: a boolean value.
-           Indicates whether a horiozontal facet integral will be applied at the bottom or top."""
-        self._ext_tb = value
-
-    @property
-    def _is_top(self):
-        """A flag indicating whether the extruded problem is a horizontal facet integral
-        on the top facet."""
-        return self._top
-
-    @_is_top.setter
-    def _is_top(self, value):
-        """Set the flag to signal a horizontal facet integral on the top facet.
-
-        :arg value: a boolean value.
-           Indicates whether a horiozontal facet integral will be applied on the top."""
-        self._top = value
-
     def __iter__(self):
         """Yield self when iterated over."""
         yield self
@@ -1349,8 +1320,7 @@ class IterationSpace(object):
     def cache_key(self):
         """Cache key used to uniquely identify the object in the cache."""
         return self._extents, self._block_shape, self.iterset.layers, \
-            isinstance(self._iterset, Subset), self.iterset._extruded_bcs, \
-            self.iterset._extruded_tb, self.iterset._is_top
+            isinstance(self._iterset, Subset), self.iterset._extruded_bcs
 
 
 class DataCarrier(object):
@@ -3009,6 +2979,37 @@ class JITModule(Cached):
                 f.write(src)
 
 
+class Iterate(object):
+    """ Class that specifies the way to iterate over a column of extruded
+    mesh elements. A column of elements refers to the elements which are
+    in the extrusion direction. The accesses to these elements are direct.
+    """
+
+    _iterates = ["ON_COLUMN", "ON_BOTTOM", "ON_TOP", "ON_INTERIOR_FACETS"]
+
+    @validate_in(('iterate', _iterates, IterateValueError))
+    def __init__(self, iterate):
+        self._iterate = iterate
+
+    def __str__(self):
+        return "OP2 Iterate: %s" % self._iterate
+
+    def __repr__(self):
+        return "%r" % self._iterate
+
+ON_COLUMN = Iterate("ON_COLUMN")
+"""Iterate over the entire column of cells."""
+
+ON_BOTTOM = Iterate("ON_BOTTOM")
+"""Itrerate over the cells at the bottom of the column in an extruded mesh."""
+
+ON_TOP = Iterate("ON_TOP")
+"""Iterate over the top cells in an extruded mesh."""
+
+ON_INTERIOR_FACETS = Iterate("ON_INTERIOR_FACETS")
+"""Iterate over the interior facets of an extruded mesh."""
+
+
 class ParLoop(LazyComputation):
     """Represents the kernel, iteration space and arguments of a parallel loop
     invocation.
@@ -3021,7 +3022,7 @@ class ParLoop(LazyComputation):
 
     @validate_type(('kernel', Kernel, KernelTypeError),
                    ('iterset', Set, SetTypeError))
-    def __init__(self, kernel, iterset, *args):
+    def __init__(self, kernel, iterset, *args, **kwargs):
         LazyComputation.__init__(self,
                                  set([a.data for a in args if a.access in [READ, RW]]) | Const._defs,
                                  set([a.data for a in args if a.access in [RW, WRITE, MIN, MAX, INC]]))
@@ -3029,6 +3030,7 @@ class ParLoop(LazyComputation):
         self._actual_args = args
         self._kernel = kernel
         self._is_layered = iterset.layers > 1
+        self._iterate = kwargs.get("iterate", None)
 
         for i, arg in enumerate(self._actual_args):
             arg.position = i
@@ -3217,6 +3219,11 @@ class ParLoop(LazyComputation):
         """Flag which triggers extrusion"""
         return self._is_layered
 
+    @property
+    def iterate(self):
+        """Affects the iteration space of the parallel loop."""
+        return self._iterate
+
 DEFAULT_SOLVER_PARAMETERS = {'ksp_type': 'cg',
                              'pc_type': 'jacobi',
                              'ksp_rtol': 1.0e-7,
@@ -3294,5 +3301,5 @@ class Solver(object):
 
 
 @collective
-def par_loop(kernel, it_space, *args):
-    return _make_object('ParLoop', kernel, it_space, *args).enqueue()
+def par_loop(kernel, it_space, *args, **kwargs):
+    return _make_object('ParLoop', kernel, it_space, *args, **kwargs).enqueue()

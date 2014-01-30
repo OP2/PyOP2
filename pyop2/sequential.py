@@ -38,6 +38,7 @@ from utils import as_tuple
 from petsc_base import *
 import host
 from host import Kernel, Arg  # noqa: needed by BackendSelector
+from base import ON_BOTTOM, ON_TOP
 
 # Parallel loop API
 
@@ -84,7 +85,7 @@ class ParLoop(host.ParLoop):
         host.ParLoop.__init__(self, *args, **kwargs)
 
     def _compute(self, part):
-        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct)
+        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct, iterate=self.iterate)
         if not hasattr(self, '_jit_args'):
             self._jit_args = [0, 0]
             if isinstance(self._it_space._iterset, Subset):
@@ -109,7 +110,7 @@ class ParLoop(host.ParLoop):
 
             self._jit_args.extend(self.offset_args)
 
-            if self._it_space._iterset._extruded_tb:
+            if self.iterate in [ON_TOP, ON_BOTTOM]:
                 self._jit_args.extend([2])
             else:
                 self._jit_args.extend(self.layer_arg)
