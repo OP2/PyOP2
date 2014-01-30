@@ -39,6 +39,7 @@ import os
 import tempfile
 import numpy as np
 
+#from ufl import split
 from ufl import Argument, Coefficient, Form, FiniteElement, VectorElement
 from ufl.algorithms import as_form, traverse_terminals, ReuseTransformer
 from ufl.indexed import Indexed
@@ -94,8 +95,7 @@ class FormSplitter(ReuseTransformer):
         # If there is no mixed element involved, return the unmodified form
         if all(isinstance(e, (FiniteElement, VectorElement)) for e in fd.unique_sub_elements):
             return [((0, 0), form)]
-        return [[(idx, f * i.measure())
-                 for idx, f in as_list(self.visit(i.integrand()))]
+        return [[f * i.measure() for f in as_tuple(self.visit(i.integrand()))]
                 for i in form.integrals()]
 
     def sum(self, o, l, r):
@@ -110,6 +110,8 @@ class FormSplitter(ReuseTransformer):
         l = as_list(l)
         r = as_list(r)
         res = []
+        from IPython import embed
+        embed()
         # For each (index, argument) tuple in the left operand list, look for
         # a tuple with corresponding index in the right operand list. If
         # there is one, append the sum of the arguments with that index to the
@@ -153,10 +155,10 @@ class FormSplitter(ReuseTransformer):
 
     def inner(self, o, l, r):
         """Reconstruct an inner product on each of the component spaces."""
-        if isinstance(l, list) and isinstance(r, list):
-            return [self._binop(o, op1, op2) for op1, op2 in zip(l, r)]
+        if isinstance(l, tuple) and isinstance(r, tuple):
+            return tuple(o.reconstruct(op1, op2) for op1, op2 in zip(l, r))
         else:
-            return self._binop(o, l, r)
+            return o.reconstruct(l, r)
 
     def product(self, o, l, r):
         """Reconstruct a product on each of the component spaces."""
@@ -166,13 +168,10 @@ class FormSplitter(ReuseTransformer):
         """Reconstruct a product on each of the component spaces."""
         return self._binop(o, l, r)
 
-    def div(self, o, arg):
-        """Reconstruct argument of Div."""
-        i, op = arg
-        return (i, o.reconstruct(op))
-
     def list_tensor(self, o, *ops):
         """Pass through the ops of a list tensor."""
+        from IPython import embed
+        embed()
         same_index = lambda ops: all(ops[0][0] == op[0] for op in ops[1:])
         have_type = lambda typ, ops: all(isinstance(op, typ) for _, op in ops)
         if have_type(Indexed, ops) and same_index(ops):
@@ -190,16 +189,16 @@ class FormSplitter(ReuseTransformer):
             # we can just return the coefficient.
             i = idx._indices[0]._value
             pos = 0
-            for j, op in arg:
+            for op in arg:
                 # If the FixedIndex points at a scalar (shapeless) operand,
                 # return it
                 if not op.shape() and i == pos:
-                    return j, op
+                    return op
                 size = np.prod(op.shape() or 1)
                 # If the FixedIndex points at a component of the current
                 # operand, reconstruct an Indexed with an adjusted index space
                 if i < pos + size:
-                    return j, o.reconstruct(op, MultiIndex(FixedIndex(i - pos), {}))
+                    return o.reconstruct(op, MultiIndex(FixedIndex(i - pos), {}))
                 # Otherwise update the position in the index space
                 pos += size
             raise NotImplementedError("No idea what to in %r with %r" % (o, arg))
@@ -208,15 +207,19 @@ class FormSplitter(ReuseTransformer):
 
     def argument(self, o):
         """Split an argument into its constituent spaces."""
-        return [(i, Argument(e, o.count()))
-                for i, e in enumerate(o.element().mixed_sub_elements())]
+        if isinstance(o.element(), (FiniteElement, VectorElement)):
+            return o
+        return tuple(Argument(e, o.count())
+                     for e in o.element().mixed_sub_elements())
+        #return split(o)
 
     def coefficient(self, o):
         """Split an argument into its constituent spaces."""
         if isinstance(o.element(), (FiniteElement, VectorElement)):
             return o
-        return [Coefficient(e, o.count())
-                for e in o.element().mixed_sub_elements()]
+        return tuple(Coefficient(e, o.count())
+                     for e in o.element().mixed_sub_elements())
+        #return split(o)
 
 
 class FFCKernel(DiskCached, KernelCached):
@@ -242,12 +245,13 @@ class FFCKernel(DiskCached, KernelCached):
         # ever contain a single integral. We therefore always return the first
         # element of any lists that contain different integrals.
         for forms in FormSplitter().split(original_form):
-            blockid = lambda block: ''.join(["_%d" % i for i in as_tuple(block)])
-            trees = [ffc_compile_form(form, prefix=name + blockid(block),
+            trees = [ffc_compile_form(form, prefix=name + str(i),
                                       parameters=ffc_parameters)[0]
-                     for block, form in forms]
+                     for i, form in enumerate(forms)]
+            from IPython import embed
+            embed()
 
-            ida = forms[0][1].form_data().integral_data[0]
+            ida = forms[0].form_data().integral_data[0]
             # Set optimization options
             opts = {} if ida.domain_type not in ['cell'] else \
                    {'licm': False,
@@ -259,8 +263,8 @@ class FFCKernel(DiskCached, KernelCached):
                 return '%s_%s_integral_0_%s' % (name + blkid, ida.domain_type,
                                                 ida.domain_id)
             kernels.append(Kernel(Root([incl] + trees), fname(name, ida), opts,
-                                  [(block, fname(name, ida, blockid(block)))
-                                   for block, form in forms]))
+                                  [fname(name, ida, str(i))
+                                   for i, form in enumerate(forms)]))
         self.kernels = tuple(kernels)
         self._initialized = True
 
