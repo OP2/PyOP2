@@ -39,10 +39,9 @@ import os
 import tempfile
 import numpy as np
 
-#from ufl import split
-from ufl import Argument, Coefficient, Form, FiniteElement, VectorElement
+from ufl import split
+from ufl import Argument, Form, FiniteElement, VectorElement
 from ufl.algorithms import as_form, traverse_terminals, ReuseTransformer
-from ufl.indexed import Indexed
 from ufl.indexing import FixedIndex, MultiIndex
 from ffc import default_parameters, compile_form as ffc_compile_form
 from ffc import constants
@@ -107,11 +106,9 @@ class FormSplitter(ReuseTransformer):
                     l.remove(e)
                     return e
             return None, None
-        l = as_list(l)
-        r = as_list(r)
-        res = []
         from IPython import embed
         embed()
+        res = []
         # For each (index, argument) tuple in the left operand list, look for
         # a tuple with corresponding index in the right operand list. If
         # there is one, append the sum of the arguments with that index to the
@@ -168,17 +165,6 @@ class FormSplitter(ReuseTransformer):
         """Reconstruct a product on each of the component spaces."""
         return self._binop(o, l, r)
 
-    def list_tensor(self, o, *ops):
-        """Pass through the ops of a list tensor."""
-        from IPython import embed
-        embed()
-        same_index = lambda ops: all(ops[0][0] == op[0] for op in ops[1:])
-        have_type = lambda typ, ops: all(isinstance(op, typ) for _, op in ops)
-        if have_type(Indexed, ops) and same_index(ops):
-            return (ops[0][0], o.reconstruct(*[op for _, op in ops]))
-        else:
-            raise NotImplementedError("No idea what to in %r with %r" % o, ops)
-
     def indexed(self, o, arg, idx):
         """Reconstruct the :class:`ufl.indexed.Indexed` only if the coefficient
         is defined on a :class:`core_types.VectorFunctionSpace`."""
@@ -207,19 +193,11 @@ class FormSplitter(ReuseTransformer):
 
     def argument(self, o):
         """Split an argument into its constituent spaces."""
-        if isinstance(o.element(), (FiniteElement, VectorElement)):
-            return o
-        return tuple(Argument(e, o.count())
-                     for e in o.element().mixed_sub_elements())
-        #return split(o)
+        return split(o)
 
     def coefficient(self, o):
         """Split an argument into its constituent spaces."""
-        if isinstance(o.element(), (FiniteElement, VectorElement)):
-            return o
-        return tuple(Coefficient(e, o.count())
-                     for e in o.element().mixed_sub_elements())
-        #return split(o)
+        return split(o)
 
 
 class FFCKernel(DiskCached, KernelCached):
