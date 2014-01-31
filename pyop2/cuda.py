@@ -62,6 +62,12 @@ class Kernel(op2.Kernel):
 
             def visit_FuncDef(self, node):
                 node.decl.funcspec.insert(0, '__device__')
+                self.generic_visit(node.body)
+
+            def visit_Decl(self, node):
+                # Static is not allow in __global__ or __device__ functions
+                if 'static' in node.storage:
+                    node.storage.remove('static')
 
         ast = c_parser.CParser().parse(self._code)
         Instrument().generic_visit(ast)
