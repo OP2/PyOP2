@@ -48,13 +48,12 @@ This demo requires the MAPDES forks of FFC, FIAT and UFL which are found at:
 
 FEniCS Viper is optionally used to visualise the solution.
 """
-import os
 import numpy as np
+import os
 
 from pyop2 import op2, utils
-from pyop2.ffc_interface import compile_form
 from triangle_reader import read_triangle
-from ufl import *
+from utils import dump_kernel, load_kernel
 
 
 def viper_shape(array):
@@ -64,36 +63,49 @@ def viper_shape(array):
 
 
 def main(opt):
-    # Set up finite element problem
-
     dt = 0.0001
 
-    T = FiniteElement("Lagrange", "triangle", 1)
-    V = VectorElement("Lagrange", "triangle", 1)
+    if opt['firedrake']:
+        from firedrake.ffc_interface import compile_form
+        from ufl import *
+        # Set up finite element problem
 
-    p = TrialFunction(T)
-    q = TestFunction(T)
-    t = Coefficient(T)
-    u = Coefficient(V)
-    a = Coefficient(T)
+        T = FiniteElement("Lagrange", "triangle", 1)
+        V = VectorElement("Lagrange", "triangle", 1)
 
-    diffusivity = 0.1
+        p = TrialFunction(T)
+        q = TestFunction(T)
+        t = Coefficient(T)
+        u = Coefficient(V)
+        a = Coefficient(T)
 
-    M = p * q * dx
+        diffusivity = 0.1
 
-    adv_rhs = (q * t + dt * dot(grad(q), u) * t) * dx
+        M = p * q * dx
 
-    d = -dt * diffusivity * dot(grad(q), grad(p)) * dx
+        adv_rhs = (q * t + dt * dot(grad(q), u) * t) * dx
 
-    diff = M - 0.5 * d
-    diff_rhs = action(M + 0.5 * d, t)
+        d = -dt * diffusivity * dot(grad(q), grad(p)) * dx
 
-    # Generate code for mass and rhs assembly.
+        diff = M - 0.5 * d
+        diff_rhs = action(M + 0.5 * d, t)
 
-    adv, = compile_form(M, "adv")
-    adv_rhs, = compile_form(adv_rhs, "adv_rhs")
-    diff, = compile_form(diff, "diff")
-    diff_rhs, = compile_form(diff_rhs, "diff_rhs")
+        # Generate code for mass and rhs assembly.
+
+        adv = compile_form(M, "adv")[0][-1]
+        adv_rhs = compile_form(adv_rhs, "adv_rhs")[0][-1]
+        diff = compile_form(diff, "diff")[0][-1]
+        diff_rhs = compile_form(diff_rhs, "diff_rhs")[0][-1]
+        if opt['update_kernels']:
+            dump_kernel(adv)
+            dump_kernel(adv_rhs)
+            dump_kernel(diff)
+            dump_kernel(diff_rhs)
+    else:
+        adv = load_kernel('adv_cell_integral_0_otherwise')
+        adv_rhs = load_kernel('adv_rhs_cell_integral_0_otherwise')
+        diff = load_kernel('diff_cell_integral_0_otherwise')
+        diff_rhs = load_kernel('diff_rhs_cell_integral_0_otherwise')
 
     # Set up simulation data structures
 
@@ -202,8 +214,13 @@ def main(opt):
         print "Expected - computed  solution: %s" % (tracer.data - analytical.data)
 
     if opt['test_output'] or opt['return_output']:
-        l2norm = dot(t - a, t - a) * dx
-        l2_kernel, = compile_form(l2norm, "error_norm")
+        if opt['firedrake']:
+            l2norm = dot(t - a, t - a) * dx
+            l2_kernel = compile_form(l2norm, "error_norm")[0][-1]
+            if opt['update_kernels']:
+                dump_kernel(l2_kernel)
+        else:
+            l2_kernel = load_kernel('error_norm_cell_integral_0_otherwise')
         result = op2.Global(1, [0.0])
         op2.par_loop(l2_kernel, elements,
                      result(op2.INC),
@@ -233,6 +250,10 @@ parser.add_argument('-t', '--test-output', action='store_true',
                     help='Save output for testing')
 parser.add_argument('-p', '--profile', action='store_true',
                     help='Create a cProfile for the run')
+parser.add_argument('-f', '--firedrake', action='store_true',
+                    help='Obtain kernels via Firedrake')
+parser.add_argument('-u', '--update-kernels', action='store_true',
+                    help='Update FFC-generated kernels (requires -f)')
 
 if __name__ == '__main__':
     opt = vars(parser.parse_args())

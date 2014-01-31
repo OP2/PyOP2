@@ -43,29 +43,37 @@ This demo requires the MAPDES forks of FFC, FIAT and UFL which are found at:
     https://bitbucket.org/mapdes/ufl
 """
 
-from pyop2 import op2, utils
-from ufl import *
-from pyop2.ffc_interface import compile_form
-
 import numpy as np
+
+from pyop2 import op2, utils
+from utils import dump_kernel, load_kernel
 
 
 def main(opt):
-    # Set up finite element identity problem
+    if opt['firedrake']:
+        # Set up finite element identity problem
+        from firedrake.ffc_interface import compile_form
+        from ufl import *
 
-    E = VectorElement("Lagrange", "triangle", 1)
+        E = VectorElement("Lagrange", "triangle", 1)
 
-    v = TestFunction(E)
-    u = TrialFunction(E)
-    f = Coefficient(E)
+        v = TestFunction(E)
+        u = TrialFunction(E)
+        f = Coefficient(E)
 
-    a = inner(v, u) * dx
-    L = inner(v, f) * dx
+        a = inner(v, u) * dx
+        L = inner(v, f) * dx
 
-    # Generate code for mass and rhs assembly.
+        # Generate code for mass and rhs assembly.
 
-    mass, = compile_form(a, "mass")
-    rhs, = compile_form(L, "rhs")
+        mass = compile_form(a, "mass_vector")[0][-1]
+        rhs = compile_form(L, "mass_vector_rhs")[0][-1]
+        if opt['update_kernels']:
+            dump_kernel(mass)
+            dump_kernel(rhs)
+    else:
+        mass = load_kernel("mass_vector_cell_integral_0_otherwise")
+        rhs = load_kernel("mass_vector_rhs_cell_integral_0_otherwise")
 
     # Set up simulation data structures
 
@@ -125,6 +133,10 @@ parser.add_argument('-s', '--save-output', action='store_true',
                     help='Save the output of the run (used for testing)')
 parser.add_argument('-p', '--profile', action='store_true',
                     help='Create a cProfile for the run')
+parser.add_argument('-f', '--firedrake', action='store_true',
+                    help='Obtain kernels via Firedrake')
+parser.add_argument('-u', '--update-kernels', action='store_true',
+                    help='Update FFC-generated kernels (requires -f)')
 
 if __name__ == '__main__':
     opt = vars(parser.parse_args())
