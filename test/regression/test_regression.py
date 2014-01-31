@@ -36,6 +36,14 @@ def test_adv_diff(backend, mms_meshes):
     assert all(convergence > [1.5, 1.85, 1.95])
 
 
+def test_adv_diff_nonsplit(backend, mms_meshes):
+    from demo.adv_diff_nonsplit import main, parser
+    res = np.array([np.sqrt(main(vars(parser.parse_args(['-m', name, '-r']))))
+                    for name, _ in mms_meshes])
+    convergence = np.log2(res[:len(mms_meshes) - 1] / res[1:])
+    assert all(convergence > [1.5, 1.85, 1.95])
+
+
 def test_laplace_ffc(backend):
     from demo.laplace_ffc import main, parser
     f, x = main(vars(parser.parse_args(['-r'])))
