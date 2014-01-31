@@ -52,9 +52,9 @@ import os
 import numpy as np
 
 from pyop2 import op2, utils
-from pyop2.ffc_interface import compile_form
 from triangle_reader import read_triangle
-from ufl import *
+
+_kerneldir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'kernels')
 
 
 def viper_shape(array):
@@ -64,36 +64,57 @@ def viper_shape(array):
 
 
 def main(opt):
-    # Set up finite element problem
-
     dt = 0.0001
 
-    T = FiniteElement("Lagrange", "triangle", 1)
-    V = VectorElement("Lagrange", "triangle", 1)
+    if opt['firedrake']:
+        from firedrake.ffc_interface import compile_form
+        from ufl import *
+        # Set up finite element problem
 
-    p = TrialFunction(T)
-    q = TestFunction(T)
-    t = Coefficient(T)
-    u = Coefficient(V)
-    a = Coefficient(T)
+        T = FiniteElement("Lagrange", "triangle", 1)
+        V = VectorElement("Lagrange", "triangle", 1)
 
-    diffusivity = 0.1
+        p = TrialFunction(T)
+        q = TestFunction(T)
+        t = Coefficient(T)
+        u = Coefficient(V)
+        a = Coefficient(T)
 
-    M = p * q * dx
+        diffusivity = 0.1
 
-    adv_rhs = (q * t + dt * dot(grad(q), u) * t) * dx
+        M = p * q * dx
 
-    d = -dt * diffusivity * dot(grad(q), grad(p)) * dx
+        adv_rhs = (q * t + dt * dot(grad(q), u) * t) * dx
 
-    diff = M - 0.5 * d
-    diff_rhs = action(M + 0.5 * d, t)
+        d = -dt * diffusivity * dot(grad(q), grad(p)) * dx
 
-    # Generate code for mass and rhs assembly.
+        diff = M - 0.5 * d
+        diff_rhs = action(M + 0.5 * d, t)
 
-    adv, = compile_form(M, "adv")
-    adv_rhs, = compile_form(adv_rhs, "adv_rhs")
-    diff, = compile_form(diff, "diff")
-    diff_rhs, = compile_form(diff_rhs, "diff_rhs")
+        # Generate code for mass and rhs assembly.
+
+        adv, = compile_form(M, "adv")
+        adv_rhs, = compile_form(adv_rhs, "adv_rhs")
+        diff, = compile_form(diff, "diff")
+        diff_rhs, = compile_form(diff_rhs, "diff_rhs")
+        if opt['update_kernels']:
+            with open(os.path.join(_kerneldir, 'adv.c'), 'w') as f:
+                f.write(adv._code)
+            with open(os.path.join(_kerneldir, 'adv_rhs.c'), 'w') as f:
+                f.write(adv_rhs._code)
+            with open(os.path.join(_kerneldir, 'diff.c'), 'w') as f:
+                f.write(diff._code)
+            with open(os.path.join(_kerneldir, 'diff_rhs.c'), 'w') as f:
+                f.write(diff_rhs._code)
+    else:
+        with open(os.path.join(_kerneldir, 'adv.c')) as f:
+            adv = op2.Kernel(f.read(), "adv_cell_integral_0_otherwise")
+        with open(os.path.join(_kerneldir, 'adv_rhs.c')) as f:
+            adv_rhs = op2.Kernel(f.read(), "adv_rhs_cell_integral_0_otherwise")
+        with open(os.path.join(_kerneldir, 'diff.c')) as f:
+            diff = op2.Kernel(f.read(), "diff_cell_integral_0_otherwise")
+        with open(os.path.join(_kerneldir, 'diff_rhs.c')) as f:
+            diff_rhs = op2.Kernel(f.read(), "diff_rhs_cell_integral_0_otherwise")
 
     # Set up simulation data structures
 
@@ -202,8 +223,15 @@ def main(opt):
         print "Expected - computed  solution: %s" % (tracer.data - analytical.data)
 
     if opt['test_output'] or opt['return_output']:
-        l2norm = dot(t - a, t - a) * dx
-        l2_kernel, = compile_form(l2norm, "error_norm")
+        if opt['firedrake']:
+            l2norm = dot(t - a, t - a) * dx
+            l2_kernel, = compile_form(l2norm, "error_norm")
+            if opt['update_kernels']:
+                with open(os.path.join(_kerneldir, 'error_norm.c'), 'w') as f:
+                    f.write(l2_kernel._code)
+        else:
+            with open(os.path.join(_kerneldir, 'error_norm.c')) as f:
+                l2_kernel = op2.Kernel(f.read(), "error_norm_cell_integral_0_otherwise")
         result = op2.Global(1, [0.0])
         op2.par_loop(l2_kernel, elements,
                      result(op2.INC),
@@ -233,6 +261,10 @@ parser.add_argument('-t', '--test-output', action='store_true',
                     help='Save output for testing')
 parser.add_argument('-p', '--profile', action='store_true',
                     help='Create a cProfile for the run')
+parser.add_argument('-f', '--firedrake', action='store_true',
+                    help='Obtain kernels via Firedrake')
+parser.add_argument('-u', '--update-kernels', action='store_true',
+                    help='Update FFC-generated kernels (requires -f)')
 
 if __name__ == '__main__':
     opt = vars(parser.parse_args())

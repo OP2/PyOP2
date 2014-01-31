@@ -41,30 +41,44 @@ bzr branch lp:~mapdes/ffc/pyop2
 This may also depend on development trunk versions of other FEniCS programs.
 """
 
-from pyop2 import op2, utils
-from pyop2.ffc_interface import compile_form
-from triangle_reader import read_triangle
-from ufl import *
-
+import os
 import numpy as np
+
+from pyop2 import op2, utils
+from triangle_reader import read_triangle
+
+_kerneldir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'kernels')
 
 
 def main(opt):
-    # Set up finite element identity problem
+    if opt['firedrake']:
+        # Set up finite element identity problem
+        from firedrake.ffc_interface import compile_form
+        from ufl import *
 
-    E = FiniteElement("Lagrange", "triangle", 1)
+        E = FiniteElement("Lagrange", "triangle", 1)
 
-    v = TestFunction(E)
-    u = TrialFunction(E)
-    f = Coefficient(E)
+        v = TestFunction(E)
+        u = TrialFunction(E)
+        f = Coefficient(E)
 
-    a = v * u * dx
-    L = v * f * dx
+        a = v * u * dx
+        L = v * f * dx
 
-    # Generate code for mass and rhs assembly.
+        # Generate code for mass and rhs assembly.
 
-    mass, = compile_form(a, "mass")
-    rhs, = compile_form(L, "rhs")
+        mass, = compile_form(a, "mass")
+        rhs, = compile_form(L, "rhs")
+        if opt['update_kernels']:
+            with open(os.path.join(_kerneldir, 'mass2d.c'), 'w') as f:
+                f.write(mass._code)
+            with open(os.path.join(_kerneldir, 'mass2d_rhs.c'), 'w') as f:
+                f.write(rhs._code)
+    else:
+        with open(os.path.join(_kerneldir, 'mass2d.c')) as f:
+            mass = op2.Kernel(f.read(), "mass_cell_integral_0_otherwise")
+        with open(os.path.join(_kerneldir, 'mass2d_rhs.c')) as f:
+            rhs = op2.Kernel(f.read(), "rhs_cell_integral_0_otherwise")
 
     # Set up simulation data structures
 
@@ -124,6 +138,10 @@ parser.add_argument('--print-output', action='store_true',
                     help='Print the output of the run to stdout')
 parser.add_argument('-p', '--profile', action='store_true',
                     help='Create a cProfile for the run')
+parser.add_argument('-f', '--firedrake', action='store_true',
+                    help='Obtain kernels via Firedrake')
+parser.add_argument('-u', '--update-kernels', action='store_true',
+                    help='Update FFC-generated kernels (requires -f)')
 
 if __name__ == '__main__':
     opt = vars(parser.parse_args())
