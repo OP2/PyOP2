@@ -38,7 +38,7 @@ from utils import as_tuple
 from petsc_base import *
 import host
 from host import Kernel, Arg  # noqa: needed by BackendSelector
-from base import ON_BOTTOM, ON_TOP
+from base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS
 
 # Parallel loop API
 
@@ -112,6 +112,8 @@ class ParLoop(host.ParLoop):
 
             if self.iterate in [ON_TOP, ON_BOTTOM]:
                 self._jit_args.extend([2])
+            elif self.iterate in [ON_INTERIOR_FACETS]:
+                self._jit_args.extend([self._it_space.layers - 1])
             else:
                 self._jit_args.extend(self.layer_arg)
 
