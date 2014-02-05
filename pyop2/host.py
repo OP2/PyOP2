@@ -103,7 +103,7 @@ class Arg(base.Arg):
         return ";\n%(type)s *%(vec_name)s[%(arity)s]" % \
             {'type': self.ctype,
              'vec_name': self.c_vec_name(),
-             'arity': self.map.arity * cdim * 2 if is_facet else self.map.arity * cdim}
+             'arity': self.map.arity * cdim * (2 if is_facet else 1)}
 
     def c_wrapper_dec(self, is_facet=False):
         if self._is_mixed_mat:
@@ -200,17 +200,36 @@ class Arg(base.Arg):
 
     def c_vec_init(self, is_top, layers, is_facet=False):
         val = []
+        arity = self.map.arity
+        # cells = 1
+        # arity = self.map.arity
+        # is_int_facet = self.map.int_facet
+        # if is_int_facet:
+        #     arity /= 2
+        #     cells *= 2
+        #from IPython import embed; embed()
+        # snd_cell = 0
+        # #The only case when this is true is when we have vertical facets in an extruded mesh.
+        # #The offset is given for only one of the cells hence the length of the offset is half
+        # #the length of the map arity (as each facet neighbours two cells).
+        # if is_facet and layers > 1 and len(self.map.offset) < arity:
+        #     arity /= 2
+        #     snd_cell = arity
         if self._flatten:
+            #for c in range(cells):
             for d in range(self.data.dataset.cdim):
-                for idx in range(self.map.arity):
+                for idx in range(arity):
                     val.append("%(vec_name)s[%(idx)s] = %(data)s" %
                                {'vec_name': self.c_vec_name(),
-                                'idx': d * self.map.arity + idx,
+                                #'idx': (d + self.data.dataset.cdim * c) * arity + idx,
+                                'idx': d * arity + idx,
                                 'data': self.c_ind_data(idx, 0, d, is_top=is_top, layers=layers)})
-                    if is_facet:
+            if is_facet:
+                for d in range(self.data.dataset.cdim):
+                    for idx in range(arity):
                         val.append("%(vec_name)s[%(idx)s] = %(data)s" %
                                    {'vec_name': self.c_vec_name(),
-                                    'idx': (d + self.data.dataset.cdim) * self.map.arity + idx,
+                                    'idx': (d + self.data.dataset.cdim) * arity + idx,
                                     'data': self.c_ind_data(idx, 0, d, is_top=is_top, layers=layers,
                                                             offset=self.map.offset[idx])})
         else:
@@ -220,7 +239,9 @@ class Arg(base.Arg):
                                {'vec_name': self.c_vec_name(),
                                 'idx': idx,
                                 'data': self.c_ind_data(mi, i, is_top=is_top, layers=layers)})
-                    if is_facet:
+            if is_facet:
+                for i, rng in enumerate(zip(self.map.arange[:-1], self.map.arange[1:])):
+                    for mi, idx in enumerate(range(*rng)):
                         val.append("%(vec_name)s[%(idx)s] = %(data)s" %
                                    {'vec_name': self.c_vec_name(),
                                     'idx': idx,
@@ -321,6 +342,9 @@ class Arg(base.Arg):
         cdim = np.prod(self.data.cdim)
         val = []
         for (k, offset), arity in zip(enumerate(self.map.arange[:-1]), self.map.arities):
+            # from IPython import embed; embed()
+            # if is_facet and len(self.map.offset) < arity:
+            #     arity /= 2
             for idx in range(cdim):
                 for i in range(arity):
                     val.append("%(name)s[%(j)d] += _%(offset)s[%(i)d] * %(dim)s;" %
@@ -342,6 +366,8 @@ class Arg(base.Arg):
         cdim = np.prod(self.data.cdim)
         val = []
         for (k, offset), arity in zip(enumerate(self.map.arange[:-1]), self.map.arities):
+            # if is_facet and len(self.map.offset) < arity:
+            #     arity /= 2
             for i in range(arity):
                 val.append("%(name)s[%(j)d] += _%(offset)s[%(i)d] * %(dim)s;" %
                            {'name': self.c_vec_name(),
@@ -675,6 +701,8 @@ class JITModule(base.JITModule):
 
         _wrapper_args = ', '.join([arg.c_wrapper_arg() for arg in self._args])
 
+        # Pass in the is_facet flag to mark the case when it's an interior horizontal facet in
+        #an extruded mesh.
         _wrapper_decs = ';\n'.join([arg.c_wrapper_dec(is_facet=is_facet) for arg in self._args])
 
         if len(Const._defs) > 0:

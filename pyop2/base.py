@@ -2283,6 +2283,7 @@ class Map(object):
         # the application of strong boundary conditions
         self._bottom_mask = np.zeros(len(offset)) if offset is not None else []
         self._top_mask = np.zeros(len(offset)) if offset is not None else []
+        #self._int_facet = int_facet
         if offset is not None and bt_masks is not None:
             self._bottom_mask[bt_masks[0]] = -1
             self._top_mask[bt_masks[1]] = -1
@@ -2379,6 +2380,13 @@ class Map(object):
     def bottom_mask(self):
         """The bottom layer mask to be applied on a mesh cell."""
         return self._bottom_mask
+
+    # @property
+    # def int_facet(self):
+    #     """Flags whether the map is on interior facets or not.
+    #     If it is then it's a map double the size it should be due to having
+    #     to cover two cells instead of one."""
+    #     return self._int_facet
 
     def __str__(self):
         return "OP2 Map: %s from (%s) to (%s) with arity %s" \
