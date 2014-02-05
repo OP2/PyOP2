@@ -77,8 +77,8 @@ class Arg(base.Arg):
             name += "_%d" % j
         return name
 
-    def c_vec_name(self):
-        return self.c_arg_name() + "_vec"
+    def c_vec_name(self, i=0):
+        return self.c_arg_name(i) + "_vec"
 
     def c_map_name(self, i, j):
         return self.c_arg_name() + "_map%d_%d" % (i, j)
@@ -99,11 +99,14 @@ class Arg(base.Arg):
         return val
 
     def c_vec_dec(self):
-        cdim = self.data.dataset.cdim if self._flatten else 1
-        return ";\n%(type)s *%(vec_name)s[%(arity)s]" % \
-            {'type': self.ctype,
-             'vec_name': self.c_vec_name(),
-             'arity': self.map.arity * cdim}
+        val = ""
+        for i, (d, m) in enumerate(zip(self.data.dataset, self.map)):
+            cdim = d.cdim if self._flatten else 1
+            val += ";\n%(type)s *%(vec_name)s[%(arity)s]" % \
+                {'type': self.ctype,
+                 'vec_name': self.c_vec_name(i),
+                 'arity': m.arity * cdim}
+        return val
 
     def c_wrapper_dec(self):
         if self._is_mixed_mat:
@@ -185,7 +188,7 @@ class Arg(base.Arg):
                     return self.c_ind_data("i_%d" % self.idx.index, i)
         elif self._is_indirect:
             if self._is_vec_map:
-                return self.c_vec_name()
+                return self.c_vec_name(i)
             return self.c_ind_data(self.idx, i)
         elif self._is_global_reduction:
             return self.c_global_reduction_name(count)
@@ -197,20 +200,20 @@ class Arg(base.Arg):
 
     def c_vec_init(self):
         val = []
-        if self._flatten:
-            for d in range(self.data.dataset.cdim):
-                for idx in range(self.map.arity):
+        for i, (ds, m) in enumerate(zip(self.data.dataset, self.map)):
+            if self._flatten:
+                for d in range(ds.cdim):
+                    for idx in range(m.arity):
+                        val.append("%(vec_name)s[%(idx)s] = %(data)s" %
+                                   {'vec_name': self.c_vec_name(i),
+                                    'idx': d * m.arity + idx,
+                                    'data': self.c_ind_data(idx, 0, d)})
+            else:
+                for idx in range(m.arity):
                     val.append("%(vec_name)s[%(idx)s] = %(data)s" %
-                               {'vec_name': self.c_vec_name(),
-                                'idx': d * self.map.arity + idx,
-                                'data': self.c_ind_data(idx, 0, d)})
-        else:
-            for i, rng in enumerate(zip(self.map.arange[:-1], self.map.arange[1:])):
-                for mi, idx in enumerate(range(*rng)):
-                    val.append("%(vec_name)s[%(idx)s] = %(data)s" %
-                               {'vec_name': self.c_vec_name(),
+                               {'vec_name': self.c_vec_name(i),
                                 'idx': idx,
-                                'data': self.c_ind_data(mi, i)})
+                                'data': self.c_ind_data(idx, i)})
         return ";\n".join(val)
 
     def c_addto_scalar_field(self, i, j, buf_name, extruded=None):
@@ -533,22 +536,19 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                             "ind": self.c_kernel_arg(idx),
                             "ofs": " + %s" % j if j else ""} for j in range(dim)])
 
-    def c_buffer_scatter_mm(self, i, j, mxofs, buf_name, buf_scat_name):
-        return "%(name_scat)s[i_0][i_1] = %(buf_name)s[%(row)d + i_0][%(col)d + i_1];" % \
+    def c_buffer_scatter_mm(self, i, j, buf_name, buf_scat_name):
+        return "%(name_scat)s[i_0][i_1] = %(buf_name)s[i_0][i_1];" % \
             {"name_scat": buf_scat_name,
-             "buf_name": buf_name,
-             "row": mxofs[0],
-             "col": mxofs[1]}
+             "buf_name": buf_name}
 
-    def c_buffer_scatter_vec(self, count, i, j, mxofs, buf_name):
+    def c_buffer_scatter_vec(self, count, i, j, buf_name):
         dim = 1 if self._flatten else self.data.split[i].cdim
-        return ";\n".join(["*(%(ind)s%(nfofs)s) %(op)s %(name)s[i_0*%(dim)d%(nfofs)s%(mxofs)s]" %
+        return ";\n".join(["*(%(ind)s%(nfofs)s) %(op)s %(name)s[i_0*%(dim)d%(nfofs)s]" %
                            {"ind": self.c_kernel_arg(count, i, j),
                             "op": "=" if self._access._mode == "WRITE" else "+=",
                             "name": buf_name,
                             "dim": dim,
-                            "nfofs": " + %d" % o if o else "",
-                            "mxofs": " + %d" % (mxofs[0] * dim) if mxofs else ""}
+                            "nfofs": " + %d" % o if o else ""}
                            for o in range(dim)])
 
 
@@ -742,7 +742,7 @@ class JITModule(base.JITModule):
         _layout_loops = ""
         _layout_loops_close = ""
         _layout_assign = ""
-        _buf_decl = {}
+        _buf_dict = {}
         _buf_name = ""
         for count, arg in _itspace_args:
             _buf_name = "buffer_" + arg.c_arg_name(count)
@@ -763,22 +763,24 @@ class JITModule(base.JITModule):
                     _layout_assign = _layout_name + "[i_0][i_1]" + " = " + _buf_name + "[i_0][i_1]"
                     _layout_loops_close = '\n'.join('  ' * n + '}' for n in range(len(_buf_size) - 1, -1, -1))
                 _buf_size = [vect_roundup(s) for s in _buf_size]
-            _buf_decl[arg] = arg.c_buffer_decl(_buf_size, count, _buf_name)
+            _buf_dict[arg] = arg.c_buffer_decl(_buf_size, count, _buf_name)
             _buf_name = _layout_name or _buf_name
             if arg.access._mode not in ['WRITE', 'INC']:
                 _itspace_loops = '\n'.join(['  ' * n + itspace_loop(n, e) for n, e in enumerate(_buf_size)])
                 _buf_gather = arg.c_buffer_gather(_buf_size, count, _buf_name)
                 _itspace_loop_close = '\n'.join('  ' * n + '}' for n in range(len(_buf_size) - 1, -1, -1))
                 _buf_gather = "\n".join([_itspace_loops, _buf_gather, _itspace_loop_close])
-        _kernel_args = ', '.join([arg.c_kernel_arg(count) if not arg._uses_itspace else _buf_decl[arg][0]
-                                  for count, arg in enumerate(self._args)])
-        _buf_decl = ";\n".join([decl for name, decl in _buf_decl.values()])
+        _buf_decl = ";\n".join([decl for name, decl in _buf_dict.values()])
 
         def itset_loop_body(idx, kernel):
-            i, j = idx
+            try:
+                i, j = idx or (0, 0)  # 2D index
+            except ValueError:
+                i, j = idx[0], 0  # 1D index, use 0 for the second component
             shape = self._itspace._block_shape[i][j]
-            offsets = self._itspace._offsets[i][j]
             nloops = len(shape)
+            _kernel_args = ', '.join([arg.c_kernel_arg(count, i) if not arg._uses_itspace else _buf_dict[arg][0]
+                                      for count, arg in enumerate(self._args)])
             _itspace_loops = '\n'.join(['  ' * n + itspace_loop(n, e) for n, e in enumerate(shape)])
             _itspace_args = [(count, arg) for count, arg in enumerate(self._args)
                              if arg.access._mode in ['WRITE', 'INC'] and arg._uses_itspace]
@@ -789,9 +791,9 @@ class JITModule(base.JITModule):
                 if arg._is_mat and arg._is_mixed:
                     _buf_scatter_name = "scatter_buffer_" + arg.c_arg_name(i, j)
                     _buf_decl_scatter = arg.data.ctype + " " + _buf_scatter_name + "".join("[%d]" % d for d in shape)
-                    _buf_scatter = arg.c_buffer_scatter_mm(i, j, offsets, _buf_name, _buf_scatter_name)
+                    _buf_scatter = arg.c_buffer_scatter_mm(i, j, _buf_name, _buf_scatter_name)
                 elif not arg._is_mat:
-                    _buf_scatter = arg.c_buffer_scatter_vec(count, i, j, offsets, _buf_name)
+                    _buf_scatter = arg.c_buffer_scatter_vec(count, i, j, _buf_name)
                 else:
                     _buf_scatter = ""
             _itspace_loop_close = '\n'.join('  ' * n + '}' for n in range(nloops - 1, -1, -1))
@@ -834,8 +836,6 @@ class JITModule(base.JITModule):
                 'addtos_vector_field': indent(_addtos_vector_field, 2 + nloops),
                 'itspace_loop_close': indent(_itspace_loop_close, 2),
                 'addtos_scalar_field_extruded': indent(_addtos_scalar_field_extruded, 2 + nloops),
-                'apply_offset': indent(_apply_offset, 3),
-                'extr_loop_close': indent(_extr_loop_close, 2),
                 'addtos_scalar_field': indent(_addtos_scalar_field, 2)
             }
 
