@@ -731,47 +731,6 @@ class JITModule(base.JITModule):
             _off_args = ""
             _off_inits = ""
 
-        # Build kernel invocation. Let X be a parameter of the kernel representing a tensor
-        # accessed in an iteration space. Let BUFFER be an array of the same size as X.
-        # BUFFER is declared and intialized in the wrapper function.
-        # * if X is written or incremented in the kernel, then BUFFER is initialized to 0
-        # * if X in read in the kernel, then BUFFER gathers data expected by X
-        _itspace_args = [(count, arg) for count, arg in enumerate(self._args) if arg._uses_itspace]
-        _buf_gather = ""
-        _layout_decl = ""
-        _layout_loops = ""
-        _layout_loops_close = ""
-        _layout_assign = ""
-        _buf_dict = {}
-        _buf_name = ""
-        for count, arg in _itspace_args:
-            _buf_name = "buffer_" + arg.c_arg_name(count)
-            _layout_name = None
-            _buf_size = list(self._itspace._extents)
-            if not arg._is_mat:
-                # Readjust size to take into account the size of a vector space
-                dim = arg.data.dim
-                _dat_size = [s[0] for s in dim] if len(arg.data.dim) > 1 else dim
-                _buf_size = [sum([e*d for e, d in zip(_buf_size, _dat_size)])]
-            if self._kernel._opt_is_padded:
-                if arg._is_mat:
-                    # Layout of matrices must be restored prior to the invokation of addto_vector
-                    # if padding was used
-                    _layout_name = "buffer_layout_" + arg.c_arg_name(count)
-                    _layout_decl = arg.c_buffer_decl(_buf_size, count, _layout_name)[1]
-                    _layout_loops = '\n'.join(['  ' * n + itspace_loop(n, e) for n, e in enumerate(_buf_size)])
-                    _layout_assign = _layout_name + "[i_0][i_1]" + " = " + _buf_name + "[i_0][i_1]"
-                    _layout_loops_close = '\n'.join('  ' * n + '}' for n in range(len(_buf_size) - 1, -1, -1))
-                _buf_size = [vect_roundup(s) for s in _buf_size]
-            _buf_dict[arg] = arg.c_buffer_decl(_buf_size, count, _buf_name)
-            _buf_name = _layout_name or _buf_name
-            if arg.access._mode not in ['WRITE', 'INC']:
-                _itspace_loops = '\n'.join(['  ' * n + itspace_loop(n, e) for n, e in enumerate(_buf_size)])
-                _buf_gather = arg.c_buffer_gather(_buf_size, count, _buf_name)
-                _itspace_loop_close = '\n'.join('  ' * n + '}' for n in range(len(_buf_size) - 1, -1, -1))
-                _buf_gather = "\n".join([_itspace_loops, _buf_gather, _itspace_loop_close])
-        _buf_decl = ";\n".join([decl for name, decl in _buf_dict.values()])
-
         def itset_loop_body(idx, kernel):
             try:
                 i, j = idx or (0, 0)  # 2D index
@@ -779,6 +738,48 @@ class JITModule(base.JITModule):
                 i, j = idx[0], 0  # 1D index, use 0 for the second component
             shape = self._itspace._block_shape[i][j]
             nloops = len(shape)
+
+            # Build kernel invocation. Let X be a parameter of the kernel representing a tensor
+            # accessed in an iteration space. Let BUFFER be an array of the same size as X.
+            # BUFFER is declared and intialized in the wrapper function.
+            # * if X is written or incremented in the kernel, then BUFFER is initialized to 0
+            # * if X in read in the kernel, then BUFFER gathers data expected by X
+            _itspace_args = [(count, arg) for count, arg in enumerate(self._args) if arg._uses_itspace]
+            _buf_gather = ""
+            _layout_decl = ""
+            _layout_loops = ""
+            _layout_loops_close = ""
+            _layout_assign = ""
+            _buf_dict = {}
+            _buf_name = ""
+            for count, arg in _itspace_args:
+                _buf_name = "buffer_" + arg.c_arg_name(count)
+                _layout_name = None
+                _buf_size = shape
+                if not arg._is_mat:
+                    # Readjust size to take into account the size of a vector space
+                    dim = arg.data.dim
+                    _dat_size = [s[0] for s in dim] if len(arg.data.dim) > 1 else dim
+                    _buf_size = [sum([e*d for e, d in zip(_buf_size, _dat_size)])]
+                if self._kernel._opt_is_padded:
+                    if arg._is_mat:
+                        # Layout of matrices must be restored prior to the invokation of addto_vector
+                        # if padding was used
+                        _layout_name = "buffer_layout_" + arg.c_arg_name(count)
+                        _layout_decl = arg.c_buffer_decl(_buf_size, count, _layout_name)[1]
+                        _layout_loops = '\n'.join(['  ' * n + itspace_loop(n, e) for n, e in enumerate(_buf_size)])
+                        _layout_assign = _layout_name + "[i_0][i_1]" + " = " + _buf_name + "[i_0][i_1]"
+                        _layout_loops_close = '\n'.join('  ' * n + '}' for n in range(len(_buf_size) - 1, -1, -1))
+                    _buf_size = [vect_roundup(s) for s in _buf_size]
+                _buf_dict[arg] = arg.c_buffer_decl(_buf_size, count, _buf_name)
+                _buf_name = _layout_name or _buf_name
+                if arg.access._mode not in ['WRITE', 'INC']:
+                    _itspace_loops = '\n'.join(['  ' * n + itspace_loop(n, e) for n, e in enumerate(_buf_size)])
+                    _buf_gather = arg.c_buffer_gather(_buf_size, count, _buf_name)
+                    _itspace_loop_close = '\n'.join('  ' * n + '}' for n in range(len(_buf_size) - 1, -1, -1))
+                    _buf_gather = "\n".join([_itspace_loops, _buf_gather, _itspace_loop_close])
+            _buf_decl = ";\n".join([decl for name, decl in _buf_dict.values()])
+
             _kernel_args = ', '.join([arg.c_kernel_arg(count, i) if not arg._uses_itspace else _buf_dict[arg][0]
                                       for count, arg in enumerate(self._args)])
             _itspace_loops = '\n'.join(['  ' * n + itspace_loop(n, e) for n, e in enumerate(shape)])
@@ -816,18 +817,32 @@ class JITModule(base.JITModule):
                 _itspace_loop_close = ''
 
             template = """
-    %(kernel_name)s(%(kernel_args)s);
-    %(buffer_decl_scatter)s;
-    %(itspace_loops)s
-    %(ind)s%(buffer_scatter)s;
-    %(ind)s%(addtos_vector_field)s;
-    %(itspace_loop_close)s
-    %(ind)s%(addtos_scalar_field_extruded)s;
-    %(addtos_scalar_field)s;
+    {
+      %(buffer_decl)s;
+      %(buffer_gather)s
+      %(layout_decl)s;
+      %(layout_loop)s
+          %(layout_assign)s;
+      %(layout_loop_close)s
+      %(kernel_name)s(%(kernel_args)s);
+      %(buffer_decl_scatter)s;
+      %(itspace_loops)s
+      %(ind)s%(buffer_scatter)s;
+      %(ind)s%(addtos_vector_field)s;
+      %(itspace_loop_close)s
+      %(ind)s%(addtos_scalar_field_extruded)s;
+      %(addtos_scalar_field)s;
+    }
 """
 
             return template % {
                 'ind': '  ' * nloops,
+                'buffer_decl': _buf_decl,
+                'buffer_gather': _buf_gather,
+                'layout_decl': _layout_decl,
+                'layout_loop': _layout_loops,
+                'layout_assign': _layout_assign,
+                'layout_loop_close': _layout_loops_close,
                 'kernel_name': kernel,
                 'kernel_args': _kernel_args,
                 'itspace_loops': indent(_itspace_loops, 2),
@@ -866,10 +881,4 @@ class JITModule(base.JITModule):
                 'interm_globals_decl': indent(_intermediate_globals_decl, 3),
                 'interm_globals_init': indent(_intermediate_globals_init, 3),
                 'interm_globals_writeback': indent(_intermediate_globals_writeback, 3),
-                'buffer_decl': _buf_decl,
-                'buffer_gather': _buf_gather,
-                'layout_decl': _layout_decl,
-                'layout_loop': _layout_loops,
-                'layout_assign': _layout_assign,
-                'layout_loop_close': _layout_loops_close,
                 'itset_loop_body': loop_body}

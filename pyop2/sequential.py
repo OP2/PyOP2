@@ -62,12 +62,6 @@ void wrap_%(kernel_name)s__(PyObject *_start, PyObject *_end,
     %(map_init)s;
     %(extr_loop)s
     %(map_bcs_m)s;
-    %(buffer_decl)s;
-    %(buffer_gather)s
-    %(layout_decl)s;
-    %(layout_loop)s
-        %(layout_assign)s;
-    %(layout_loop_close)s
     %(itset_loop_body)s
     %(map_bcs_p)s;
     %(apply_offset)s;
