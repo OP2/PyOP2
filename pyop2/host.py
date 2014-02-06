@@ -736,7 +736,10 @@ class JITModule(base.JITModule):
                 i, j = idx or (0, 0)  # 2D index
             except ValueError:
                 i, j = idx[0], 0  # 1D index, use 0 for the second component
-            shape = self._itspace._block_shape[i][j]
+            try:
+                shape = self._itspace._block_shape[i][j]
+            except IndexError:
+                shape = self._args[0].data[i].dim
             nloops = len(shape)
 
             # Build kernel invocation. Let X be a parameter of the kernel representing a tensor
