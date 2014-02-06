@@ -2964,7 +2964,8 @@ class Kernel(KernelCached):
         # Both code and name are relevant since there might be multiple kernels
         # extracting different functions from the same code
         # Also include the PyOP2 version, since the Kernel class might change
-        return md5(code + name + str(opts) + str(include_dirs) + version).hexdigest()
+        return md5(code + name + str(opts) + str(include_dirs) + str(blocks)
+                   + version).hexdigest()
 
     def __init__(self, code, name, opts={}, include_dirs=[], blocks=None):
         # Protect against re-initialization when retrieved from cache
