@@ -134,7 +134,7 @@ class Arg(base.Arg):
         return val
 
     def c_ind_data(self, idx, i, j=0, is_top=False, layers=1, offset=None):
-        return "%(name)s + (%(map_name)s[i * %(arity)s + %(idx)s]%(top)s%(offset)s)* %(dim)s%(off)s" % \
+        return "%(name)s + (%(map_name)s[i * %(arity)s + %(idx)s]%(top)s%(off_mul)s%(off_add)s)* %(dim)s%(off)s" % \
             {'name': self.c_arg_name(i),
              'map_name': self.c_map_name(i, 0),
              'arity': self.map.split[i].arity,
@@ -142,17 +142,19 @@ class Arg(base.Arg):
              'top': ' + '+str(layers - 2) if is_top else '',
              'dim': self.data.split[i].cdim,
              'off': ' + %d' % j if j else '',
-             'offset': ' + %d' % offset if offset is not None else ''}
+             'off_mul': ' * %d' % offset if is_top and offset is not None else '',
+             'off_add': ' + %d' % offset if not is_top and offset is not None else ''}
 
     def c_ind_data_xtr(self, idx, i, j=0, is_top=False, layers=1):
         cdim = np.prod(self.data.cdim)
-        return "%(name)s + (xtr_%(map_name)s[%(idx)s]%(top)s)*%(dim)s%(off)s" % \
+        return "%(name)s + (xtr_%(map_name)s[%(idx)s]%(top)s%(offset)s)*%(dim)s%(off)s" % \
             {'name': self.c_arg_name(i),
              'map_name': self.c_map_name(i, 0),
              'idx': idx,
              'top': ' + '+str(layers - 2) if is_top else '',
              'dim': 1 if self._flatten else str(cdim),
-             'off': ' + %d' % j if j else ''}
+             'off': ' + %d' % j if j else '',
+             'offset': ' * _'+self.c_offset_name(i, 0)+'['+idx+']' if is_top else ''}
 
     def c_kernel_arg_name(self, i, j):
         return "p_%s" % self.c_arg_name(i, j)
@@ -201,29 +203,14 @@ class Arg(base.Arg):
     def c_vec_init(self, is_top, layers, is_facet=False):
         val = []
         arity = self.map.arity
-        # cells = 1
-        # arity = self.map.arity
-        # is_int_facet = self.map.int_facet
-        # if is_int_facet:
-        #     arity /= 2
-        #     cells *= 2
-        #from IPython import embed; embed()
-        # snd_cell = 0
-        # #The only case when this is true is when we have vertical facets in an extruded mesh.
-        # #The offset is given for only one of the cells hence the length of the offset is half
-        # #the length of the map arity (as each facet neighbours two cells).
-        # if is_facet and layers > 1 and len(self.map.offset) < arity:
-        #     arity /= 2
-        #     snd_cell = arity
         if self._flatten:
-            #for c in range(cells):
             for d in range(self.data.dataset.cdim):
                 for idx in range(arity):
                     val.append("%(vec_name)s[%(idx)s] = %(data)s" %
                                {'vec_name': self.c_vec_name(),
-                                #'idx': (d + self.data.dataset.cdim * c) * arity + idx,
                                 'idx': d * arity + idx,
-                                'data': self.c_ind_data(idx, 0, d, is_top=is_top, layers=layers)})
+                                'data': self.c_ind_data(idx, 0, d, is_top=is_top, layers=layers,
+                                                        offset=self.map.offset[idx] if is_top else None)})
             if is_facet:
                 for d in range(self.data.dataset.cdim):
                     for idx in range(arity):
@@ -238,7 +225,8 @@ class Arg(base.Arg):
                     val.append("%(vec_name)s[%(idx)s] = %(data)s" %
                                {'vec_name': self.c_vec_name(),
                                 'idx': idx,
-                                'data': self.c_ind_data(mi, i, is_top=is_top, layers=layers)})
+                                'data': self.c_ind_data(mi, i, is_top=is_top, layers=layers,
+                                                        offset=self.map.offset[idx] if is_top else None)})
             if is_facet:
                 for i, rng in enumerate(zip(self.map.arange[:-1], self.map.arange[1:])):
                     for mi, idx in enumerate(range(*rng)):
