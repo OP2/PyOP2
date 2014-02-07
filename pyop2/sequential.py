@@ -33,17 +33,16 @@
 
 """OP2 sequential backend."""
 
-import ctypes
-from numpy.ctypeslib import ndpointer
-
-from base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS
 from exceptions import *
-import host
+from utils import as_tuple
 from mpi import collective
 from petsc_base import *
+import host
+import ctypes
+from numpy.ctypeslib import ndpointer
 from host import Kernel, Arg  # noqa: needed by BackendSelector
+from base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS
 from profiling import lineprof
-from utils import as_tuple
 
 # Parallel loop API
 
@@ -51,7 +50,7 @@ from utils import as_tuple
 class JITModule(host.JITModule):
 
     _wrapper = """
-void %(wrapper_name)s(int start, int end,
+double %(wrapper_name)s(int start, int end,
                       %(ssinds_arg)s
                       %(wrapper_args)s
                       %(const_args)s
@@ -62,6 +61,12 @@ void %(wrapper_name)s(int start, int end,
   %(const_inits)s;
   %(map_decl)s
   %(vec_decs)s;
+  long s1, s2;
+  double total_time;
+  s1 = stamp();
+  %(clo)s# ifdef LIKWID_PERFMON
+  %(clo)s  LIKWID_MARKER_START("%(region_name)s");
+  %(clo)s#endif
   for ( int n = start; n < end; n++ ) {
     int i = %(index_expr)s;
     %(vec_inits)s;
@@ -70,7 +75,13 @@ void %(wrapper_name)s(int start, int end,
     %(map_bcs_m)s;
     %(buffer_decl)s;
     %(buffer_gather)s
+    %(cli)s# ifdef LIKWID_PERFMON
+    %(cli)s  LIKWID_MARKER_START("%(region_name)s");
+    %(cli)s#endif
     %(kernel_name)s(%(kernel_args)s);
+    %(cli)s# ifdef LIKWID_PERFMON
+    %(cli)s  LIKWID_MARKER_STOP("%(region_name)s");
+    %(cli)s#endif
     %(layout_decl)s;
     %(layout_loop)s
         %(layout_assign)s;
@@ -80,6 +91,11 @@ void %(wrapper_name)s(int start, int end,
     %(apply_offset)s;
     %(extr_loop_close)s
   }
+  %(clo)s# ifdef LIKWID_PERFMON
+  %(clo)s  LIKWID_MARKER_STOP("%(region_name)s");
+  %(clo)s#endif
+  s2 = stamp();
+  return (s2 - s1) / 1e9;
 }
 """
 
@@ -92,7 +108,7 @@ class ParLoop(host.ParLoop):
     @collective
     @lineprof
     def _compute(self, part):
-        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct, iterate=self.iteration_region)
+        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct, iterate=self.iteration_region, likwid=self._use_likwid)
         if not hasattr(self, '_jit_args'):
             self._argtypes = [ctypes.c_int, ctypes.c_int]
             self._jit_args = [0, 0]
@@ -151,7 +167,8 @@ class ParLoop(host.ParLoop):
         # Must call fun on all processes since this may trigger
         # compilation.
         with timed_region("ParLoop kernel"):
-            fun(*self._jit_args, argtypes=self._argtypes, restype=None)
+            time = fun(*self._jit_args, argtypes=self._argtypes, restype=ctypes.c_double)
+        return time
 
 
 def _setup():

@@ -65,12 +65,24 @@ class Configuration(object):
     """
     # name, env variable, type, default, write once
     DEFAULTS = {
+        "only_lhs": ("PYOP2_ONLY_LHS", bool, False),
+        "only_rhs": ("PYOP2_ONLY_RHS", bool, False),
+        "likwid_inner": ("PYOP2_LIKWID_INNER", bool, False), # add likwid instrumentation around the kernel only otherwise include wrapper too
+        "likwid_outer": ("PYOP2_LIKWID_OUTER", bool, False),
+        "split": ("PYOP2_SPLIT", tuple, (-1, -1)), # (6, 7), (9, 10)
+        "linux_compiler": ("PYOP2_LINUX_COMPILER", str, "mpicc"), # mpicc, icc
+        "vect": ("PYOP2_VECT", int, -1), # 1, 2 etc.
+        "region_name": ("PYOP2_REGION_NAME", str, "default"), # Give a suitable name to the region we want to measure
+        "ap": ("PYOP2_LICM", bool, False),
+        "licm": ("PYOP2_LICM", bool, False),
+        "only_kernel": ("PYOP2_ONLY_KERNEL", bool, False), # Measure the time around the kernel only or otherwise around the wrapper
         "backend": ("PYOP2_BACKEND", str, "sequential"),
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gnu"),
         "simd_isa": ("PYOP2_SIMD_ISA", str, "sse"),
         "blas": ("PYOP2_BLAS", str, ""),
         "debug": ("PYOP2_DEBUG", int, 0),
         "log_level": ("PYOP2_LOG_LEVEL", (str, int), "WARNING"),
+        "likwid": ("PYOP2_LIKWID_PROFILING", bool, False),
         "lazy_evaluation": ("PYOP2_LAZY", bool, True),
         "lazy_max_trace_length": ("PYOP2_MAX_TRACE_LENGTH", int, 0),
         "dump_gencode": ("PYOP2_DUMP_GENCODE", bool, False),

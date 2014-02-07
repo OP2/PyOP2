@@ -42,14 +42,18 @@ from subprocess import Popen, PIPE
 
 from base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS
 from exceptions import *
-import device
+from utils import *
+from petsc_base import *
+from logger import warning
 import host
+import ctypes
+from numpy.ctypeslib import ndpointer
 from host import Kernel  # noqa: for inheritance
 from logger import warning
+import device
 import plan as _plan
-from petsc_base import *
 from profiling import lineprof
-from utils import *
+from base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS
 
 # hard coded value to max openmp threads
 _max_threads = 32
@@ -137,7 +141,7 @@ class JITModule(host.JITModule):
     _system_headers = ['#include <omp.h>']
 
     _wrapper = """
-void %(wrapper_name)s(int boffset,
+double %(wrapper_name)s(int boffset,
                       int nblocks,
                       int *blkmap,
                       int *offset,
@@ -150,8 +154,14 @@ void %(wrapper_name)s(int boffset,
   %(user_code)s
   %(wrapper_decs)s;
   %(const_inits)s;
+  long s1, s2;
+  s1 = stamp();
   #pragma omp parallel shared(boffset, nblocks, nelems, blkmap)
   {
+# ifdef LIKWID_PERFMON
+    LIKWID_MARKER_THREADINIT;
+    LIKWID_MARKER_START("%(kernel_name)s");
+#endif
     %(map_decl)s
     int tid = omp_get_thread_num();
     %(interm_globals_decl)s;
@@ -185,7 +195,12 @@ void %(wrapper_name)s(int boffset,
       }
     }
     %(interm_globals_writeback)s;
+# ifdef LIKWID_PERFMON
+    LIKWID_MARKER_STOP("%(kernel_name)s");
+#endif
   }
+  s2 = stamp();
+  return (s2 - s1) / 1e9;
 }
 """
 
@@ -213,7 +228,7 @@ class ParLoop(device.ParLoop, host.ParLoop):
     @collective
     @lineprof
     def _compute(self, part):
-        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct, iterate=self.iteration_region)
+        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct, iterate=self.iteration_region, likwid=self._use_likwid)
         if not hasattr(self, '_jit_args'):
             self._jit_args = [None] * 5
             self._argtypes = [None] * 5
@@ -270,6 +285,7 @@ class ParLoop(device.ParLoop, host.ParLoop):
                 self._jit_args.append(0)
                 self._jit_args.append(self._it_space.layers - 1)
 
+        time = 0
         if part.size > 0:
             #TODO: compute partition size
             plan = self._get_plan(part, 1024)
@@ -281,7 +297,7 @@ class ParLoop(device.ParLoop, host.ParLoop):
             self._jit_args[4] = plan.nelems
             # Must call compile on all processes even if partition size is
             # zero since compilation is collective.
-            fun = fun.compile(argtypes=self._argtypes, restype=None)
+            fun = fun.compile(argtypes=self._argtypes, restype=ctypes.c_double)
 
             boffset = 0
             for c in range(plan.ncolors):
@@ -289,7 +305,7 @@ class ParLoop(device.ParLoop, host.ParLoop):
                 self._jit_args[0] = boffset
                 self._jit_args[1] = nblocks
                 with timed_region("ParLoop kernel"):
-                    fun(*self._jit_args)
+                	time += fun(*self._jit_args)
                 boffset += nblocks
         else:
             # Fake types for arguments so that ctypes doesn't complain
@@ -299,7 +315,8 @@ class ParLoop(device.ParLoop, host.ParLoop):
             # No need to actually call function since partition size
             # is zero, however we must compile it because compilation
             # is collective
-            fun.compile(argtypes=self._argtypes, restype=None)
+            fun.compile(argtypes=self._argtypes, restype=ctypes.c_double)
+        return time
 
     def _get_plan(self, part, part_size):
         if self._is_indirect:

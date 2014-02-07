@@ -35,6 +35,7 @@
 
 import numpy as np
 from time import time
+from decorator import decorator
 from contextlib import contextmanager
 from decorator import decorator
 
@@ -87,6 +88,20 @@ class Timer(object):
         self._timer = timer
         self._start = None
         self._timings = []
+        self._volume = None
+        self._timers[n] = self
+        self._c_timings = []
+        self._loopstyle = False
+        self._output_file = None
+        self._extra_param = -1
+        self._only_kernel = False
+
+    def data_volume(self, vol):
+        self._volume = vol
+
+    def c_time(self, c_time):
+        """Time value from the kernel wrapper."""
+        self._c_timings.append(c_time)
 
     def start(self):
         """Start the timer."""
@@ -135,16 +150,51 @@ class Timer(object):
         return sum(self._timings)
 
     @property
+    def c_time_total(self):
+        """Total time spent for all recorded C timed events."""
+        return sum(self._c_timings)
+
+    @property
     def average(self):
         """Average time spent per recorded event."""
         return np.average(self._timings)
+
+    @property
+    def c_time_average(self):
+        """Average time spent per recorded event."""
+        return np.average(self._c_timings)
+
+    @property
+    def dv(self):
+        if self._volume:
+            return self.ncalls * self._volume / (1024.0 * 1024.0)
+        return 0.0
+
+    @property
+    def bw(self):
+        return self.dv / self.total
+
+    @property
+    def c_bw(self):
+        return self.dv / self.c_time_total if self.c_time_total else 0.0
+
+    @property
+    def sd(self):
+        """Standard deviation of recorded event time."""
+        return np.std(self._timings)
+
+    @property
+    def c_time_sd(self):
+        """Standard deviation of recorded event C time."""
+        return np.std(self._c_timings)
 
     @classmethod
     def summary(cls, filename=None):
         """Print a summary table for all timers or write CSV to filename."""
         if not cls._timers:
             return
-        column_heads = ("Timer", "Total time", "Calls", "Average time")
+        column_heads = ("Timer", "Total time", "Calls", "Average time", "Standard Deviation", "Tot C time", "Avg C time",
+                        "Tot DV (MB)", "Tot BW (MB/s)", "Tot C BW (MB/s)")
         if isinstance(filename, str):
             import csv
             with open(filename, 'wb') as f:
@@ -163,13 +213,43 @@ class Timer(object):
                             for t in cls._timers.values()])
             averagecol = max([len(column_heads[3])] + [len('%g' % t.average)
                              for t in cls._timers.values()])
-            fmt = "%%%ds | %%%ds | %%%ds | %%%ds" % (
-                namecol, totalcol, ncallscol, averagecol)
-            print fmt % column_heads
-            fmt = "%%%ds | %%%dg | %%%dd | %%%dg" % (
-                namecol, totalcol, ncallscol, averagecol)
-            for t in sorted(cls._timers.values(), key=lambda k: k.name):
-                print fmt % (t.name, t.total, t.ncalls, t.average)
+            sdcol = max([len(column_heads[4])] + [len('%g' % t.sd)
+                        for t in cls._timers.values()])
+            c_totalcol = max([len(column_heads[5])] + [len('%g' % t.c_time_total)
+                             for t in cls._timers.values()])
+            c_averagecol = max([len(column_heads[6])] + [len('%g' % t.c_time_average)
+                               for t in cls._timers.values()])
+            dvcol = max([len(column_heads[7])] + [len('%g' % t.dv)
+                        for t in cls._timers.values()])
+            bwcol = max([len(column_heads[8])] + [len('%g' % t.bw)
+                        for t in cls._timers.values()])
+            c_bwcol = max([len(column_heads[8])] + [len('%g' % t.c_bw)
+                          for t in cls._timers.values()])
+
+            fmt = "%%%ds | %%%ds | %%%ds | %%%ds | %%%ds |  %%%ds | %%%ds | %%%ds | %%%ds | %%%ds" % (
+                namecol, totalcol, ncallscol, averagecol, sdcol, c_totalcol, c_averagecol, dvcol, bwcol, c_bwcol)
+            if not cls._loopstyle:
+                if cls._output_file is not None:
+                    with open(cls._output_file, "w") as f:
+                        f.write(fmt % column_heads)
+                else:
+                    print fmt % column_heads
+            fmt = "%%%ds | %%%dg | %%%dd | %%%dg | %%%dg |  %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg" % (
+                namecol, totalcol, ncallscol, averagecol, sdcol, c_totalcol, c_averagecol, dvcol, bwcol, 3, c_bwcol)
+            keys = sorted(cls._timers.keys(), key=lambda k: k[-6:])
+            if cls._output_file is not None:
+                fmt += "\n"
+            for k in keys:
+                t = cls._timers[k]
+                xtra_param = -1
+                if cls._extra_param is not None:
+                    xtra_param = cls._extra_param
+                if cls._output_file is not None:
+                    with open(cls._output_file, "a") as f:
+                        tbw = fmt % (t.name, t.total, t.ncalls, t.average, t.sd, t.c_time_total, t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw)
+                        f.write(tbw)
+                else:
+                    print fmt % (t.name, t.total, t.ncalls, t.average, t.sd, t.c_time_total, t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw)
 
     @classmethod
     def get_timers(cls):
@@ -179,9 +259,52 @@ class Timer(object):
     @classmethod
     def reset_all(cls):
         """Clear all timer information previously recorded."""
+        cls._loopstyle = False
+        cls._output_file = None
+        cls._extra_param = None
+        cls._only_kernel = False
         if not cls._timers:
             return
         cls._timers = {}
+
+    @classmethod
+    def loopstyle(cls, value):
+        """Only print the info not the header."""
+        cls._loopstyle = value
+
+    @classmethod
+    def output_file(cls, value):
+        """Output file name set up."""
+        cls._output_file = value
+
+    @classmethod
+    def extra_param(cls, value):
+        """Extra param to print factor for compute or traffic."""
+        cls._extra_param = value
+
+    @classmethod
+    def only_kernel(cls, value):
+        """Only time the kernel execution and return the value otherwise
+        time the whole wrapper."""
+        cls._only_kernel = value
+
+
+@contextmanager
+def profiling(t, name):
+    timer = Timer("%s-%s" % (t, name))
+    timer.start()
+    yield
+    timer.stop()
+
+
+def add_data_volume(t, name, vol):
+    timer = Timer("%s-%s" % (t, name))
+    timer.data_volume(vol)
+
+
+def add_c_time(t, name, time):
+    timer = Timer("%s-%s" % (t, name))
+    timer.c_time(time)
 
 
 class timed_function(Timer):
@@ -237,8 +360,19 @@ def reset_timers():
     """Clear all timer information previously recorded."""
     Timer.reset_all()
 
+def loopstyle(value):
+    Timer.loopstyle(value)
 
-def timing(name, reset=False, total=True):
+def output_file(value):
+    Timer.output_file(value)
+
+def extra_param(value):
+    Timer.extra_param(value)
+
+def only_kernel(value):
+    Timer.only_kernel(value)
+
+def timing(name, reset=Falsee, total=True):
     """Return timing (average) for given task, optionally clearing timing."""
     t = Timer(name)
     ret = t.total if total else t.average

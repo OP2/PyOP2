@@ -53,6 +53,7 @@ from mpi import MPI, _MPI, _check_comm, collective
 from profiling import profile, timed_region, timed_function
 from sparsity import build_sparsity
 from version import __version__ as version
+from profiling import profiling, add_data_volume, add_c_time
 
 from coffee.ast_base import Node
 from coffee import ast_base as ast
@@ -85,7 +86,7 @@ class ExecutionTrace(object):
         self._trace = list()
 
     def append(self, computation):
-        if not configuration['lazy_evaluation']:
+        if configuration['lazy_evaluation']:
             assert not self._trace
             computation._run()
         elif configuration['lazy_max_trace_length'] > 0 and \
@@ -3549,6 +3550,10 @@ class Kernel(Cached):
         code must conform to the OP2 user kernel API."""
         return self._code
 
+    @code.setter
+    def code(self, value):
+        self._code = value
+
     def __str__(self):
         return "OP2 Kernel: %s" % self._name
 
@@ -3596,6 +3601,9 @@ class JITModule(Cached):
         if iterate is not None:
             key += ((iterate,))
 
+        use_likwid = kwargs.get('likwid', False)
+        if use_likwid is not None:
+            key += ((use_likwid,))
         # The currently defined Consts need to be part of the cache key, since
         # these need to be uploaded to the device before launching the kernel
         for c in Const._definitions():
@@ -3703,6 +3711,9 @@ class ParLoop(LazyComputation):
         self._kernel = kernel
         self._is_layered = iterset._extruded
         self._iteration_region = kwargs.get("iterate", None)
+        self._use_likwid = kwargs.get("likwid", False)
+        self._is_lhs = False
+        self._is_rhs = False
 
         for i, arg in enumerate(self._actual_args):
             arg.position = i
@@ -3717,15 +3728,52 @@ class ParLoop(LazyComputation):
                         arg2.indirect_position = arg1.indirect_position
 
         self._it_space = self.build_itspace(iterset)
+        # Data volume computation
+        vol = 0
+        for arg in args:
+            if arg._is_dat:
+                vol += sum(s.size * s.cdim for s in arg.data.dataset) * arg.dtype.itemsize
+                self._is_rhs = True
+            if arg._is_mat:
+                self._is_lhs = True
+                vol += (arg.data.sparsity.onz + arg.data.sparsity.nz) * arg.dtype.itemsize
+        self._data_volume = vol
 
     def _run(self):
-        return self.compute()
+        if (configuration['only_lhs'] and self._is_lhs) or \
+           (configuration['only_rhs'] and self._is_rhs and not self._is_lhs) or \
+           (not configuration['only_lhs'] and not configuration['only_rhs']):
+            return self.compute()
+        else:
+            return self.compute_no_profiling()
 
     @collective
     @timed_function('ParLoop compute')
     @profile
     def compute(self):
         """Executes the kernel over all members of the iteration space."""
+        region_name = configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name
+        with profiling('base', '%s-%s' % (region_name, self.kernel._md5)):
+            self.halo_exchange_begin()
+            self.maybe_set_dat_dirty()
+            t1 = self._compute(self.it_space.iterset.core_part)
+            self.halo_exchange_end()
+            t2 = self._compute(self.it_space.iterset.owned_part)
+            self.reduction_begin()
+            t3 = 0
+            if self.needs_exec_halo:
+                t3 = self._compute(self.it_space.iterset.exec_part)
+            self.reduction_end()
+            self.maybe_set_halo_update_needed()
+            #self.assemble()
+        add_data_volume('base', '%s-%s' % (region_name, self.kernel._md5),
+                        self._data_volume)
+        add_c_time('base', '%s-%s' % (region_name, self.kernel._md5),
+                        t1 + t2 + t3)
+    @collective
+    def compute_no_profiling(self):
+        """Executes the kernel over all members of the iteration space."""
+        region_name = configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name
         self.halo_exchange_begin()
         self.maybe_set_dat_dirty()
         self._compute(self.it_space.iterset.core_part)
@@ -3736,6 +3784,7 @@ class ParLoop(LazyComputation):
             self._compute(self.it_space.iterset.exec_part)
         self.reduction_end()
         self.maybe_set_halo_update_needed()
+        #self.assemble()
 
     @collective
     def _compute(self, part):
@@ -3908,6 +3957,10 @@ class ParLoop(LazyComputation):
         a certain part of an extruded mesh, for example on top cells, bottom cells or
         interior facets."""
         return self._iteration_region
+
+    def likwid(self):
+        """Specifies if likwid should be used or not."""
+        return self._use_likwid
 
 DEFAULT_SOLVER_PARAMETERS = {'ksp_type': 'cg',
                              'pc_type': 'jacobi',
