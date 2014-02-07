@@ -536,11 +536,6 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                             "ind": self.c_kernel_arg(idx),
                             "ofs": " + %s" % j if j else ""} for j in range(dim)])
 
-    def c_buffer_scatter_mm(self, i, j, buf_name, buf_scat_name):
-        return "%(name_scat)s[i_0][i_1] = %(buf_name)s[i_0][i_1];" % \
-            {"name_scat": buf_scat_name,
-             "buf_name": buf_name}
-
     def c_buffer_scatter_vec(self, count, i, j, buf_name):
         dim = 1 if self._flatten else self.data.split[i].cdim
         return ";\n".join(["*(%(ind)s%(nfofs)s) %(op)s %(name)s[i_0*%(dim)d%(nfofs)s]" %
@@ -789,28 +784,19 @@ class JITModule(base.JITModule):
             _itspace_args = [(count, arg) for count, arg in enumerate(self._args)
                              if arg.access._mode in ['WRITE', 'INC'] and arg._uses_itspace]
             _buf_scatter = ""
-            _buf_decl_scatter = ""
-            _buf_scatter_name = None
             for count, arg in _itspace_args:
-                if arg._is_mat and arg._is_mixed:
-                    _buf_scatter_name = "scatter_buffer_" + arg.c_arg_name(i, j)
-                    _buf_decl_scatter = arg.data.ctype + " " + _buf_scatter_name + "".join("[%d]" % d for d in shape)
-                    _buf_scatter = arg.c_buffer_scatter_mm(i, j, _buf_name, _buf_scatter_name)
-                elif not arg._is_mat:
+                if not arg._is_mat:
                     _buf_scatter = arg.c_buffer_scatter_vec(count, i, j, _buf_name)
-                else:
-                    _buf_scatter = ""
             _itspace_loop_close = '\n'.join('  ' * n + '}' for n in range(nloops - 1, -1, -1))
-            _addto_buf_name = _buf_scatter_name or _buf_name
             if self._itspace._extruded:
-                _addtos_scalar_field_extruded = ';\n'.join([arg.c_addto_scalar_field(i, j, _addto_buf_name, "xtr_") for arg in self._args
+                _addtos_scalar_field_extruded = ';\n'.join([arg.c_addto_scalar_field(i, j, _buf_name, "xtr_") for arg in self._args
                                                             if arg._is_mat and arg.data._is_scalar_field])
                 _addtos_vector_field = ';\n'.join([arg.c_addto_vector_field(i, j, "xtr_") for arg in self._args
                                                   if arg._is_mat and arg.data._is_vector_field])
                 _addtos_scalar_field = ""
             else:
                 _addtos_scalar_field_extruded = ""
-                _addtos_scalar_field = ';\n'.join([arg.c_addto_scalar_field(i, j, _addto_buf_name) for count, arg in enumerate(self._args)
+                _addtos_scalar_field = ';\n'.join([arg.c_addto_scalar_field(i, j, _buf_name) for count, arg in enumerate(self._args)
                                                    if arg._is_mat and arg.data._is_scalar_field])
                 _addtos_vector_field = ';\n'.join([arg.c_addto_vector_field(i, j) for arg in self._args
                                                   if arg._is_mat and arg.data._is_vector_field])
@@ -828,7 +814,6 @@ class JITModule(base.JITModule):
           %(layout_assign)s;
       %(layout_loop_close)s
       %(kernel_name)s(%(kernel_args)s);
-      %(buffer_decl_scatter)s;
       %(itspace_loops)s
       %(ind)s%(buffer_scatter)s;
       %(ind)s%(addtos_vector_field)s;
@@ -849,7 +834,6 @@ class JITModule(base.JITModule):
                 'kernel_name': kernel,
                 'kernel_args': _kernel_args,
                 'itspace_loops': indent(_itspace_loops, 2),
-                'buffer_decl_scatter': _buf_decl_scatter,
                 'buffer_scatter': _buf_scatter,
                 'addtos_vector_field': indent(_addtos_vector_field, 2 + nloops),
                 'itspace_loop_close': indent(_itspace_loop_close, 2),
