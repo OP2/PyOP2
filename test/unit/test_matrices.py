@@ -773,15 +773,20 @@ class TestMixedMatrices:
     def mat(self, msparsity, mmap, mdat):
         mat = op2.Mat(msparsity)
 
-        code = c_for("i", 3,
-                     c_for("j", 3,
-                           Incr(Symbol("v", ("i", "j")), FlatBlock("d[i][0] * d[j][0]"))))
-        addone = FunDecl("void", "addone_mat",
-                         [Decl("double", Symbol("v", (3, 3))),
-                          Decl("double", c_sym("**d"))],
-                         Block([code], open_scope=False))
+        blocks = []
+        kernels = []
+        for i, r in enumerate([1, 2]):
+            for j, c in enumerate([1, 2]):
+                code = c_for("i", r,
+                             c_for("j", c,
+                                   Incr(Symbol("v", ("i", "j")), FlatBlock("d[i][0] * d[j][0]"))))
+                kernels.append(FunDecl("void", "addone_mat%d%d" % (i, j),
+                                       [Decl("double", Symbol("v", (r, c))),
+                                        Decl("double", c_sym("**d"))],
+                                       Block([code], open_scope=False)))
+                blocks.append(((i, j), "addone_mat%d%d" % (i, j)))
 
-        addone = op2.Kernel(addone, "addone_mat")
+        addone = op2.Kernel(Root(kernels), "addone_mat", blocks=blocks)
         op2.par_loop(addone, mmap.iterset,
                      mat(op2.INC, (mmap[op2.i[0]], mmap[op2.i[1]])),
                      mdat(op2.READ, mmap))
@@ -790,11 +795,15 @@ class TestMixedMatrices:
     @pytest.fixture
     def dat(self, mset, mmap, mdat):
         dat = op2.MixedDat(mset)
-        kernel_code = FunDecl("void", "addone_rhs",
-                              [Decl("double", Symbol("v", (3,))),
-                               Decl("double**", c_sym("d"))],
-                              c_for("i", 3, Incr(Symbol("v", ("i")), FlatBlock("d[i][0]"))))
-        addone = op2.Kernel(kernel_code, "addone_rhs")
+        blocks = []
+        kernels = []
+        for i, r in enumerate([1, 2]):
+            kernels.append(FunDecl("void", "addone_rhs%d" % i,
+                                   [Decl("double", Symbol("v", (r,))),
+                                    Decl("double**", c_sym("d"))],
+                                   c_for("i", r, Incr(Symbol("v", ("i")), FlatBlock("d[i][0]")))))
+            blocks.append(((i, 0), "addone_rhs%d" % i))
+        addone = op2.Kernel(Root(kernels), "addone_rhs", blocks=blocks)
         op2.par_loop(addone, mmap.iterset,
                      dat(op2.INC, mmap[op2.i[0]]),
                      mdat(op2.READ, mmap))
@@ -820,11 +829,15 @@ class TestMixedMatrices:
         assembly = Block(
             [Incr(Symbol("v", ("i"), ((2, 0),)), FlatBlock("d[i][0]")),
              Incr(Symbol("v", ("i"), ((2, 1),)), FlatBlock("d[i][1]"))], open_scope=True)
-        kernel_code = FunDecl("void", "addone_rhs_vec",
-                              [Decl("double", Symbol("v", (6,))),
-                               Decl("double**", c_sym("d"))],
-                              c_for("i", 3, assembly))
-        addone = op2.Kernel(kernel_code, "addone_rhs_vec")
+        blocks = []
+        kernels = []
+        for i, r in enumerate([1, 2]):
+            kernels.append(FunDecl("void", "addone_rhs_vec%d" % i,
+                                   [Decl("double", Symbol("v", (2*r,))),
+                                    Decl("double**", c_sym("d"))],
+                                   c_for("i", r, assembly)))
+            blocks.append(((i, 0), "addone_rhs_vec%d" % i))
+        addone = op2.Kernel(Root(kernels), "addone_rhs_vec", blocks=blocks)
         op2.par_loop(addone, mmap.iterset,
                      dat(op2.INC, mmap[op2.i[0]]),
                      mvdat(op2.READ, mmap))
