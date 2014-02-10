@@ -249,9 +249,11 @@ class TestMixedIndirectLoop:
         """Increment into a MixedDat from a non-mixed Dat."""
         d = op2.Dat(iterset, np.ones(iterset.size))
         kernel_inc = """void kernel_inc(double **d, double *x) {
-          d[0][0] += x[0]; d[1][0] += x[0];
+          d[0][0] += x[0];
         }"""
-        op2.par_loop(op2.Kernel(kernel_inc, "kernel_inc"), iterset,
+        blocks = [((0, 0), "kernel_inc"), ((1, 0), "kernel_inc")]
+        op2.par_loop(op2.Kernel(kernel_inc, "kernel_inc", blocks=blocks),
+                     iterset,
                      mdat(op2.INC, mmap),
                      d(op2.READ))
         assert all(mdat[0].data == 1.0) and mdat[1].data == 4096.0
@@ -265,7 +267,9 @@ class TestMixedIndirectLoop:
                               [Decl("double", c_sym("*d")),
                                Decl("double", c_sym("*x"))],
                               Block([assembly], open_scope=False))
-        op2.par_loop(op2.Kernel(kernel_code, "kernel_inc"), iterset,
+        blocks = [((0, 0), "kernel_inc"), ((1, 0), "kernel_inc")]
+        op2.par_loop(op2.Kernel(kernel_code, "kernel_inc", blocks=blocks),
+                     iterset,
                      mdat(op2.INC, mmap[op2.i[0]]),
                      d(op2.READ))
         assert all(mdat[0].data == 1.0) and mdat[1].data == 4096.0
