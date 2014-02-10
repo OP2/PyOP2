@@ -277,6 +277,9 @@ class Arg(object):
         elif self._uses_itspace:
             self._block_shape = tuple(((m.arity,),) for m in map)
             self._offsets = tuple(((o,),) for o in map.arange)
+        elif self.data:
+            self._block_shape = tuple((d.dim,) for d in self.data)
+            self._offsets = None
         else:
             self._block_shape = None
             self._offsets = None
