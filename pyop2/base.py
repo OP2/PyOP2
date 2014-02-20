@@ -568,6 +568,8 @@ class Set(object):
         self._layers = layers if layers is not None else 1
         self._partition_size = 1024
         self._ext_tb_bcs = None
+        self._ext_tb = False
+        self._top = False
         if self.halo:
             self.halo.verify(self)
         Set._globalcount += 1
@@ -2281,6 +2283,7 @@ class Map(object):
         # the application of strong boundary conditions
         self._bottom_mask = np.zeros(len(offset)) if offset is not None else []
         self._top_mask = np.zeros(len(offset)) if offset is not None else []
+        #self._int_facet = int_facet
         if offset is not None and bt_masks is not None:
             self._bottom_mask[bt_masks[0]] = -1
             self._top_mask[bt_masks[1]] = -1
@@ -2377,6 +2380,13 @@ class Map(object):
     def bottom_mask(self):
         """The bottom layer mask to be applied on a mesh cell."""
         return self._bottom_mask
+
+    # @property
+    # def int_facet(self):
+    #     """Flags whether the map is on interior facets or not.
+    #     If it is then it's a map double the size it should be due to having
+    #     to cover two cells instead of one."""
+    #     return self._int_facet
 
     def __str__(self):
         return "OP2 Map: %s from (%s) to (%s) with arity %s" \
@@ -2946,6 +2956,10 @@ class JITModule(Cached):
                 key += (arg.data.dims, arg.data.dtype, idxs,
                         map_arities, arg.access)
 
+        iterate = kwargs.get("iterate", None)
+        if iterate is not None:
+            key += ((iterate,))
+
         # The currently defined Consts need to be part of the cache key, since
         # these need to be uploaded to the device before launching the kernel
         for c in Const._definitions():
@@ -2978,6 +2992,37 @@ class JITModule(Cached):
                 f.write(src)
 
 
+class Iterate(object):
+    """ Class that specifies the way to iterate over a column of extruded
+    mesh elements. A column of elements refers to the elements which are
+    in the extrusion direction. The accesses to these elements are direct.
+    """
+
+    _iterates = ["ON_COLUMN", "ON_BOTTOM", "ON_TOP", "ON_INTERIOR_FACETS"]
+
+    @validate_in(('iterate', _iterates, IterateValueError))
+    def __init__(self, iterate):
+        self._iterate = iterate
+
+    def __str__(self):
+        return "OP2 Iterate: %s" % self._iterate
+
+    def __repr__(self):
+        return "%r" % self._iterate
+
+ON_COLUMN = Iterate("ON_COLUMN")
+"""Iterate over the entire column of cells."""
+
+ON_BOTTOM = Iterate("ON_BOTTOM")
+"""Itrerate over the cells at the bottom of the column in an extruded mesh."""
+
+ON_TOP = Iterate("ON_TOP")
+"""Iterate over the top cells in an extruded mesh."""
+
+ON_INTERIOR_FACETS = Iterate("ON_INTERIOR_FACETS")
+"""Iterate over the interior facets of an extruded mesh."""
+
+
 class ParLoop(LazyComputation):
     """Represents the kernel, iteration space and arguments of a parallel loop
     invocation.
@@ -2990,7 +3035,7 @@ class ParLoop(LazyComputation):
 
     @validate_type(('kernel', Kernel, KernelTypeError),
                    ('iterset', Set, SetTypeError))
-    def __init__(self, kernel, iterset, *args):
+    def __init__(self, kernel, iterset, *args, **kwargs):
         LazyComputation.__init__(self,
                                  set([a.data for a in args if a.access in [READ, RW]]) | Const._defs,
                                  set([a.data for a in args if a.access in [RW, WRITE, MIN, MAX, INC]]))
@@ -2998,6 +3043,7 @@ class ParLoop(LazyComputation):
         self._actual_args = args
         self._kernel = kernel
         self._is_layered = iterset.layers > 1
+        self._iterate = kwargs.get("iterate", None)
 
         for i, arg in enumerate(self._actual_args):
             arg.position = i
@@ -3186,6 +3232,11 @@ class ParLoop(LazyComputation):
         """Flag which triggers extrusion"""
         return self._is_layered
 
+    @property
+    def iterate(self):
+        """Affects the iteration space of the parallel loop."""
+        return self._iterate
+
 DEFAULT_SOLVER_PARAMETERS = {'ksp_type': 'cg',
                              'pc_type': 'jacobi',
                              'ksp_rtol': 1.0e-7,
@@ -3263,5 +3314,5 @@ class Solver(object):
 
 
 @collective
-def par_loop(kernel, it_space, *args):
-    return _make_object('ParLoop', kernel, it_space, *args).enqueue()
+def par_loop(kernel, it_space, *args, **kwargs):
+    return _make_object('ParLoop', kernel, it_space, *args, **kwargs).enqueue()

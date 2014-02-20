@@ -98,14 +98,14 @@ class Arg(base.Arg):
                     val += ", PyObject *_%s" % (self.c_map_name(i, j))
         return val
 
-    def c_vec_dec(self):
+    def c_vec_dec(self, is_facet=False):
         cdim = self.data.dataset.cdim if self._flatten else 1
         return ";\n%(type)s *%(vec_name)s[%(arity)s]" % \
             {'type': self.ctype,
              'vec_name': self.c_vec_name(),
-             'arity': self.map.arity * cdim}
+             'arity': self.map.arity * cdim * (2 if is_facet else 1)}
 
-    def c_wrapper_dec(self):
+    def c_wrapper_dec(self, is_facet=False):
         if self._is_mixed_mat:
             val = "Mat %(name)s = (Mat)((uintptr_t)PyLong_AsUnsignedLong(_%(name)s))" % \
                 {"name": self.c_arg_name()}
@@ -130,26 +130,31 @@ class Arg(base.Arg):
                     val += ";\nint *%(name)s = (int *)(((PyArrayObject *)_%(name)s)->data)" \
                         % {'name': self.c_map_name(i, j)}
         if self._is_vec_map:
-            val += self.c_vec_dec()
+            val += self.c_vec_dec(is_facet=is_facet)
         return val
 
-    def c_ind_data(self, idx, i, j=0):
-        return "%(name)s + %(map_name)s[i * %(arity)s + %(idx)s] * %(dim)s%(off)s" % \
+    def c_ind_data(self, idx, i, j=0, is_top=False, layers=1, offset=None):
+        return "%(name)s + (%(map_name)s[i * %(arity)s + %(idx)s]%(top)s%(off_mul)s%(off_add)s)* %(dim)s%(off)s" % \
             {'name': self.c_arg_name(i),
              'map_name': self.c_map_name(i, 0),
              'arity': self.map.split[i].arity,
              'idx': idx,
+             'top': ' + '+str(layers - 2) if is_top else '',
              'dim': self.data.split[i].cdim,
-             'off': ' + %d' % j if j else ''}
+             'off': ' + %d' % j if j else '',
+             'off_mul': ' * %d' % offset if is_top and offset is not None else '',
+             'off_add': ' + %d' % offset if not is_top and offset is not None else ''}
 
-    def c_ind_data_xtr(self, idx, i, j=0):
+    def c_ind_data_xtr(self, idx, i, j=0, is_top=False, layers=1):
         cdim = np.prod(self.data.cdim)
-        return "%(name)s + xtr_%(map_name)s[%(idx)s]*%(dim)s%(off)s" % \
+        return "%(name)s + (xtr_%(map_name)s[%(idx)s]%(top)s%(offset)s)*%(dim)s%(off)s" % \
             {'name': self.c_arg_name(i),
              'map_name': self.c_map_name(i, 0),
              'idx': idx,
+             'top': ' + '+str(layers - 2) if is_top else '',
              'dim': 1 if self._flatten else str(cdim),
-             'off': ' + %d' % j if j else ''}
+             'off': ' + %d' % j if j else '',
+             'offset': ' * _'+self.c_offset_name(i, 0)+'['+idx+']' if is_top else ''}
 
     def c_kernel_arg_name(self, i, j):
         return "p_%s" % self.c_arg_name(i, j)
@@ -160,7 +165,7 @@ class Arg(base.Arg):
     def c_local_tensor_name(self, i, j):
         return self.c_kernel_arg_name(i, j)
 
-    def c_kernel_arg(self, count, i=0, j=0, shape=(0,)):
+    def c_kernel_arg(self, count, i=0, j=0, shape=(0,), is_top=False, layers=1):
         if self._uses_itspace:
             if self._is_mat:
                 if self.data._is_vector_field:
@@ -174,7 +179,7 @@ class Arg(base.Arg):
                     raise RuntimeError("Don't know how to pass kernel arg %s" % self)
             else:
                 if self.data is not None and self.data.dataset.set.layers > 1:
-                    return self.c_ind_data_xtr("i_%d" % self.idx.index, i)
+                    return self.c_ind_data_xtr("i_%d" % self.idx.index, i, is_top=is_top, layers=layers)
                 elif self._flatten:
                     return "%(name)s + %(map_name)s[i * %(arity)s + i_0 %% %(arity)d] * %(dim)s + (i_0 / %(arity)d)" % \
                         {'name': self.c_arg_name(),
@@ -195,22 +200,41 @@ class Arg(base.Arg):
             return "%(name)s + i * %(dim)s" % {'name': self.c_arg_name(i),
                                                'dim': self.data.cdim}
 
-    def c_vec_init(self):
+    def c_vec_init(self, is_top, layers, is_facet=False):
         val = []
+        arity = self.map.arity
         if self._flatten:
             for d in range(self.data.dataset.cdim):
-                for idx in range(self.map.arity):
+                for idx in range(arity):
                     val.append("%(vec_name)s[%(idx)s] = %(data)s" %
                                {'vec_name': self.c_vec_name(),
-                                'idx': d * self.map.arity + idx,
-                                'data': self.c_ind_data(idx, 0, d)})
+                                'idx': d * arity + idx,
+                                'data': self.c_ind_data(idx, 0, d, is_top=is_top, layers=layers,
+                                                        offset=self.map.offset[idx] if is_top else None)})
+            if is_facet:
+                for d in range(self.data.dataset.cdim):
+                    for idx in range(arity):
+                        val.append("%(vec_name)s[%(idx)s] = %(data)s" %
+                                   {'vec_name': self.c_vec_name(),
+                                    'idx': (d + self.data.dataset.cdim) * arity + idx,
+                                    'data': self.c_ind_data(idx, 0, d, is_top=is_top, layers=layers,
+                                                            offset=self.map.offset[idx])})
         else:
             for i, rng in enumerate(zip(self.map.arange[:-1], self.map.arange[1:])):
                 for mi, idx in enumerate(range(*rng)):
                     val.append("%(vec_name)s[%(idx)s] = %(data)s" %
                                {'vec_name': self.c_vec_name(),
                                 'idx': idx,
-                                'data': self.c_ind_data(mi, i)})
+                                'data': self.c_ind_data(mi, i, is_top=is_top, layers=layers,
+                                                        offset=self.map.offset[idx] if is_top else None)})
+            if is_facet:
+                for i, rng in enumerate(zip(self.map.arange[:-1], self.map.arange[1:])):
+                    for mi, idx in enumerate(range(*rng)):
+                        val.append("%(vec_name)s[%(idx)s] = %(data)s" %
+                                   {'vec_name': self.c_vec_name(),
+                                    'idx': idx,
+                                    'data': self.c_ind_data(mi, i, is_top=is_top, layers=layers,
+                                                            offset=self.map.offset[idx])})
         return ";\n".join(val)
 
     def c_addto_scalar_field(self, i, j, buf_name, extruded=None):
@@ -302,10 +326,13 @@ class Arg(base.Arg):
         else:
             raise RuntimeError("Don't know how to zero temp array for %s" % self)
 
-    def c_add_offset_flatten(self):
+    def c_add_offset_flatten(self, is_facet=False):
         cdim = np.prod(self.data.cdim)
         val = []
         for (k, offset), arity in zip(enumerate(self.map.arange[:-1]), self.map.arities):
+            # from IPython import embed; embed()
+            # if is_facet and len(self.map.offset) < arity:
+            #     arity /= 2
             for idx in range(cdim):
                 for i in range(arity):
                     val.append("%(name)s[%(j)d] += _%(offset)s[%(i)d] * %(dim)s;" %
@@ -314,12 +341,21 @@ class Arg(base.Arg):
                                 'j': offset + idx * arity + i,
                                 'offset': self.c_offset_name(k, 0),
                                 'dim': cdim})
+                    if is_facet:
+                        val.append("%(name)s[%(j)d] += _%(offset)s[%(i)d] * %(dim)s;" %
+                                   {'name': self.c_vec_name(),
+                                    'i': i,
+                                    'j': offset + (idx + cdim) * arity + i,
+                                    'offset': self.c_offset_name(k, 0),
+                                    'dim': cdim})
         return '\n'.join(val)+'\n'
 
-    def c_add_offset(self):
+    def c_add_offset(self, is_facet=False):
         cdim = np.prod(self.data.cdim)
         val = []
         for (k, offset), arity in zip(enumerate(self.map.arange[:-1]), self.map.arities):
+            # if is_facet and len(self.map.offset) < arity:
+            #     arity /= 2
             for i in range(arity):
                 val.append("%(name)s[%(j)d] += _%(offset)s[%(i)d] * %(dim)s;" %
                            {'name': self.c_vec_name(),
@@ -327,6 +363,13 @@ class Arg(base.Arg):
                             'j': offset + i,
                             'offset': self.c_offset_name(k, 0),
                             'dim': cdim})
+                if is_facet:
+                    val.append("%(name)s[%(j)d] += _%(offset)s[%(i)d] * %(dim)s;" %
+                               {'name': self.c_vec_name(),
+                                'i': i,
+                                'j': offset + i + arity,
+                                'offset': self.c_offset_name(k, 0),
+                                'dim': cdim})
         return '\n'.join(val)+'\n'
 
     # New globals generation which avoids false sharing.
@@ -547,6 +590,7 @@ class JITModule(base.JITModule):
         self._itspace = itspace
         self._args = args
         self._direct = kwargs.get('direct', False)
+        self._iterate = kwargs.get('iterate', False)
 
     def __call__(self, *args):
         return self.compile()(*args)
@@ -636,6 +680,9 @@ class JITModule(base.JITModule):
         _ssinds_arg = ""
         _ssinds_dec = ""
         _index_expr = "n"
+        is_top = (self._iterate == ON_TOP)
+        is_facet = (self._iterate == ON_INTERIOR_FACETS)
+
         if isinstance(self._itspace._iterset, Subset):
             _ssinds_arg = "PyObject* _ssinds,"
             _ssinds_dec = "int* ssinds = (int*) (((PyArrayObject*) _ssinds)->data);"
@@ -643,7 +690,9 @@ class JITModule(base.JITModule):
 
         _wrapper_args = ', '.join([arg.c_wrapper_arg() for arg in self._args])
 
-        _wrapper_decs = ';\n'.join([arg.c_wrapper_dec() for arg in self._args])
+        # Pass in the is_facet flag to mark the case when it's an interior horizontal facet in
+        #an extruded mesh.
+        _wrapper_decs = ';\n'.join([arg.c_wrapper_dec(is_facet=is_facet) for arg in self._args])
 
         if len(Const._defs) > 0:
             _const_args = ', '
@@ -665,7 +714,7 @@ class JITModule(base.JITModule):
              for count, arg in enumerate(self._args)
              if arg._is_global_reduction])
 
-        _vec_inits = ';\n'.join([arg.c_vec_init() for arg in self._args
+        _vec_inits = ';\n'.join([arg.c_vec_init(is_top, self._itspace.layers, is_facet) for arg in self._args
                                  if not arg._is_mat and arg._is_vec_map])
 
         indent = lambda t, i: ('\n' + '  ' * i).join(t.split('\n'))
@@ -680,6 +729,7 @@ class JITModule(base.JITModule):
         _layer_arg = ""
         _layer_arg_init = ""
         if self._itspace.layers > 1:
+            #TO DO: for interior horizontal facets add the offset to get the other half of the map
             a_bcs = self._itspace.iterset._extruded_bcs
             _layer_arg = ", PyObject *_layer"
             _layer_arg_init = "int layer = (int)PyInt_AsLong(_layer);"
@@ -703,9 +753,9 @@ class JITModule(base.JITModule):
                                          if arg._uses_itspace and arg._flatten and not arg._is_mat])
             _apply_offset += ';\n'.join([arg.c_add_offset_map() for arg in self._args
                                          if arg._uses_itspace and (not arg._flatten or arg._is_mat)])
-            _apply_offset += ';\n'.join([arg.c_add_offset_flatten() for arg in self._args
+            _apply_offset += ';\n'.join([arg.c_add_offset_flatten(is_facet=is_facet) for arg in self._args
                                          if arg._is_vec_map and arg._flatten])
-            _apply_offset += ';\n'.join([arg.c_add_offset() for arg in self._args
+            _apply_offset += ';\n'.join([arg.c_add_offset(is_facet=is_facet) for arg in self._args
                                          if arg._is_vec_map and not arg._flatten])
             _extr_loop = '\n' + extrusion_loop()
             _extr_loop_close = '}\n'

@@ -46,6 +46,7 @@ from host import Kernel  # noqa: for inheritance
 import device
 import plan as _plan
 from subprocess import Popen, PIPE
+from base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS
 
 # hard coded value to max openmp threads
 _max_threads = 32
@@ -225,7 +226,7 @@ void wrap_%(kernel_name)s__(PyObject* _boffset,
 class ParLoop(device.ParLoop, host.ParLoop):
 
     def _compute(self, part):
-        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct)
+        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct, iterate=self.iterate)
         if not hasattr(self, '_jit_args'):
             self._jit_args = [None] * 5
             if isinstance(self._it_space._iterset, Subset):
@@ -251,7 +252,12 @@ class ParLoop(device.ParLoop, host.ParLoop):
             # offset_args returns an empty list if there are none
             self._jit_args.extend(self.offset_args)
 
-            self._jit_args.extend(self.layer_arg)
+            if self.iterate in [ON_TOP, ON_BOTTOM]:
+                self._jit_args.extend([2])
+            elif self.iterate in [ON_INTERIOR_FACETS]:
+                self._jit_args.extend([self._it_space.layers - 1])
+            else:
+                self._jit_args.extend(self.layer_arg)
 
         if part.size > 0:
             #TODO: compute partition size
