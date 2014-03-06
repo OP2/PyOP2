@@ -48,13 +48,12 @@ This may also depend on development trunk versions of other FEniCS programs.
 
 FEniCS Viper is also required and is used to visualise the solution.
 """
-import os
 import numpy as np
+import os
 
 from pyop2 import op2, utils
 from triangle_reader import read_triangle
-
-_kerneldir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'kernels')
+from utils import dump_kernel, load_kernel
 
 
 def viper_shape(array):
@@ -93,28 +92,20 @@ def main(opt):
 
         # Generate code for mass and rhs assembly.
 
-        adv, = compile_form(M, "adv")
-        adv_rhs, = compile_form(adv_rhs, "adv_rhs")
-        diff, = compile_form(diff, "diff")
-        diff_rhs, = compile_form(diff_rhs, "diff_rhs")
+        adv = compile_form(M, "adv")[0][-1]
+        adv_rhs = compile_form(adv_rhs, "adv_rhs")[0][-1]
+        diff = compile_form(diff, "diff")[0][-1]
+        diff_rhs = compile_form(diff_rhs, "diff_rhs")[0][-1]
         if opt['update_kernels']:
-            with open(os.path.join(_kerneldir, 'adv.c'), 'w') as f:
-                f.write(adv._code)
-            with open(os.path.join(_kerneldir, 'adv_rhs.c'), 'w') as f:
-                f.write(adv_rhs._code)
-            with open(os.path.join(_kerneldir, 'diff.c'), 'w') as f:
-                f.write(diff._code)
-            with open(os.path.join(_kerneldir, 'diff_rhs.c'), 'w') as f:
-                f.write(diff_rhs._code)
+            dump_kernel(adv)
+            dump_kernel(adv_rhs)
+            dump_kernel(diff)
+            dump_kernel(diff_rhs)
     else:
-        with open(os.path.join(_kerneldir, 'adv.c')) as f:
-            adv = op2.Kernel(f.read(), "adv_cell_integral_0_otherwise")
-        with open(os.path.join(_kerneldir, 'adv_rhs.c')) as f:
-            adv_rhs = op2.Kernel(f.read(), "adv_rhs_cell_integral_0_otherwise")
-        with open(os.path.join(_kerneldir, 'diff.c')) as f:
-            diff = op2.Kernel(f.read(), "diff_cell_integral_0_otherwise")
-        with open(os.path.join(_kerneldir, 'diff_rhs.c')) as f:
-            diff_rhs = op2.Kernel(f.read(), "diff_rhs_cell_integral_0_otherwise")
+        adv = load_kernel('adv_cell_integral_0_otherwise')
+        adv_rhs = load_kernel('adv_rhs_cell_integral_0_otherwise')
+        diff = load_kernel('diff_cell_integral_0_otherwise')
+        diff_rhs = load_kernel('diff_rhs_cell_integral_0_otherwise')
 
     # Set up simulation data structures
 
@@ -225,13 +216,11 @@ def main(opt):
     if opt['test_output'] or opt['return_output']:
         if opt['firedrake']:
             l2norm = dot(t - a, t - a) * dx
-            l2_kernel, = compile_form(l2norm, "error_norm")
+            l2_kernel = compile_form(l2norm, "error_norm")[0][-1]
             if opt['update_kernels']:
-                with open(os.path.join(_kerneldir, 'error_norm.c'), 'w') as f:
-                    f.write(l2_kernel._code)
+                dump_kernel(l2_kernel)
         else:
-            with open(os.path.join(_kerneldir, 'error_norm.c')) as f:
-                l2_kernel = op2.Kernel(f.read(), "error_norm_cell_integral_0_otherwise")
+            l2_kernel = load_kernel('error_norm_cell_integral_0_otherwise')
         result = op2.Global(1, [0.0])
         op2.par_loop(l2_kernel, elements,
                      result(op2.INC),

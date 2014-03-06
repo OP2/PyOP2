@@ -54,12 +54,10 @@ bzr branch lp:~mapdes/ffc/pyop2
 This may also depend on development trunk versions of other FEniCS programs.
 """
 
-import os
 import numpy as np
 
 from pyop2 import op2, utils
-
-_kerneldir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'kernels')
+from utils import dump_kernel, load_kernel
 
 
 def main(opt):
@@ -79,18 +77,14 @@ def main(opt):
 
         # Generate code for Laplacian and rhs assembly.
 
-        laplacian, = compile_form(a, "laplacian")
-        rhs, = compile_form(L, "rhs")
+        laplacian = compile_form(a, "laplacian")[0][-1]
+        rhs = compile_form(L, "laplacian_rhs")[0][-1]
         if opt['update_kernels']:
-            with open(os.path.join(_kerneldir, 'laplacian.c'), 'w') as f:
-                f.write(laplacian._code)
-            with open(os.path.join(_kerneldir, 'laplacian_rhs.c'), 'w') as f:
-                f.write(rhs._code)
+            dump_kernel(laplacian)
+            dump_kernel(rhs)
     else:
-        with open(os.path.join(_kerneldir, 'laplacian.c')) as f:
-            laplacian = op2.Kernel(f.read(), "laplacian_cell_integral_0_otherwise")
-        with open(os.path.join(_kerneldir, 'laplacian_rhs.c')) as f:
-            rhs = op2.Kernel(f.read(), "rhs_cell_integral_0_otherwise")
+        laplacian = load_kernel("laplacian_cell_integral_0_otherwise")
+        rhs = load_kernel("laplacian_rhs_cell_integral_0_otherwise")
 
     # Set up simulation data structures
 

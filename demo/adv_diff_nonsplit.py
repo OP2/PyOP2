@@ -47,13 +47,12 @@ This may also depend on development trunk versions of other FEniCS programs.
 FEniCS Viper is also required and is used to visualise the solution.
 """
 
-import os
 import numpy as np
+import os
 
 from pyop2 import op2, utils
 from triangle_reader import read_triangle
-
-_kerneldir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'kernels')
+from utils import dump_kernel, load_kernel
 
 
 def viper_shape(array):
@@ -89,18 +88,14 @@ def main(opt):
 
         # Generate code for mass and rhs assembly.
 
-        lhs, = compile_form(a, "lhs")
-        rhs, = compile_form(L, "rhs")
+        lhs = compile_form(a, "adv_diff")[0][-1]
+        rhs = compile_form(L, "adv_diff_rhs")[0][-1]
         if opt['update_kernels']:
-            with open(os.path.join(_kerneldir, 'adv_diff.c'), 'w') as f:
-                f.write(lhs._code)
-            with open(os.path.join(_kerneldir, 'adv_diff_rhs.c'), 'w') as f:
-                f.write(rhs._code)
+            dump_kernel(lhs)
+            dump_kernel(rhs)
     else:
-        with open(os.path.join(_kerneldir, 'adv_diff.c')) as f:
-            lhs = op2.Kernel(f.read(), "lhs_cell_integral_0_otherwise")
-        with open(os.path.join(_kerneldir, 'adv_diff_rhs.c')) as f:
-            rhs = op2.Kernel(f.read(), "rhs_cell_integral_0_otherwise")
+        lhs = load_kernel("adv_diff_cell_integral_0_otherwise")
+        rhs = load_kernel("adv_diff_rhs_cell_integral_0_otherwise")
 
     # Set up simulation data structures
 
@@ -195,13 +190,11 @@ def main(opt):
     if opt['test_output'] or opt['return_output']:
         if opt['firedrake']:
             l2norm = dot(t - a, t - a) * dx
-            l2_kernel, = compile_form(l2norm, "error_norm")
+            l2_kernel = compile_form(l2norm, "error_norm")[0][-1]
             if opt['update_kernels']:
-                with open(os.path.join(_kerneldir, 'error_norm.c'), 'w') as f:
-                    f.write(l2_kernel._code)
+                dump_kernel(l2_kernel)
         else:
-            with open(os.path.join(_kerneldir, 'error_norm.c')) as f:
-                l2_kernel = op2.Kernel(f.read(), "error_norm_cell_integral_0_otherwise")
+            l2_kernel = load_kernel("error_norm_cell_integral_0_otherwise")
         result = op2.Global(1, [0.0])
         op2.par_loop(l2_kernel, elements,
                      result(op2.INC),
