@@ -56,13 +56,17 @@ from ir.ast_base import Node
 
 class LazyComputation(object):
 
-    """Helper class holding computation to be carried later on.
-    """
+    """Helper class holding computation to be carried later on."""
 
     def __init__(self, reads, writes):
         self.reads = to_set(reads)
         self.writes = to_set(writes)
-        self._scheduled = False
+
+    def depends_on(self, c):
+        return self.reads & c.writes or self.writes & c.reads or self.writes & c.writes
+
+    def needed_for(self, reads, writes):
+        return self.reads & writes or self.writes & reads
 
     def enqueue(self):
         _trace.append(self)
@@ -74,8 +78,13 @@ class LazyComputation(object):
 
 class LazyPass(LazyComputation):
 
+    """Lazy no op class."""
+
     def _run(self):
         pass
+
+    def __str__(self):
+        return "pass"
 
 
 class LazyMethodCall(LazyComputation):
@@ -93,7 +102,66 @@ class LazyMethodCall(LazyComputation):
         self._method(*self._args, **self._kwargs)
 
     def __str__(self):
-        return "LazyMethodCall(%r(%r))" % (str(self._method), ", ".join([str(a) for a in self._args]))
+        return "LazyMethodCall(%r(%r))" % \
+               (str(self._method), ", ".join([str(a) for a in self._args]))
+
+
+class LazyHaloSend(LazyMethodCall):
+
+    def __init__(self, arg, parloop):
+        LazyMethodCall.__init__(self,
+                                set([CORE(arg.data), OWNED(arg.data)]),
+                                set([NET(arg.data, parloop)]),
+                                arg.halo_exchange_begin)
+
+        self._dat = arg.data
+
+    def __str__(self):
+        return "LazyHaloSend(%r)" % self._dat
+
+
+class LazyHaloRecv(LazyMethodCall):
+
+    def __init__(self, arg, parloop):
+        LazyMethodCall.__init__(self,
+                                set([NET(arg.data, parloop)]),
+                                set([HALOEXEC(arg.data), HALOIMPORT(arg.data)]),
+                                arg.halo_exchange_end)
+        self._dat = arg.data
+
+    def __str__(self):
+        return "LazyHaloRecv(%r)" % self._dat
+
+
+class LazyReductionBegin(LazyMethodCall):
+
+    def __init__(self, arg):
+        LazyMethodCall.__init__(self, set([arg.data]), set(), arg.reduction_begin)
+        self._dat = arg.data
+
+    def __str__(self):
+        return "LazyReductionBegin(%r)" % self._dat
+
+
+class LazyReductionEnd(LazyMethodCall):
+
+    def __init__(self, arg):
+        LazyMethodCall.__init__(self, set(), set([arg.data]), arg.reduction_end)
+        self._dat = arg.data
+
+    def __str__(self):
+        return "LazyReductionEnd(%r)" % self._dat
+
+
+class LazyCompute(LazyMethodCall):
+
+    def __init__(self, reads, writes, parloop, section):
+        LazyMethodCall.__init__(self, reads, writes, parloop.compute, section)
+        self._parloop = parloop
+        self._section = section
+
+    def __str__(self):
+        return "compute(%r)[%r]" % (self._parloop, self._section)
 
 
 class Dependency(object):
@@ -155,36 +223,130 @@ def ALL(dat):
 
 class ExecutionTrace(object):
 
-    """Container maintaining delayed computation until they are executed."""
+    """Container maintaining delayed computation until they are executed.
+
+    Objects of this class maintain lazy computation inside a directed acyclic
+    graph representing a partial order of the execution based on the reads and
+    writes specifications of each :class:LazyComputation.
+    """
 
     def __init__(self):
-        self._trace = list()
+        self._init()
+
+    def _init(self):
+        self.top = LazyPass(None, None)
+        self.bot = LazyPass(None, None)
+        self.edges = set()
+        self.edges.add((self.top, self.bot))
+
+    def children(self, node):
+        return set([e[1] for e in self.edges if e[0] is node])
+
+    def parents(self, node):
+        return set([e[0] for e in self.edges if e[1] is node])
+
+    def descendants(self, node):
+        d = self.children(node)
+        children = set(d)
+        for c in children:
+            d.update(self.descendants(c))
+        return d
+
+    def ancestors(self, node):
+        a = self.parents(node)
+        parents = set(a)
+        for p in parents:
+            a.update(self.ancestors(p))
+        return a
+
+    def clear(self):
+        """Forcefully drops delayed computations. Only use this if you know
+        what you are doing.
+        """
+        self._init()
 
     def append(self, computation):
         if not configuration['lazy_evaluation']:
-            assert not self._trace
             computation._run()
         elif configuration['lazy_max_trace_length'] > 0 and \
                 configuration['lazy_max_trace_length'] == len(self._trace):
             self.evaluate(computation.reads, computation.writes)
             computation._run()
         else:
-            self._trace.append(computation)
+            self._append(computation)
+
+    def _append(self, node):
+        """Inserts `node` in the DAG."""
+        # find where to attach the new closure:
+        # fallback in case we find no other closure to attach to
+        anchors = set([self.top])
+        # find all closure the new on depends_on
+        # NOTE: this search could be cut back
+        anchors.update([n for n in self.descendants(self.top) if node.depends_on(n)])
+        # only attach to anchors which have no descendants in anchors
+        anchors.difference_update([n for a in anchors for n in self.ancestors(a)])
+        # attach the new node to its anchors and bot
+        self.edges.update([(a, node) for a in anchors])
+        self.edges.add((node, self.bot))
+        self.edges.difference_update([(a, self.bot) for a in anchors])
+        self.edges.discard((self.top, self.bot))
 
     def in_queue(self, computation):
-        return computation in self._trace
+        return computation in [e[0] for e in self.edges] or \
+            computation in [e[1] for e in self.edges]
 
-    def clear(self):
-        """Forcefully drops delayed computations. Only use this if you know
-        what you are doing.
-        """
-        self._trace = list()
+    def remove(self, node):
+        parents = self.parents(node)
+        children = self.children(node)
+
+        self.edges.difference_update([(p, node) for p in parents])
+        self.edges.difference_update([(node, c) for c in children])
+        self.edges.update([(p, c) for p in parents for c in children])
 
     def evaluate_all(self):
         """Forces the evaluation of all delayed computations."""
-        for comp in self._trace:
-            comp._run()
-        self._trace = list()
+        self._schedule(self.top)
+        self._run(self.top)
+        self._init()
+
+    def _run(self, node):
+        assert len(self.children(node)) < 2
+        node._run()
+        if self.children(node):
+            self._run(list(self.children(node))[0])
+
+    def _schedule(self, node):
+        if node is self.bot:
+            return
+        if len(self.children(node)) == 1:
+            self._schedule(list(self.children(node))[0])
+            return
+
+        # if multiple computations can be scheduled
+        runnables = [n for n in self.children(node) if len(self.parents(n)) == 1]
+        sends = [n for n in runnables if isinstance(n, LazyHaloSend)]
+        # prioritize halo sends
+        if sends:
+            self._move_up(sends[0])
+        else:
+            self._move_up(runnables[0])
+
+        # continue until the dag is a total order
+        self._schedule(self.top)
+
+    def _move_up(self, node):
+        """Make `node` a parent of all its siblings."""
+        assert len(self.parents(node)) == 1
+        p = list(self.parents(node))[0]
+
+        siblings = self.children(p)
+        siblings.discard(node)
+        self.edges.difference_update([(p, n) for n in siblings])
+        self.edges.update([(node, s) for s in siblings])
+
+        dups = self.children(node) & set([d for n in self.children(node) for d in self.descendants(n)])
+        for d in dups:
+            self.edges.discard((node, d))
 
     def evaluate(self, reads=None, writes=None):
         """Force the evaluation of delayed computation on which reads and writes
@@ -197,28 +359,38 @@ class ExecutionTrace(object):
                      This forces evaluation of all :func:`par_loop`\s that read from the
                      :class:`DataCarrier` (and any other dependent computation).
         """
+        self.evaluate_all()
 
-        reads = to_set(reads)
-        writes = to_set(writes)
+    def _graphviz(self):
+        """DEBUG, dumps the DAG in the `dot` format."""
+        def name(node):
+            if node is self.top:
+                return "top"
+            if node is self.bot:
+                return "bot"
+            return id(node)
 
-        def _depends_on(reads, writes, cont):
-            return reads & cont.writes or writes & cont.reads or writes & cont.writes
+        def indent(str):
+            return "\n".join(map(lambda s: "  %s" % s, str.splitlines()))
+        a = set(self.top.descendants)
+        a.add(self.top)
+        nodes = "\n".join(["%d [label=\"%s\"];" % (id(n), name(n)) for n in a])
+        cedges = "\n".join(["%d -> %d [color=red];" % (id(s), id(d)) for s in a for d in s.parents])
+        edges = "\n".join(["%d -> %d;" % (id(s), id(d)) for s in a for d in s.children])
+        extras = "  {rank = min; %s }\n  { rank = sink; %s }\n" % (id(self.top), id(self.bot))
 
-        for comp in reversed(self._trace):
-            if _depends_on(reads, writes, comp):
-                comp._scheduled = True
-                reads = reads | comp.reads - comp.writes
-                writes = writes | comp.writes
-            else:
-                comp._scheduled = False
+        def sibling(n):
+            return " ".join(["%d;" % id(s) for s in n.children if len(n.children) > 1])
+        siblings = "\n".join(["  { rank = same; %s }" % sibling(n) for n in a])
 
-        new_trace = list()
-        for comp in self._trace:
-            if comp._scheduled:
-                comp._run()
-            else:
-                new_trace.append(comp)
-        self._trace = new_trace
+        return """digraph d {
+          %(nodes)s
+          %(siblings)s
+          %(extras)s
+          %(cedges)s
+          %(edges)s
+        }""" % {'nodes': indent(nodes), 'cedges': indent(cedges),
+                'edges': indent(edges), 'extras': extras, 'siblings': siblings}
 
 
 _trace = ExecutionTrace()
@@ -1918,9 +2090,9 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
         del self._numpy_data
 
         if configuration['lazy_evaluation']:
-            _trace.evaluate({CORE(self), OWNED(self)}, set())
+            _trace.evaluate(set([CORE(self), OWNED(self)]), set())
             for c in self._cow_parloop:
-                _trace._trace.remove(c)
+                _trace.remove(c)
 
         for c in self._cow_parloop:
             c._run()
@@ -3416,10 +3588,9 @@ class ParLoop(object):
                             writes.extend([n(d) for d in arg.data for n in neighboor])
 
         if part.size > 0:
-            return LazyMethodCall(set(reads) | Const._defs,
-                                  set(writes),
-                                  self.compute,
-                                  part)
+            return LazyCompute(set(reads) | Const._defs,
+                               set(writes),
+                               self, part)
         else:
             return LazyPass(set(reads) | Const._defs,
                             set(writes))
@@ -3450,10 +3621,8 @@ class ParLoop(object):
         if self.is_direct:
             return []
 
-        return [LazyMethodCall({CORE(arg.data), OWNED(arg.data)},
-                               {NET(arg.data, self)},
-                               arg.halo_exchange_begin)
-                for arg in self.args if arg._is_dat and arg.access in [READ, RW]]
+        return [LazyHaloSend(arg, self) for arg in self.args
+                if arg._is_dat and arg.access in [READ, RW]]
 
     @collective
     def _spawn_halo_exchange_recvs(self):
@@ -3461,25 +3630,19 @@ class ParLoop(object):
         if self.is_direct:
             return []
 
-        return [LazyMethodCall({NET(arg.data, self)},
-                               {HALOEXEC(arg.data), HALOIMPORT(arg.data)},
-                               arg.halo_exchange_end)
-                for arg in self.args if arg._is_dat and arg.access in [READ, RW]]
+        return [LazyHaloRecv(arg, self) for arg in self.args
+                if arg._is_dat and arg.access in [READ, RW]]
 
     @collective
     def _spawn_reduction_begins(self):
         """Start reductions"""
-        return [LazyMethodCall({arg.data},
-                               set(),
-                               arg.reduction_begin)
+        return [LazyReductionBegin(arg)
                 for arg in self.args if arg._is_global_reduction]
 
     @collective
     def _spawn_reduction_ends(self):
         """End reductions"""
-        return [LazyMethodCall(set(),
-                               {arg.data},
-                               arg.reduction_end)
+        return [LazyReductionEnd(arg)
                 for arg in self.args if arg._is_global_reduction]
 
     @collective
