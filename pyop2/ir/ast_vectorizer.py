@@ -105,8 +105,7 @@ class LoopVectoriser(object):
 
         for stmt, stmt_info in self.lo.out_prods.items():
             # First, find outer product loops in the nest
-            it_vars, parent = stmt_info
-            loops = self.lo.out_prods[stmt][2]
+            it_vars, parent, loops = stmt_info
 
             vect_len = self.intr["dp_reg"]
             rows = loops[0].size()

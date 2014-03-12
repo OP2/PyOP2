@@ -191,17 +191,22 @@ class LoopOptimiser(object):
                 # Iteration variables of the two children do not match, add
                 # the children to the dict of invariant expressions iff
                 # they were invariant w.r.t. some loops and not just symbols
-                if invariant_l and not isinstance(left, Symbol):
+                if invariant_l:
+                    left = Par(left) if isinstance(left, Symbol) else left
                     expr_dep[dep_left].append(left)
-                if invariant_r and not isinstance(right, Symbol):
+                if invariant_r:
+                    right = Par(right) if isinstance(right, Symbol) else right
                     expr_dep[dep_right].append(right)
                 return ((), False)
 
         def replace_const(node, syms_dict):
             if isinstance(node, Symbol):
-                return False
+                if str(Par(node)) in syms_dict:
+                    return True
+                else:
+                    return False
             if isinstance(node, Par):
-                if node in syms_dict:
+                if str(node) in syms_dict:
                     return True
                 else:
                     return replace_const(node.children[0], syms_dict)
@@ -213,9 +218,11 @@ class LoopOptimiser(object):
             left = node.children[0]
             right = node.children[1]
             if replace_const(left, syms_dict):
-                node.children[0] = syms_dict[left]
+                left = Par(left) if isinstance(left, Symbol) else left
+                node.children[0] = syms_dict[str(left)]
             if replace_const(right, syms_dict):
-                node.children[1] = syms_dict[right]
+                right = Par(right) if isinstance(right, Symbol) else right
+                node.children[1] = syms_dict[str(right)]
             return False
 
         # Find out all variables which are written to in this loop nest
@@ -227,6 +234,7 @@ class LoopOptimiser(object):
         # Extract read-only sub-expressions that do not depend on at least
         # one loop in the loop nest
         ext_loops = []
+        self.hoisted_syms = {}
         for s, op in self.out_prods.items():
             expr_dep = defaultdict(list)
             if isinstance(s, (Assign, Incr)):
@@ -275,8 +283,7 @@ class LoopOptimiser(object):
                 for_ass = [Assign(_s, e) for _s, e in zip(for_sym, expr)]
                 block = Block(for_ass, open_scope=True)
                 for l in wl:
-                    inv_for = For(dcopy(l.init), dcopy(l.cond),
-                                  dcopy(l.incr), block)
+                    inv_for = For(dcopy(l.init), dcopy(l.cond), dcopy(l.incr), block)
                     block = Block([inv_for], open_scope=True)
 
                 # Update the lists of symbols accessed and of decls
@@ -289,8 +296,11 @@ class LoopOptimiser(object):
                 new_block = var_decl + [inv_for] + place.children[ofs:]
                 place.children = place.children[:ofs] + new_block
 
+                # Track hoisted symbols
+                self.hoisted_syms.update(zip(for_sym, [(i, (place, ofs, inv_for)) for i in expr]))
+
                 # 4) Replace invariant sub-trees with the proper tmp variable
-                replace_const(s.children[1], dict(zip(expr, for_sym)))
+                replace_const(s.children[1], dict(zip([str(i) for i in expr], for_sym)))
 
                 # 5) Record invariant loops which have been hoisted out of
                 # the present loop nest
@@ -373,7 +383,8 @@ class LoopOptimiser(object):
                         return split_sum(node.children[1], (node, 1), is_left, found, sum_count)
                     return True
             else:
-                raise RuntimeError("Splitting expression, shouldn't be here.")
+                raise RuntimeError("Splitting expression, but actually found an unknown \
+                                    node: %s" % node.gencode())
 
         def split_and_update(out_prods):
             op_split, op_splittable = ({}, {})
@@ -415,3 +426,86 @@ class LoopOptimiser(object):
         if splittable:
             new_out_prods.update(splittable)
         self.out_prods = new_out_prods
+
+    def op_expand(self):
+        """Expand outer product expressions such that:
+
+        Y[j] = f(...)
+        (X[i]*Y[j])*F + ...
+
+        becomes:
+
+        Y[j] = f(...)*F
+        (X[i]*Y[j]) + ...
+
+        This might be useful for various purposes:
+        - Relieve register pressure; when, for example, (X[i]*Y[j]) is computed
+        in a loop L' different than the loop L'' in which Y[j] is evaluated,
+        and the cost(L') > cost(L'')
+        - To "clean" outer products: this might better expose well-known linear
+        algebra operations, like matrix-matrix multiplications. """
+
+        CONST = -1
+        ITVAR = -2
+        updated_syms = defaultdict(list)
+
+        def find_expandable(node, parent, it_vars):
+            if isinstance(node, Symbol):
+                if not node.rank:
+                    return ([node], CONST)
+                elif node.rank[-1] not in it_vars:
+                    return ([node], CONST)
+                else:
+                    return ([node], ITVAR)
+            elif isinstance(node, Par):
+                return find_expandable(node.children[0], node, it_vars)
+            elif isinstance(node, Prod):
+                left_node, left_type = find_expandable(node.children[0], node, it_vars)
+                right_node, right_type = find_expandable(node.children[1], node, it_vars)
+                if left_type == ITVAR and right_type == ITVAR:
+                    # Found an expandable product
+                    return (left_node, ITVAR)
+                elif left_type == CONST and right_type == CONST:
+                    # Product of constants; they are both used for expansion (if any)
+                    return ([node], CONST)
+                else:
+                    # Do the expansion
+                    const = left_node[0] if left_type == CONST else right_node[0]
+                    expandable, exp_node = (left_node, node.children[0]) if left_type == ITVAR \
+                        else (right_node, node.children[1])
+                    for sym in expandable:
+                        if not (updated_syms.get(sym) and const in updated_syms[sym]):
+                            # Perform the expansion; we do the expansion for a symbol only
+                            # if we hadn't done it before (that's the purpose of updated_syms)
+                            if sym not in self.hoisted_syms:
+                                raise RuntimeError("Expanding expression, but found one outer\
+                                    product symbol which was not hoisted: %s" % sym.gencode())
+                            old_expr, for_loop = self.hoisted_syms[sym]
+                            new_node = Prod(Par(old_expr.children[0]), const)
+                            old_expr.children[0] = new_node
+                            updated_syms[sym].append(const)
+                    # Update the parent node, since an expression has been expanded
+                    if parent.children[0] == node:
+                        parent.children[0] = exp_node
+                    elif parent.children[1] == node:
+                        parent.children[1] = exp_node
+                    else:
+                        raise RuntimeError("Expanding expression, but can't find the\
+                                relationship between parent and child node")
+                    return (expandable, ITVAR)
+            elif isinstance(node, Sum):
+                left_node, left_type = find_expandable(node.children[0], node, it_vars)
+                right_node, right_type = find_expandable(node.children[1], node, it_vars)
+                if left_type == ITVAR and right_type == ITVAR:
+                    return (left_node + right_node, ITVAR)
+                elif left_type == CONST and right_type == CONST:
+                    return ([node], CONST)
+                else:
+                    return (None, CONST)
+            else:
+                raise RuntimeError("Finding expandable expression, but actually \
+                                    found an unknown node: %s" % node.gencode())
+
+        for stmt, stmt_info in self.out_prods.items():
+            it_vars, parent, loops = stmt_info
+            find_expandable(stmt.children[1], stmt, it_vars)

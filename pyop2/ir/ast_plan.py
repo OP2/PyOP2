@@ -170,6 +170,7 @@ class ASTKernel(object):
 
             # 2) Splitting
             if split:
+                nest.op_expand()
                 nest.op_split(split[0], split[1])
 
             # 3) Register tiling
