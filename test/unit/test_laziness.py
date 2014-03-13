@@ -43,6 +43,76 @@ from pyop2 import op2
 nelems = 42
 
 
+class TestExecutionTrace:
+
+    def test_read_write_dependency(self, backend, skip_greedy):
+        a = op2.base.LazyPass(set([1]), set())
+        b = op2.base.LazyPass(set(), set([1]))
+
+        assert b.depends_on(a)
+
+    def test_write_read_dependency(self, backend, skip_greedy):
+        a = op2.base.LazyPass(set(), set([1]))
+        b = op2.base.LazyPass(set([1]), set())
+
+        assert b.depends_on(a)
+
+    def test_maintain_write_order(self, backend, skip_greedy):
+        a = op2.base.LazyPass(set(), set([1]))
+        b = op2.base.LazyPass(set(), set([1]))
+
+        assert b.depends_on(a)
+
+    def test_empty_trace(self, backend, skip_greedy):
+        """Check trace initial state."""
+        trace = op2.base.ExecutionTrace()
+        assert trace.in_queue(trace.top)
+        assert trace.in_queue(trace.bot)
+        assert trace.bot in trace.children(trace.top)
+
+    def test_enqueue(self, backend, skip_greedy):
+        trace = op2.base.ExecutionTrace()
+
+        c = op2.base.LazyPass(set(), set())
+        trace._append(c)
+
+        assert trace.in_queue(c)
+        assert c in trace.children(trace.top)
+        assert c in trace.parents(trace.bot)
+
+    def test_siblings(self, backend, skip_greedy):
+        trace = op2.base.ExecutionTrace()
+
+        a = op2.base.LazyPass(set([1]), set([1]))
+        b = op2.base.LazyPass(set([2]), set([2]))
+
+        trace._append(a)
+        trace._append(b)
+
+        assert a in trace.children(trace.top)
+        assert b in trace.children(trace.top)
+        assert len(trace.children(trace.top)) == 2
+
+    def test_children(self, backend, skip_greedy):
+        trace = op2.base.ExecutionTrace()
+
+        a = op2.base.LazyPass(set([1]), set([1]))
+        b = op2.base.LazyPass(set([1]), set([2]))
+        c = op2.base.LazyPass(set([1]), set([3]))
+
+        trace._append(a)
+        trace._append(b)
+        trace._append(c)
+
+        assert a in trace.children(trace.top)
+        assert len(trace.children(trace.top)) == 1
+        assert b in trace.children(a)
+        assert len(trace.parents(b)) == 1
+        assert c in trace.children(a)
+        assert len(trace.parents(c)) == 1
+        assert len(trace.children(a)) == 2
+
+
 class TestLaziness:
 
     @pytest.fixture
@@ -65,26 +135,6 @@ count(unsigned int* x)
         assert a.data[0] == nelems
         assert a.data[0] == nelems
 
-    def test_reorder(self, backend, skip_greedy, iterset):
-        a = op2.Global(1, 0, numpy.uint32, "a")
-        b = op2.Global(1, 0, numpy.uint32, "b")
-
-        kernel = """
-void
-count(unsigned int* x)
-{
-  (*x) += 1;
-}
-"""
-        op2.par_loop(op2.Kernel(kernel, "count"), iterset, a(op2.INC))
-        op2.par_loop(op2.Kernel(kernel, "count"), iterset, b(op2.INC))
-
-        assert a._data[0] == 0
-        assert b._data[0] == 0
-        assert b.data[0] == nelems
-        assert a._data[0] == 0
-        assert a.data[0] == nelems
-
     def test_ro_accessor(self, backend, skip_greedy, iterset):
         """Read-only access to a Dat should force computation that writes to it."""
         op2.base._trace.clear()
@@ -92,7 +142,6 @@ count(unsigned int* x)
         k = op2.Kernel('void k(double *x) { *x = 1.0; }', 'k')
         op2.par_loop(k, iterset, d(op2.WRITE))
         assert all(d.data_ro == 1.0)
-        assert len(op2.base._trace._trace) == 0
 
     def test_rw_accessor(self, backend, skip_greedy, iterset):
         """Read-write access to a Dat should force computation that writes to it,
@@ -105,58 +154,7 @@ count(unsigned int* x)
         op2.par_loop(k, iterset, d(op2.WRITE))
         op2.par_loop(k2, iterset, d2(op2.WRITE), d(op2.READ))
         assert all(d.data == 1.0)
-        assert len(op2.base._trace._trace) == 0
 
-    def test_chain(self, backend, skip_greedy, skip_opencl, skip_cuda, iterset):
-        """Test correct dependency propagation across multiple loops."""
-        # This test cannot be performed on OpenCL or CUDA because of
-        # how it asserted and how 'device' backend differ from CPU ones.
-        # Because of host/device transfers, public and private Dat accessors
-        # cannot be used as an indicator of the progress of the lazy
-        # evaluation
-
-        a = op2.Global(1, 0, numpy.uint32, "a")
-        x = op2.Dat(iterset, numpy.zeros(nelems), numpy.uint32, "x")
-        y = op2.Dat(iterset, numpy.zeros(nelems), numpy.uint32, "y")
-
-        kernel_add_one = """
-void
-add_one(unsigned int* x)
-{
-  (*x) += 1;
-}
-"""
-        kernel_copy = """
-void
-copy(unsigned int* dst, unsigned int* src)
-{
-  (*dst) = (*src);
-}
-"""
-        kernel_sum = """
-void
-sum(unsigned int* sum, unsigned int* x)
-{
-  (*sum) += (*x);
-}
-"""
-
-        op2.par_loop(op2.Kernel(kernel_add_one, "add_one"), iterset, x(op2.RW))
-        op2.par_loop(op2.Kernel(kernel_copy, "copy"), iterset, y(op2.WRITE), x(op2.READ))
-        op2.par_loop(op2.Kernel(kernel_sum, "sum"), iterset, a(op2.INC), x(op2.READ))
-
-        # check everything is zero at first
-        assert a._data[0] == 0
-        assert sum(x._data) == 0
-        assert sum(y._data) == 0
-
-        # force computation affecting 'a' (1st and 3rd par_loop)
-        assert a.data[0] == nelems
-        assert sum(x.data_ro) == nelems
-        assert all(y._data == 0)
-
-        # force the last par_loop remaining (2nd)
-        assert sum(y.data_ro) == nelems
 
 if __name__ == '__main__':
     import os
