@@ -172,6 +172,7 @@ class ASTKernel(object):
             if split:
                 nest.op_expand()
                 nest.op_split(split[0], split[1])
+            from IPython import embed; embed()
 
             # 3) Register tiling
             if tile_opt and v_type == AUTOVECT:

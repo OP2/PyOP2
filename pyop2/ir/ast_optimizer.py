@@ -352,13 +352,32 @@ class LoopOptimiser(object):
         """Split outer product RHS to improve resources utilization (e.g.
         vector registers)."""
 
+        def check_sum(par_node):
+            """Return true if there are no sums in the sub-tree rooted in
+            par_node, false otherwise."""
+            if isinstance(par_node, Symbol):
+                return False
+            elif isinstance(par_node, Sum):
+                return True
+            elif isinstance(par_node, Par):
+                return check_sum(par_node.children[0])
+            elif isinstance(par_node, Prod):
+                left = check_sum(par_node.children[0])
+                right = check_sum(par_node.children[1])
+                return left or right
+            else:
+                raise RuntimeError("Checking whether a node contains sums, but \
+                        found an unknown node %s:" % str(par_node))
+
         def split_sum(node, parent, is_left, found, sum_count):
             """Exploit sum's associativity to cut node when a sum is found."""
             if isinstance(node, Symbol):
                 return False
-            elif isinstance(node, Par) and found:
-                return False
-            elif isinstance(node, Par) and not found:
+            #elif isinstance(node, Par) and found:
+            #    return False
+            #elif isinstance(node, Par) and not found:
+            #    return split_sum(node.children[0], (node, 0), is_left, found, sum_count)
+            elif isinstance(node, Par):
                 return split_sum(node.children[0], (node, 0), is_left, found, sum_count)
             elif isinstance(node, Prod) and found:
                 return False
@@ -408,10 +427,13 @@ class LoopOptimiser(object):
                     stmt_right_loops = [split_loop, split_loop.children[0].children[0]]
                     # Update outer product dictionaries
                     op_splittable[stmt_right] = (it_vars, split_inner_loop, stmt_right_loops)
-                    op_split[stmt_left] = (it_vars, parent, loops)
-                    return op_split, op_splittable
-                else:
-                    return out_prods, {}
+                    if check_sum(stmt_left.children[1]):
+                        op_splittable[stmt_left] = (it_vars, parent, loops)
+                    else:
+                        op_split[stmt_left] = (it_vars, parent, loops)
+            return op_split, op_splittable
+                #else:
+                #    return out_prods, {}
 
         if not self.out_prods:
             return
