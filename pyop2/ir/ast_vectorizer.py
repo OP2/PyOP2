@@ -48,7 +48,6 @@ class LoopVectoriser(object):
         self.lo = loop_optimiser
         self.intr = intrinsics
         self.comp = compiler
-        self.iloops = self._inner_loops(loop_optimiser.loop_nest)
         self.padded = []
 
     def align_and_pad(self, decl_scope, only_align=False):
@@ -78,12 +77,13 @@ class LoopVectoriser(object):
             if d.sym.rank and s != ap.PARAM_VAR:
                 d.attr.append(self.comp["align"](self.intr["alignment"]))
 
+        iloops = self._inner_loops(self.lo.pre_header)
         # Add pragma alignment over innermost loops
-        for l in self.iloops:
+        for l in iloops:
             l.pragma = self.comp["decl_aligned_for"]
 
         # Loop adjustment
-        for l in self.iloops:
+        for l in iloops:
             for stm in l.children[0].children:
                 sym = stm.children[0]
                 if sym.rank and sym.rank[-1] == l.it_var():
@@ -169,7 +169,7 @@ class LoopVectoriser(object):
         def find_iloops(node, loops):
             if isinstance(node, Perfect):
                 return False
-            elif isinstance(node, Block):
+            elif isinstance(node, (Root, Block)):
                 return any([find_iloops(s, loops) for s in node.children])
             elif isinstance(node, For):
                 found = find_iloops(node.children[0], loops)

@@ -134,10 +134,19 @@ class ArrayInit(Expr):
     in as simple strings."""
 
     def __init__(self, values):
-        self.values = values
+        self.values = (values,) if isinstance(values, str) else values
+        self.blas_format = False
 
     def gencode(self):
-        return self.values
+        if self.blas_format:
+            return self.values[0]
+        elif len(self.values) == 2:
+            return self.values[1]
+        else:
+            return self.values[0]
+
+    def set_blas_format(self):
+        self.blas_format = True
 
 
 class Par(UnaryExpr):

@@ -156,6 +156,7 @@ class ASTKernel(object):
         vect = opts.get('vect')
         ap = opts.get('ap')
         split = opts.get('split')
+        blas = opts.get('blas')
 
         v_type, v_param = vect if vect else (None, None)
         tile_opt, tile_sz = tile if tile else (False, -1)
@@ -168,17 +169,21 @@ class ASTKernel(object):
                 inv_outer_loops = nest.op_licm()  # noqa
                 self.decls.update(nest.decls)
 
-            # 2) Splitting
-            if split:
+            # 2) Set the ground for BLAS transformation
+            if blas:
                 nest.op_expand()
-                nest.op_split(split[0], split[1])
-            from IPython import embed; embed()
+                nest.assembly_precompute()
+                nest.op_split()
 
-            # 3) Register tiling
+            # 3) Splitting
+            if split:
+                nest.op_split(split[0], split[1])
+
+            # 4) Register tiling
             if tile_opt and v_type == AUTOVECT:
                 nest.op_tiling(tile_sz)
 
-            # 4) Vectorization
+            # 5) Vectorization
             if ast_vectorizer.initialized:
                 vect = LoopVectoriser(nest)
                 if ap:

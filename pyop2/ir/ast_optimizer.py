@@ -52,7 +52,7 @@ class LoopOptimiser(object):
       be beneficial for loop nests in which the bounds of all loops are
       relatively small (let's say less than 50-60).
 
-    * register tiling:
+    * Register tiling:
       Given a rectangular iteration space, register tiling slices it into
       square tiles of user-provided size, with the aim of improving register
       pressure and register re-use."""
@@ -348,9 +348,26 @@ class LoopOptimiser(object):
             idx = pb.index(loops[1])
             par_block.children = pb[:idx] + tiled_loops + pb[idx + 1:]
 
-    def op_split(self, cut, length):
-        """Split outer product RHS to improve resources utilization (e.g.
-        vector registers)."""
+    def op_split(self, cut=1, length=0):
+        """Split assembly to improve resources utilization (e.g. vector
+        registers). The splitting ``cuts'' the expressions into length
+        blocks of #cut outer products.
+
+        For example:
+        for i
+          for j
+            A[i][j] += X[i]*Y[j] + Z[i]*K[j] + B[i]*X[j]
+        with cut=1, length=1 this would be transformed into:
+        for i
+          for j
+            A[i][j] += X[i]*Y[j]
+        for i
+          for j
+            A[i][j] += Z[i]*K[j] + B[i]*X[j]
+
+        If length is 0, then cut is ignored, and the expression is fully cut
+        into chunks containing a single outer product.
+        """
 
         def check_sum(par_node):
             """Return true if there are no sums in the sub-tree rooted in
@@ -373,10 +390,6 @@ class LoopOptimiser(object):
             """Exploit sum's associativity to cut node when a sum is found."""
             if isinstance(node, Symbol):
                 return False
-            #elif isinstance(node, Par) and found:
-            #    return False
-            #elif isinstance(node, Par) and not found:
-            #    return split_sum(node.children[0], (node, 0), is_left, found, sum_count)
             elif isinstance(node, Par):
                 return split_sum(node.children[0], (node, 0), is_left, found, sum_count)
             elif isinstance(node, Prod) and found:
@@ -388,8 +401,10 @@ class LoopOptimiser(object):
             elif isinstance(node, Sum):
                 sum_count += 1
                 if not found:
+                    # Track the first Sum we found while cutting
                     found = parent
                 if sum_count == cut:
+                    # Perform the cut
                     if is_left:
                         parent, parent_leaf = parent
                         parent.children[parent_leaf] = node.children[0]
@@ -432,21 +447,26 @@ class LoopOptimiser(object):
                     else:
                         op_split[stmt_left] = (it_vars, parent, loops)
             return op_split, op_splittable
-                #else:
-                #    return out_prods, {}
 
         if not self.out_prods:
             return
-
         new_out_prods = {}
         splittable = self.out_prods
-        for i in range(length-1):
-            split, splittable = split_and_update(splittable)
-            new_out_prods.update(split)
-            if not splittable:
-                break
-        if splittable:
-            new_out_prods.update(splittable)
+
+        if length:
+            # Split into at most length blocks
+            for i in range(length-1):
+                split, splittable = split_and_update(splittable)
+                new_out_prods.update(split)
+                if not splittable:
+                    break
+            if splittable:
+                new_out_prods.update(splittable)
+        else:
+            # Split everything into blocks of length 1
+            while splittable:
+                split, splittable = split_and_update(splittable)
+                new_out_prods.update(split)
         self.out_prods = new_out_prods
 
     def op_expand(self):
@@ -531,3 +551,81 @@ class LoopOptimiser(object):
         for stmt, stmt_info in self.out_prods.items():
             it_vars, parent, loops = stmt_info
             find_expandable(stmt.children[1], stmt, it_vars)
+
+    def assembly_precompute(self):
+        """In an assembly loop nest, only the local tensor is updated every
+        iteration. All other written to variables, are actually const, since
+        they are written only once.
+
+        This method exploits this property to precompute all written variables
+        (but the local tensor) out of the loop nest. This has di effect of
+        making the loop nest perfect.
+
+        For example:
+        for i
+          double A[...] = ...
+          for r
+            A[r] += f(...)
+          for j
+            // A is only read here
+            ...
+
+        becomes
+        for i
+          for r
+            A[i][r] += f(...)
+        for i
+          for j
+            ...
+        """
+
+        def precomputing_error(node):
+            raise RuntimeError("Precomputing assembly expressions; found \
+                    an unexpteced AST node while precomputing: %s" % str(node))
+
+        outer_loop = self.fors[0].children[0]
+        outer_var = self.fors[0].it_var()
+        outer_bound = self.fors[0].size()
+        op_outer_loop = self.itspace[0][0]
+
+        # Precomputation
+        new_outer_block = []
+        expanded_syms = {}
+        for i in outer_loop.children:
+            if i == op_outer_loop:
+                break
+            elif isinstance(i, Decl):
+                # Vector expand the declaration of the precomputed symbol
+                i.sym.rank = (outer_bound,) + i.sym.rank
+                if isinstance(i.init, Symbol):
+                    i.init.symbol = "{%s}" % i.init.symbol
+                new_outer_block.append(i)
+            elif isinstance(i, For):
+                # Vector expand every assignment
+                nested_stmts = i.children[0].children
+                precompute_for = dcopy(self.fors[0])
+                precompute_for.children[0].children = [i]
+                new_outer_block.append(precompute_for)
+                for j in nested_stmts:
+                    if isinstance(j, (Assign, Incr)):
+                        symbol = j.children[0]
+                        new_rank = (outer_var,) + symbol.rank
+                        expanded_syms[str(symbol)] = new_rank
+                        symbol.rank = new_rank
+                    else:
+                        precomputing_error(j)
+            else:
+                precomputing_error(i)
+
+        # Delete precomputed stmts from original loop nest
+        outer_loop.children = [op_outer_loop]
+
+        # Update the AST adding the newly precomputed blocks
+        root = self.pre_header.children
+        root.insert(root.index(self.fors[0]), Block(new_outer_block))
+
+        # Update the AST by vector-expanding the accessed variables that have
+        # been pre-computed
+        for s in self.sym:
+            if str(s) in expanded_syms:
+                s.rank = expanded_syms[str(s)]
