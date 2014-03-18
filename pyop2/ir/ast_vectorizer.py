@@ -42,43 +42,43 @@ class LoopVectoriser(object):
 
     """ Loop vectorizer """
 
-    def __init__(self, loop_optimiser):
-        if not initialized:
-            raise RuntimeError("Vectorizer must be initialized first.")
+    def __init__(self, loop_optimiser, intrinsics, compiler):
         self.lo = loop_optimiser
         self.intr = intrinsics
         self.comp = compiler
         self.padded = []
 
-    def align_and_pad(self, decl_scope, only_align=False):
+    def alignment(self, decl_scope):
+        """Align all data structures accessed in the loop nest to the size in
+        bytes of the vector length."""
+
+        for d, s in decl_scope.values():
+            if d.sym.rank and s != ap.PARAM_VAR:
+                d.attr.append(self.comp["align"](self.intr["alignment"]))
+
+    def padding(self, decl_scope):
         """Pad all data structures accessed in the loop nest to the nearest
-        multiple of the vector length. Also align them to the size of the
-        vector length in order to issue aligned loads and stores. Tell about
-        the alignment to the back-end compiler by adding suitable pragmas to
-        loops. Finally, adjust trip count and bound of each innermost loop
-        in which padded and aligned arrays are written to."""
+        multiple of the vector length. Adjust trip counts and bounds of all
+        innermost loops where padded arrays are written to. Since padding
+        enforces data alignment of multi-dimensional arrays, add suitable
+        pragmas to inner loops to inform the backend compiler about this
+        property."""
 
         used_syms = [s.symbol for s in self.lo.sym]
         acc_decls = [d for s, d in decl_scope.items() if s in used_syms]
 
         # Padding
-        if not only_align:
-            for d, s in acc_decls:
-                if d.sym.rank:
-                    if s == ap.PARAM_VAR:
-                        d.sym.rank = tuple([vect_roundup(r) for r in d.sym.rank])
-                    else:
-                        rounded = vect_roundup(d.sym.rank[-1])
-                        d.sym.rank = d.sym.rank[:-1] + (rounded,)
-                    self.padded.append(d.sym)
-
-        # Alignment
-        for d, s in decl_scope.values():
-            if d.sym.rank and s != ap.PARAM_VAR:
-                d.attr.append(self.comp["align"](self.intr["alignment"]))
+        for d, s in acc_decls:
+            if d.sym.rank:
+                if s == ap.PARAM_VAR:
+                    d.sym.rank = tuple([vect_roundup(r) for r in d.sym.rank])
+                else:
+                    rounded = vect_roundup(d.sym.rank[-1])
+                    d.sym.rank = d.sym.rank[:-1] + (rounded,)
+                self.padded.append(d.sym)
 
         iloops = self._inner_loops(self.lo.pre_header)
-        # Add pragma alignment over innermost loops
+        # Add pragma alignment
         for l in iloops:
             l.pragma = self.comp["decl_aligned_for"]
 
@@ -461,79 +461,7 @@ class OuterProduct():
         return (stmt, layout)
 
 
-intrinsics = {}
-compiler = {}
-initialized = False
-
-
-def init_vectorizer(isa, comp):
-    global intrinsics, compiler, initialized
-    intrinsics = _init_isa(isa)
-    compiler = _init_compiler(comp)
-    if intrinsics and compiler:
-        initialized = True
-
-
-def _init_isa(isa):
-    """Set the intrinsics instruction set. """
-
-    if isa == 'sse':
-        return {
-            'inst_set': 'SSE',
-            'avail_reg': 16,
-            'alignment': 16,
-            'dp_reg': 2,  # Number of double values per register
-            'reg': lambda n: 'xmm%s' % n
-        }
-
-    if isa == 'avx':
-        return {
-            'inst_set': 'AVX',
-            'avail_reg': 16,
-            'alignment': 32,
-            'dp_reg': 4,  # Number of double values per register
-            'reg': lambda n: 'ymm%s' % n,
-            'zeroall': '_mm256_zeroall ()',
-            'setzero': AVXSetZero(),
-            'decl_var': '__m256d',
-            'align_array': lambda p: '__attribute__((aligned(%s)))' % p,
-            'symbol_load': lambda s, r, o=None: AVXLoad(s, r, o),
-            'symbol_set': lambda s, r, o=None: AVXSet(s, r, o),
-            'store': lambda m, r: AVXStore(m, r),
-            'mul': lambda r1, r2: AVXProd(r1, r2),
-            'div': lambda r1, r2: AVXDiv(r1, r2),
-            'add': lambda r1, r2: AVXSum(r1, r2),
-            'sub': lambda r1, r2: AVXSub(r1, r2),
-            'l_perm': lambda r, f: AVXLocalPermute(r, f),
-            'g_perm': lambda r1, r2, f: AVXGlobalPermute(r1, r2, f),
-            'unpck_hi': lambda r1, r2: AVXUnpackHi(r1, r2),
-            'unpck_lo': lambda r1, r2: AVXUnpackLo(r1, r2)
-        }
-
-
-def _init_compiler(compiler):
-    """Set compiler-specific keywords. """
-
-    if compiler == 'intel':
-        return {
-            'align': lambda o: '__attribute__((aligned(%s)))' % o,
-            'decl_aligned_for': '#pragma vector aligned',
-            'AVX': ['-xAVX'],
-            'SSE': ['-xSSE'],
-            'vect_header': '#include <immintrin.h>'
-        }
-
-    if compiler == 'gnu':
-        return {
-            'align': lambda o: '__attribute__((aligned(%s)))' % o,
-            'decl_aligned_for': '#pragma vector aligned',
-            'AVX': ['-mavx'],
-            'SSE': ['-msse'],
-            'vect_header': '#include <immintrin.h>'
-        }
-
-
 def vect_roundup(x):
     """Return x rounded up to the vector length. """
-    word_len = intrinsics.get("dp_reg") or 1
+    word_len = ap.intrinsics.get("dp_reg") or 1
     return int(ceil(x / float(word_len))) * word_len

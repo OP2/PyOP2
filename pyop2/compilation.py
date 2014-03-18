@@ -176,8 +176,24 @@ class LinuxCompiler(Compiler):
         super(LinuxCompiler, self).__init__("mpicc", cppargs=cppargs, ldargs=ldargs)
 
 
+class LinuxIntelCompiler(LinuxCompiler):
+    """A compiler for building a shared library on linux systems.
+
+    :arg cppargs: A list of arguments to pass to the C compiler
+         (optional).
+    :arg ldargs: A list of arguments to pass to the linker (optional)."""
+    def __init__(self, cppargs=[], ldargs=[]):
+        opt_flags = ['-O2']
+        if configuration['debug']:
+            opt_flags = ['-O0', '-g']
+
+        cppargs = ['-std=c99', '-fPIC', '-Wall'] + opt_flags + cppargs
+        ldargs = ['-shared'] + ldargs
+        super(LinuxCompiler, self).__init__("icc", cppargs=cppargs, ldargs=ldargs)
+
+
 @collective
-def load(src, fn_name, cppargs=[], ldargs=[], argtypes=None, restype=None):
+def load(src, fn_name, cppargs=[], ldargs=[], argtypes=None, restype=None, compiler=None):
     """Build a shared library and return a function pointer from it.
 
     :arg src: A string containing the source to build
@@ -191,7 +207,10 @@ def load(src, fn_name, cppargs=[], ldargs=[], argtypes=None, restype=None):
          ``None`` for ``void``)."""
     platform = sys.platform
     if platform.find('linux') == 0:
-        compiler = LinuxCompiler(cppargs, ldargs)
+        if compiler == 'intel':
+            compiler = LinuxIntelCompiler(cppargs, ldargs)
+        else:
+            compiler = LinuxCompiler(cppargs, ldargs)
     elif platform.find('darwin') == 0:
         compiler = MacCompiler(cppargs, ldargs)
     else:

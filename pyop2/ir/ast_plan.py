@@ -35,8 +35,7 @@
 
 from ast_base import *
 from ast_optimizer import LoopOptimiser
-from ast_vectorizer import init_vectorizer, LoopVectoriser
-import ast_vectorizer
+from ast_vectorizer import LoopVectoriser
 
 # Possibile optimizations
 AUTOVECT = 1        # Auto-vectorization
@@ -61,6 +60,7 @@ class ASTKernel(object):
     def __init__(self, ast):
         self.ast = ast
         self.decls, self.fors = self._visit_ast(ast, fors=[], decls={})
+        self.blas = False  # True if blas transformation is succesfully applied
 
     def _visit_ast(self, node, parent=None, fors=None, decls=None):
         """Return lists of:
@@ -174,6 +174,7 @@ class ASTKernel(object):
                 nest.op_expand()
                 nest.assembly_precompute()
                 nest.op_split()
+                self.blas = nest.turn_into_blas_dgemm(blas, self.decls)
 
             # 3) Splitting
             if split:
@@ -184,15 +185,116 @@ class ASTKernel(object):
                 nest.op_tiling(tile_sz)
 
             # 5) Vectorization
-            if ast_vectorizer.initialized:
-                vect = LoopVectoriser(nest)
+            if initialized:
+                vect = LoopVectoriser(nest, intrinsics, compiler)
                 if ap:
-                    vect.align_and_pad(self.decls)
+                    vect.alignment(self.decls)
+                    if not self.blas:
+                        vect.padding(self.decls)
                 if v_type and v_type != AUTOVECT:
                     vect.outer_product(v_type, v_param)
+            else:
+                raise RuntimeError("The vectorizer is not initialized.")
 
 
-def init_ir(isa, compiler):
+# Initialize the IR engine
+intrinsics = {}
+compiler = {}
+blas_interface = {}
+initialized = False
+
+
+def init_ir(isa, _compiler, blas):
     """Initialize the Intermediate Representation engine."""
+    global intrinsics, compiler, blas_interface, initialized
+    intrinsics = _init_isa(isa)
+    compiler = _init_compiler(_compiler)
+    blas_interface = _init_blas(blas)
+    if intrinsics and compiler and blas_interface:
+        initialized = True
 
-    init_vectorizer(isa, compiler)
+
+def _init_isa(isa):
+    """Set the intrinsics instruction set. """
+
+    if isa == 'sse':
+        return {
+            'inst_set': 'SSE',
+            'avail_reg': 16,
+            'alignment': 16,
+            'dp_reg': 2,  # Number of double values per register
+            'reg': lambda n: 'xmm%s' % n
+        }
+
+    if isa == 'avx':
+        return {
+            'inst_set': 'AVX',
+            'avail_reg': 16,
+            'alignment': 32,
+            'dp_reg': 4,  # Number of double values per register
+            'reg': lambda n: 'ymm%s' % n,
+            'zeroall': '_mm256_zeroall ()',
+            'setzero': AVXSetZero(),
+            'decl_var': '__m256d',
+            'align_array': lambda p: '__attribute__((aligned(%s)))' % p,
+            'symbol_load': lambda s, r, o=None: AVXLoad(s, r, o),
+            'symbol_set': lambda s, r, o=None: AVXSet(s, r, o),
+            'store': lambda m, r: AVXStore(m, r),
+            'mul': lambda r1, r2: AVXProd(r1, r2),
+            'div': lambda r1, r2: AVXDiv(r1, r2),
+            'add': lambda r1, r2: AVXSum(r1, r2),
+            'sub': lambda r1, r2: AVXSub(r1, r2),
+            'l_perm': lambda r, f: AVXLocalPermute(r, f),
+            'g_perm': lambda r1, r2, f: AVXGlobalPermute(r1, r2, f),
+            'unpck_hi': lambda r1, r2: AVXUnpackHi(r1, r2),
+            'unpck_lo': lambda r1, r2: AVXUnpackLo(r1, r2)
+        }
+
+
+def _init_compiler(compiler):
+    """Set compiler-specific keywords. """
+
+    if compiler == 'intel':
+        return {
+            'name': 'intel',
+            'align': lambda o: '__attribute__((aligned(%s)))' % o,
+            'decl_aligned_for': '#pragma vector aligned',
+            'AVX': '-xAVX',
+            'SSE': '-xSSE',
+            'vect_header': '#include <immintrin.h>',
+            'c_compiler': 'icc',
+            'cxx_compiler': 'icpc',
+            'extra_dirs': '/usr/include/mpi'
+        }
+
+    if compiler == 'gnu':
+        return {
+            'name': 'gnu',
+            'align': lambda o: '__attribute__((aligned(%s)))' % o,
+            'decl_aligned_for': '#pragma vector aligned',
+            'AVX': '-mavx',
+            'SSE': '-msse',
+            'vect_header': '#include <immintrin.h>',
+            'c_compiler': 'mpicc',
+            'cxx_compiler': 'mpicxx',
+            'extra_dirs': ''
+        }
+
+
+def _init_blas(blas):
+    """Initialize a dictionary containing blas-specific keywords, which
+    are used for code generation."""
+
+    dgemm = "%(ver)sdgemm(%(order)s, %(notrans)s, %(notrans)s, %(m1size)d, %(m2size)d, %(m3size)d, "
+    dgemm += "1.0, %(m1)s, %(m3size)d, %(m2)s, %(m2size)s, 1.0, %(m3)s, %(m1size)s);"
+
+    if blas == 'mkl':
+        return {
+            'blas_header': '#include <mkl.h>',
+            'link': '-lmkl_rt',
+            'dgemm': dgemm,
+            'prefix': 'cblas_',
+            'row_major': 'CblasRowMajor',
+            'no_trans': 'CblasNoTrans',
+            'trans': 'CblasTrans'
+        }

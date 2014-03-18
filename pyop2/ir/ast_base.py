@@ -36,7 +36,7 @@ Abstract Syntax Tree (ast)."""
 
 # Utilities for simple exprs and commands
 point = lambda p: "[%s]" % p
-point_ofs = lambda p, o: "[%s*%d+%d]" % (p, o[0], o[1])
+point_ofs = lambda p, o: "[%s*%s+%s]" % (p, str(o[0]), str(o[1]))
 assign = lambda s, e: "%s = %s" % (s, e)
 incr = lambda s, e: "%s += %s" % (s, e)
 incr_by_1 = lambda s: "++%s" % s
@@ -134,19 +134,10 @@ class ArrayInit(Expr):
     in as simple strings."""
 
     def __init__(self, values):
-        self.values = (values,) if isinstance(values, str) else values
-        self.blas_format = False
+        self.values = values
 
     def gencode(self):
-        if self.blas_format:
-            return self.values[0]
-        elif len(self.values) == 2:
-            return self.values[1]
-        else:
-            return self.values[0]
-
-    def set_blas_format(self):
-        self.blas_format = True
+        return self.values
 
 
 class Par(UnaryExpr):
@@ -338,7 +329,7 @@ class EmptyStatement(Statement, Perfect):
 
 
 class FlatBlock(Statement):
-    """Treat a chunk of code as a single statement, i.e. a C string"""
+    """Treat a chunk of code as a single statement, i.e. a C string."""
 
     def __init__(self, code, pragma=None):
         Statement.__init__(self, pragma)

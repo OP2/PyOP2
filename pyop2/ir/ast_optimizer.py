@@ -34,7 +34,7 @@
 from collections import defaultdict
 from copy import deepcopy as dcopy
 
-from pyop2.ir.ast_base import *
+from ast_base import *
 import ast_plan
 
 
@@ -583,6 +583,10 @@ class LoopOptimiser(object):
             raise RuntimeError("Precomputing assembly expressions; found \
                     an unexpteced AST node while precomputing: %s" % str(node))
 
+        # There must be at least three loops for precomputation to be meaningful
+        if self.loop_nest in [l for l, b in self.itspace]:
+            return
+
         outer_loop = self.fors[0].children[0]
         outer_var = self.fors[0].it_var()
         outer_bound = self.fors[0].size()
@@ -622,10 +626,141 @@ class LoopOptimiser(object):
 
         # Update the AST adding the newly precomputed blocks
         root = self.pre_header.children
-        root.insert(root.index(self.fors[0]), Block(new_outer_block))
+        ofs = root.index(self.fors[0])
+        self.pre_header.children = root[:ofs] + new_outer_block + root[ofs:]
 
         # Update the AST by vector-expanding the accessed variables that have
         # been pre-computed
         for s in self.sym:
             if str(s) in expanded_syms:
                 s.rank = expanded_syms[str(s)]
+
+    def turn_into_blas_dgemm(self, blas, kernel_decls):
+        """Find any perfect loop nest whose computation is actually a matrix-matrix
+        multiply (MMM), and transform it into a call to BLAS dgemm. Involved matrix'
+        layout is modified accordingly.
+
+        ``blas'' indicates which BLAS implementation should be used. Supported values
+        are, currently: {mkl}.
+        """
+
+        def update_symbols(node, parent, syms_to_change, ofs_sizes, to_transpose):
+            """Change the storage layout of symbols involved in MMMs."""
+            if isinstance(node, Symbol) and node.symbol in syms_to_change:
+                if isinstance(parent, Decl):
+                    node.rank = (int(node.rank[0])*int(node.rank[1]),)
+                else:
+                    if node.symbol in to_transpose:
+                        node.offset = ((ofs_sizes[0], node.rank[0]),)
+                        node.rank = (node.rank[-1],)
+                    else:
+                        node.offset = ((ofs_sizes[2], node.rank[-1]),)
+                        node.rank = (node.rank[0],)
+            elif isinstance(node, (Par, For)):
+                update_symbols(node.children[0], node, syms_to_change, ofs_sizes, to_transpose)
+            elif isinstance(node, Decl):
+                update_symbols(node.sym, node, syms_to_change, ofs_sizes, to_transpose)
+            elif isinstance(node, (Assign, Incr)):
+                update_symbols(node.children[0], node, syms_to_change, ofs_sizes, to_transpose)
+                update_symbols(node.children[1], node, syms_to_change, ofs_sizes, to_transpose)
+            elif isinstance(node, (Root, Block)):
+                for n in node.children:
+                    update_symbols(n, node, syms_to_change, ofs_sizes, to_transpose)
+            else:
+                pass
+
+        def check_prod(node):
+            """Return (e1, e2) if the node is a product between two symbols s1
+            and s2, () otherwise.
+            For example:
+            - Par(Par(Prod(s1, s2))) -> (s1, s2)
+            - Prod(s1, s2) -> (s1, s2)
+            - Sum -> ()
+            - Prod(Sum, s1) -> ()"""
+            if isinstance(node, Par):
+                return check_prod(node.children[0])
+            elif isinstance(node, Prod):
+                left, right = (node.children[0], node.children[1])
+                if isinstance(left, Expr) and isinstance(right, Expr):
+                    return (left, right)
+                return ()
+            return ()
+
+        # There must be at least three loops to extract a MMM
+        if self.loop_nest in [l for l, b in self.itspace]:
+            return
+
+        outer_loop = self.loop_nest
+        ofs = self.pre_header.children.index(outer_loop)
+        found_mmm = False
+
+        # 1) Split potential MMM into different perfect loop nests
+        to_remove, to_transpose = ([], [])
+        to_transform = {}
+        for middle_loop in outer_loop.children[0].children:
+            if not isinstance(middle_loop, For):
+                continue
+            found = False
+            inner_loop = middle_loop.children[0].children
+            if not (len(inner_loop) == 1 and isinstance(inner_loop[0], For)):
+                continue
+            # Found a perfect loop nest, now check body operation
+            body = inner_loop[0].children[0].children
+            if not (len(body) == 1 and isinstance(body[0], Incr)):
+                continue
+            # The body is actually as a single statement, as expected
+            lhs = body[0].children[0].rank
+            rhs = check_prod(body[0].children[1])
+            if not rhs:
+                continue
+            # Check memory access pattern
+            it_var = inner_loop[0].it_var()
+            rhs_l, rhs_r = (rhs[0].rank, rhs[1].rank)
+            if lhs[0] == rhs_l[0] and lhs[1] == rhs_r[1] and rhs_l[1] == rhs_r[0] or \
+                    lhs[0] == rhs_r[1] and lhs[1] == rhs_r[0] and rhs_l[1] == rhs_r[0]:
+                found = True
+            elif lhs[0] == rhs_l[1] and lhs[1] == rhs_r[1] and rhs_l[0] == rhs_r[0] or \
+                    lhs[0] == rhs_r[1] and lhs[1] == rhs_l[1] and rhs_l[0] == rhs_r[0] or \
+                    lhs[0] == rhs_l[0] and lhs[1] == rhs_r[0] and rhs_l[1] == rhs_r[1] or \
+                    lhs[0] == rhs_r[0] and lhs[1] == rhs_l[0] and rhs_l[1] == rhs_r[1]:
+                found = True
+                to_transpose.append(rhs[0].symbol if rhs_l[1] == it_var else rhs[1].symbol)
+            if found:
+                new_outer = dcopy(outer_loop)
+                new_outer.children[0].children = [middle_loop]
+                to_remove.append(middle_loop)
+                self.pre_header.children.insert(ofs, new_outer)
+                loop_sizes = (outer_loop.size(), middle_loop.size(), inner_loop[0].size())
+                to_transform[new_outer] = (body[0].children[0], rhs, loop_sizes)
+                found_mmm = True
+        # Clean up
+        for l in to_remove:
+            outer_loop.children[0].children.remove(l)
+        if not outer_loop.children[0].children:
+            self.pre_header.children.remove(outer_loop)
+
+        # 2) Delegate to BLAS
+        change_layout = []
+        for l, mmm in to_transform.items():
+            lhs, rhs, loop_sizes = mmm
+            blas_interface = ast_plan.blas_interface
+            dgemm = blas_interface['dgemm'] % \
+                {'ver': blas_interface['prefix'],
+                 'notrans': blas_interface['no_trans'],
+                 'order': blas_interface['row_major'],
+                 'm1size': loop_sizes[2],
+                 'm2size': loop_sizes[1],
+                 'm3size': loop_sizes[0],
+                 'm1': rhs[0].symbol,
+                 'm2': rhs[1].symbol,
+                 'm3': lhs.symbol}
+            self.pre_header.children[self.pre_header.children.index(l)] = FlatBlock(dgemm)
+            to_change = [rhs[0].symbol, rhs[1].symbol, lhs.symbol]
+            change_layout.extend([s for s in to_change if s not in change_layout])
+        # Change the storage layout of involved matrices
+        if change_layout:
+            update_symbols(self.pre_header, None, change_layout, loop_sizes, to_transpose)
+            update_symbols(kernel_decls[lhs.symbol][0], None, change_layout,
+                           loop_sizes, to_transpose)
+
+        return found_mmm

@@ -45,7 +45,7 @@ from utils import as_tuple
 
 from ir.ast_base import Node
 from ir.ast_plan import ASTKernel
-import ir.ast_vectorizer
+import ir.ast_plan
 from ir.ast_vectorizer import vect_roundup
 
 
@@ -55,10 +55,12 @@ class Kernel(base.Kernel):
         """Transform an Abstract Syntax Tree representing the kernel into a
         string of code (C syntax) suitable to CPU execution."""
         if not isinstance(ast, Node):
+            self._blas = False
             return ast
         self._ast = ast
         ast_handler = ASTKernel(ast)
         ast_handler.plan_cpu(opts)
+        self._blas = ast_handler.blas
         return ast.gencode()
 
 
@@ -255,14 +257,14 @@ class Arg(base.Arg):
              'cols': cols_str,
              'insert': self.access == WRITE}
 
-    def c_addto_vector_field(self, i, j, xtr="", is_facet=False):
+    def c_addto_vector_field(self, i, j, indices, xtr="", is_facet=False):
         maps = as_tuple(self.map, Map)
         nrows = maps[0].split[i].arity
         ncols = maps[1].split[j].arity
         rmult, cmult = self.data.sparsity[i, j].dims
         s = []
         if self._flatten:
-            idx = '[i_0][i_1]'
+            idx = indices
             val = "&%s%s" % ("buffer_" + self.c_arg_name(), idx)
             row = "%(m)s * %(xtr)s%(map)s[%(elem_idx)si_0 %% %(dim)s] + (i_0 / %(dim)s)" % \
                   {'m': rmult,
@@ -546,14 +548,14 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
     def c_buffer_decl(self, size, idx, buf_name, is_facet=False):
         buf_type = self.data.ctype
         dim = len(size)
-        compiler = ir.ast_vectorizer.compiler
-        isa = ir.ast_vectorizer.intrinsics
+        compiler = ir.ast_plan.compiler
+        isa = ir.ast_plan.intrinsics
         return (buf_name, "%(typ)s %(name)s%(dim)s%(align)s%(init)s" %
                 {"typ": buf_type,
                  "name": buf_name,
                  "dim": "".join(["[%d]" % (d * (2 if is_facet else 1)) for d in size]),
                  "align": " " + compiler.get("align")(isa["alignment"]) if compiler else "",
-                 "init": " = " + "{" * dim + "0" + "}" * dim if self.access._mode in ['WRITE', 'INC'] else ""})
+                 "init": " = " + "{" * dim + "0.0" + "}" * dim if self.access._mode in ['WRITE', 'INC'] else ""})
 
     def c_buffer_gather(self, size, idx, buf_name):
         dim = 1 if self._flatten else self.data.cdim
@@ -640,9 +642,9 @@ class JITModule(base.JITModule):
         strip = lambda code: '\n'.join([l for l in code.splitlines()
                                         if l.strip() and l.strip() != ';'])
 
-        compiler = ir.ast_vectorizer.compiler
-        vect_flag = compiler.get(ir.ast_vectorizer.intrinsics.get('inst_set')) if compiler else None
-
+        blas = ir.ast_plan.blas_interface
+        compiler = ir.ast_plan.compiler
+        headers = "\n".join([h for h in [compiler.get('vect_header'), blas.get('blas_header')] if h])
         if any(arg._is_soa for arg in self._args):
             kernel_code = """
             #define OP2_STRIDE(a, idx) a[idx]
@@ -650,13 +652,13 @@ class JITModule(base.JITModule):
             %(code)s
             #undef OP2_STRIDE
             """ % {'code': self._kernel.code,
-                   'header': compiler.get('vect_header') if vect_flag else ""}
+                   'header': headers}
         else:
             kernel_code = """
             %(header)s
             %(code)s
             """ % {'code': self._kernel.code,
-                   'header': compiler.get('vect_header') if vect_flag else ""}
+                   'header': headers}
         code_to_compile = strip(dedent(self._wrapper) % self.generate_code())
 
         _const_decs = '\n'.join([const._format_declaration()
@@ -683,23 +685,28 @@ class JITModule(base.JITModule):
         cppargs = ["-I%s/include" % d for d in get_petsc_dir()] + \
                   ["-I%s" % d for d in self._kernel._include_dirs] + \
                   ["-I%s" % os.path.abspath(os.path.dirname(__file__))]
-        if vect_flag:
-            cppargs += vect_flag
+        if compiler:
+            cppargs += ["-I%s" % compiler['extra_dirs']]
+            cppargs += [compiler[ir.ast_plan.intrinsics['inst_set']]]
         ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
                  ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()] + \
                  ["-lpetsc", "-lm"] + self._libraries
+        if blas:
+            ldargs += [blas['link']]
         self._fun = compilation.load(code_to_compile,
                                      self._wrapper_name,
                                      cppargs=cppargs,
                                      ldargs=ldargs,
                                      argtypes=argtypes,
-                                     restype=restype)
+                                     restype=restype,
+                                     compiler=compiler['name'])
         # Blow away everything we don't need any more
         del self._args
         del self._kernel
         del self._itspace
         del self._direct
         del self._iteration_region
+
         return self._fun
 
     def generate_code(self):
@@ -821,9 +828,12 @@ class JITModule(base.JITModule):
                     # Layout of matrices must be restored prior to the invokation of addto_vector
                     # if padding was used
                     _layout_name = "buffer_layout_" + arg.c_arg_name(count)
+                    if self._kernel._blas:
+                        _buf_size = [reduce(lambda x, y: x*y, _buf_size)]
                     _layout_decl = arg.c_buffer_decl(_buf_size, count, _layout_name, is_facet=is_facet)[1]
                     _layout_loops = '\n'.join(['  ' * n + itspace_loop(n, e) for n, e in enumerate(_buf_size)])
-                    _layout_assign = _layout_name + "[i_0][i_1]" + " = " + _buf_name + "[i_0][i_1]"
+                    _layout_indices = "".join(["[i_%d]" % i for i in range(len(_buf_size))])
+                    _layout_assign = _layout_name + _layout_indices + " = " + _buf_name + _layout_indices
                     _layout_loops_close = '\n'.join('  ' * n + '}' for n in range(len(_buf_size) - 1, -1, -1))
                 _buf_size = [vect_roundup(s) for s in _buf_size]
             _buf_decl[arg] = arg.c_buffer_decl(_buf_size, count, _buf_name, is_facet=is_facet)
@@ -856,17 +866,18 @@ class JITModule(base.JITModule):
                     _buf_scatter = ""
             _itspace_loop_close = '\n'.join('  ' * n + '}' for n in range(nloops - 1, -1, -1))
             _addto_buf_name = _buf_scatter_name or _buf_name
+            _buffer_indices = "[i_0*%d + i_1]" % shape[0] if self._kernel._blas else "[i_0][i_1]"
             if self._itspace._extruded:
                 _addtos_scalar_field_extruded = ';\n'.join([arg.c_addto_scalar_field(i, j, _addto_buf_name, "xtr_", is_facet=is_facet) for arg in self._args
                                                             if arg._is_mat and arg.data[i, j]._is_scalar_field])
-                _addtos_vector_field = ';\n'.join([arg.c_addto_vector_field(i, j, "xtr_", is_facet=is_facet) for arg in self._args
+                _addtos_vector_field = ';\n'.join([arg.c_addto_vector_field(i, j, _buffer_indices, "xtr_", is_facet=is_facet) for arg in self._args
                                                   if arg._is_mat and arg.data[i, j]._is_vector_field])
                 _addtos_scalar_field = ""
             else:
                 _addtos_scalar_field_extruded = ""
                 _addtos_scalar_field = ';\n'.join([arg.c_addto_scalar_field(i, j, _addto_buf_name) for count, arg in enumerate(self._args)
                                                    if arg._is_mat and arg.data[i, j]._is_scalar_field])
-                _addtos_vector_field = ';\n'.join([arg.c_addto_vector_field(i, j) for arg in self._args
+                _addtos_vector_field = ';\n'.join([arg.c_addto_vector_field(i, j, _buffer_indices) for arg in self._args
                                                   if arg._is_mat and arg.data[i, j]._is_vector_field])
 
             if not _addtos_vector_field and not _buf_scatter:
