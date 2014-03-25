@@ -38,7 +38,7 @@ from itertools import product
 import pytest
 
 from pyop2 import op2
-from pyop2 import base
+from pyop2 import lazy
 from pyop2.backends import backends
 
 
@@ -97,7 +97,7 @@ def pytest_collection_modifyitems(items):
 
 
 def pytest_runtest_teardown(item, nextitem):
-    base._trace.clear()
+    lazy._trace.clear()
 
 
 @pytest.fixture
