@@ -136,7 +136,7 @@ class ASTKernel(object):
 
             # Add iteration space arguments
             self.fundecl.args.extend([Decl("int", c_sym("%s" % i))
-                                     for i in itspace_vrs])
+                                     for i in reversed(itspace_vrs)])
 
         # Clean up the kernel removing variable qualifiers like 'static'
         for decl in self.decls.values():
