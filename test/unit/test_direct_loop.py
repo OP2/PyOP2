@@ -226,7 +226,7 @@ class TestDirectLoop:
         x_data = x.data_with_halos
         op2.par_loop(op2.Kernel(kernel, 'k'),
                      elems, x(op2.WRITE))
-        op2.base._trace.evaluate(set([x]), set())
+        op2.base._trace.evaluate(set(op2.base.ALL(x)), set())
         with pytest.raises((RuntimeError, ValueError)):
             x_data[0] = 1
 

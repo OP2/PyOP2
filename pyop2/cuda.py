@@ -414,27 +414,21 @@ class Global(DeviceDataMixin, op2.Global):
         if self.state is not DeviceDataMixin.DEVICE_UNALLOCATED:
             self.state = DeviceDataMixin.HOST
 
-    def _finalise_reduction_begin(self, grid_size, op):
+    def _finalise_reduction(self, grid_size, op):
         # Need to make sure the kernel launch finished
         _stream.synchronize()
         self._reduction_buffer.get(ary=self._host_reduction_buffer)
 
-    def _finalise_reduction_end(self, grid_size, op):
         self.state = DeviceDataMixin.HOST
         tmp = self._host_reduction_buffer
-        if op is op2.MIN:
-            tmp = np.min(tmp, axis=0)
-            fn = min
-        elif op is op2.MAX:
-            tmp = np.max(tmp, axis=0)
-            fn = max
-        else:
-            tmp = np.sum(tmp, axis=0)
+
+        np_op, fn = {op2.MIN: (np.min, min),
+                     op2.MAX: (np.max, max),
+                     op2.INC: (np.sum, lambda x, y: x + y)}[op]
+
+        tmp = np_op(tmp, axis=0)
         for i in range(self.cdim):
-            if op is op2.INC:
-                self._data[i] += tmp[i]
-            else:
-                self._data[i] = fn(self._data[i], tmp[i])
+            self._data[i] = fn(self._data[i], tmp[i])
 
 
 class Map(op2.Map):
@@ -873,18 +867,19 @@ class ParLoop(op2.ParLoop):
         _stream.synchronize()
         for arg in self.args:
             if arg._is_global_reduction:
-                arg.data._finalise_reduction_begin(max_grid_size, arg.access)
-                arg.data._finalise_reduction_end(max_grid_size, arg.access)
+                arg.data._finalise_reduction(max_grid_size, arg.access)
             elif not arg._is_mat:
                 # Data state is updated in finalise_reduction for Global
                 if arg.access is not op2.READ:
                     arg.data.state = DeviceDataMixin.DEVICE
         self.maybe_set_dat_dirty()
 
-    def assemble(self):
-        for arg in self.args:
-            if arg._is_mat:
-                arg.data._assemble(rowmap=arg.map[0], colmap=arg.map[1])
+    def _spawn_assembles(self):
+        return [base.LazyMethodCall(set([arg.data]), set([arg.data]),
+                                    arg.data._assemble,
+                                    rowmap=arg.map[0], colmap=arg.map[1])
+                for arg in self.args if arg._is_mat]
+
 
 _device = None
 _context = None

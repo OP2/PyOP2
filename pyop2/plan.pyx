@@ -38,8 +38,8 @@ Cython implementation of the Plan construction.
 import base
 from utils import align, as_tuple
 import math
-import numpy
-cimport numpy
+import numpy as np
+cimport numpy as np
 from libc.stdlib cimport malloc, free
 try:
     from collections import OrderedDict
@@ -73,17 +73,17 @@ cdef class _Plan:
     # property definitions, these are necessary to allow CUDA and OpenCL to override them without
     # breaking this code
 
-    cdef numpy.ndarray _nelems
-    cdef numpy.ndarray _ind_map
-    cdef numpy.ndarray _loc_map
-    cdef numpy.ndarray _ind_sizes
-    cdef numpy.ndarray _nindirect
-    cdef numpy.ndarray _ind_offs
-    cdef numpy.ndarray _offset
-    cdef numpy.ndarray _thrcol
-    cdef numpy.ndarray _nthrcol
-    cdef numpy.ndarray _ncolblk
-    cdef numpy.ndarray _blkmap
+    cdef np.ndarray _nelems
+    cdef np.ndarray _ind_map
+    cdef np.ndarray _loc_map
+    cdef np.ndarray _ind_sizes
+    cdef np.ndarray _nindirect
+    cdef np.ndarray _ind_offs
+    cdef np.ndarray _offset
+    cdef np.ndarray _thrcol
+    cdef np.ndarray _nthrcol
+    cdef np.ndarray _ncolblk
+    cdef np.ndarray _blkmap
     cdef int _nblocks
     cdef int _nargs
     cdef int _ninds
@@ -103,15 +103,16 @@ cdef class _Plan:
 
     def _compute_partition_info(self, iset, partition_size, matrix_coloring, args):
         self._nblocks = int(math.ceil(iset.size / float(partition_size)))
-        self._nelems = numpy.array([min(partition_size, iset.size - i * partition_size) for i in range(self._nblocks)],
-                                  dtype=numpy.int32)
+        self._nelems = np.array([min(partition_size, iset.size - i * partition_size) \
+                                 for i in range(self._nblocks)],
+                                dtype=np.int32)
 
         def offset_iter(offset):
             _offset = offset
             for pi in range(self._nblocks):
                 yield _offset
                 _offset += self._nelems[pi]
-        self._offset = numpy.fromiter(offset_iter(iset.offset), dtype=numpy.int32)
+        self._offset = np.fromiter(offset_iter(iset.offset), dtype=np.int32)
 
     def _compute_staging_info(self, iset, partition_size, matrix_coloring, args):
         """Constructs:
@@ -157,7 +158,7 @@ cdef class _Plan:
                 else:
                     staged_values = map.values_with_halo[start:end, ii]
 
-                inds[dat, map, pi], inv = numpy.unique(staged_values, return_inverse=True)
+                inds[dat, map, pi], inv = np.unique(staged_values, return_inverse=True)
                 sizes[dat, map, pi] = len(inds[dat, map, pi])
 
                 for i, ind in enumerate(sorted(ii)):
@@ -173,28 +174,28 @@ cdef class _Plan:
                 # fills with -1 for debugging
                 # this should be removed and generated code changed
                 # once we switch to python plan only
-                pad = numpy.empty(len(indices[dat, map]) * iset.size - cumsum, dtype=numpy.int32)
+                pad = np.empty(len(indices[dat, map]) * iset.size - cumsum, dtype=np.int32)
                 pad.fill(-1)
                 yield pad
         t = tuple(ind_iter())
-        self._ind_map = numpy.concatenate(t) if t else numpy.array([], dtype=numpy.int32)
+        self._ind_map = np.concatenate(t) if t else np.array([], dtype=np.int32)
 
         def size_iter():
             for pi in range(self._nblocks):
                 for dat,map in d.iterkeys():
                     yield sizes[(dat,map,pi)]
-        self._ind_sizes = numpy.fromiter(size_iter(), dtype=numpy.int32)
+        self._ind_sizes = np.fromiter(size_iter(), dtype=np.int32)
 
         def nindirect_iter():
             for dat,map in d.iterkeys():
                 yield sum(sizes[(dat,map,pi)] for pi in range(self._nblocks))
-        self._nindirect = numpy.fromiter(nindirect_iter(), dtype=numpy.int32)
+        self._nindirect = np.fromiter(nindirect_iter(), dtype=np.int32)
 
-        locs_t = tuple(locs[dat, map, i, pi].astype(numpy.int16)
+        locs_t = tuple(locs[dat, map, i, pi].astype(np.int16)
                        for dat, map in d.iterkeys()
                        for i in indices[dat, map]
                        for pi in range(self._nblocks))
-        self._loc_map = numpy.concatenate(locs_t) if locs_t else numpy.array([], dtype=numpy.int16)
+        self._loc_map = np.concatenate(locs_t) if locs_t else np.array([], dtype=np.int16)
 
         def off_iter():
             _off = dict()
@@ -204,7 +205,7 @@ cdef class _Plan:
                 for dat, map in d.iterkeys():
                     yield _off[dat, map]
                     _off[dat, map] += sizes[dat, map, pi]
-        self._ind_offs = numpy.fromiter(off_iter(), dtype=numpy.int32)
+        self._ind_offs = np.fromiter(off_iter(), dtype=np.int32)
 
         # max shared memory required by work groups
         nshareds = [0] * self._nblocks
@@ -250,9 +251,9 @@ cdef class _Plan:
             elif isinstance(ra, base.Mat):
                 s = ra.sparsity.maps[0][0].toset.exec_size
 
-            pcds[i] = numpy.empty((s,), dtype=numpy.uint32)
+            pcds[i] = np.empty((s,), dtype=np.uint32)
             flat_race_args[i].size = s
-            flat_race_args[i].tmp = <unsigned int *> numpy.PyArray_DATA(pcds[i])
+            flat_race_args[i].tmp = <unsigned int *> np.PyArray_DATA(pcds[i])
 
             flat_race_args[i].count = len(race_args[ra])
             flat_race_args[i].mip = <map_idx_t*> malloc(flat_race_args[i].count * sizeof(map_idx_t))
@@ -260,7 +261,7 @@ cdef class _Plan:
                 map, idx = mi
                 if map._parent is not None:
                     map = map._parent
-                flat_race_args[i].mip[j].map_base = <int *> numpy.PyArray_DATA(map.values_with_halo)
+                flat_race_args[i].mip[j].map_base = <int *> np.PyArray_DATA(map.values_with_halo)
                 flat_race_args[i].mip[j].arity = map.arity
                 flat_race_args[i].mip[j].idx = idx
 
@@ -282,19 +283,19 @@ cdef class _Plan:
         # loops and to avoid splitting code: set vs subset)
         cdef int * iteridx
         if isinstance(iset.set, base.Subset):
-            iteridx = <int *> numpy.PyArray_DATA(iset.set.indices)
+            iteridx = <int *> np.PyArray_DATA(iset.set.indices)
         else:
-            _id = numpy.arange(iset.set.total_size, dtype=numpy.uint32)
-            iteridx = <int *> numpy.PyArray_DATA(_id)
+            _id = np.arange(iset.set.total_size, dtype=np.uint32)
+            iteridx = <int *> np.PyArray_DATA(_id)
 
         # intra partition coloring
-        self._thrcol = numpy.empty((iset.set.exec_size, ), dtype=numpy.int32)
+        self._thrcol = np.empty((iset.set.exec_size, ), dtype=np.int32)
         self._thrcol.fill(-1)
 
         # create direct reference to numpy array storage
-        cdef int * thrcol = <int *> numpy.PyArray_DATA(self._thrcol)
-        cdef int * nelems = <int *> numpy.PyArray_DATA(self._nelems)
-        cdef int * offset = <int *> numpy.PyArray_DATA(self._offset)
+        cdef int * thrcol = <int *> np.PyArray_DATA(self._thrcol)
+        cdef int * nelems = <int *> np.PyArray_DATA(self._nelems)
+        cdef int * offset = <int *> np.PyArray_DATA(self._offset)
 
         # Colour threads of each partition
         if thread_coloring:
@@ -341,16 +342,16 @@ cdef class _Plan:
                     # We've run out of colours, so we start over and offset
                     _base_color += 32
 
-            self._nthrcol = numpy.zeros(self._nblocks,dtype=numpy.int32)
+            self._nthrcol = np.zeros(self._nblocks,dtype=np.int32)
             for _p in range(self._nblocks):
                 self._nthrcol[_p] = max(self._thrcol[offset[_p]:(offset[_p] + nelems[_p])]) + 1
             self._thrcol = self._thrcol[iset.offset:(iset.offset + iset.size)]
 
         # partition coloring
-        pcolors = numpy.empty(self._nblocks, dtype=numpy.int32)
+        pcolors = np.empty(self._nblocks, dtype=np.int32)
         pcolors.fill(-1)
 
-        cdef int * _pcolors = <int *> numpy.PyArray_DATA(pcolors)
+        cdef int * _pcolors = <int *> np.PyArray_DATA(pcolors)
 
         _base_color = 0
         terminated = False
@@ -403,8 +404,8 @@ cdef class _Plan:
 
         self._pcolors = pcolors
         self._ncolors = max(pcolors) + 1
-        self._ncolblk = numpy.bincount(pcolors).astype(numpy.int32)
-        self._blkmap = numpy.argsort(pcolors, kind='mergesort').astype(numpy.int32)
+        self._ncolblk = np.bincount(pcolors).astype(np.int32)
+        self._blkmap = np.argsort(pcolors, kind='mergesort').astype(np.int32)
 
     @property
     def nargs(self):
@@ -494,7 +495,7 @@ cdef class _Plan:
     @property
     def nsharedCol(self):
         """Array of shared memory sizes for each colour."""
-        return numpy.array([self._nshared] * self._ncolors, dtype=numpy.int32)
+        return np.array([self._nshared] * self._ncolors, dtype=np.int32)
 
 
 class Plan(base.Cached, _Plan):

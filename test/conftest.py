@@ -38,6 +38,7 @@ from itertools import product
 import pytest
 
 from pyop2 import op2
+from pyop2 import lazy
 from pyop2.backends import backends
 
 
@@ -93,6 +94,10 @@ def pytest_collection_modifyitems(items):
             return 1
         return 0
     items.sort(cmp=cmp)
+
+
+def pytest_runtest_teardown(item, nextitem):
+    lazy._trace.clear()
 
 
 @pytest.fixture

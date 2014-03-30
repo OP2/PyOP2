@@ -230,6 +230,14 @@ def uniquify(iterable):
     return (x for x in iterable if x not in uniq and (uniq.add(x) or True))
 
 
+def to_set(arg):
+    """Create a set from either an atom, an iterable, or nested iterable."""
+    if arg is None:
+        return set()
+    else:
+        return set(arg)
+
+
 def parser(description=None, group=False):
     """Create default argparse.ArgumentParser parser for pyop2 programs."""
     parser = argparse.ArgumentParser(description=description,
