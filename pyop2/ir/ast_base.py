@@ -66,7 +66,16 @@ class Node(object):
     """The base class of the AST."""
 
     def __init__(self, children=None):
-        self.children = map(as_symbol, children) if children else []
+        self.children = tuple(map(as_symbol, children)) if children else tuple()
+
+    def __hash__(self):
+        return hash(self.gencode())
+
+    def __eq__(self, other):
+        return hash(self) == hash(other)
+
+    def __ne__(self, other):
+        return not self == other
 
     def gencode(self):
         code = ""
@@ -132,6 +141,7 @@ class ArrayInit(Expr):
 
     def __init__(self, values):
         self.values = values
+        super(ArrayInit, self).__init__()
 
     def gencode(self):
         return self.values
@@ -225,6 +235,7 @@ class Symbol(Expr):
         self.rank = rank
         self.offset = offset
         self.loop_dep = tuple([i for i in rank if not str(i).isdigit()])
+        super(Symbol, self).__init__()
 
     def gencode(self):
         points = ""
@@ -330,7 +341,7 @@ class FlatBlock(Statement):
 
     def __init__(self, code, pragma=None):
         Statement.__init__(self, pragma)
-        self.children.append(code)
+        self.children = (code, )
 
     def gencode(self, scope=False):
         return self.children[0]
@@ -415,8 +426,8 @@ class Decl(Statement, Perfect):
         super(Decl, self).__init__()
         self.typ = typ
         self.sym = as_symbol(sym)
-        self.qual = qualifiers or []
-        self.attr = attributes or []
+        self.qual = tuple(qualifiers) if qualifiers else ()
+        self.attr = tuple(attributes) if attributes else ()
         self.init = as_symbol(init) if init is not None else EmptyStatement()
 
     def gencode(self, scope=False):
@@ -495,17 +506,18 @@ class FunDecl(Statement):
 
     def __init__(self, ret, name, args, body, pred=[], headers=None):
         super(FunDecl, self).__init__([body])
-        self.pred = pred
+        self.pred = tuple(pred)
         self.ret = ret
         self.name = name
-        self.args = args
-        self.headers = headers or []
+        self.args = tuple(args)
+        self.headers = tuple(headers) if headers else tuple()
 
     def gencode(self):
         headers = "" if not self.headers else \
                   "\n".join(["#include <%s>" % h for h in self.headers])
-        sign_list = self.pred + [self.ret, self.name,
-                                 wrap(", ".join([arg.gencode(True) for arg in self.args]))]
+        sign_list = list(self.pred) + \
+                    [self.ret, self.name,
+                     wrap(", ".join([arg.gencode(True) for arg in self.args]))]
         return headers + "\n" + " ".join(sign_list) + \
             "\n{\n%s\n}" % indent(self.children[0].gencode())
 
