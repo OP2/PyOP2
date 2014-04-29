@@ -48,6 +48,7 @@ from profiling import lineprof
 
 
 class JITModule(host.JITModule):
+    _system_headers = []
 
     _wrapper = """
 double %(wrapper_name)s(int start, int end,
@@ -98,7 +99,6 @@ double %(wrapper_name)s(int start, int end,
   return (s2 - s1) / 1e9;
 }
 """
-
 
 class ParLoop(host.ParLoop):
 

@@ -86,7 +86,7 @@ class ExecutionTrace(object):
         self._trace = list()
 
     def append(self, computation):
-        if configuration['lazy_evaluation']:
+        if not configuration['lazy_evaluation']:
             assert not self._trace
             computation._run()
         elif configuration['lazy_max_trace_length'] > 0 and \
@@ -3522,6 +3522,10 @@ class Kernel(Cached):
             return ast.gencode()
         return ast
 
+    @property
+    def _md5(self):
+        return md5(self.code + self.name).hexdigest()[:6]
+
     def __init__(self, code, name, opts={}, include_dirs=[], headers=[],
                  user_code=""):
         # Protect against re-initialization when retrieved from cache
@@ -3740,12 +3744,18 @@ class ParLoop(LazyComputation):
         self._data_volume = vol
 
     def _run(self):
-        if (configuration['only_lhs'] and self._is_lhs) or \
-           (configuration['only_rhs'] and self._is_rhs and not self._is_lhs) or \
-           (not configuration['only_lhs'] and not configuration['only_rhs']):
+        if configuration['only_rhs'] and self._is_rhs and not self._is_lhs:
+            if self._kernel.name == "form00_cell_integral_0_otherwise":
+                if configuration['spike_kernel'] is not "" or configuration['spike_wrapper'] is not "":
+                        configuration['spike'] = True
+                return self.compute()
+        if configuration['only_lhs'] and self._is_lhs:
+            if configuration['spike_kernel'] is not "":
+                    configuration['spike'] = True
             return self.compute()
-        else:
-            return self.compute_no_profiling()
+        if configuration["profiling"] and not configuration['only_lhs'] and not configuration['only_rhs']:
+            return self.compute() 
+        return self.compute_no_profiling()
 
     @collective
     @timed_function('ParLoop compute')
@@ -3771,9 +3781,10 @@ class ParLoop(LazyComputation):
         add_c_time('base', '%s-%s' % (region_name, self.kernel._md5),
                         t1 + t2 + t3)
     @collective
+    @timed_function('ParLoop compute')
+    @profile
     def compute_no_profiling(self):
         """Executes the kernel over all members of the iteration space."""
-        region_name = configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name
         self.halo_exchange_begin()
         self.maybe_set_dat_dirty()
         self._compute(self.it_space.iterset.core_part)

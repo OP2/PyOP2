@@ -65,6 +65,9 @@ class Configuration(object):
     """
     # name, env variable, type, default, write once
     DEFAULTS = {
+        "spike_wrapper": ("PYOP2_SPIKE_WRAPPER", str, ""),
+        "spike": ("PYOP2_SPIKE", bool, False),
+        "spike_kernel": ("PYOP2_SPIKE_KERNEL", str, ""),
         "only_lhs": ("PYOP2_ONLY_LHS", bool, False),
         "only_rhs": ("PYOP2_ONLY_RHS", bool, False),
         "likwid_inner": ("PYOP2_LIKWID_INNER", bool, False), # add likwid instrumentation around the kernel only otherwise include wrapper too

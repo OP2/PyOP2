@@ -360,6 +360,9 @@ def reset_timers():
     """Clear all timer information previously recorded."""
     Timer.reset_all()
 
+def reset():
+    Timer.reset_all()
+
 def loopstyle(value):
     Timer.loopstyle(value)
 
@@ -372,7 +375,7 @@ def extra_param(value):
 def only_kernel(value):
     Timer.only_kernel(value)
 
-def timing(name, reset=Falsee, total=True):
+def timing(name, reset=False, total=True):
     """Return timing (average) for given task, optionally clearing timing."""
     t = Timer(name)
     ret = t.total if total else t.average

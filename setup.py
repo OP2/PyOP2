@@ -128,6 +128,15 @@ class sdist(_sdist):
         _sdist.run(self)
 cmdclass['sdist'] = sdist
 
+# Test for availability of likwid
+# FIXME: Better not use a hard-coded path, maybe read $LIKWID_DIR
+#if exists('/usr/local/include/likwid.h'):
+#    ext_modules.append(Extension('pyop2.likwid', likwid_sources,
+#                                 include_dirs=['/usr/local/include'],
+#                                 library_dirs=['/usr/local/lib'],
+#                                 libraries=['likwid'],
+#                                 runtime_library_dirs=['/usr/local/lib']))
+
 setup(name='PyOP2',
       version=versioneer.get_version(),
       description='Framework for performance-portable parallel computations on unstructured meshes',

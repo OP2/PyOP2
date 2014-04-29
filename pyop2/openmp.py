@@ -158,10 +158,10 @@ double %(wrapper_name)s(int boffset,
   s1 = stamp();
   #pragma omp parallel shared(boffset, nblocks, nelems, blkmap)
   {
-# ifdef LIKWID_PERFMON
-    LIKWID_MARKER_THREADINIT;
-    LIKWID_MARKER_START("%(kernel_name)s");
-#endif
+    %(clo)s# ifdef LIKWID_PERFMON
+    %(clo)s  LIKWID_MARKER_THREADINIT;
+    %(clo)s  LIKWID_MARKER_START("%(region_name)s");
+    %(clo)s#endif
     %(map_decl)s
     int tid = omp_get_thread_num();
     %(interm_globals_decl)s;
@@ -183,7 +183,14 @@ double %(wrapper_name)s(int boffset,
         %(map_bcs_m)s;
         %(buffer_decl)s;
         %(buffer_gather)s
+        %(cli)s# ifdef LIKWID_PERFMON
+        %(cli)s  LIKWID_MARKER_THREADINIT;
+        %(cli)s  LIKWID_MARKER_START("%(region_name)s");
+        %(cli)s#endif
         %(kernel_name)s(%(kernel_args)s);
+        %(cli)s# ifdef LIKWID_PERFMON
+        %(cli)s  LIKWID_MARKER_STOP("%(region_name)s");
+        %(cli)s#endif
         %(layout_decl)s;
         %(layout_loop)s
             %(layout_assign)s;
@@ -195,9 +202,9 @@ double %(wrapper_name)s(int boffset,
       }
     }
     %(interm_globals_writeback)s;
-# ifdef LIKWID_PERFMON
-    LIKWID_MARKER_STOP("%(kernel_name)s");
-#endif
+    %(clo)s# ifdef LIKWID_PERFMON
+    %(clo)s  LIKWID_MARKER_STOP("%(region_name)s");
+    %(clo)s#endif
   }
   s2 = stamp();
   return (s2 - s1) / 1e9;

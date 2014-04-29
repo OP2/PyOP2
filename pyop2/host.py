@@ -677,6 +677,20 @@ class JITModule(base.JITModule):
                 externc_open = 'extern "C" {'
                 externc_close = '}'
         headers = "\n".join([compiler.get('vect_header', ""), blas_header])
+        self.timer_function = """
+        #include <time.h>
+        #include <sys/types.h>
+        #include <stdlib.h>
+
+        long stamp()
+        {
+          struct timespec tv;
+          long _stamp;
+          clock_gettime(CLOCK_MONOTONIC, &tv);
+          _stamp = tv.tv_sec * 1000 * 1000 * 1000 + tv.tv_nsec;
+          return _stamp;
+        }
+        """
         if any(arg._is_soa for arg in self._args):
             kernel_code = """
             #define OP2_STRIDE(a, idx) a[idx]
@@ -687,7 +701,7 @@ class JITModule(base.JITModule):
             %(externc_open)s
             %(code)s
             #undef OP2_STRIDE
-            """ % {'code': self._kernel.code,
+            """ % {'code': self._kernel.code if not configuration['spike'] else configuration['spike_kernel'],
                    'externc_open': externc_open,
                    'namespace': blas_namespace,
                    'header': headers,
@@ -700,19 +714,21 @@ class JITModule(base.JITModule):
             %(namespace)s
             %(externc_open)s
             %(code)s
-            """ % {'code': self._kernel.code,
+            """ % {'code': self._kernel.code if not configuration['spike'] else configuration['spike_kernel'],
                    'externc_open': externc_open,
                    'namespace': blas_namespace,
                    'header': headers,
                    'timer': self.timer_function}
 
         code_to_compile = strip(dedent(self._wrapper) % self.generate_code())
-
+        if configuration['spike'] and configuration['spike_wrapper'] != "":
+                code_to_compile = configuration['spike_wrapper']
+        configuration['spike'] = False
         _const_decs = '\n'.join([const._format_declaration()
                                 for const in Const._definitions()]) + '\n'
 
         if configuration["likwid"]:
-            self._system_headers += ["#include <likwid.h>"]
+            self._kernel._headers += ["#include <likwid.h>"]
 
         code_to_compile = """
         #include <mat_utils.h>
@@ -743,7 +759,8 @@ class JITModule(base.JITModule):
             cppargs += [compiler[coffee.ast_plan.intrinsics['inst_set']]]
         ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
                  ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()] + \
-                 ["-lpetsc", "-lm", "-llikwid", "-lrt"] + self._libraries
+                 ['-Wl,-rpath,/opt/intel/lib/intel64/'] + \
+                 ["-lpetsc", "-lm", "-llikwid" if configuration["likwid"] else "", "-lrt"] + self._libraries
         if configuration["likwid"]:
             cppargs += ["-DLIKWID_PERFMON"]
         if self._kernel._applied_blas:
@@ -755,7 +772,8 @@ class JITModule(base.JITModule):
             if blas['name'] == 'eigen':
                 extension = "cpp"
         cppargs += ["-D_POSIX_C_SOURCE=199309L"]
-        self._fun, command_line = compilation.load(code_to_compile,
+        self._fun = compilation.load(code_to_compile,
+                                     extension,
                                      self._wrapper_name,
                                      cppargs=cppargs,
                                      ldargs=ldargs,
@@ -969,6 +987,7 @@ class JITModule(base.JITModule):
                 'addtos_scalar_field': indent(_addtos_scalar_field, 2)
             }
 
+        comment_likwid_instr = not configuration["likwid_outer"] or (configuration['only_rhs'] and self._kernel.name != "form00_cell_integral_0_otherwise")
         return {'kernel_name': self._kernel.name,
                 'wrapper_name': self._wrapper_name,
                 'ssinds_arg': _ssinds_arg,
@@ -1000,7 +1019,7 @@ class JITModule(base.JITModule):
                 'layout_loop_close': _layout_loops_close,
                 'kernel_args': _kernel_args,
                 'cli': "//" if not configuration["likwid_inner"] else "",
-                'clo': "//" if not configuration["likwid_outer"] else "",
+                'clo': "//" if comment_likwid_instr else "",
                 "region_name": configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name,
                 'itset_loop_body': '\n'.join([itset_loop_body(i, j, shape, offsets, is_facet=(self._iteration_region == ON_INTERIOR_FACETS))
                                               for i, j, shape, offsets in self._itspace])}
