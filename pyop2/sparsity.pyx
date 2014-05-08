@@ -157,24 +157,13 @@ cdef build_sparsity_pattern_seq(int rmult, int cmult, int nrows, list maps):
                         s_diag[row].insert(buf.begin(), buf.end())
 
     # Create final sparsity structure
-    cdef np.ndarray[DTYPE_t, ndim=1] nnz = np.empty(lsize, dtype=np.int32)
-    cdef np.ndarray[DTYPE_t, ndim=1] rowptr = np.empty(lsize + 1, dtype=np.int32)
-    rowptr[0] = 0
+    cdef np.ndarray[DTYPE_t, ndim=1] d_nnz = np.empty(lsize, dtype=np.int32)
+    cdef int d_nz = 0
     for row in range(lsize):
-        nnz[row] = s_diag[row].size()
-        rowptr[row+1] = rowptr[row] + nnz[row]
+        d_nnz[row] = s_diag[row].size()
+        d_nz += d_nnz[row]
 
-    cdef np.ndarray[DTYPE_t, ndim=1] colidx = np.empty(rowptr[lsize], dtype=np.int32)
-    # Note: elements in a set are always sorted, so no need to sort colidx
-    for row in range(lsize):
-        i = rowptr[row]
-        it = s_diag[row].begin()
-        while it != s_diag[row].end():
-            colidx[i] = deref(it)
-            inc(it)
-            i += 1
-
-    return rowptr[lsize], nnz, rowptr, colidx
+    return d_nz, d_nnz
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -249,13 +238,13 @@ def build_sparsity(object sparsity, bool parallel):
     cdef int nrows = sparsity._nrows
     cdef int ncols = sparsity._ncols
 
+    sparsity._rowptr = []
+    sparsity._colidx = []
     if parallel:
         sparsity._d_nnz, sparsity._o_nnz, sparsity._d_nz, sparsity._o_nz = \
             build_sparsity_pattern_mpi(rmult, cmult, nrows, ncols, sparsity.maps)
-        sparsity._rowptr = []
-        sparsity._colidx = []
     else:
-        sparsity._d_nz, sparsity._d_nnz, sparsity._rowptr, sparsity._colidx = \
+        sparsity._d_nz, sparsity._d_nnz = \
             build_sparsity_pattern_seq(rmult, cmult, nrows, sparsity.maps)
         sparsity._o_nnz = []
         sparsity._o_nz = 0
