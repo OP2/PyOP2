@@ -81,6 +81,7 @@ cdef build_sparsity_pattern_seq(int rmult, int cmult, int nrows, list maps):
         cmap rowmap, colmap
         vector[Set[int]] s_diag
         Set[int].const_iterator it
+        vector[int] buf
 
     lsize = nrows*rmult
     s_diag = vector[Set[int]](lsize)
@@ -147,12 +148,13 @@ cdef build_sparsity_pattern_seq(int rmult, int cmult, int nrows, list maps):
 
         else:
             for e in range(rsize):
+                for d in range(colmap.arity):
+                    for c in range(cmult):
+                        buf[d*cmult+c] = cmult * colmap.values[d + e * colmap.arity] + c
                 for i in range(rowmap.arity):
                     for r in range(rmult):
-                            row = rmult * rowmap.values[i + e*rowmap.arity] + r
-                            for d in range(colmap.arity):
-                                for c in range(cmult):
-                                    s_diag[row].insert(cmult * colmap.values[d + e * colmap.arity] + c)
+                        row = rmult * rowmap.values[i + e*rowmap.arity] + r
+                        s_diag[row].insert(buf.begin(), buf.end())
 
     # Create final sparsity structure
     cdef np.ndarray[DTYPE_t, ndim=1] nnz = np.empty(lsize, dtype=np.int32)
