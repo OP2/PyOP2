@@ -243,14 +243,6 @@ class Mat(base.Mat, CopyOnWrite):
                 indices=np.arange(self.sparsity.nrows * rdim, dtype=PETSc.IntType))
             col_lg.create(
                 indices=np.arange(self.sparsity.ncols * cdim, dtype=PETSc.IntType))
-            self._array = np.zeros(self.sparsity.nz, dtype=PETSc.RealType)
-            # We're not currently building a blocked matrix, so need to scale the
-            # number of rows and columns by the sparsity dimensions
-            # FIXME: This needs to change if we want to do blocked sparse
-            # NOTE: using _rowptr and _colidx since we always want the host values
-            mat.createAIJWithArrays(
-                (self.sparsity.nrows * rdim, self.sparsity.ncols * cdim),
-                (self.sparsity._rowptr, self.sparsity._colidx, self._array))
         else:
             # FIXME: probably not right for vector fields
             # We get the PETSc local to global mapping from the halo
@@ -267,9 +259,12 @@ class Mat(base.Mat, CopyOnWrite):
             row_lg = row_lg.unblock(rdim)
             col_lg = col_lg.unblock(cdim)
 
-            mat.createAIJ(size=((self.sparsity.nrows * rdim, None),
-                                (self.sparsity.ncols * cdim, None)),
-                          nnz=(self.sparsity.nnz, self.sparsity.onnz))
+        # We're not currently building a blocked matrix, so need to scale the
+        # number of rows and columns by the sparsity dimensions
+        # FIXME: This needs to change if we want to do blocked sparse
+        mat.createAIJ(size=((self.sparsity.nrows * rdim, None),
+                            (self.sparsity.ncols * cdim, None)),
+                      nnz=(self.sparsity.nnz, self.sparsity.onnz))
         mat.setLGMap(rmap=row_lg, cmap=col_lg)
         # Do not stash entries destined for other processors, just drop them
         # (we take care of those in the halo)
