@@ -3287,7 +3287,9 @@ class Sparsity(ObjectCached):
         self._dsets = dsets
 
         if dsets[0] is None or dsets[1] is None:
-            pass
+            # This will cause a trivial memory accounting error (although not a leak).
+            self._d_nz = 0
+            self._o_nz = 0
         else:
             # All rmaps and cmaps have the same data set - just use the first.
             self._nrows = self._rmaps[0].toset.size
