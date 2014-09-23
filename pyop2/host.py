@@ -238,7 +238,7 @@ class Arg(base.Arg):
                         vec_idx += 1
         return ";\n".join(val)
 
-    def c_addto(self, i, j, buf_name, extruded=None, is_facet=False):
+    def c_addto(self, i, j, buf_name, extruded=None, is_facet=False, applied_blas=False):
         maps = as_tuple(self.map, Map)
         nrows = maps[0].split[i].arity
         ncols = maps[1].split[j].arity
@@ -255,15 +255,24 @@ class Arg(base.Arg):
 
         if self.data._is_vector_field and self._flatten:
             rbs, cbs = self.data.sparsity[i, j].dims
+            rdim = rbs * nrows
             tmp_name = 'tmp_' + buf_name
+            if applied_blas:
+                idx = "[(%%(ridx)s)*%d + (%%(cidx)s)]" % rdim
+            else:
+                idx = "[%(ridx)s][%(cidx)s]"
             ret = []
+            idx_l = idx % {'ridx': "%d*j + k" % rbs,
+                           'cidx': "%d*l + m" % cbs}
+            idx_r = idx % {'ridx': "j + %d*k" % nrows,
+                           'cidx': "l + %d*m" % ncols}
             # Shuffle xxx yyy zzz into xyz xyz xyz
             ret.append("""
             for ( int j = 0; j < %(nrows)d; j++ ) {
                for ( int k = 0; k < %(rbs)d; k++ ) {
                   for ( int l = 0; l < %(ncols)d; l++ ) {
                      for ( int m = 0; m < %(cbs)d; m++ ) {
-                        %(tmp_name)s[%(rbs)d*j + k][%(cbs)d*l + m] = %(buf_name)s[j + %(rarity)d*k][l + %(carity)d*m];
+                        %(tmp_name)s%(idx_l)s = %(buf_name)s%(idx_r)s;
                      }
                   }
                }
@@ -271,6 +280,8 @@ class Arg(base.Arg):
                     'ncols': ncols,
                     'rbs': rbs,
                     'cbs': cbs,
+                    'idx_l': idx_l,
+                    'idx_r': idx_r,
                     'buf_name': buf_name,
                     'tmp_name': tmp_name})
             addto = 'MatSetValuesBlockedLocal'
@@ -907,11 +918,16 @@ class JITModule(base.JITModule):
             _itspace_loop_close = '\n'.join('  ' * n + '}' for n in range(nloops - 1, -1, -1))
             _addto_buf_name = _buf_scatter_name or _buf_name
             if self._itspace._extruded:
-                _addtos_extruded = '\n'.join([arg.c_addto(i, j, _addto_buf_name, "xtr_", is_facet=is_facet) for arg in self._args if arg._is_mat])
+                _addtos_extruded = '\n'.join([arg.c_addto(i, j, _addto_buf_name,
+                                                          "xtr_", is_facet=is_facet,
+                                                          applied_blas=self._kernel._applied_blas)
+                                              for arg in self._args if arg._is_mat])
                 _addtos = ""
             else:
                 _addtos_extruded = ""
-                _addtos = '\n'.join([arg.c_addto(i, j, _addto_buf_name) for count, arg in enumerate(self._args) if arg._is_mat])
+                _addtos = '\n'.join([arg.c_addto(i, j, _addto_buf_name,
+                                                 applied_blas=self._kernel._applied_blas)
+                                     for count, arg in enumerate(self._args) if arg._is_mat])
             if not _buf_scatter:
                 _itspace_loops = ''
                 _itspace_loop_close = ''
