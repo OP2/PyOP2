@@ -37,6 +37,7 @@ import numpy as np
 from time import time
 from contextlib import contextmanager
 from decorator import decorator
+import configuration as cfg
 
 import __builtin__
 
@@ -189,6 +190,9 @@ class timed_function(Timer):
     """Decorator to time function calls."""
 
     def __call__(self, f):
+        if not cfg.configuration['profiling']:
+            return f
+
         def wrapper(f, *args, **kwargs):
             if not self._name:
                 self._name = f.func_name
@@ -213,11 +217,14 @@ def toc(name):
 @contextmanager
 def timed_region(name):
     """A context manager for timing a given code region."""
-    tic(name)
-    try:
+    if cfg.configuration['profiling']:
+        tic(name)
+        try:
+            yield
+        finally:
+            toc(name)
+    else:
         yield
-    finally:
-        toc(name)
 
 
 def summary(filename=None):
