@@ -3576,6 +3576,9 @@ class ParLoop(object):
         self._it_space = self.build_itspace(iterset)
 
     def _run(self):
+        for a in self.args:
+            if a.access != READ:
+                a.data._version_bump()
         return self.compute()
 
     @collective
