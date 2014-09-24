@@ -91,8 +91,11 @@ class ParLoop(host.ParLoop):
     @collective
     @lineprof
     def _compute(self, part):
-        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct, iterate=self.iteration_region)
-        if not hasattr(self, '_jit_args'):
+        fun = getattr(self, '_fun', None)
+        if not fun:
+            fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct, iterate=self.iteration_region)
+            self._fun = fun
+        if not hasattr(self, '_argtypes'):
             self._argtypes = [ctypes.c_int, ctypes.c_int]
             self._jit_args = [0, 0]
             if isinstance(self._it_space._iterset, Subset):
