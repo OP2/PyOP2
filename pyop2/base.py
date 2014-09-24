@@ -3575,6 +3575,23 @@ class ParLoop(object):
 
         self._it_space = self.build_itspace(iterset)
 
+    def replace_arg_data(self, data, idx):
+        """Replace the data payload of an argument in this :class:`ParLoop`.
+
+        :arg data: the :class:`DataCarrier` to use as a replacement.
+        :arg idx: the index of the argument in the :class:`ParLoop`.
+
+        .. warning::
+
+           No error checking is performed in this routine.  It is up
+           to the caller to ensure that they do not accidentally
+           replace the payload of (say) a :class:`Global` :class:`Arg`
+           with a :class:`Mat`.
+
+           Do not use this function unless you know what you're doing!
+        """
+        self._actual_args[idx]._dat = data
+
     def _run(self):
         for a in self.args:
             if a.access != READ:
