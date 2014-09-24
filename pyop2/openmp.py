@@ -36,7 +36,6 @@
 import ctypes
 import math
 import numpy as np
-from numpy.ctypeslib import ndpointer
 import os
 from subprocess import Popen, PIPE
 
@@ -221,7 +220,7 @@ class ParLoop(device.ParLoop, host.ParLoop):
             self._argtypes[1] = ctypes.c_int
             if isinstance(self._it_space._iterset, Subset):
                 self._argtypes.append(self._it_space._iterset._argtype)
-                self._jit_args.append(self._it_space._iterset._indices)
+                self._jit_args.append(self._it_space._iterset._indices.ctypes.data)
             for arg in self.args:
                 if arg._is_mat:
                     self._argtypes.append(arg.data._argtype)
@@ -231,23 +230,23 @@ class ParLoop(device.ParLoop, host.ParLoop):
                         # Cannot access a property of the Dat or we will force
                         # evaluation of the trace
                         self._argtypes.append(d._argtype)
-                        self._jit_args.append(d._data)
+                        self._jit_args.append(d._data.ctypes.data)
 
                 if arg._is_indirect or arg._is_mat:
                     maps = as_tuple(arg.map, Map)
                     for map in maps:
                         for m in map:
                             self._argtypes.append(m._argtype)
-                            self._jit_args.append(m.values_with_halo)
+                            self._jit_args.append(m.values_with_halo.ctypes.data)
 
             for c in Const._definitions():
                 self._argtypes.append(c._argtype)
-                self._jit_args.append(c.data)
+                self._jit_args.append(c.data.ctypes.data)
 
             # offset_args returns an empty list if there are none
             for a in self.offset_args:
-                self._argtypes.append(ndpointer(a.dtype, shape=a.shape))
-                self._jit_args.append(a)
+                self._argtypes.append(ctypes.c_voidp)
+                self._jit_args.append(a.ctypes.data)
 
             if self.iteration_region in [ON_BOTTOM]:
                 self._argtypes.append(ctypes.c_int)
@@ -273,12 +272,12 @@ class ParLoop(device.ParLoop, host.ParLoop):
         if part.size > 0:
             #TODO: compute partition size
             plan = self._get_plan(part, 1024)
-            self._argtypes[2] = ndpointer(plan.blkmap.dtype, shape=plan.blkmap.shape)
-            self._jit_args[2] = plan.blkmap
-            self._argtypes[3] = ndpointer(plan.offset.dtype, shape=plan.offset.shape)
-            self._jit_args[3] = plan.offset
-            self._argtypes[4] = ndpointer(plan.nelems.dtype, shape=plan.nelems.shape)
-            self._jit_args[4] = plan.nelems
+            self._argtypes[2] = ctypes.c_voidp
+            self._jit_args[2] = plan.blkmap.ctypes.data
+            self._argtypes[3] = ctypes.c_voidp
+            self._jit_args[3] = plan.offset.ctypes.data
+            self._argtypes[4] = ctypes.c_voidp
+            self._jit_args[4] = plan.nelems.ctypes.data
             # Must call compile on all processes even if partition size is
             # zero since compilation is collective.
             fun = fun.compile(argtypes=self._argtypes, restype=None)
@@ -293,9 +292,9 @@ class ParLoop(device.ParLoop, host.ParLoop):
                 boffset += nblocks
         else:
             # Fake types for arguments so that ctypes doesn't complain
-            self._argtypes[2] = ndpointer(np.int32, shape=(0, ))
-            self._argtypes[3] = ndpointer(np.int32, shape=(0, ))
-            self._argtypes[4] = ndpointer(np.int32, shape=(0, ))
+            self._argtypes[2] = ctypes.c_voidp
+            self._argtypes[3] = ctypes.c_voidp
+            self._argtypes[4] = ctypes.c_voidp
             # No need to actually call function since partition size
             # is zero, however we must compile it because compilation
             # is collective
