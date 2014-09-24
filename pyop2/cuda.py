@@ -325,7 +325,6 @@ class Mat(DeviceDataMixin, op2.Mat):
 
     @property
     def values(self):
-        base._trace.evaluate(set([self]), set([self]))
         shape = self.sparsity.maps[0][0].toset.size * self.dims[0]
         shape = (shape, shape)
         ret = np.zeros(shape=shape, dtype=self.dtype)
@@ -339,7 +338,6 @@ class Mat(DeviceDataMixin, op2.Mat):
 
     @property
     def array(self):
-        base._trace.evaluate(set([self]), set([self]))
         return self._csrdata.get()
 
     @modifies
@@ -349,7 +347,6 @@ class Mat(DeviceDataMixin, op2.Mat):
         strong boundary conditions.
 
         :param rows: a :class:`Subset` or an iterable"""
-        base._trace.evaluate(set([self]), set([self]))
         rows = rows.indices if isinstance(rows, Subset) else rows
         for row in rows:
             s = self.sparsity._rowptr[row]
@@ -361,7 +358,6 @@ class Mat(DeviceDataMixin, op2.Mat):
                 self._csrdata[diag:diag + 1].fill(diag_val)
 
     def zero(self):
-        base._trace.evaluate(set([]), set([self]))
         self._csrdata.fill(0)
         self._lmadata.fill(0)
         self._version_set_zero()
@@ -409,14 +405,12 @@ class Global(DeviceDataMixin, op2.Global):
 
     @property
     def data(self):
-        base._trace.evaluate(set([self]), set())
         if self.state is not DeviceDataMixin.DEVICE_UNALLOCATED:
             self.state = DeviceDataMixin.HOST
         return self._data
 
     @data.setter
     def data(self, value):
-        base._trace.evaluate(set(), set([self]))
         self._data = verify_reshape(value, self.dtype, self.dim)
         if self.state is not DeviceDataMixin.DEVICE_UNALLOCATED:
             self.state = DeviceDataMixin.HOST

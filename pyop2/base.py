@@ -58,107 +58,6 @@ from coffee.ast_base import Node
 from coffee import ast_base as ast
 
 
-class LazyComputation(object):
-
-    """Helper class holding computation to be carried later on.
-    """
-
-    def __init__(self, reads, writes):
-        self.reads = set(flatten(reads))
-        self.writes = set(flatten(writes))
-        self._scheduled = False
-
-    def enqueue(self):
-        global _trace
-        _trace.append(self)
-        return self
-
-    def _run(self):
-        assert False, "Not implemented"
-
-
-class ExecutionTrace(object):
-
-    """Container maintaining delayed computation until they are executed."""
-
-    def __init__(self):
-        self._trace = list()
-
-    def append(self, computation):
-        if not configuration['lazy_evaluation']:
-            assert not self._trace
-            computation._run()
-        elif configuration['lazy_max_trace_length'] > 0 and \
-                configuration['lazy_max_trace_length'] == len(self._trace):
-            self.evaluate(computation.reads, computation.writes)
-            computation._run()
-        else:
-            self._trace.append(computation)
-
-    def in_queue(self, computation):
-        return computation in self._trace
-
-    def clear(self):
-        """Forcefully drops delayed computation. Only use this if you know what you
-        are doing.
-        """
-        self._trace = list()
-
-    def evaluate_all(self):
-        """Forces the evaluation of all delayed computations."""
-        for comp in self._trace:
-            comp._run()
-        self._trace = list()
-
-    def evaluate(self, reads=None, writes=None):
-        """Force the evaluation of delayed computation on which reads and writes
-        depend.
-
-        :arg reads: the :class:`DataCarrier`\s which you wish to read from.
-                    This forces evaluation of all :func:`par_loop`\s that write to
-                    the :class:`DataCarrier` (and any other dependent computation).
-        :arg writes: the :class:`DataCarrier`\s which you will write to (i.e. modify values).
-                     This forces evaluation of all :func:`par_loop`\s that read from the
-                     :class:`DataCarrier` (and any other dependent computation).
-        """
-
-        if reads is not None:
-            try:
-                reads = set(flatten(reads))
-            except TypeError:       # not an iterable
-                reads = set([reads])
-        else:
-            reads = set()
-        if writes is not None:
-            try:
-                writes = set(flatten(writes))
-            except TypeError:
-                writes = set([writes])
-        else:
-            writes = set()
-
-        def _depends_on(reads, writes, cont):
-            return reads & cont.writes or writes & cont.reads or writes & cont.writes
-
-        for comp in reversed(self._trace):
-            if _depends_on(reads, writes, comp):
-                comp._scheduled = True
-                reads = reads | comp.reads - comp.writes
-                writes = writes | comp.writes
-            else:
-                comp._scheduled = False
-
-        new_trace = list()
-        for comp in self._trace:
-            if comp._scheduled:
-                comp._run()
-            else:
-                new_trace.append(comp)
-        self._trace = new_trace
-
-
-_trace = ExecutionTrace()
-
 # Data API
 
 
@@ -1451,17 +1350,6 @@ class DataCarrier(Versioned):
         the product of the dim tuple."""
         return self._cdim
 
-    def _force_evaluation(self, read=True, write=True):
-        """Force the evaluation of any outstanding computation to ensure that this DataCarrier is up to date.
-
-        Arguments read and write specify the intent you wish to observe the data with.
-
-        :arg read: if `True` force evaluation that writes to this DataCarrier.
-        :arg write: if `True` force evaluation that reads from this DataCarrier."""
-        reads = self if read else None
-        writes = self if write else None
-        _trace.evaluate(reads, writes)
-
 
 class _EmptyDataMixin(object):
     """A mixin for :class:`Dat` and :class:`Global` objects that takes
@@ -1654,7 +1542,6 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
         :meth:`data_with_halos`.
 
         """
-        _trace.evaluate(set([self]), set([self]))
         if self.dataset.total_size > 0 and self._data.size == 0 and self.cdim > 0:
             raise RuntimeError("Illegal access: no data associated with this Dat!")
         maybe_setflags(self._data, write=True)
@@ -1692,7 +1579,6 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
         :meth:`data_ro_with_halos`.
 
         """
-        _trace.evaluate(set([self]), set())
         if self.dataset.total_size > 0 and self._data.size == 0 and self.cdim > 0:
             raise RuntimeError("Illegal access: no data associated with this Dat!")
         v = self._data[:self.dataset.size].view()
@@ -1796,7 +1682,7 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
         :arg other: The destination :class:`Dat`
         :arg subset: A :class:`Subset` of elements to copy (optional)"""
 
-        self._copy_parloop(other, subset=subset).enqueue()
+        self._copy_parloop(other, subset=subset)._run()
 
     @collective
     def _copy_parloop(self, other, subset=None):
@@ -1853,13 +1739,6 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
         except AttributeError:
             pass
 
-        if configuration['lazy_evaluation']:
-            _trace.evaluate(self._cow_parloop.reads, self._cow_parloop.writes)
-            try:
-                _trace._trace.remove(self._cow_parloop)
-            except ValueError:
-                return
-
         self._cow_parloop._run()
 
     @collective
@@ -1872,11 +1751,6 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
         # Remove the write dependency of the copy (in order to prevent
         # premature execution of the loop).
         other._cow_parloop.writes = set()
-        if configuration['lazy_evaluation']:
-            # In the lazy case, we enqueue now to ensure we are at the
-            # right point in the trace.
-            other._cow_parloop.enqueue()
-
         return other
 
     def __str__(self):
@@ -2248,7 +2122,7 @@ class MixedDat(Dat):
         if subset is not None:
             raise NotImplementedError("MixedDat.copy with a Subset is not supported")
         for s, o in zip(self, other):
-            s._copy_parloop(o).enqueue()
+            s._copy_parloop(o)._run()
 
     @collective
     def _cow_actual_copy(self, src):
@@ -2469,7 +2343,6 @@ class Const(DataCarrier):
         """Remove this Const object from the namespace
 
         This allows the same name to be redeclared with a different shape."""
-        _trace.evaluate(set(), set([self]))
         Const._defs.discard(self)
 
     def _format_declaration(self):
@@ -2580,7 +2453,6 @@ class Global(DataCarrier, _EmptyDataMixin):
     @property
     def data(self):
         """Data array."""
-        _trace.evaluate(set([self]), set())
         if len(self._data) is 0:
             raise RuntimeError("Illegal access: No data associated with this Global!")
         return self._data
@@ -2599,7 +2471,6 @@ class Global(DataCarrier, _EmptyDataMixin):
     @data.setter
     @modifies
     def data(self, value):
-        _trace.evaluate(set(), set([self]))
         self._data = verify_reshape(value, self.dtype, self.dim)
 
     @property
@@ -3366,24 +3237,13 @@ class Mat(SetAssociated):
         return _make_object('Arg', data=self, map=path_maps, access=access,
                             idx=path_idxs, flatten=flatten)
 
-    class _Assembly(LazyComputation):
-        """Finalise assembly of this matrix.
-
-        Called lazily after user calls :meth:`assemble`"""
-        def __init__(self, mat):
-            super(Mat._Assembly, self).__init__(reads=mat, writes=mat)
-            self._mat = mat
-
-        def _run(self):
-            self._mat._assemble()
-
     def assemble(self):
         """Finalise this :class:`Mat` ready for use.
 
         Call this /after/ executing all the par_loops that write to
         the matrix before you want to look at it.
         """
-        Mat._Assembly(self).enqueue()
+        self._assemble()
 
     def _assemble(self):
         raise NotImplementedError("Abstract Mat base class doesn't know how to assemble itself")
@@ -3665,7 +3525,7 @@ ALL = IterationRegion("ALL")
 """Iterate over all cells of an extruded mesh."""
 
 
-class ParLoop(LazyComputation):
+class ParLoop(object):
     """Represents the kernel, iteration space and arguments of a parallel loop
     invocation.
 
@@ -3682,9 +3542,6 @@ class ParLoop(LazyComputation):
     @validate_type(('kernel', Kernel, KernelTypeError),
                    ('iterset', Set, SetTypeError))
     def __init__(self, kernel, iterset, *args, **kwargs):
-        LazyComputation.__init__(self,
-                                 set([a.data for a in args if a.access in [READ, RW]]) | Const._defs,
-                                 set([a.data for a in args if a.access in [RW, WRITE, MIN, MAX, INC]]))
         # INCs into globals need to start with zero and then sum back
         # into the input global at the end.  This has the same number
         # of reductions but means that successive par_loops
@@ -3787,12 +3644,8 @@ class ParLoop(LazyComputation):
         # Finalise global increments
         for i, glob in self._reduced_globals.iteritems():
             # These can safely access the _data member directly
-            # because lazy evaluation has ensured that any pending
-            # updates to glob happened before this par_loop started
-            # and the reduction_end on the temporary global pulled
+            # because the reduction_end on the temporary global pulled
             # data back from the device if necessary.
-            # In fact we can't access the properties directly because
-            # that forces an infinite loop.
             glob._data += self.args[i].data._data
 
     @collective
@@ -3982,7 +3835,6 @@ class Solver(object):
         # Finalise assembly of the matrix, we know we need to this
         # because we're about to look at it.
         A.assemble()
-        _trace.evaluate(set([A, b]), set([x]))
         self._solve(A, x, b)
 
     def _solve(self, A, x, b):
@@ -3993,5 +3845,5 @@ class Solver(object):
 def par_loop(kernel, it_space, *args, **kwargs):
     if isinstance(kernel, types.FunctionType):
         import pyparloop
-        return pyparloop.ParLoop(pyparloop.Kernel(kernel), it_space, *args, **kwargs).enqueue()
-    return _make_object('ParLoop', kernel, it_space, *args, **kwargs).enqueue()
+        return pyparloop.ParLoop(pyparloop.Kernel(kernel), it_space, *args, **kwargs)._run()
+    return _make_object('ParLoop', kernel, it_space, *args, **kwargs)._run()

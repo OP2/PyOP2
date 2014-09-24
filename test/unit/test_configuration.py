@@ -64,8 +64,6 @@ class TestConfigurationAPI:
     @pytest.mark.parametrize(('key', 'val'), [('backend', 0),
                                               ('debug', 'illegal'),
                                               ('log_level', 1.5),
-                                              ('lazy_evaluation', 'illegal'),
-                                              ('lazy_max_trace_length', 'illegal'),
                                               ('dump_gencode', 'illegal'),
                                               ('dump_gencode_path', 0)])
     def test_configuration_illegal_types(self, key, val):

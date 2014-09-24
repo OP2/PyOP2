@@ -381,13 +381,11 @@ class TestPlanCache:
         op2.par_loop(op2.Kernel(kernel_inc, "kernel_inc"),
                      iterset,
                      x(op2.RW, iter2ind1[0]))
-        op2.base._trace.evaluate(set([x]), set())
         assert len(self.cache) == 1
 
         op2.par_loop(op2.Kernel(kernel_dec, "kernel_dec"),
                      iterset,
                      x(op2.RW, iter2ind1[0]))
-        op2.base._trace.evaluate(set([x]), set())
         assert len(self.cache) == 1
 
     def test_arg_order(self, backend, iterset, iter2ind1, x, y):
@@ -408,7 +406,6 @@ void kernel_swap(unsigned int* x, unsigned int* y)
                      x(op2.RW, iter2ind1[0]),
                      y(op2.RW, iter2ind1[0]))
 
-        op2.base._trace.evaluate(set([x]), set())
         assert len(self.cache) == 1
 
         op2.par_loop(op2.Kernel(kernel_swap, "kernel_swap"),
@@ -416,7 +413,6 @@ void kernel_swap(unsigned int* x, unsigned int* y)
                      y(op2.RW, iter2ind1[0]),
                      x(op2.RW, iter2ind1[0]))
 
-        op2.base._trace.evaluate(set([x]), set())
         assert len(self.cache) == 1
 
     def test_idx_order(self, backend, iterset, iter2ind2, x):
@@ -437,7 +433,6 @@ void kernel_swap(unsigned int* x, unsigned int* y)
                      x(op2.RW, iter2ind2[0]),
                      x(op2.RW, iter2ind2[1]))
 
-        op2.base._trace.evaluate(set([x]), set())
         assert len(self.cache) == 1
 
         op2.par_loop(op2.Kernel(kernel_swap, "kernel_swap"),
@@ -445,7 +440,6 @@ void kernel_swap(unsigned int* x, unsigned int* y)
                      x(op2.RW, iter2ind2[1]),
                      x(op2.RW, iter2ind2[0]))
 
-        op2.base._trace.evaluate(set([x]), set())
         assert len(self.cache) == 1
 
     def test_dat_same_size_times_dim(self, backend, iterset, iter2ind1, iter2ind2, x2, xl):
@@ -465,7 +459,6 @@ void kernel_swap(unsigned int* x)
                      iterset,
                      x2(op2.RW, iter2ind2[0]))
 
-        op2.base._trace.evaluate(set([x2]), set())
         assert len(self.cache) == 1
 
         kernel_inc = "void kernel_inc(unsigned long* x) { *x += 1; }"
@@ -473,7 +466,6 @@ void kernel_swap(unsigned int* x)
                      iterset,
                      xl(op2.RW, iter2ind1[0]))
 
-        op2.base._trace.evaluate(set([xl]), set())
         assert len(self.cache) == 2
 
     def test_same_nonstaged_arg_count(self, backend, iterset, iter2ind1, x, a64, g):
@@ -485,7 +477,6 @@ void kernel_swap(unsigned int* x)
                      iterset,
                      x(op2.INC, iter2ind1[0]),
                      a64(op2.RW))
-        op2.base._trace.evaluate(set([x]), set())
         assert len(self.cache) == 1
 
         kernel_dummy = "void kernel_dummy(unsigned int* x, unsigned int* g) { }"
@@ -493,7 +484,6 @@ void kernel_swap(unsigned int* x)
                      iterset,
                      x(op2.INC, iter2ind1[0]),
                      g(op2.READ))
-        op2.base._trace.evaluate(set([x]), set())
         assert len(self.cache) == 1
 
     def test_same_conflicts(self, backend, iterset, iter2ind2, x, y):
@@ -505,7 +495,6 @@ void kernel_swap(unsigned int* x)
                      iterset,
                      x(op2.INC, iter2ind2[0]),
                      x(op2.INC, iter2ind2[1]))
-        op2.base._trace.evaluate(set([x]), set())
         assert len(self.cache) == 1
 
         kernel_dummy = "void kernel_dummy(unsigned int* x, unsigned int* y) { }"
@@ -513,7 +502,6 @@ void kernel_swap(unsigned int* x)
                      iterset,
                      y(op2.INC, iter2ind2[0]),
                      y(op2.INC, iter2ind2[1]))
-        op2.base._trace.evaluate(set([y]), set())
         assert len(self.cache) == 1
 
     def test_diff_conflicts(self, backend, iterset, iter2ind2, x, y):
@@ -525,7 +513,6 @@ void kernel_swap(unsigned int* x)
                      iterset,
                      x(op2.READ, iter2ind2[0]),
                      x(op2.READ, iter2ind2[1],))
-        op2.base._trace.evaluate(set(), set([x]))
         assert len(self.cache) == 1
 
         kernel_dummy = "void kernel_dummy(unsigned int* x, unsigned int* y) { }"
@@ -533,7 +520,6 @@ void kernel_swap(unsigned int* x)
                      iterset,
                      y(op2.INC, iter2ind2[0]),
                      y(op2.INC, iter2ind2[1]))
-        op2.base._trace.evaluate(set([y]), set())
         assert len(self.cache) == 2
 
     def test_same_with_mat(self, backend, iterset, x, iter2ind1, mat):
@@ -548,7 +534,6 @@ void kernel_swap(unsigned int* x)
                           partition_size=10,
                           matrix_coloring=True)
 
-        op2.base._trace.evaluate(set([mat]), set())
         assert len(self.cache) == 1
         assert self.cache_hit[plan1] == 1
         plan2 = plan.Plan(iterset.all_part,
@@ -558,7 +543,6 @@ void kernel_swap(unsigned int* x)
                           partition_size=10,
                           matrix_coloring=True)
 
-        op2.base._trace.evaluate(set([mat]), set())
         assert len(self.cache) == 1
         assert plan1 is plan2
         assert self.cache_hit[plan1] == 2
@@ -576,7 +560,6 @@ void kernel_swap(unsigned int* x)
                           partition_size=10,
                           matrix_coloring=True)
 
-        op2.base._trace.evaluate(set([mat]), set())
         assert len(self.cache) == 1
         assert self.cache_hit[plan1] == 1
         plan2 = plan.Plan(iterset.all_part,
@@ -586,7 +569,6 @@ void kernel_swap(unsigned int* x)
                           partition_size=10,
                           matrix_coloring=True)
 
-        op2.base._trace.evaluate(set([mat]), set())
         assert len(self.cache) == 2
         assert plan1 is not plan2
         assert self.cache_hit[plan1] == 1
@@ -620,7 +602,6 @@ class TestGeneratedCodeCache:
                      a(op2.WRITE),
                      x(op2.READ, iter2ind1[0]))
 
-        op2.base._trace.evaluate(set([a]), set())
         assert len(self.cache) == 1
 
         op2.par_loop(op2.Kernel(kernel_cpy, "kernel_cpy"),
@@ -628,7 +609,6 @@ class TestGeneratedCodeCache:
                      a(op2.WRITE),
                      x(op2.READ, iter2ind1[0]))
 
-        op2.base._trace.evaluate(set([a]), set())
         assert len(self.cache) == 1
 
     def test_diff_kernel(self, backend, iterset, iter2ind1, x, a):
@@ -642,7 +622,6 @@ class TestGeneratedCodeCache:
                      a(op2.WRITE),
                      x(op2.READ, iter2ind1[0]))
 
-        op2.base._trace.evaluate(set([a]), set())
         assert len(self.cache) == 1
 
         kernel_cpy = "void kernel_cpy(unsigned int* DST, unsigned int* SRC) { *DST = *SRC; }"
@@ -652,7 +631,6 @@ class TestGeneratedCodeCache:
                      a(op2.WRITE),
                      x(op2.READ, iter2ind1[0]))
 
-        op2.base._trace.evaluate(set([a]), set())
         assert len(self.cache) == 2
 
     def test_invert_arg_similar_shape(self, backend, iterset, iter2ind1, x, y):
@@ -673,7 +651,6 @@ void kernel_swap(unsigned int* x, unsigned int* y)
                      x(op2.RW, iter2ind1[0]),
                      y(op2.RW, iter2ind1[0]))
 
-        op2.base._trace.evaluate(set([x]), set())
         assert len(self.cache) == 1
 
         op2.par_loop(op2.Kernel(kernel_swap, "kernel_swap"),
@@ -681,7 +658,6 @@ void kernel_swap(unsigned int* x, unsigned int* y)
                      y(op2.RW, iter2ind1[0]),
                      x(op2.RW, iter2ind1[0]))
 
-        op2.base._trace.evaluate(set([y]), set())
         assert len(self.cache) == 1
 
     def test_dloop_ignore_scalar(self, backend, iterset, a, b):
@@ -702,7 +678,6 @@ void kernel_swap(unsigned int* x, unsigned int* y)
                      a(op2.RW),
                      b(op2.RW))
 
-        op2.base._trace.evaluate(set([a]), set())
         assert len(self.cache) == 1
 
         op2.par_loop(op2.Kernel(kernel_swap, "kernel_swap"),
@@ -710,7 +685,6 @@ void kernel_swap(unsigned int* x, unsigned int* y)
                      b(op2.RW),
                      a(op2.RW))
 
-        op2.base._trace.evaluate(set([b]), set())
         assert len(self.cache) == 1
 
     def test_vector_map(self, backend, iterset, x2, iter2ind2):
@@ -731,14 +705,12 @@ void kernel_swap(unsigned int* x[2])
                      iterset,
                      x2(op2.RW, iter2ind2))
 
-        op2.base._trace.evaluate(set([x2]), set())
         assert len(self.cache) == 1
 
         op2.par_loop(op2.Kernel(kernel_swap, "kernel_swap"),
                      iterset,
                      x2(op2.RW, iter2ind2))
 
-        op2.base._trace.evaluate(set([x2]), set())
         assert len(self.cache) == 1
 
     def test_map_index_order_matters(self, backend, iterset, x2, iter2ind2):
@@ -750,14 +722,12 @@ void kernel_swap(unsigned int* x[2])
                      x2(op2.INC, iter2ind2[0]),
                      x2(op2.INC, iter2ind2[1]))
 
-        op2.base._trace.evaluate(set([x2]), set())
         assert len(self.cache) == 1
 
         op2.par_loop(k, iterset,
                      x2(op2.INC, iter2ind2[1]),
                      x2(op2.INC, iter2ind2[0]))
 
-        op2.base._trace.evaluate(set([x2]), set())
         assert len(self.cache) == 2
 
     def test_same_iteration_space_works(self, backend, iterset, x2, iter2ind2):
@@ -771,13 +741,11 @@ void kernel_swap(unsigned int* x[2])
         op2.par_loop(k, iterset,
                      x2(op2.INC, iter2ind2[op2.i[0]]))
 
-        op2.base._trace.evaluate(set([x2]), set())
         assert len(self.cache) == 1
 
         op2.par_loop(k, iterset,
                      x2(op2.INC, iter2ind2[op2.i[0]]))
 
-        op2.base._trace.evaluate(set([x2]), set())
         assert len(self.cache) == 1
 
     def test_change_const_dim_matters(self, backend, iterset, diterset):
@@ -790,7 +758,6 @@ void kernel_swap(unsigned int* x[2])
 
         op2.par_loop(k, iterset, d(op2.WRITE))
 
-        op2.base._trace.evaluate(set([d]), set())
         assert len(self.cache) == 1
 
         c.remove_from_namespace()
@@ -799,7 +766,6 @@ void kernel_swap(unsigned int* x[2])
 
         op2.par_loop(k, iterset, d(op2.WRITE))
 
-        op2.base._trace.evaluate(set([d]), set())
         assert len(self.cache) == 2
 
         c.remove_from_namespace()
@@ -814,13 +780,11 @@ void kernel_swap(unsigned int* x[2])
 
         op2.par_loop(k, iterset, d(op2.WRITE))
 
-        op2.base._trace.evaluate(set([d]), set())
         assert len(self.cache) == 1
 
         c.data = 2
         op2.par_loop(k, iterset, d(op2.WRITE))
 
-        op2.base._trace.evaluate(set([d]), set())
         assert len(self.cache) == 1
 
         c.remove_from_namespace()
@@ -834,13 +798,11 @@ void kernel_swap(unsigned int* x[2])
 
         op2.par_loop(k, iterset, d(op2.WRITE))
 
-        op2.base._trace.evaluate(set([d]), set())
         assert len(self.cache) == 1
 
         d = op2.Dat(diterset, range(nelems), numpy.int32)
         op2.par_loop(k, iterset, d(op2.WRITE))
 
-        op2.base._trace.evaluate(set([d]), set())
         assert len(self.cache) == 2
 
     def test_change_global_dtype_matters(self, backend, iterset, diterset):
@@ -852,13 +814,11 @@ void kernel_swap(unsigned int* x[2])
 
         op2.par_loop(k, iterset, g(op2.INC))
 
-        op2.base._trace.evaluate(set([g]), set())
         assert len(self.cache) == 1
 
         g = op2.Global(1, 0, dtype=numpy.float64)
         op2.par_loop(k, iterset, g(op2.INC))
 
-        op2.base._trace.evaluate(set([g]), set())
         assert len(self.cache) == 2
 
 

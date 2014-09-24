@@ -34,7 +34,6 @@
 """Global test configuration."""
 
 import os
-from itertools import product
 import pytest
 
 from pyop2 import op2
@@ -57,17 +56,11 @@ def pytest_cmdline_preparse(config, args):
         args.insert(0, '-n ' + os.environ['PYTEST_NPROCS'])
     if 'PYTEST_WATCH' in os.environ and '-f' not in args:
         args.insert(0, '-f')
-    if 'PYTEST_LAZY' in os.environ:
-        args.insert(0, '--lazy')
-    if 'PYTEST_GREEDY' in os.environ:
-        args.insert(0, '--greedy')
 
 
 def pytest_addoption(parser):
     parser.addoption("--backend", action="append",
                      help="Selection the backend: one of %s" % backends.keys())
-    parser.addoption("--lazy", action="store_true", help="Only run lazy mode")
-    parser.addoption("--greedy", action="store_true", help="Only run greedy mode")
 
 
 def pytest_collection_modifyitems(items):
@@ -120,11 +113,6 @@ def skip_greedy():
     return None
 
 
-@pytest.fixture
-def skip_lazy():
-    return None
-
-
 def pytest_generate_tests(metafunc):
     """Parametrize tests to run on all backends."""
 
@@ -154,32 +142,21 @@ def pytest_generate_tests(metafunc):
         # Restrict to set of backends specified on the class level
         if hasattr(metafunc.cls, 'backends'):
             backend = backend.intersection(set(metafunc.cls.backends))
-        # It is preferable to run in greedy mode first, in
-        # case some test create leftover computations
-        lazy = []
-        # Skip greedy execution by passing skip_greedy as a parameter
-        if not ('skip_greedy' in metafunc.fixturenames or
-                metafunc.config.option.lazy):
-            lazy.append('greedy')
-        # Skip lazy execution by passing skip_greedy as a parameter
-        if not ('skip_lazy' in metafunc.fixturenames or
-                metafunc.config.option.greedy):
-            lazy.append('lazy')
         # Allow skipping individual backends by passing skip_<backend> as a
         # parameter
         backend = [b for b in backend.difference(skip_backends)
                    if not 'skip_' + b in metafunc.fixturenames]
-        params = list(product(backend, lazy))
-        metafunc.parametrize('backend', params or [(None, None)], indirect=True,
-                             ids=['-'.join(p) for p in params])
+        params = backend
+        metafunc.parametrize('backend', params or [None], indirect=True,
+                             ids=params)
 
 
 @pytest.fixture(scope='session')
 def backend(request):
-    backend, lazy = request.param
+    backend = request.param
     # Initialise the backend
     try:
-        op2.init(backend=backend, lazy_evaluation=(lazy == 'lazy'))
+        op2.init(backend=backend)
     # Skip test if initialisation failed
     except:
         pytest.skip('Backend %s is not available' % backend)

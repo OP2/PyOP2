@@ -148,7 +148,6 @@ class DeviceDataMixin(object):
     @collective
     def data(self):
         """Numpy array containing the data values."""
-        base._trace.evaluate(self, self)
         if len(self._data) is 0 and self.dataset.total_size > 0:
             raise RuntimeError("Illegal access: No data associated with this Dat!")
         maybe_setflags(self._data, write=True)
@@ -161,7 +160,6 @@ class DeviceDataMixin(object):
     @data.setter
     @collective
     def data(self, value):
-        base._trace.evaluate(set(), set([self]))
         maybe_setflags(self._data, write=True)
         self.needs_halo_update = True
         self._data = verify_reshape(value, self.dtype, self.shape)
@@ -171,7 +169,6 @@ class DeviceDataMixin(object):
     @property
     def data_ro(self):
         """Numpy array containing the data values.  Read-only"""
-        base._trace.evaluate(reads=self)
         if len(self._data) is 0 and self.dataset.total_size > 0:
             raise RuntimeError("Illegal access: No data associated with this Dat!")
         maybe_setflags(self._data, write=True)
