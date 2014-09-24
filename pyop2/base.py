@@ -346,7 +346,6 @@ class Arg(object):
     def halo_exchange_begin(self):
         """Begin halo exchange for the argument if a halo update is required.
         Doing halo exchanges only makes sense for :class:`Dat` objects."""
-        assert self._is_dat, "Doing halo exchanges only makes sense for Dats"
         assert not self._in_flight, \
             "Halo exchange already in flight for Arg %s" % self
         if self.access in [READ, RW] and self.data.needs_halo_update:
@@ -358,7 +357,6 @@ class Arg(object):
     def halo_exchange_end(self):
         """End halo exchange if it is in flight.
         Doing halo exchanges only makes sense for :class:`Dat` objects."""
-        assert self._is_dat, "Doing halo exchanges only makes sense for Dats"
         if self.access in [READ, RW] and self._in_flight:
             self._in_flight = False
             self.data.halo_exchange_end()
@@ -3546,17 +3544,33 @@ class ParLoop(object):
         # parallel.
         # Don't care about MIN and MAX because they commute with the reduction
         self._reduced_globals = {}
+        self._reduction_args = []
         for i, arg in enumerate(args):
-            if arg._is_global_reduction and arg.access == INC:
-                glob = arg.data
-                self._reduced_globals[i] = glob
-                args[i]._dat = _make_object('Global', glob.dim, data=np.zeros_like(glob.data_ro), dtype=glob.dtype)
+            if arg._is_global_reduction:
+                if arg.access == INC:
+                    glob = arg.data
+                    self._reduced_globals[i] = glob
+                    args[i]._dat = _make_object('Global', glob.dim, data=np.zeros_like(glob.data_ro), dtype=glob.dtype)
+                self._reduction_args.append(arg)
 
         # Always use the current arguments, also when we hit cache
         self._actual_args = args
         self._kernel = kernel
         self._is_layered = iterset._extruded
+        self._halo_exchange_args = []
+        if not self.is_direct:
+            for arg in self.args:
+                if arg._is_dat:
+                    self._halo_exchange_args.append(arg)
         self._iteration_region = kwargs.get("iterate", None)
+        self._args_to_mark_for_halo_exchange = []
+        for arg in self.args:
+            if arg._is_dat and arg.access in [INC, WRITE, RW]:
+                self._args_to_mark_for_halo_exchange.append(arg)
+        self._args_to_mark_read_only = []
+        for arg in self.args:
+            if arg._is_dat:
+                self._args_to_mark_read_only.append(arg)
 
         for i, arg in enumerate(self._actual_args):
             arg.position = i
@@ -3571,6 +3585,8 @@ class ParLoop(object):
                         arg2.indirect_position = arg1.indirect_position
 
         self._it_space = self.build_itspace(iterset)
+        self.needs_exec_halo = any(arg._is_indirect_and_not_read or arg._is_mat
+                                   for arg in self.args)
 
     def replace_arg_data(self, data, idx):
         """Replace the data payload of an argument in this :class:`ParLoop`.
@@ -3600,25 +3616,26 @@ class ParLoop(object):
     @profile
     def compute(self):
         """Executes the kernel over all members of the iteration space."""
+        iterset = self.it_space.iterset
         self.halo_exchange_begin()
-        self.maybe_set_dat_dirty()
-        self._compute(self.it_space.iterset.core_part)
+        self._compute(iterset.core_part)
         self.halo_exchange_end()
-        self._compute(self.it_space.iterset.owned_part)
+        self._compute(iterset.owned_part)
         self.reduction_begin()
         if self.needs_exec_halo:
-            self._compute(self.it_space.iterset.exec_part)
+            self._compute(iterset.exec_part)
         self.reduction_end()
         self.maybe_set_halo_update_needed()
+        self.mark_dats_read_only()
 
     @collective
-    def _compute(self, part):
+    def _compute(self, start, end):
         """Executes the kernel over all members of a MPI-part of the iteration space."""
         raise RuntimeError("Must select a backend")
 
-    def maybe_set_dat_dirty(self):
-        for arg in self.args:
-            if arg._is_dat and arg.data._is_allocated:
+    def mark_dats_read_only(self):
+        for arg in self._args_to_mark_read_only:
+            if arg.data._is_allocated:
                 for d in arg.data:
                     maybe_setflags(d._data, write=False)
 
@@ -3626,38 +3643,29 @@ class ParLoop(object):
     @timed_function('ParLoop halo exchange begin')
     def halo_exchange_begin(self):
         """Start halo exchanges."""
-        if self.is_direct:
-            # No need for halo exchanges for a direct loop
-            return
-        for arg in self.args:
-            if arg._is_dat:
-                arg.halo_exchange_begin()
+        for arg in self._halo_exchange_args:
+            arg.halo_exchange_begin()
 
     @collective
     @timed_function('ParLoop halo exchange end')
     def halo_exchange_end(self):
         """Finish halo exchanges (wait on irecvs)"""
-        if self.is_direct:
-            return
-        for arg in self.args:
-            if arg._is_dat:
-                arg.halo_exchange_end()
+        for arg in self._halo_exchange_args:
+            arg.halo_exchange_end()
 
     @collective
     @timed_function('ParLoop reduction begin')
     def reduction_begin(self):
         """Start reductions"""
-        for arg in self.args:
-            if arg._is_global_reduction:
-                arg.reduction_begin()
+        for arg in self._reduction_args:
+            arg.reduction_begin()
 
     @collective
     @timed_function('ParLoop reduction end')
     def reduction_end(self):
         """End reductions"""
-        for arg in self.args:
-            if arg._is_global_reduction:
-                arg.reduction_end()
+        for arg in self._reduction_args:
+            arg.reduction_end()
         # Finalise global increments
         for i, glob in self._reduced_globals.iteritems():
             # These can safely access the _data member directly
@@ -3669,9 +3677,8 @@ class ParLoop(object):
     def maybe_set_halo_update_needed(self):
         """Set halo update needed for :class:`Dat` arguments that are written to
         in this parallel loop."""
-        for arg in self.args:
-            if arg._is_dat and arg.access in [INC, WRITE, RW]:
-                arg.data.needs_halo_update = True
+        for arg in self._args_to_mark_for_halo_exchange:
+            arg.data.needs_halo_update = True
 
     def build_itspace(self, iterset):
         """Checks that the iteration set of the :class:`ParLoop` matches the
@@ -3745,12 +3752,6 @@ class ParLoop(object):
     def is_indirect(self):
         """Is the parallel loop indirect?"""
         return not self.is_direct
-
-    @property
-    def needs_exec_halo(self):
-        """Does the parallel loop need an exec halo?"""
-        return any(arg._is_indirect_and_not_read or arg._is_mat
-                   for arg in self.args)
 
     @property
     def kernel(self):
