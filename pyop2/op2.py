@@ -53,7 +53,7 @@ __all__ = ['configuration', 'READ', 'WRITE', 'RW', 'INC', 'MIN', 'MAX',
            'set_log_level', 'MPI', 'init', 'exit', 'Kernel', 'Set', 'ExtrudedSet',
            'MixedSet', 'Subset', 'DataSet', 'MixedDataSet', 'Halo', 'Dat',
            'MixedDat', 'Mat', 'Const', 'Global', 'Map', 'MixedMap', 'Sparsity',
-           'Solver', 'par_loop', 'solve']
+           'Solver', 'par_loop', 'solve', 'ParLoop']
 
 
 def initialised():
@@ -194,6 +194,10 @@ class DecoratedMap(base.DecoratedMap):
 
 
 class MixedMap(base.MixedMap):
+    __metaclass__ = backends._BackendSelector
+
+
+class ParLoop(base.ParLoop):
     __metaclass__ = backends._BackendSelector
 
 
