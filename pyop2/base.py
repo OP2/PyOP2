@@ -473,10 +473,10 @@ class Set(object):
         # A cache of objects built on top of this set
         self._cache = {}
         Set._globalcount += 1
-        self.core_part = SetPartition(self, 0, self.core_size)
-        self.owned_part = SetPartition(self, self.core_size, self.size - self.core_size)
-        self.exec_part = SetPartition(self, self.size, self.exec_size - self.size)
-        self.all_part = SetPartition(self, 0, self.exec_size)
+        self.core_part = SetPartition(self, 0, self.core_size, name="core")
+        self.owned_part = SetPartition(self, self.core_size, self.size - self.core_size, name="owned")
+        self.exec_part = SetPartition(self, self.size, self.exec_size - self.size, name="exec")
+        self.all_part = SetPartition(self, 0, self.exec_size, name="all")
 
     @property
     def core_size(self):
@@ -598,10 +598,10 @@ class ExtrudedSet(Set):
             raise SizeTypeError("Number of layers must be > 1 (not %s)" % layers)
         self._layers = layers
         self._extruded = True
-        self.core_part = SetPartition(self, 0, self.core_size)
-        self.owned_part = SetPartition(self, self.core_size, self.size - self.core_size)
-        self.exec_part = SetPartition(self, self.size, self.exec_size - self.size)
-        self.all_part = SetPartition(self, 0, self.exec_size)
+        self.core_part = SetPartition(self, 0, self.core_size, name="core")
+        self.owned_part = SetPartition(self, self.core_size, self.size - self.core_size, name="owned")
+        self.exec_part = SetPartition(self, self.size, self.exec_size - self.size, name="exec")
+        self.all_part = SetPartition(self, 0, self.exec_size, name="all")
 
     def __getattr__(self, name):
         """Returns a :class:`Set` specific attribute."""
@@ -662,10 +662,10 @@ class Subset(ExtrudedSet):
         self._size = (self._indices < superset._size).sum()
         self._ieh_size = (self._indices < superset._ieh_size).sum()
         self._inh_size = len(self._indices)
-        self.core_part = SetPartition(self, 0, self.core_size)
-        self.owned_part = SetPartition(self, self.core_size, self.size - self.core_size)
-        self.exec_part = SetPartition(self, self.size, self.exec_size - self.size)
-        self.all_part = SetPartition(self, 0, self.exec_size)
+        self.core_part = SetPartition(self, 0, self.core_size, name="core")
+        self.owned_part = SetPartition(self, self.core_size, self.size - self.core_size, name="owned")
+        self.exec_part = SetPartition(self, self.size, self.exec_size - self.size, name="exec")
+        self.all_part = SetPartition(self, 0, self.exec_size, name="all")
 
     # Look up any unspecified attributes on the _set.
     def __getattr__(self, name):
@@ -713,10 +713,11 @@ class Subset(ExtrudedSet):
 
 
 class SetPartition(object):
-    def __init__(self, set, offset, size):
+    def __init__(self, set, offset, size, name):
         self.set = set
         self.offset = offset
         self.size = size
+        self.name = name
 
 
 class MixedSet(Set, ObjectCached):

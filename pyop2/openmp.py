@@ -315,6 +315,9 @@ class ParLoop(device.ParLoop, host.ParLoop):
             fun.compile(argtypes=self._argtypes, restype=None)
 
     def _get_plan(self, part, part_size):
+        plan_name = "_%s_plan" % part.name
+        if hasattr(self, plan_name):
+            return getattr(self, plan_name)
         if self._is_indirect:
             plan = _plan.Plan(part,
                               *self._unwound_args,
@@ -337,6 +340,7 @@ class ParLoop(device.ParLoop, host.ParLoop):
                     self.offset = np.arange(part.offset, part.offset + part.size, partition_size, dtype=np.int32)
 
             plan = FakePlan(part, part_size)
+        setattr(self, plan_name, plan)
         return plan
 
     @property
