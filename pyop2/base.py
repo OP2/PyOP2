@@ -473,6 +473,10 @@ class Set(object):
         # A cache of objects built on top of this set
         self._cache = {}
         Set._globalcount += 1
+        self.core_part = SetPartition(self, 0, self.core_size)
+        self.owned_part = SetPartition(self, self.core_size, self.size - self.core_size)
+        self.exec_part = SetPartition(self, self.size, self.exec_size - self.size)
+        self.all_part = SetPartition(self, 0, self.exec_size)
 
     @property
     def core_size(self):
@@ -572,22 +576,6 @@ class Set(object):
         size = slot.value.astype(np.int)
         return cls(size[0], name)
 
-    @property
-    def core_part(self):
-        return SetPartition(self, 0, self.core_size)
-
-    @property
-    def owned_part(self):
-        return SetPartition(self, self.core_size, self.size - self.core_size)
-
-    @property
-    def exec_part(self):
-        return SetPartition(self, self.size, self.exec_size - self.size)
-
-    @property
-    def all_part(self):
-        return SetPartition(self, 0, self.exec_size)
-
 
 class ExtrudedSet(Set):
 
@@ -610,6 +598,10 @@ class ExtrudedSet(Set):
             raise SizeTypeError("Number of layers must be > 1 (not %s)" % layers)
         self._layers = layers
         self._extruded = True
+        self.core_part = SetPartition(self, 0, self.core_size)
+        self.owned_part = SetPartition(self, self.core_size, self.size - self.core_size)
+        self.exec_part = SetPartition(self, self.size, self.exec_size - self.size)
+        self.all_part = SetPartition(self, 0, self.exec_size)
 
     def __getattr__(self, name):
         """Returns a :class:`Set` specific attribute."""
@@ -670,6 +662,10 @@ class Subset(ExtrudedSet):
         self._size = (self._indices < superset._size).sum()
         self._ieh_size = (self._indices < superset._ieh_size).sum()
         self._inh_size = len(self._indices)
+        self.core_part = SetPartition(self, 0, self.core_size)
+        self.owned_part = SetPartition(self, self.core_size, self.size - self.core_size)
+        self.exec_part = SetPartition(self, self.size, self.exec_size - self.size)
+        self.all_part = SetPartition(self, 0, self.exec_size)
 
     # Look up any unspecified attributes on the _set.
     def __getattr__(self, name):
