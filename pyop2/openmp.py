@@ -212,8 +212,11 @@ class ParLoop(device.ParLoop, host.ParLoop):
     @collective
     @lineprof
     def _compute(self, part):
-        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct, iterate=self.iteration_region)
-        if not hasattr(self, '_jit_args'):
+        fun = getattr(self, '_fun', None)
+        if not fun:
+            fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct, iterate=self.iteration_region)
+            self._fun = fun
+        if not hasattr(self, '_argtypes'):
             self._jit_args = [None] * 5
             self._argtypes = [None] * 5
             self._argtypes[0] = ctypes.c_int
