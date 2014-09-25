@@ -209,6 +209,17 @@ void %(wrapper_name)s(int boffset,
 
 class ParLoop(device.ParLoop, host.ParLoop):
 
+    def replace_arg_data(self, data, idx):
+        super(ParLoop, self).replace_arg_data(data, idx)
+        if hasattr(self, '_jit_args'):
+            offset = 5
+            if isinstance(self._it_space._iterset, Subset):
+                offset += 1
+            if isinstance(data, Mat):
+                self._jit_args[idx + offset] = data.handle.handle
+            else:
+                self._jit_args[idx + offset] = data._data.ctypes.data
+
     @collective
     @lineprof
     def _compute(self, part):
