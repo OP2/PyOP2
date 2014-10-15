@@ -529,8 +529,8 @@ class Solver(base.Solver, PETSc.KSP):
                 debug("%3d KSP Residual norm %14.12e" % (its, norm))
             self.setMonitor(monitor)
         # Not using super here since the MRO would call base.Solver.solve
-        #with timed_region("PETSc Krylov solver"):
-        with b.vec_ro as bv:
+        with timed_region("PETSc Krylov solver"):
+            with b.vec_ro as bv:
                 with x.vec as xv:
                     PETSc.KSP.solve(self, bv, xv)
         if self.parameters['plot_convergence']:

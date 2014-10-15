@@ -40,16 +40,12 @@ from numpy.ctypeslib import ndpointer
 import os
 from subprocess import Popen, PIPE
 
-from base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS
 from exceptions import *
 from utils import *
 from petsc_base import *
 from logger import warning
 import host
-import ctypes
-from numpy.ctypeslib import ndpointer
 from host import Kernel  # noqa: for inheritance
-from logger import warning
 import device
 import plan as _plan
 from profiling import lineprof
@@ -154,14 +150,11 @@ double %(wrapper_name)s(int boffset,
   %(user_code)s
   %(wrapper_decs)s;
   %(const_inits)s;
-  long s1, s2;
-  s1 = stamp();
+  %(timer_start)s
   #pragma omp parallel shared(boffset, nblocks, nelems, blkmap)
   {
-    %(clo)s# ifdef LIKWID_PERFMON
-    %(clo)s  LIKWID_MARKER_THREADINIT;
-    %(clo)s  LIKWID_MARKER_START("%(region_name)s");
-    %(clo)s#endif
+    %(likwid_thread_init_outer)s
+    %(likwid_start_outer)s
     %(map_decl)s
     int tid = omp_get_thread_num();
     %(interm_globals_decl)s;
@@ -183,14 +176,12 @@ double %(wrapper_name)s(int boffset,
         %(map_bcs_m)s;
         %(buffer_decl)s;
         %(buffer_gather)s
-        %(cli)s# ifdef LIKWID_PERFMON
-        %(cli)s  LIKWID_MARKER_THREADINIT;
-        %(cli)s  LIKWID_MARKER_START("%(region_name)s");
-        %(cli)s#endif
+
+        %(likwid_thread_init_inner)s
+        %(likwid_start_inner)s
         %(kernel_name)s(%(kernel_args)s);
-        %(cli)s# ifdef LIKWID_PERFMON
-        %(cli)s  LIKWID_MARKER_STOP("%(region_name)s");
-        %(cli)s#endif
+        %(likwid_end_inner)s
+
         %(layout_decl)s;
         %(layout_loop)s
             %(layout_assign)s;
@@ -202,12 +193,9 @@ double %(wrapper_name)s(int boffset,
       }
     }
     %(interm_globals_writeback)s;
-    %(clo)s# ifdef LIKWID_PERFMON
-    %(clo)s  LIKWID_MARKER_STOP("%(region_name)s");
-    %(clo)s#endif
+    %(likwid_end_outer)s
   }
-  s2 = stamp();
-  return (s2 - s1) / 1e9;
+  %(timer_end)s
 }
 """
 
@@ -235,7 +223,7 @@ class ParLoop(device.ParLoop, host.ParLoop):
     @collective
     @lineprof
     def _compute(self, part):
-        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct, iterate=self.iteration_region, likwid=self._use_likwid)
+        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct, iterate=self.iteration_region)
         if not hasattr(self, '_jit_args'):
             self._jit_args = [None] * 5
             self._argtypes = [None] * 5
@@ -312,7 +300,7 @@ class ParLoop(device.ParLoop, host.ParLoop):
                 self._jit_args[0] = boffset
                 self._jit_args[1] = nblocks
                 with timed_region("ParLoop kernel"):
-                	time += fun(*self._jit_args)
+                    time += fun(*self._jit_args)
                 boffset += nblocks
         else:
             # Fake types for arguments so that ctypes doesn't complain

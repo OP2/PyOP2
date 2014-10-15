@@ -128,14 +128,30 @@ class sdist(_sdist):
         _sdist.run(self)
 cmdclass['sdist'] = sdist
 
-# Test for availability of likwid
-# FIXME: Better not use a hard-coded path, maybe read $LIKWID_DIR
-#if exists('/usr/local/include/likwid.h'):
-#    ext_modules.append(Extension('pyop2.likwid', likwid_sources,
-#                                 include_dirs=['/usr/local/include'],
-#                                 library_dirs=['/usr/local/lib'],
-#                                 libraries=['likwid'],
-#                                 runtime_library_dirs=['/usr/local/lib']))
+ext_modules = [Extension('pyop2.plan', plan_sources,
+                         include_dirs=numpy_includes),
+               Extension('pyop2.sparsity', sparsity_sources,
+                         include_dirs=['pyop2'] + includes, language="c++",
+                         libraries=["petsc"],
+                         extra_link_args=["-L%s/lib" % d for d in petsc_dirs] +
+                         ["-Wl,-rpath,%s/lib" % d for d in petsc_dirs]),
+               Extension('pyop2.computeind', computeind_sources,
+                         include_dirs=numpy_includes)]
+
+try:
+    likwid_base = env['PYOP2_LIKWID_DIR']
+except KeyError:
+    print "PYOP2_LIKWID_DIR not set"
+    likwid_base = "/usr/local"
+from os.path import exists
+if exists(likwid_base + '/include/likwid.h'):
+    ext_modules.append(Extension('pyop2.likwid', likwid_sources,
+                                 include_dirs=['/usr/local/include'],
+                                 library_dirs=['/usr/local/lib'],
+                                 libraries=['likwid'],
+                                 runtime_library_dirs=['/usr/local/lib']))
+else:
+    print "Likwid installation not found at default location /usr/local/include/likwid.h nor at PYOP2_LIKWID_DIR=", env('PYOP2_LIKWID_DIR'), "/include/likwid.h"
 
 setup(name='PyOP2',
       version=versioneer.get_version(),
@@ -162,12 +178,4 @@ setup(name='PyOP2',
           'pyop2': ['assets/*', 'mat_utils.*', '*.h', '*.pxd', '*.pyx']},
       scripts=glob('scripts/*'),
       cmdclass=cmdclass,
-      ext_modules=[Extension('pyop2.plan', plan_sources,
-                             include_dirs=numpy_includes),
-                   Extension('pyop2.sparsity', sparsity_sources,
-                             include_dirs=['pyop2'] + includes, language="c++",
-                             libraries=["petsc"],
-                             extra_link_args=["-L%s/lib" % d for d in petsc_dirs] +
-                             ["-Wl,-rpath,%s/lib" % d for d in petsc_dirs]),
-                   Extension('pyop2.computeind', computeind_sources,
-                             include_dirs=numpy_includes)])
+      ext_modules=ext_modules)

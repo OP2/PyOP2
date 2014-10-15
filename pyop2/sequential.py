@@ -62,12 +62,8 @@ double %(wrapper_name)s(int start, int end,
   %(const_inits)s;
   %(map_decl)s
   %(vec_decs)s;
-  long s1, s2;
-  double total_time;
-  s1 = stamp();
-  %(clo)s# ifdef LIKWID_PERFMON
-  %(clo)s  LIKWID_MARKER_START("%(region_name)s");
-  %(clo)s#endif
+  %(timer_start)s
+  %(likwid_start_outer)s
   for ( int n = start; n < end; n++ ) {
     int i = %(index_expr)s;
     %(vec_inits)s;
@@ -76,13 +72,11 @@ double %(wrapper_name)s(int start, int end,
     %(map_bcs_m)s;
     %(buffer_decl)s;
     %(buffer_gather)s
-    %(cli)s# ifdef LIKWID_PERFMON
-    %(cli)s  LIKWID_MARKER_START("%(region_name)s");
-    %(cli)s#endif
+
+    %(likwid_start_inner)s
     %(kernel_name)s(%(kernel_args)s);
-    %(cli)s# ifdef LIKWID_PERFMON
-    %(cli)s  LIKWID_MARKER_STOP("%(region_name)s");
-    %(cli)s#endif
+    %(likwid_end_inner)s
+
     %(layout_decl)s;
     %(layout_loop)s
         %(layout_assign)s;
@@ -92,13 +86,11 @@ double %(wrapper_name)s(int start, int end,
     %(apply_offset)s;
     %(extr_loop_close)s
   }
-  %(clo)s# ifdef LIKWID_PERFMON
-  %(clo)s  LIKWID_MARKER_STOP("%(region_name)s");
-  %(clo)s#endif
-  s2 = stamp();
-  return (s2 - s1) / 1e9;
+  %(likwid_end_outer)s
+  %(timer_end)s
 }
 """
+
 
 class ParLoop(host.ParLoop):
 
@@ -108,7 +100,7 @@ class ParLoop(host.ParLoop):
     @collective
     @lineprof
     def _compute(self, part):
-        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct, iterate=self.iteration_region, likwid=self._use_likwid)
+        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct, iterate=self.iteration_region)
         if not hasattr(self, '_jit_args'):
             self._argtypes = [ctypes.c_int, ctypes.c_int]
             self._jit_args = [0, 0]

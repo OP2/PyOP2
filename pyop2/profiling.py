@@ -37,7 +37,9 @@ import numpy as np
 from time import time
 from decorator import decorator
 from contextlib import contextmanager
-from decorator import decorator
+from configuration import configuration
+
+use_python_profiling = not configuration["hpc_profiling"] and configuration["profiling"]
 
 import __builtin__
 
@@ -269,17 +271,17 @@ class Timer(object):
 
     @classmethod
     def loopstyle(cls, value):
-        """Only print the info not the header."""
+        """Only print the profiling information without the header description of each column."""
         cls._loopstyle = value
 
     @classmethod
     def output_file(cls, value):
-        """Output file name set up."""
+        """Set the output file name."""
         cls._output_file = value
 
     @classmethod
     def extra_param(cls, value):
-        """Extra param to print factor for compute or traffic."""
+        """Used for printing extra information about the run."""
         cls._extra_param = value
 
     @classmethod
@@ -298,13 +300,11 @@ def profiling(t, name):
 
 
 def add_data_volume(t, name, vol):
-    timer = Timer("%s-%s" % (t, name))
-    timer.data_volume(vol)
+    Timer("%s-%s" % (t, name)).data_volume(vol)
 
 
 def add_c_time(t, name, time):
-    timer = Timer("%s-%s" % (t, name))
-    timer.c_time(time)
+    Timer("%s-%s" % (t, name)).c_time(time)
 
 
 class timed_function(Timer):
@@ -315,11 +315,13 @@ class timed_function(Timer):
         def wrapper(f, *args, **kwargs):
             if not self._name:
                 self._name = f.func_name
-            self.start()
+            if use_python_profiling:
+                self.start()
             try:
                 return f(*args, **kwargs)
             finally:
-                self.stop()
+                if use_python_profiling:
+                    self.stop()
         return decorator(wrapper, f)
 
 
@@ -336,11 +338,13 @@ def toc(name):
 @contextmanager
 def timed_region(name):
     """A context manager for timing a given code region."""
-    tic(name)
+    if use_python_profiling:
+        tic(name)
     try:
         yield
     finally:
-        toc(name)
+        if use_python_profiling:
+            toc(name)
 
 
 def summary(filename=None):
@@ -360,20 +364,26 @@ def reset_timers():
     """Clear all timer information previously recorded."""
     Timer.reset_all()
 
+
 def reset():
     Timer.reset_all()
+
 
 def loopstyle(value):
     Timer.loopstyle(value)
 
+
 def output_file(value):
     Timer.output_file(value)
+
 
 def extra_param(value):
     Timer.extra_param(value)
 
+
 def only_kernel(value):
     Timer.only_kernel(value)
+
 
 def timing(name, reset=False, total=True):
     """Return timing (average) for given task, optionally clearing timing."""

@@ -3,4 +3,4 @@ from pyop2.compilation import clear_cache
 
 
 if __name__ == '__main__':
-    clear_cache(prompt=False)
+    clear_cache(prompt=True)
