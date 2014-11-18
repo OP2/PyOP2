@@ -4069,7 +4069,11 @@ class ParLoop(LazyComputation):
                         if m.iterset != _iterset and m.iterset not in _iterset:
                             raise MapValueError(
                                 "Iterset of arg %s map %s doesn't match ParLoop iterset." % (i, j))
-                    elif m.iterset != _iterset and m.iterset not in _iterset:
+                    # Allow iterating over the base set and accessing data
+                    # through an extruded map.  No offsets are applied
+                    # (effectively kernel can see entire column stack)
+                    elif m.iterset != _iterset and m.iterset not in _iterset and \
+                         _iterset not in m.iterset:
                         raise MapValueError(
                             "Iterset of arg %s map %s doesn't match ParLoop iterset." % (i, j))
                 if arg._uses_itspace:
