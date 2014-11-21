@@ -223,7 +223,7 @@ class LinuxIntelCompiler(Compiler):
 
         cppargs = ['-std=c99', '-fPIC', '-no-multibyte-chars'] + opt_flags + cppargs
         ldargs = ['-shared'] + ldargs
-        super(LinuxIntelCompiler, self).__init__("mpicc", cppargs=cppargs, ldargs=ldargs)
+        super(LinuxIntelCompiler, self).__init__(configuration['linux_compiler'], cppargs=cppargs, ldargs=ldargs)
 
 
 @collective
