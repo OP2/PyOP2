@@ -292,7 +292,6 @@ class Mat(device.Mat, petsc_base.Mat, DeviceDataMixin):
 
     @property
     def values(self):
-        base._trace.evaluate(set([self]), set())
         self._from_device()
         return self.handle[:, :]
 
@@ -323,7 +322,6 @@ class Global(device.Global, DeviceDataMixin):
 
     @property
     def data(self):
-        base._trace.evaluate(set([self]), set())
         if self.state is DeviceDataMixin.DEVICE:
             self._array.get(_queue, ary=self._data)
         if self.state is not DeviceDataMixin.DEVICE_UNALLOCATED:
@@ -332,7 +330,6 @@ class Global(device.Global, DeviceDataMixin):
 
     @data.setter
     def data(self, value):
-        base._trace.evaluate(set(), set([self]))
         self._data = verify_reshape(value, self.dtype, self.dim)
         if self.state is not DeviceDataMixin.DEVICE_UNALLOCATED:
             self.state = DeviceDataMixin.HOST
@@ -775,7 +772,6 @@ class ParLoop(device.ParLoop):
         for arg in self.args:
             if arg.access is not READ:
                 arg.data.state = DeviceDataMixin.DEVICE
-        self.maybe_set_dat_dirty()
 
         for a in self._all_global_reduction_args:
             a.data._post_kernel_reduction_task(conf['work_group_count'], a.access)

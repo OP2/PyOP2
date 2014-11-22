@@ -89,7 +89,6 @@ class Dat(base.Dat):
 
         acc = (lambda d: d.data_ro) if readonly else (lambda d: d.data)
         # Getting the Vec needs to ensure we've done all current computation.
-        self._force_evaluation()
         if not hasattr(self, '_vec'):
             size = (self.dataset.size * self.cdim, None)
             self._vec = PETSc.Vec().createWithArray(acc(self), size=size)
@@ -124,7 +123,6 @@ class Dat(base.Dat):
     @collective
     def dump(self, filename):
         """Dump the vector to file ``filename`` in PETSc binary format."""
-        base._trace.evaluate(set([self]), set())
         vwr = PETSc.Viewer().createBinary(filename, PETSc.Viewer.Mode.WRITE)
         self.vec.view(vwr)
 
@@ -323,7 +321,6 @@ class Mat(base.Mat, CopyOnWrite):
     @collective
     def dump(self, filename):
         """Dump the matrix to file ``filename`` in PETSc binary format."""
-        base._trace.evaluate(set([self]), set())
         vwr = PETSc.Viewer().createBinary(filename, PETSc.Viewer.Mode.WRITE)
         self.handle.view(vwr)
 
@@ -331,7 +328,6 @@ class Mat(base.Mat, CopyOnWrite):
     @collective
     def zero(self):
         """Zero the matrix."""
-        base._trace.evaluate(set(), set([self]))
         self.handle.zeroEntries()
 
     @modifies
@@ -342,7 +338,6 @@ class Mat(base.Mat, CopyOnWrite):
         strong boundary conditions.
 
         :param rows: a :class:`Subset` or an iterable"""
-        base._trace.evaluate(set([self]), set([self]))
         rows = rows.indices if isinstance(rows, Subset) else rows
         self.handle.zeroRowsLocal(rows, diag_val)
 
@@ -391,7 +386,6 @@ class Mat(base.Mat, CopyOnWrite):
         The diagonal entries corresponding to the complement of rows
         are incremented by zero.
         """
-        base._trace.evaluate(set([self]), set([self]))
         vec = self.handle.createVecLeft()
         vec.setOption(vec.Option.IGNORE_OFF_PROC_ENTRIES, True)
         rows = np.asarray(rows)
@@ -422,14 +416,12 @@ class Mat(base.Mat, CopyOnWrite):
         """Array of non-zero values."""
         if not hasattr(self, '_array'):
             self._init()
-        base._trace.evaluate(set([self]), set())
         self._assemble()
         return self._array
 
     @property
     @modifies
     def values(self):
-        base._trace.evaluate(set([self]), set())
         self._assemble()
         return self.handle[:, :]
 

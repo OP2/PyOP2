@@ -34,7 +34,6 @@
 """OP2 sequential backend."""
 
 import ctypes
-from numpy.ctypeslib import ndpointer
 
 from base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS
 from exceptions import *
@@ -89,16 +88,30 @@ class ParLoop(host.ParLoop):
     def __init__(self, *args, **kwargs):
         host.ParLoop.__init__(self, *args, **kwargs)
 
+    def replace_arg_data(self, data, idx):
+        super(ParLoop, self).replace_arg_data(data, idx)
+        if hasattr(self, '_jit_args'):
+            offset = 2
+            if isinstance(self._it_space._iterset, Subset):
+                offset += 1
+            if isinstance(data, Mat):
+                self._jit_args[idx + offset] = data.handle.handle
+            else:
+                self._jit_args[idx + offset] = data._data.ctypes.data
+
     @collective
     @lineprof
     def _compute(self, part):
-        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct, iterate=self.iteration_region)
-        if not hasattr(self, '_jit_args'):
+        fun = getattr(self, '_fun', None)
+        if not fun:
+            fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct, iterate=self.iteration_region)
+            self._fun = fun
+        if not hasattr(self, '_argtypes'):
             self._argtypes = [ctypes.c_int, ctypes.c_int]
             self._jit_args = [0, 0]
             if isinstance(self._it_space._iterset, Subset):
                 self._argtypes.append(self._it_space._iterset._argtype)
-                self._jit_args.append(self._it_space._iterset._indices)
+                self._jit_args.append(self._it_space._iterset._indices.ctypes.data)
             for arg in self.args:
                 if arg._is_mat:
                     self._argtypes.append(arg.data._argtype)
@@ -108,22 +121,22 @@ class ParLoop(host.ParLoop):
                         # Cannot access a property of the Dat or we will force
                         # evaluation of the trace
                         self._argtypes.append(d._argtype)
-                        self._jit_args.append(d._data)
+                        self._jit_args.append(d._data.ctypes.data)
 
                 if arg._is_indirect or arg._is_mat:
                     maps = as_tuple(arg.map, Map)
                     for map in maps:
                         for m in map:
                             self._argtypes.append(m._argtype)
-                            self._jit_args.append(m.values_with_halo)
+                            self._jit_args.append(m.values_with_halo.ctypes.data)
 
             for c in Const._definitions():
                 self._argtypes.append(c._argtype)
-                self._jit_args.append(c.data)
+                self._jit_args.append(c.data.ctypes.data)
 
             for a in self.offset_args:
-                self._argtypes.append(ndpointer(a.dtype, shape=a.shape))
-                self._jit_args.append(a)
+                self._argtypes.append(ctypes.c_voidp)
+                self._jit_args.append(a.ctypes.data)
 
             if self.iteration_region in [ON_BOTTOM]:
                 self._argtypes.append(ctypes.c_int)

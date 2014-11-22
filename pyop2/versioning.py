@@ -44,19 +44,21 @@ not increase the version number.
 
 Data carrying objects are also equipped with a :meth:`duplicate`
 method. From a user perspective, this is a deep copy of the original
-object. In the case of :class:`~pyop2.base.Dat` objects, this is implemented
-as a shallow copy along with a copy on write mechanism which causes
-the actual copy to occur if either the original or the copy is
-modified.  The delayed copy is implemented by immediately creating a
-copy :func:`~pyop2.base.par_loop` and, if lazy evaluation is enabled,
-enqueing it. This ensures that the dependency trace will cause all
-operations on which the copy depends to occur before the
-copy. Conversely, the dependency of the copy :class:`~pyop2.base.Dat` on the
-copying loop is artificially removed. This prevents the execution of
-the copy being triggered when the copy :class:`~pyop2.base.Dat` is
-read. Instead, writes to the original and copy :class:`~pyop2.base.Dat` are
-intercepted and execution of the copy :func:`~pyop2.base.par_loop` is forced
-at that point."""
+object. In the case of :class:`~pyop2.base.Dat` objects, this is
+implemented as a shallow copy along with a copy on write mechanism
+which causes the actual copy to occur if either the original or the
+copy is modified.  The delayed copy is implemented by immediately
+creating a copy :func:`~pyop2.base.par_loop`. This ensures that the
+dependency trace will cause all operations on which the copy depends
+to occur before the copy. Conversely, the dependency of the copy
+:class:`~pyop2.base.Dat` on the copying loop is artificially
+removed. This prevents the execution of the copy being triggered when
+the copy :class:`~pyop2.base.Dat` is read. Instead, writes to the
+original and copy :class:`~pyop2.base.Dat` are intercepted and
+execution of the copy :func:`~pyop2.base.par_loop` is forced at that
+point.
+
+"""
 
 from decorator import decorator
 from copy import copy as shallow_copy

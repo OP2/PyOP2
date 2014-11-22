@@ -119,8 +119,9 @@ class TestVersioning:
         c.remove_from_namespace()
 
     def test_dat_modified(self, backend, x):
+        version = x._version
         x += 1
-        assert x._version == 2
+        assert x._version > version
 
     def test_zero(self, backend, mat):
         mat.zero()
@@ -128,9 +129,10 @@ class TestVersioning:
 
     def test_version_after_zero(self, backend, mat):
         mat.zero_rows([1], 1.0)  # 2
+        version = mat._version
         mat.zero()  # 0
         mat.zero_rows([2], 1.0)  # 3
-        assert mat._version == 3
+        assert mat._version > version
 
     def test_dat_copy_increases_version(self, backend, x):
         old_version = x._version
