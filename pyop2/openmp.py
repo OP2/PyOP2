@@ -137,7 +137,7 @@ class JITModule(host.JITModule):
     _system_headers = ['#include <omp.h>']
 
     _wrapper = """
-void %(wrapper_name)s(int boffset,
+double %(wrapper_name)s(int boffset,
                       int nblocks,
                       int *blkmap,
                       int *offset,
@@ -150,8 +150,11 @@ void %(wrapper_name)s(int boffset,
   %(user_code)s
   %(wrapper_decs)s;
   %(const_inits)s;
+  %(timer_start)s
   #pragma omp parallel shared(boffset, nblocks, nelems, blkmap)
   {
+    %(likwid_thread_init_outer)s
+    %(likwid_start_outer)s
     %(map_decl)s
     int tid = omp_get_thread_num();
     %(interm_globals_decl)s;
@@ -173,7 +176,10 @@ void %(wrapper_name)s(int boffset,
         %(map_bcs_m)s;
         %(buffer_decl)s;
         %(buffer_gather)s
+        %(likwid_thread_init_inner)s
+        %(likwid_start_inner)s
         %(kernel_name)s(%(kernel_args)s);
+        %(likwid_end_inner)s
         %(layout_decl)s;
         %(layout_loop)s
             %(layout_assign)s;
@@ -185,7 +191,9 @@ void %(wrapper_name)s(int boffset,
       }
     }
     %(interm_globals_writeback)s;
+    %(likwid_end_outer)s
   }
+  %(timer_end)s
 }
 """
 
@@ -270,6 +278,7 @@ class ParLoop(device.ParLoop, host.ParLoop):
                 self._jit_args.append(0)
                 self._jit_args.append(self._it_space.layers - 1)
 
+        time = 0
         if part.size > 0:
             # TODO: compute partition size
             plan = self._get_plan(part, 1024)
@@ -281,7 +290,7 @@ class ParLoop(device.ParLoop, host.ParLoop):
             self._jit_args[4] = plan.nelems
             # Must call compile on all processes even if partition size is
             # zero since compilation is collective.
-            fun = fun.compile(argtypes=self._argtypes, restype=None)
+            fun = fun.compile(argtypes=self._argtypes, restype=ctypes.c_double)
 
             boffset = 0
             for c in range(plan.ncolors):
@@ -289,7 +298,7 @@ class ParLoop(device.ParLoop, host.ParLoop):
                 self._jit_args[0] = boffset
                 self._jit_args[1] = nblocks
                 with timed_region("ParLoop kernel"):
-                    fun(*self._jit_args)
+                    time += fun(*self._jit_args)
                 boffset += nblocks
         else:
             # Fake types for arguments so that ctypes doesn't complain
@@ -299,7 +308,8 @@ class ParLoop(device.ParLoop, host.ParLoop):
             # No need to actually call function since partition size
             # is zero, however we must compile it because compilation
             # is collective
-            fun.compile(argtypes=self._argtypes, restype=None)
+            fun.compile(argtypes=self._argtypes, restype=ctypes.c_double)
+        return time
 
     def _get_plan(self, part, part_size):
         if self._is_indirect:

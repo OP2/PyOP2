@@ -49,9 +49,10 @@ from utils import as_tuple
 
 
 class JITModule(host.JITModule):
+    _system_headers = []
 
     _wrapper = """
-void %(wrapper_name)s(int start, int end,
+double %(wrapper_name)s(int start, int end,
                       %(ssinds_arg)s
                       %(wrapper_args)s
                       %(const_args)s
@@ -62,6 +63,8 @@ void %(wrapper_name)s(int start, int end,
   %(const_inits)s;
   %(map_decl)s
   %(vec_decs)s;
+  %(timer_start)s
+  %(likwid_start_outer)s
   for ( int n = start; n < end; n++ ) {
     int i = %(index_expr)s;
     %(vec_inits)s;
@@ -70,7 +73,11 @@ void %(wrapper_name)s(int start, int end,
     %(map_bcs_m)s;
     %(buffer_decl)s;
     %(buffer_gather)s
+
+    %(likwid_start_inner)s
     %(kernel_name)s(%(kernel_args)s);
+    %(likwid_end_inner)s
+
     %(layout_decl)s;
     %(layout_loop)s
         %(layout_assign)s;
@@ -80,6 +87,8 @@ void %(wrapper_name)s(int start, int end,
     %(apply_offset)s;
     %(extr_loop_close)s
   }
+  %(likwid_end_outer)s
+  %(timer_end)s
 }
 """
 
@@ -150,8 +159,10 @@ class ParLoop(host.ParLoop):
         self._jit_args[1] = part.offset + part.size
         # Must call fun on all processes since this may trigger
         # compilation.
+        time = 0
         with timed_region("ParLoop kernel"):
-            fun(*self._jit_args, argtypes=self._argtypes, restype=None)
+            time = fun(*self._jit_args, argtypes=self._argtypes, restype=ctypes.c_double)
+        return time
 
 
 def _setup():

@@ -78,6 +78,7 @@ try:
     plan_sources = ['pyop2/plan.pyx']
     sparsity_sources = ['pyop2/sparsity.pyx']
     computeind_sources = ['pyop2/computeind.pyx']
+    likwid_sources = ['pyop2/likwid.pyx']
 
 # Else we require the Cython-compiled .c file to be present and use that
 # Note: file is not in revision control but needs to be included in distributions
@@ -85,7 +86,8 @@ except ImportError:
     plan_sources = ['pyop2/plan.c']
     sparsity_sources = ['pyop2/sparsity.cpp']
     computeind_sources = ['pyop2/computeind.c']
-    sources = plan_sources + sparsity_sources + computeind_sources
+    likwid_sources = ['pyop2/likwid.c']
+    sources = plan_sources + sparsity_sources + computeind_sources + likwid_sources
     from os.path import exists
     if not all([exists(f) for f in sources]):
         raise ImportError("Installing from source requires Cython")
@@ -125,8 +127,34 @@ class sdist(_sdist):
         cythonize(plan_sources)
         cythonize(sparsity_sources, language="c++", include_path=includes)
         cythonize(computeind_sources)
+        cythonize(likwid_sources)
         _sdist.run(self)
 cmdclass['sdist'] = sdist
+
+ext_modules = [Extension('pyop2.plan', plan_sources,
+                         include_dirs=numpy_includes),
+               Extension('pyop2.sparsity', sparsity_sources,
+                         include_dirs=['pyop2'] + includes, language="c++",
+                         libraries=["petsc"],
+                         extra_link_args=["-L%s/lib" % d for d in petsc_dirs] +
+                         ["-Wl,-rpath,%s/lib" % d for d in petsc_dirs]),
+               Extension('pyop2.computeind', computeind_sources,
+                         include_dirs=numpy_includes)]
+
+try:
+    likwid_base = env['PYOP2_LIKWID_DIR']
+except KeyError:
+    print "PYOP2_LIKWID_DIR not set, using default /usr/local"
+    likwid_base = "/usr/local"
+from os.path import exists
+if exists(likwid_base + '/include/likwid.h'):
+    ext_modules.append(Extension('pyop2.likwid', likwid_sources,
+                                 include_dirs=['/usr/local/include'],
+                                 library_dirs=['/usr/local/lib'],
+                                 libraries=['likwid'],
+                                 runtime_library_dirs=['/usr/local/lib']))
+else:
+    print "Likwid installation not found at default location /usr/local/include/likwid.h nor at PYOP2_LIKWID_DIR=", env('PYOP2_LIKWID_DIR'), "/include/likwid.h"
 
 setup(name='PyOP2',
       version=versioneer.get_version(),
@@ -154,12 +182,4 @@ setup(name='PyOP2',
           'pyop2': ['assets/*', 'mat_utils.*', '*.h', '*.pxd', '*.pyx']},
       scripts=glob('scripts/*'),
       cmdclass=cmdclass,
-      ext_modules=[Extension('pyop2.plan', plan_sources,
-                             include_dirs=numpy_includes),
-                   Extension('pyop2.sparsity', sparsity_sources,
-                             include_dirs=['pyop2'] + includes, language="c++",
-                             libraries=["petsc"],
-                             extra_link_args=["-L%s/lib" % d for d in petsc_dirs] +
-                             ["-Wl,-rpath,%s/lib" % d for d in petsc_dirs]),
-                   Extension('pyop2.computeind', computeind_sources,
-                             include_dirs=numpy_includes)])
+      ext_modules=ext_modules)

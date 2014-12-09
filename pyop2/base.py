@@ -53,6 +53,7 @@ from mpi import MPI, _MPI, _check_comm, collective
 from profiling import profile, timed_region, timed_function
 from sparsity import build_sparsity
 from version import __version__ as version
+from hpc_profiling import hpc_profiling, add_data_volume, add_c_time
 
 from coffee.base import Node
 from coffee import base as ast
@@ -3618,6 +3619,10 @@ class Kernel(Cached):
             return ast.gencode()
         return ast
 
+    @property
+    def _md5(self):
+        return md5(self.code + self.name).hexdigest()[:6]
+
     def __init__(self, code, name, opts={}, include_dirs=[], headers=[],
                  user_code=""):
         # Protect against re-initialization when retrieved from cache
@@ -3692,6 +3697,12 @@ class JITModule(Cached):
         iterate = kwargs.get("iterate", None)
         if iterate is not None:
             key += ((iterate,))
+
+        if configuration['likwid'] is not None:
+            key += ((configuration['likwid'],))
+
+        if configuration['hpc_profiling'] is not None:
+            key += ((configuration['hpc_profiling'],))
 
         # The currently defined Consts need to be part of the cache key, since
         # these need to be uploaded to the device before launching the kernel
@@ -3802,6 +3813,8 @@ class ParLoop(LazyComputation):
         self._iteration_region = kwargs.get("iterate", None)
         # Are we only computing over owned set entities?
         self._only_local = isinstance(iterset, LocalSet)
+        self._is_lhs = False
+        self._is_rhs = False
 
         for i, arg in enumerate(self._actual_args):
             arg.position = i
@@ -3825,9 +3838,30 @@ class ParLoop(LazyComputation):
                     raise RuntimeError("Iteration over a LocalSet does not make sense for RW args")
 
         self._it_space = self.build_itspace(iterset)
+        # Data volume computation
+        vol = 0
+        unique_args = []
+        for arg1 in args:
+            freq = 0
+            for arg2 in unique_args:
+                if arg1 == arg2:
+                    freq += 1
+            if freq == 0:
+                unique_args.append(arg1)
+        for arg in unique_args:
+            if arg._is_dat:
+                vol += sum(s.size * s.cdim for s in arg.data.dataset) * arg.dtype.itemsize
+                self._is_rhs = True
+            if arg._is_mat:
+                self._is_lhs = True
+                vol += (arg.data.sparsity.onz + arg.data.sparsity.nz) * arg.dtype.itemsize
+        self._data_volume = vol
 
     def _run(self):
-        return self.compute()
+        import pyparloop
+        if isinstance(self._kernel, pyparloop.Kernel) or not configuration["hpc_profiling"]:
+            return self.compute()
+        return self.hpc_profiled_compute()
 
     @collective
     @timed_function('ParLoop compute')
@@ -3847,6 +3881,30 @@ class ParLoop(LazyComputation):
             self._compute(self.it_space.iterset.exec_part)
         self.reduction_end()
         self.maybe_set_halo_update_needed()
+
+    @collective
+    @timed_function('ParLoop compute')
+    @profile
+    def hpc_profiled_compute(self):
+        """Executes the kernel over all members of the iteration space."""
+        region_name = configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name
+        with hpc_profiling('base', '%s-%s' % (region_name, self.kernel._md5)):
+            self.halo_exchange_begin()
+            self.maybe_set_dat_dirty()
+            t = self._compute(self.it_space.iterset.core_part)
+            self.halo_exchange_end()
+            t += self._compute(self.it_space.iterset.owned_part)
+            self.reduction_begin()
+            if self._only_local:
+                self.reverse_halo_exchange_begin()
+            if not self._only_local and self.needs_exec_halo:
+                t += self._compute(self.it_space.iterset.exec_part)
+            self.reduction_end()
+            if self._only_local:
+                self.reverse_halo_exchange_end()
+            self.maybe_set_halo_update_needed()
+        add_data_volume('base', '%s-%s' % (region_name, self.kernel._md5), self._data_volume)
+        add_c_time('base', '%s-%s' % (region_name, self.kernel._md5), t)
 
     @collective
     def _compute(self, part):
@@ -4042,6 +4100,7 @@ class ParLoop(LazyComputation):
         a certain part of an extruded mesh, for example on top cells, bottom cells or
         interior facets."""
         return self._iteration_region
+
 
 DEFAULT_SOLVER_PARAMETERS = {'ksp_type': 'cg',
                              'pc_type': 'jacobi',

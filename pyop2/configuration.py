@@ -65,6 +65,20 @@ class Configuration(object):
     """
     # name, env variable, type, default, write once
     DEFAULTS = {
+        # Enable profiling of the wrapper functions.
+        "hpc_profiling": ("PYOP2_HPC_PROFILING", bool, False),
+        "likwid": ("PYOP2_LIKWID", bool, False),
+        # add likwid instrumentation for the kernel
+        # can be enbaled or disabled at any point in the code
+        "likwid_inner": ("PYOP2_LIKWID_INNER", bool, False),
+        # add likwid instrumentation for the wrapper (includes kernel too)
+        # can be enbaled or disabled at any point in the code
+        "likwid_outer": ("PYOP2_LIKWID_OUTER", bool, False),
+        # Give a suitable name to the region we want to measure
+        "region_name": ("PYOP2_REGION_NAME", str, "default"),
+        # Measure the time around the kernel only
+        "only_kernel": ("PYOP2_ONLY_KERNEL", bool, False),
+
         "backend": ("PYOP2_BACKEND", str, "sequential"),
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gnu"),
         "simd_isa": ("PYOP2_SIMD_ISA", str, "sse"),
