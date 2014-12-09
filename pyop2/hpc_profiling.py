@@ -48,6 +48,7 @@ class Timer(object):
     """
 
     _timers = {}
+    _output_file = None
 
     def __new__(cls, name=None, timer=time):
         n = name or 'timer' + str(len(cls._timers))
@@ -263,26 +264,6 @@ def add_data_volume(t, name, vol):
 
 def add_c_time(t, name, time):
     Timer("%s-%s" % (t, name)).c_time(time)
-
-
-def tic(name):
-    """Start a timer with the given name."""
-    Timer(name).start()
-
-
-def toc(name):
-    """Stop a timer with the given name."""
-    return Timer(name).stop()
-
-
-@contextmanager
-def timed_region(name):
-    """A context manager for timing a given code region."""
-    tic(name)
-    try:
-        yield
-    finally:
-        toc(name)
 
 
 def summary(filename=None):

@@ -3813,8 +3813,6 @@ class ParLoop(LazyComputation):
         self._iteration_region = kwargs.get("iterate", None)
         # Are we only computing over owned set entities?
         self._only_local = isinstance(iterset, LocalSet)
-        self._is_lhs = False
-        self._is_rhs = False
 
         for i, arg in enumerate(self._actual_args):
             arg.position = i
@@ -3851,15 +3849,15 @@ class ParLoop(LazyComputation):
         for arg in unique_args:
             if arg._is_dat:
                 vol += sum(s.size * s.cdim for s in arg.data.dataset) * arg.dtype.itemsize
-                self._is_rhs = True
             if arg._is_mat:
-                self._is_lhs = True
                 vol += (arg.data.sparsity.onz + arg.data.sparsity.nz) * arg.dtype.itemsize
         self._data_volume = vol
 
     def _run(self):
         import pyparloop
         if isinstance(self._kernel, pyparloop.Kernel) or not configuration["hpc_profiling"]:
+            return self.compute()
+        if self.is_direct and configuration["only_indirect_loops"]:
             return self.compute()
         return self.hpc_profiled_compute()
 

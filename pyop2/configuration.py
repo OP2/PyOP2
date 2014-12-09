@@ -38,6 +38,7 @@ import os
 from tempfile import gettempdir
 
 from exceptions import ConfigurationError
+from contextlib import contextmanager
 
 
 class Configuration(object):
@@ -67,6 +68,8 @@ class Configuration(object):
     DEFAULTS = {
         # Enable profiling of the wrapper functions.
         "hpc_profiling": ("PYOP2_HPC_PROFILING", bool, False),
+        # Turn on likwid. TODO: make it true when
+        # either inner or outer likwid flags are true
         "likwid": ("PYOP2_LIKWID", bool, False),
         # add likwid instrumentation for the kernel
         # can be enbaled or disabled at any point in the code
@@ -78,6 +81,8 @@ class Configuration(object):
         "region_name": ("PYOP2_REGION_NAME", str, "default"),
         # Measure the time around the kernel only
         "only_kernel": ("PYOP2_ONLY_KERNEL", bool, False),
+        # For a given code region only report the indirect loops
+        "only_indirect_loops": ("PYOP2_ONLY_INDIRECT_LOOPS", bool, False),
 
         "backend": ("PYOP2_BACKEND", str, "sequential"),
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gnu"),
@@ -155,3 +160,10 @@ class Configuration(object):
         self._conf[key] = value
 
 configuration = Configuration()
+
+@contextmanager
+def configure(flag, value):
+    old_value = configuration[flag]
+    configuration[flag] = value
+    yield
+    configuration[flag] = old_value
