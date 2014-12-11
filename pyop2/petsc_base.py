@@ -244,7 +244,7 @@ class Mat(base.Mat, CopyOnWrite):
         mat = PETSc.Mat()
         row_lg = PETSc.LGMap()
         col_lg = PETSc.LGMap()
-        rdim, cdim = self.sparsity.dims
+        rdim, cdim = self.sparsity.dims[0][0]
         if MPI.comm.size == 1:
             # The PETSc local to global mapping is the identity in the sequential case
             row_lg.create(
@@ -293,7 +293,7 @@ class Mat(base.Mat, CopyOnWrite):
         mat.setOption(mat.Option.UNUSED_NONZERO_LOCATION_ERR, True)
 
         # Put zeros in all the places we might eventually put a value.
-        sparsity.fill_with_zeros(mat, self.sparsity.dims, self.sparsity.maps)
+        sparsity.fill_with_zeros(mat, self.sparsity.dims[0][0], self.sparsity.maps)
 
         # Now we've filled up our matrix, so the sparsity is
         # "complete", we can ignore subsequent zero entries.
@@ -512,7 +512,7 @@ class Solver(base.Solver, PETSc.KSP):
                     offset = MPI.comm.exscan(nlocal_rows)
                 for i in range(rows):
                     if i < cols:
-                        nrows = A[i, i].sparsity.nrows * A[i, i].dims[0]
+                        nrows = A[i, i].sparsity.nrows * A.dims[i][i][0]
                         ises.append((str(i), PETSc.IS().createStride(nrows, first=offset, step=1)))
                         offset += nrows
                 self.getPC().setFieldSplitIS(*ises)

@@ -59,12 +59,12 @@ cdef extern from "petsc.h":
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-cdef build_sparsity_pattern(int rmult, int cmult, list maps, bool have_odiag):
+cdef build_sparsity_pattern(object sparsity, bool block, bool have_odiag):
     """Build a sparsity pattern defined by a list of pairs of maps
 
-    :arg rmult: the dataset dimension of the rows of the sparsity (the row block size).
-    :arg cmult: the dataset dimension of the columns of the sparsity (column block size).
-    :arg maps: a list of pairs of row, column maps defining the sparsity pattern.
+    :arg sparsity: the Sparsity object to build a pattern for
+    :arg block: Build a block sparsity?
+    :arg have_odiag: Running in parallel?
 
     The sparsity pattern is built from the outer products of the pairs
     of maps.  This code works for both the serial and (MPI-) parallel
@@ -74,21 +74,34 @@ cdef build_sparsity_pattern(int rmult, int cmult, list maps, bool have_odiag):
         int layer, layer_start, layer_end
         int local_nrows, local_ncols, set_size
         int row, col, tmp_row, tmp_col, reps, rrep, crep
+        int row_count, col_count
+        int rmult, cmult
         int rarity, carity
+        bool needs_mult
         vector[vecset[int]] s_diag, s_odiag
         vecset[int].const_iterator it
-        int *rmap_vals
-        int *cmap_vals
-        int *roffset
-        int *coffset
+        int[:, ::1] rmap_vals, cmap_valse
+        int[::1] roffset, coffset
 
     # Number of rows and columns "local" to this process
     # In parallel, the matrix is distributed row-wise, so all
     # processes always see all columns, but we distinguish between
     # local (process-diagonal) and remote (process-off-diagonal)
     # columns.
-    local_nrows = rmult * maps[0][0].toset.size
-    local_ncols = cmult * maps[0][1].toset.size
+    can_block = (len(sparsity.dsets[0]) == 1 and len(sparsity.dsets[1]) == 1)
+    if can_block and block:
+        rmult = cmult = 1
+        local_nrows = sparsity.dsets[0].size
+        local_ncols = sparsity.dsets[1].size
+        needs_mult = False
+    else:
+        needs_mult = True
+        local_nrows = 0
+        for dset in sparsity.dsets[0]:
+            local_nrows += dset.cdim * dset.size
+        local_ncols = 0
+        for dset in sparsity.dsets[1]:
+            local_ncols += dset.cdim * dset.size
 
     if local_nrows == 0:
         # We don't own any rows, return something appropriate.
@@ -99,89 +112,102 @@ cdef build_sparsity_pattern(int rmult, int cmult, list maps, bool have_odiag):
     if have_odiag:
         s_odiag = vector[vecset[int]](local_nrows)
 
+    maps = sparsity.maps
+
     extruded = maps[0][0].iterset._extruded
 
-    for rmap, cmap in maps:
-        set_size = rmap.iterset.exec_size
-        rarity = rmap.arity
-        carity = cmap.arity
-        rmap_vals = <int *>np.PyArray_DATA(rmap.values_with_halo)
-        cmap_vals = <int *>np.PyArray_DATA(cmap.values_with_halo)
-        if not s_diag[0].capacity():
-            # Preallocate set entries heuristically based on arity
-            for i in range(local_nrows):
-                s_diag[i].reserve(6*rarity)
-                # Always reserve space for diagonal entry
-                if i < local_ncols:
-                    s_diag[i].insert(i)
-            if have_odiag:
-                for i in range(local_nrows):
-                    s_odiag[i].reserve(6*rarity)
-        if not extruded:
-            # Non extruded case, reasonably straightfoward
-            for e in range(set_size):
-                for i in range(rarity):
-                    tmp_row = rmult * rmap_vals[e * rarity + i]
-                    # Not a process-local row, carry on.
-                    if tmp_row >= local_nrows:
-                        continue
-                    for r in range(rmult):
-                        row = tmp_row + r
-                        for d in range(carity):
-                            for c in range(cmult):
-                                col = cmult * cmap_vals[e * carity + d] + c
-                                # Process-local column?
-                                if col < local_ncols:
-                                    s_diag[row].insert(col)
-                                else:
-                                    assert have_odiag, "Should never happen"
-                                    s_odiag[row].insert(col)
-        else:
-            # Now the slightly trickier extruded case
-            roffset = <int *>np.PyArray_DATA(rmap.offset)
-            coffset = <int *>np.PyArray_DATA(cmap.offset)
-            layers = rmap.iterset.layers
-            for region in rmap.iteration_region:
-                # The rowmap will have an iteration region attached to
-                # it specifying which bits of the "implicit" (walking
-                # up the column) map we want.  This mostly affects the
-                # range of the loop over layers, except in the
-                # ON_INTERIOR_FACETS where we also have to "double" up
-                # the map.
-                layer_start = 0
-                layer_end = layers - 1
-                reps = 1
-                if region.where == "ON_BOTTOM":
-                    layer_end = 1
-                elif region.where == "ON_TOP":
-                    layer_start = layers - 2
-                elif region.where == "ON_INTERIOR_FACETS":
-                    layer_end = layers - 2
-                    reps = 2
-                elif region.where != "ALL":
-                    raise RuntimeError("Unhandled iteration region %s", region)
-                for e in range(set_size):
-                    for i in range(rarity):
-                        tmp_row = rmult * (rmap_vals[e * rarity + i] + layer_start * roffset[i])
-                        # Not a process-local row, carry on
-                        if tmp_row >= local_nrows:
-                            continue
-                        for r in range(rmult):
-                            # Double up for interior facets
-                            for rrep in range(reps):
-                                row = tmp_row + r + rmult*rrep*roffset[i]
-                                for layer in range(layer_start, layer_end):
-                                    for d in range(carity):
-                                        for c in range(cmult):
-                                            for crep in range(reps):
-                                                col = cmult * (cmap_vals[e * carity + d] +
-                                                               (layer + crep) * coffset[d]) + c
-                                                if col < local_ncols:
-                                                    s_diag[row].insert(col)
-                                                else:
-                                                    assert have_odiag, "Should never happen"
-                                                    s_odiag[row].insert(col)
-                                    row += rmult * roffset[i]
+    for rmaps, cmaps in maps:
+        row_count = 0
+        for which_row, rmap in enumerate(rmaps):
+            col_count = 0
+            set_size = rmap.iterset.exec_size
+            rarity = rmap.arity
+            rmap_vals = rmap.values_with_halo
+            if not s_diag[row_count].capacity():
+                # Preallocate set entries heuristically based on arity
+                for i in range(rmap.toset.size):
+                    s_diag[row_count + i].reserve(6*rarity)
+                if have_odiag:
+                    for i in range(rmap.toset.size):
+                        s_odiag[row_count + i].reserve(6*rarity)
+            for which_col, cmap in enumerate(cmaps):
+                carity = cmap.arity
+                cmap_vals = cmap.values_with_halo
+                if needs_mult:
+                    rmult, cmult = sparsity.dims[which_row][which_col]
+                if not extruded:
+                    # Non extruded case, reasonably straightfoward
+                    for e in range(set_size):
+                        for i in range(rarity):
+                            tmp_row = row_count + rmult * rmap_vals[e, i]
+                            # Not a process-local row, carry on.
+                            if tmp_row >= local_nrows:
+                                continue
+                            for r in range(rmult):
+                                row = tmp_row + r
+                                # Always reserve space for diagonal entry
+                                if row < local_ncols:
+                                    s_diag[row].insert(row)
+                                for d in range(carity):
+                                    for c in range(cmult):
+                                        col = col_count + cmult * cmap_vals[e, d] + c
+                                        # Process-local column?
+                                        if col < local_ncols:
+                                            s_diag[row].insert(col)
+                                        else:
+                                            assert have_odiag, "Should never happen"
+                                            s_odiag[row].insert(col)
+                else:
+                    # Now the slightly trickier extruded case
+                    roffset = rmap.offset
+                    coffset = cmap.offset
+                    layers = rmap.iterset.layers
+                    for region in rmap.iteration_region:
+                        # The rowmap will have an iteration region attached to
+                        # it specifying which bits of the "implicit" (walking
+                        # up the column) map we want.  This mostly affects the
+                        # range of the loop over layers, except in the
+                        # ON_INTERIOR_FACETS where we also have to "double" up
+                        # the map.
+                        layer_start = 0
+                        layer_end = layers - 1
+                        reps = 1
+                        if region.where == "ON_BOTTOM":
+                            layer_end = 1
+                        elif region.where == "ON_TOP":
+                            layer_start = layers - 2
+                        elif region.where == "ON_INTERIOR_FACETS":
+                            layer_end = layers - 2
+                            reps = 2
+                        elif region.where != "ALL":
+                            raise RuntimeError("Unhandled iteration region %s", region)
+                        for e in range(set_size):
+                            for i in range(rarity):
+                                tmp_row = row_count + rmult * (rmap_vals[e, i] + layer_start * roffset[i])
+                                # Not a process-local row, carry on
+                                if tmp_row >= local_nrows:
+                                    continue
+                                for r in range(rmult):
+                                    # Double up for interior facets
+                                    for rrep in range(reps):
+                                        row = tmp_row + r + rmult*rrep*roffset[i]
+                                        for layer in range(layer_start, layer_end):
+                                            for d in range(carity):
+                                                for c in range(cmult):
+                                                    for crep in range(reps):
+                                                        col = col_count + cmult * (cmap_vals[e, d] +
+                                                                                   (layer + crep) * coffset[d]) + c
+                                                        if col < local_ncols:
+                                                            s_diag[row].insert(col)
+                                                        else:
+                                                            assert have_odiag, "Should never happen"
+                                                            s_odiag[row].insert(col)
+                                            # Always reserve space for diagonal entry
+                                            if row < local_ncols:
+                                                s_diag[row].insert(row)
+                                            row += rmult * roffset[i]
+                col_count += cmult * cmap.toset.size
+            row_count += rmult * rmap.toset.size
 
     # Create final sparsity structure
     cdef np.ndarray[np.int32_t, ndim=1] dnnz = np.zeros(local_nrows, dtype=np.int32)
@@ -349,13 +375,7 @@ def fill_with_zeros(PETSc.Mat mat not None, dims, maps):
 
 
 def build_sparsity(object sparsity, bool parallel, bool block=True):
-    cdef int rmult, cmult
-    rmult, cmult = sparsity._dims
-
-    # Build sparsity pattern for block sparse matrix
-    if block and rmult == cmult and rmult > 1:
-        rmult = cmult = 1
-    pattern = build_sparsity_pattern(rmult, cmult, sparsity.maps, have_odiag=parallel)
+    pattern = build_sparsity_pattern(sparsity, block, have_odiag=parallel)
 
     sparsity._d_nz = pattern[0]
     sparsity._o_nz = pattern[1]
