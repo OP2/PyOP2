@@ -49,6 +49,8 @@ class Timer(object):
 
     _timers = {}
     _output_file = None
+    _flp_ops = 0
+    _gflops = 0.0
 
     def __new__(cls, name=None, timer=time):
         n = name or 'timer' + str(len(cls._timers))
@@ -77,6 +79,11 @@ class Timer(object):
     def c_time(self, c_time):
         """Time value from the kernel wrapper."""
         self._c_timings.append(c_time)
+
+    def papi_gflops(self, flp_ops, gflops):
+        """Time value from the kernel wrapper."""
+        Timer._flp_ops = max(Timer._flp_ops, flp_ops)
+        Timer._gflops = max(Timer._gflops, gflops)
 
     def start(self):
         """Start the timer."""
@@ -211,6 +218,8 @@ class Timer(object):
                 xtra_param = -1
                 if cls._extra_param is not None:
                     xtra_param = cls._extra_param
+                if cls._gflops > 0.0:
+                    xtra_param = cls._gflops
                 if cls._output_file is not None:
                     with open(cls._output_file, "a") as f:
                         tbw = fmt % (t.name, t.total, t.ncalls, t.average, t.sd, t.c_time_total, t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw)
@@ -264,6 +273,10 @@ def add_data_volume(t, name, vol):
 
 def add_c_time(t, name, time):
     Timer("%s-%s" % (t, name)).c_time(time)
+
+
+def add_papi_gflops(t, name, flp_ops, gflops):
+    Timer("%s-%s" % (t, name)).papi_gflops(flp_ops, gflops)
 
 
 def summary(filename=None):

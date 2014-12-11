@@ -715,6 +715,9 @@ class JITModule(base.JITModule):
         if configuration["likwid"]:
             self._kernel._headers += ["#include <likwid.h>"]
 
+        if configuration["papi_flops"]:
+            self._kernel._headers += ["#include <papi.h>"]
+
         code_to_compile = """
         #include <mat_utils.h>
         #include <stdbool.h>
@@ -748,8 +751,18 @@ class JITModule(base.JITModule):
         if configuration["likwid"]:
             more_args.append("-llikwid")
             cppargs += ["-DLIKWID_PERFMON"]
+        if configuration["papi_flops"]:
+            more_args.append("-lpapi")
+            more_args.append("-lpfm")
         ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
-                 ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()] + more_args + self._libraries
+                 ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()]
+        if configuration["papi_flops"]:
+            cppargs += ["-I%s" % get_papi_dir()]
+            ldargs += ["-L%s" % get_papi_dir()]
+            ldargs += ["-Wl,-rpath,%s" % get_papi_dir()]
+            ldargs += ["-L%s/libpfm4/lib" % get_papi_dir()]
+            ldargs += ["-Wl,-rpath,%s/libpfm4/lib" % get_papi_dir()]
+        ldargs += more_args + self._libraries
         if self._kernel._applied_blas:
             blas_dir = blas['dir']
             if blas_dir:
@@ -843,6 +856,32 @@ class JITModule(base.JITModule):
         _likwid_thread_init = """LIKWID_MARKER_THREADINIT;\n"""
         _likwid_start = """LIKWID_MARKER_START("%(region_name)s");\n"""
         _likwid_end = """LIKWID_MARKER_STOP("%(region_name)s");\n"""
+
+        _papi_args = ", long long fl_ops[1], double gflops[1]"
+
+        _papi_decl = """
+  float real_time, proc_time, mflops;
+  long long flpops;
+  float ireal_time, iproc_time, imflops;
+  long long iflpops;
+  int retval;
+        """
+
+        _papi_init = """
+        retval = PAPI_library_init(PAPI_VER_CURRENT);
+        """
+
+        _papi_start = """
+        retval = PAPI_flops(&ireal_time, &iproc_time, &iflpops, &imflops);
+        """
+
+        _papi_end = """
+        retval = PAPI_flops(&real_time, &proc_time, &flpops, &mflops);
+        """
+        _papi_print = """
+        fl_ops[0] = flpops - iflpops;
+        gflops[0] = mflops / 1000.0;
+        """
 
         _map_decl = ""
         _apply_offset = ""
@@ -1022,5 +1061,11 @@ class JITModule(base.JITModule):
                 'likwid_end_outer': _likwid_end % {'region_name': region_name} if configuration["likwid"] and configuration["likwid_outer"] else "",
                 'timer_start': _timer_start if configuration["hpc_profiling"] else "",
                 'timer_end': _timer_end if configuration["hpc_profiling"] else "",
+                'papi_args': _papi_args if configuration['papi_flops'] else "",
+                'papi_decl': _papi_decl if configuration['papi_flops'] else "",
+                'papi_init': _papi_init if configuration['papi_flops'] else "",
+                'papi_start': _papi_start if configuration['papi_flops'] else "",
+                'papi_end': _papi_end if configuration['papi_flops'] else "",
+                'papi_print': _papi_print if configuration['papi_flops'] else "",
                 'itset_loop_body': '\n'.join([itset_loop_body(i, j, shape, offsets, is_facet=(self._iteration_region == ON_INTERIOR_FACETS))
                                               for i, j, shape, offsets in self._itspace])}

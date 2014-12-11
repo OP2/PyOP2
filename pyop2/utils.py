@@ -322,3 +322,11 @@ def get_petsc_dir():
 
 Set the environment variable PETSC_DIR to your local PETSc base
 directory or install PETSc from PyPI: pip install petsc""")
+
+
+def get_papi_dir():
+    try:
+        papi_dir = os.environ['PYOP2_PAPI_DIR']
+        return papi_dir
+    except KeyError:
+        sys.exit("You have chosen to profile using PAPI but have not provided a path to the PAPI folder.")

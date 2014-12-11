@@ -57,13 +57,17 @@ double %(wrapper_name)s(int start, int end,
                       %(wrapper_args)s
                       %(const_args)s
                       %(off_args)s
-                      %(layer_arg)s) {
+                      %(layer_arg)s
+                      %(papi_args)s) {
+  %(papi_decl)s;
+  %(papi_init)s;
   %(user_code)s
   %(wrapper_decs)s;
   %(const_inits)s;
   %(map_decl)s
   %(vec_decs)s;
   %(timer_start)s
+  %(papi_start)s
   %(likwid_start_outer)s
   for ( int n = start; n < end; n++ ) {
     int i = %(index_expr)s;
@@ -88,6 +92,8 @@ double %(wrapper_name)s(int start, int end,
     %(extr_loop_close)s
   }
   %(likwid_end_outer)s
+  %(papi_end)s
+  %(papi_print)s
   %(timer_end)s
 }
 """
@@ -155,6 +161,12 @@ class ParLoop(host.ParLoop):
                 self._jit_args.append(0)
                 self._jit_args.append(self._it_space.layers - 1)
 
+            if configuration['papi_flops']:
+                self._argtypes.append(ndpointer(np.dtype('int64'), shape=(1,)))
+                self._jit_args.append(np.zeros(1, dtype=np.int64))
+                self._argtypes.append(ndpointer(np.dtype('float64'), shape=(1,)))
+                self._jit_args.append(np.zeros(1, dtype=np.float64))
+
         self._jit_args[0] = part.offset
         self._jit_args[1] = part.offset + part.size
         # Must call fun on all processes since this may trigger
@@ -162,7 +174,9 @@ class ParLoop(host.ParLoop):
         time = 0
         with timed_region("ParLoop kernel"):
             time = fun(*self._jit_args, argtypes=self._argtypes, restype=ctypes.c_double)
-        return time
+        if configuration['papi_flops']:
+            return time, self._jit_args[-2][0], self._jit_args[-1][0]
+        return time, 0, 0.0
 
 
 def _setup():

@@ -53,7 +53,7 @@ from mpi import MPI, _MPI, _check_comm, collective
 from profiling import profile, timed_region, timed_function
 from sparsity import build_sparsity
 from version import __version__ as version
-from hpc_profiling import hpc_profiling, add_data_volume, add_c_time
+from hpc_profiling import hpc_profiling, add_data_volume, add_c_time, add_papi_gflops
 
 from coffee.base import Node
 from coffee import base as ast
@@ -3889,20 +3889,21 @@ class ParLoop(LazyComputation):
         with hpc_profiling('base', '%s-%s' % (region_name, self.kernel._md5)):
             self.halo_exchange_begin()
             self.maybe_set_dat_dirty()
-            t = self._compute(self.it_space.iterset.core_part)
+            t, flp_ops, gflops = self._compute(self.it_space.iterset.core_part)
             self.halo_exchange_end()
-            t += self._compute(self.it_space.iterset.owned_part)
+            self._compute(self.it_space.iterset.owned_part)
             self.reduction_begin()
             if self._only_local:
                 self.reverse_halo_exchange_begin()
             if not self._only_local and self.needs_exec_halo:
-                t += self._compute(self.it_space.iterset.exec_part)
+                self._compute(self.it_space.iterset.exec_part)
             self.reduction_end()
             if self._only_local:
                 self.reverse_halo_exchange_end()
             self.maybe_set_halo_update_needed()
         add_data_volume('base', '%s-%s' % (region_name, self.kernel._md5), self._data_volume)
         add_c_time('base', '%s-%s' % (region_name, self.kernel._md5), t)
+        add_papi_gflops('base', '%s-%s' % (region_name, self.kernel._md5), flp_ops, gflops)
 
     @collective
     def _compute(self, part):

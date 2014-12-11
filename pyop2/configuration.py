@@ -83,6 +83,8 @@ class Configuration(object):
         "only_kernel": ("PYOP2_ONLY_KERNEL", bool, False),
         # For a given code region only report the indirect loops
         "only_indirect_loops": ("PYOP2_ONLY_INDIRECT_LOOPS", bool, False),
+        # For a given code region only report the indirect loops
+        "papi_flops": ("PYOP2_PAPI_FLOPS", bool, False),
 
         "backend": ("PYOP2_BACKEND", str, "sequential"),
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gnu"),
@@ -160,6 +162,7 @@ class Configuration(object):
         self._conf[key] = value
 
 configuration = Configuration()
+
 
 @contextmanager
 def configure(flag, value):
