@@ -3689,7 +3689,6 @@ class Kernel(Cached):
         if self._initialized:
             return
         self._name = name or "kernel_%d" % Kernel._globalcount
-        print 'HERE -----'
         self._cpp = cpp
         self._libs = libs
         self._lib_dirs = lib_dirs
