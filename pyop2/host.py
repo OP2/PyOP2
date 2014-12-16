@@ -705,6 +705,9 @@ class JITModule(base.JITModule):
         if configuration["debug"]:
             self._wrapper_code = code_to_compile
 
+        libs = self._kernel._libs
+        lib_dirs = self._kernel._lib_dirs
+
         extension = self._extension
         cppargs = self._cppargs
         cppargs += ["-I%s/include" % d for d in get_petsc_dir()] + \
@@ -714,7 +717,9 @@ class JITModule(base.JITModule):
             cppargs += [compiler[coffee.plan.intrinsics['inst_set']]]
         ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
                  ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()] + \
-                 ["-lpetsc", "-lm"] + self._libraries
+                 ["-lpetsc", "-lm"] + self._libraries + \
+                 ["-l"+s for s in libs] + \
+                 ["-L"+s for s in lib_dirs]
         if self._kernel._applied_blas:
             blas_dir = blas['dir']
             if blas_dir:
