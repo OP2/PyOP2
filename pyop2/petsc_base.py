@@ -276,7 +276,11 @@ class ProxyMat(base.Mat):
 
     @property
     def values(self):
-        raise NotImplementedError("ProxyMat has no values() array")
+        ris = self._parent.global_ises[0][self._i]
+        cis = self._parent.global_ises[1][self._j]
+        mat = self._parent.handle.getSubMatrix(isrow=ris,
+                                               iscol=cis)
+        return mat[:, :]
 
     @property
     def dtype(self):
