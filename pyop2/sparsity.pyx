@@ -210,8 +210,6 @@ def build_sparsity(object sparsity, bint parallel, bool block=True):
 
     rset, cset = sparsity.dsets
 
-    rset = [r for r in rset]
-    cset = [c for c in cset]
     if block and len(rset) == 1 and len(cset) == 1:
         should_block = True
 
