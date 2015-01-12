@@ -240,12 +240,6 @@ class ProxyMat(base.Mat):
         self._colis = self._parent.local_ises[1][self._j]
         self._diag_dat = _make_object('MixedDat', parent.sparsity.dsets[0])
 
-    def __del__(self):
-        if hasattr(self, '_handle'):
-            self._parent.handle.restoreLocalSubMatrix(isrow=self._rowis,
-                                                      iscol=self._colis,
-                                                      submat=self._handle)
-
     def __getitem__(self, idx):
         return self
 
