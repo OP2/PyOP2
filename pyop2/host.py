@@ -44,7 +44,7 @@ from configuration import configuration
 from utils import as_tuple
 
 from coffee.base import Node
-from coffee.plan import ASTKernel
+from coffee.plan import ASTKernelCPU
 import coffee.plan
 from coffee.vectorizer import vect_roundup
 
@@ -59,8 +59,8 @@ class Kernel(base.Kernel):
             self._applied_ap = False
             return ast
         self._ast = ast
-        ast_handler = ASTKernel(ast, self._include_dirs)
-        ast_handler.plan_cpu(opts)
+        ast_handler = ASTKernelCPU(ast, self._include_dirs)
+        ast_handler.plan(opts)
         self._applied_blas = ast_handler.blas
         self._applied_ap = ast_handler.ap
         return ast_handler.gencode()

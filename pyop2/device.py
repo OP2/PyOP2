@@ -35,7 +35,7 @@ import base
 from base import *
 
 from coffee.base import Node
-from coffee.plan import ASTKernel
+from coffee.plan import ASTKernelGPU
 
 from mpi import collective
 
@@ -48,8 +48,8 @@ class Kernel(base.Kernel):
         if not isinstance(ast, Node):
             return ast
         self._ast = ast
-        ast_handler = ASTKernel(ast)
-        ast_handler.plan_gpu()
+        ast_handler = ASTKernelGPU(ast)
+        ast_handler.plan(opts)
         return ast.gencode()
 
     def __init__(self, code, name, opts={}, include_dirs=[]):
