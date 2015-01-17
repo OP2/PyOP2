@@ -854,10 +854,10 @@ class JITModule(base.JITModule):
         _timer_end = """s2=stamp();\nreturn (s2 - s1)/1e9;\n"""
 
         _likwid_thread_init = """LIKWID_MARKER_THREADINIT;\n"""
-        _likwid_start = """LIKWID_MARKER_START("%(region_name)s");\n"""
-        _likwid_end = """LIKWID_MARKER_STOP("%(region_name)s");\n"""
+        _likwid_start = """likwid_markerStartRegion("%(region_name)s");\n"""
+        _likwid_end = """likwid_markerStopRegion("%(region_name)s");\n"""
 
-        _papi_args = ", long long fl_ops[1], double gflops[1]"
+        _papi_args = ", double fl_ops[1], double gflops[1]"
 
         _papi_decl = """
   float real_time, proc_time, mflops;
@@ -879,7 +879,7 @@ class JITModule(base.JITModule):
         retval = PAPI_flops(&real_time, &proc_time, &flpops, &mflops);
         """
         _papi_print = """
-        fl_ops[0] = flpops - iflpops;
+        fl_ops[0] = (flpops - iflpops) / 1000000.0;
         gflops[0] = mflops / 1000.0;
         """
 

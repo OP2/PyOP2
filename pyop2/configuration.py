@@ -85,6 +85,8 @@ class Configuration(object):
         "only_indirect_loops": ("PYOP2_ONLY_INDIRECT_LOOPS", bool, False),
         # For a given code region only report the indirect loops
         "papi_flops": ("PYOP2_PAPI_FLOPS", bool, False),
+        # Compute maximal bandwidth
+        "max_bw": ("PYOP2_MAX_BW", bool, False),
 
         "backend": ("PYOP2_BACKEND", str, "sequential"),
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gnu"),
@@ -168,5 +170,11 @@ configuration = Configuration()
 def configure(flag, value):
     old_value = configuration[flag]
     configuration[flag] = value
+    if configuration["likwid"]:
+        import likwid
+        likwid.initialise()
     yield
+    if configuration["likwid"]:
+        import likwid
+        likwid.finalise()
     configuration[flag] = old_value

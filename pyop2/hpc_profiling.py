@@ -51,6 +51,7 @@ class Timer(object):
     _output_file = None
     _flp_ops = 0
     _gflops = 0.0
+    _max_bw = 0.0
 
     def __new__(cls, name=None, timer=time):
         n = name or 'timer' + str(len(cls._timers))
@@ -139,12 +140,12 @@ class Timer(object):
     @property
     def c_time_total(self):
         """Total time spent for all recorded C timed events."""
-        return sum(self._c_timings)
+        return self.ncalls * min(self._c_timings)
 
     @property
     def c_time_average(self):
         """Average time spent per recorded event."""
-        return np.average(self._c_timings)
+        return min(self._c_timings)
 
     @property
     def dv(self):
@@ -158,7 +159,11 @@ class Timer(object):
 
     @property
     def c_bw(self):
-        return self.dv / self.c_time_total if self.c_time_total else 0.0
+        return self.dv / (self.ncalls * min(self._c_timings)) if self.c_time_total else 0.0
+
+    @property
+    def c_mbw(self):
+        return Timer._max_bw / (min(self._c_timings) * 1024 * 1024) if self.c_time_total else 0.0
 
     @property
     def sd(self):
@@ -207,9 +212,11 @@ class Timer(object):
                         for t in cls._timers.values()])
             c_bwcol = max([len(column_heads[8])] + [len('%g' % t.c_bw)
                           for t in cls._timers.values()])
+            c_mbwcol = max([len(column_heads[8])] + [len('%g' % t.c_mbw)
+                          for t in cls._timers.values()])
 
-            fmt = "%%%ds | %%%dg | %%%dd | %%%dg | %%%dg |  %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg" % (
-                namecol, totalcol, ncallscol, averagecol, sdcol, c_totalcol, c_averagecol, dvcol, bwcol, 3, c_bwcol)
+            fmt = "%%%ds | %%%dg | %%%dd | %%%dg | %%%dg |  %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg" % (
+                namecol, totalcol, ncallscol, averagecol, sdcol, c_totalcol, c_averagecol, dvcol, bwcol, 3, c_bwcol, c_mbwcol)
             keys = sorted(cls._timers.keys(), key=lambda k: k[-6:])
             if cls._output_file is not None:
                 fmt += "\n"
@@ -219,13 +226,13 @@ class Timer(object):
                 if cls._extra_param is not None:
                     xtra_param = cls._extra_param
                 if cls._gflops > 0.0:
-                    xtra_param = cls._gflops
+                    xtra_param = cls._flp_ops
                 if cls._output_file is not None:
                     with open(cls._output_file, "a") as f:
-                        tbw = fmt % (t.name, t.total, t.ncalls, t.average, t.sd, t.c_time_total, t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw)
+                        tbw = fmt % (t.name, t.total, t.ncalls, t.average, t.sd, t.c_time_total, t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw, t.c_mbw)
                         f.write(tbw)
                 else:
-                    print fmt % (t.name, t.total, t.ncalls, t.average, t.sd, t.c_time_total, t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw)
+                    print fmt % (t.name, t.total, t.ncalls, t.average, t.sd, t.c_time_total, t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw, t.c_mbw)
 
     @classmethod
     def get_timers(cls):
@@ -241,6 +248,8 @@ class Timer(object):
         if not cls._timers:
             return
         cls._timers = {}
+        cls._gflops = 0.0
+        cls._flp_ops = 0
 
     @classmethod
     def output_file(cls, value):
@@ -257,6 +266,11 @@ class Timer(object):
         """Only time the kernel execution and return the value otherwise
         time the whole wrapper."""
         cls._only_kernel = value
+
+    @classmethod
+    def set_max_bw(cls, value):
+        """Include a distribution of values per element."""
+        cls._max_bw = value
 
 
 @contextmanager
@@ -311,3 +325,7 @@ def only_kernel(value):
     """Only insert instrumentation code and timers around the kernel. By Default
     the instrumentation and timers are set at the beginning."""
     Timer.only_kernel(value)
+
+def set_max_bw(max_bw):
+    """Record maximal bandwidth."""
+    Timer.set_max_bw(max_bw)

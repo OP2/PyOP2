@@ -162,8 +162,8 @@ class ParLoop(host.ParLoop):
                 self._jit_args.append(self._it_space.layers - 1)
 
             if configuration['papi_flops']:
-                self._argtypes.append(ndpointer(np.dtype('int64'), shape=(1,)))
-                self._jit_args.append(np.zeros(1, dtype=np.int64))
+                self._argtypes.append(ndpointer(np.dtype('float64'), shape=(1,)))
+                self._jit_args.append(np.zeros(1, dtype=np.float64))
                 self._argtypes.append(ndpointer(np.dtype('float64'), shape=(1,)))
                 self._jit_args.append(np.zeros(1, dtype=np.float64))
 

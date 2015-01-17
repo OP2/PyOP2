@@ -201,7 +201,9 @@ class LinuxCompiler(Compiler):
         # This is the default in Ubuntu 14.04 so work around this
         # problem by turning ivopts off.
         # For 4.6 we need to turn off more, so go to no-tree-vectorize
-        opt_flags = ['-g', '-O3', '-fno-tree-vectorize']
+
+        # Maybe include '-ftree-slp-vectorize'
+        opt_flags = ['-O3', '-march=native', '-ffast-math', '-fassociative-math']
         if configuration['debug']:
             opt_flags = ['-O0', '-g']
 

@@ -53,7 +53,7 @@ from mpi import MPI, _MPI, _check_comm, collective
 from profiling import profile, timed_region, timed_function
 from sparsity import build_sparsity
 from version import __version__ as version
-from hpc_profiling import hpc_profiling, add_data_volume, add_c_time, add_papi_gflops
+from hpc_profiling import hpc_profiling, add_data_volume, add_c_time, add_papi_gflops, set_max_bw
 
 from coffee.base import Node
 from coffee import base as ast
@@ -3837,7 +3837,7 @@ class ParLoop(LazyComputation):
 
         self._it_space = self.build_itspace(iterset)
         # Data volume computation
-        vol = 0
+        vol = 0.0
         unique_args = []
         for arg1 in args:
             freq = 0
@@ -3854,6 +3854,9 @@ class ParLoop(LazyComputation):
         self._data_volume = vol
 
     def _run(self):
+        if configuration['max_bw'] and configuration["only_indirect_loops"] and self.is_indirect:
+            set_max_bw(self._data_volume)
+            return
         import pyparloop
         if isinstance(self._kernel, pyparloop.Kernel) or not configuration["hpc_profiling"]:
             return self.compute()
