@@ -3854,9 +3854,18 @@ class ParLoop(LazyComputation):
         self._data_volume = vol
 
     def _run(self):
-        if configuration['max_bw'] and configuration["only_indirect_loops"] and self.is_indirect:
-            set_max_bw(self._data_volume)
-            return
+        if MPI.comm.size == 1:
+            if configuration['max_bw'] and configuration["only_indirect_loops"] and self.is_indirect:
+                set_max_bw(self._data_volume)
+                with open(configuration['space']+".txt", "w+") as h:
+                    h.write(str(self._data_volume))
+                return
+        elif len(configuration['space']) > 0:
+            with open(configuration['space']+".txt", "r") as h:
+                for line in h:
+                    words = line.split()
+                    set_max_bw(float(words[0]) / MPI.comm.size)
+                
         import pyparloop
         if isinstance(self._kernel, pyparloop.Kernel) or not configuration["hpc_profiling"]:
             return self.compute()

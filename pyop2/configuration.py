@@ -87,6 +87,8 @@ class Configuration(object):
         "papi_flops": ("PYOP2_PAPI_FLOPS", bool, False),
         # Compute maximal bandwidth
         "max_bw": ("PYOP2_MAX_BW", bool, False),
+        # Discretization
+        "space": ("PYOP2_SPACE", str, ""),
 
         "backend": ("PYOP2_BACKEND", str, "sequential"),
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gnu"),
