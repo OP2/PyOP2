@@ -85,10 +85,10 @@ class Configuration(object):
         "only_indirect_loops": ("PYOP2_ONLY_INDIRECT_LOOPS", bool, False),
         # For a given code region only report the indirect loops
         "papi_flops": ("PYOP2_PAPI_FLOPS", bool, False),
-        # Compute maximal bandwidth
-        "max_bw": ("PYOP2_MAX_BW", bool, False),
-        # Discretization
-        "space": ("PYOP2_SPACE", str, ""),
+        # For extruded meshes: horizontally DG dofs per column
+        "dg_dpc": ("PYOP2_DG_DPC", int, 0),
+        # For extruded meshes: DG coords correction term for MBW
+        "dg_coords": ("PYOP2_DG_COORDS", int, 0),
 
         "backend": ("PYOP2_BACKEND", str, "sequential"),
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gnu"),

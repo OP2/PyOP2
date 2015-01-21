@@ -51,7 +51,6 @@ class Timer(object):
     _output_file = None
     _flp_ops = 0
     _gflops = 0.0
-    _max_bw = 0.0
 
     def __new__(cls, name=None, timer=time):
         n = name or 'timer' + str(len(cls._timers))
@@ -73,9 +72,13 @@ class Timer(object):
         self._output_file = None
         self._extra_param = -1
         self._only_kernel = False
+        self._volume_mvbw = None
+        self._volume_mbw = None
 
-    def data_volume(self, vol):
+    def data_volume(self, vol, vol_mvbw, vol_mbw):
         self._volume = vol
+        self._volume_mvbw = vol_mvbw
+        self._volume_mbw = vol_mbw
 
     def c_time(self, c_time):
         """Time value from the kernel wrapper."""
@@ -159,11 +162,15 @@ class Timer(object):
 
     @property
     def c_bw(self):
-        return self.dv / (self.ncalls * min(self._c_timings)) if self.c_time_total else 0.0
+        return self._volume / (min(self._c_timings) * 1024.0 * 1024.0) if self.c_time_total else 0.0
+
+    @property
+    def c_mvbw(self):
+        return self._volume_mvbw / (min(self._c_timings) * 1024.0 * 1024.0) if self.c_time_total else 0.0
 
     @property
     def c_mbw(self):
-        return Timer._max_bw / (min(self._c_timings) * 1024 * 1024) if self.c_time_total else 0.0
+        return self._volume_mbw / (min(self._c_timings) * 1024.0 * 1024.0) if self.c_time_total else 0.0
 
     @property
     def sd(self):
@@ -213,10 +220,12 @@ class Timer(object):
             c_bwcol = max([len(column_heads[8])] + [len('%g' % t.c_bw)
                           for t in cls._timers.values()])
             c_mbwcol = max([len(column_heads[8])] + [len('%g' % t.c_mbw)
-                          for t in cls._timers.values()])
+                           for t in cls._timers.values()])
+            c_mvbwcol = max([len(column_heads[8])] + [len('%g' % t.c_mvbw)
+                            for t in cls._timers.values()])
 
-            fmt = "%%%ds | %%%dg | %%%dd | %%%dg | %%%dg |  %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg" % (
-                namecol, totalcol, ncallscol, averagecol, sdcol, c_totalcol, c_averagecol, dvcol, bwcol, 3, c_bwcol, c_mbwcol)
+            fmt = "%%%ds | %%%dg | %%%dd | %%%dg | %%%dg |  %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg" % (
+                namecol, totalcol, ncallscol, averagecol, sdcol, c_totalcol, c_averagecol, dvcol, bwcol, 3, c_bwcol, c_mbwcol, c_mvbwcol)
             keys = sorted(cls._timers.keys(), key=lambda k: k[-6:])
             if cls._output_file is not None:
                 fmt += "\n"
@@ -229,10 +238,10 @@ class Timer(object):
                     xtra_param = cls._flp_ops
                 if cls._output_file is not None:
                     with open(cls._output_file, "a") as f:
-                        tbw = fmt % (t.name, t.total, t.ncalls, t.average, t.sd, t.c_time_total, t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw, t.c_mbw)
+                        tbw = fmt % (t.name, t.total, t.ncalls, t.average, t.sd, t.c_time_total, t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw, t.c_mbw, t.c_mvbw)
                         f.write(tbw)
                 else:
-                    print fmt % (t.name, t.total, t.ncalls, t.average, t.sd, t.c_time_total, t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw, t.c_mbw)
+                    print fmt % (t.name, t.total, t.ncalls, t.average, t.sd, t.c_time_total, t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw, t.c_mbw, t.c_mvbw)
 
     @classmethod
     def get_timers(cls):
@@ -281,8 +290,8 @@ def hpc_profiling(t, name):
     timer.stop()
 
 
-def add_data_volume(t, name, vol):
-    Timer("%s-%s" % (t, name)).data_volume(vol)
+def add_data_volume(t, name, vol, vol_mvbw, vol_mbw):
+    Timer("%s-%s" % (t, name)).data_volume(vol, vol_mvbw, vol_mbw)
 
 
 def add_c_time(t, name, time):
@@ -325,7 +334,3 @@ def only_kernel(value):
     """Only insert instrumentation code and timers around the kernel. By Default
     the instrumentation and timers are set at the beginning."""
     Timer.only_kernel(value)
-
-def set_max_bw(max_bw):
-    """Record maximal bandwidth."""
-    Timer.set_max_bw(max_bw)

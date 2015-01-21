@@ -53,7 +53,7 @@ from mpi import MPI, _MPI, _check_comm, collective
 from profiling import profile, timed_region, timed_function
 from sparsity import build_sparsity
 from version import __version__ as version
-from hpc_profiling import hpc_profiling, add_data_volume, add_c_time, add_papi_gflops, set_max_bw
+from hpc_profiling import hpc_profiling, add_data_volume, add_c_time, add_papi_gflops
 
 from coffee.base import Node
 from coffee import base as ast
@@ -3837,7 +3837,6 @@ class ParLoop(LazyComputation):
 
         self._it_space = self.build_itspace(iterset)
         # Data volume computation
-        vol = 0.0
         unique_args = []
         for arg1 in args:
             freq = 0
@@ -3846,26 +3845,34 @@ class ParLoop(LazyComputation):
                     freq += 1
             if freq == 0:
                 unique_args.append(arg1)
+        # VBW: Valuable BW
+        vol = 0.0
+        # MVBW: Maximal Valuable BW which counts the volume twice for INC and WRITE
+        mvbw_vol = 0.0
+        # MBW: Maximal BW which counts in the horizontal misses
+        mbw_vol = 0.0
         for arg in unique_args:
             if arg._is_dat:
-                vol += sum(s.size * s.cdim for s in arg.data.dataset) * arg.dtype.itemsize
+                volume = sum(s.size * s.cdim for s in arg.data.dataset) * arg.dtype.itemsize
+                vol += volume
+                mvbw_vol += volume * (2 if arg.access in [INC, WRITE] else 1)
+                if self._is_layered:
+                    mbw_vol += sum(configuration["dg_dpc"] * iterset.size * s.cdim for s in arg.data.dataset) * arg.dtype.itemsize
             if arg._is_mat:
-                vol += (arg.data.sparsity.onz + arg.data.sparsity.nz) * arg.dtype.itemsize
+                volume = (arg.data.sparsity.onz + arg.data.sparsity.nz) * arg.dtype.itemsize
+                vol += volume
+                mvbw_vol += volume
+                if self._is_layered:
+                    # TO DO: Not sure how to compute MBW for this case
+                    mbw_vol += volume
+        # Lower bound Valuable BW
         self._data_volume = vol
+        # Maximal Valuable BW
+        self._data_volume_mvbw = mvbw_vol
+        # Apply the correction term
+        self._data_volume_mbw = mbw_vol - configuration['dg_coords']
 
     def _run(self):
-        if MPI.comm.size == 1:
-            if configuration['max_bw'] and configuration["only_indirect_loops"] and self.is_indirect:
-                set_max_bw(self._data_volume)
-                with open(configuration['space']+".txt", "w+") as h:
-                    h.write(str(self._data_volume))
-                return
-        elif len(configuration['space']) > 0:
-            with open(configuration['space']+".txt", "r") as h:
-                for line in h:
-                    words = line.split()
-                    set_max_bw(float(words[0]) / MPI.comm.size)
-                
         import pyparloop
         if isinstance(self._kernel, pyparloop.Kernel) or not configuration["hpc_profiling"]:
             return self.compute()
@@ -3913,7 +3920,7 @@ class ParLoop(LazyComputation):
             if self._only_local:
                 self.reverse_halo_exchange_end()
             self.maybe_set_halo_update_needed()
-        add_data_volume('base', '%s-%s' % (region_name, self.kernel._md5), self._data_volume)
+        add_data_volume('base', '%s-%s' % (region_name, self.kernel._md5), self._data_volume, self._data_volume_mvbw, self._data_volume_mbw)
         add_c_time('base', '%s-%s' % (region_name, self.kernel._md5), t)
         add_papi_gflops('base', '%s-%s' % (region_name, self.kernel._md5), flp_ops, gflops)
 
