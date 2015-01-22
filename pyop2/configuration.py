@@ -89,6 +89,8 @@ class Configuration(object):
         "dg_dpc": ("PYOP2_DG_DPC", int, 0),
         # For extruded meshes: DG coords correction term for MBW
         "dg_coords": ("PYOP2_DG_COORDS", int, 0),
+        # Randomize the mesh by mixing the maps
+        "randomize": ("PYOP2_randomize", bool, False),
 
         "backend": ("PYOP2_BACKEND", str, "sequential"),
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gnu"),

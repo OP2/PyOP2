@@ -36,6 +36,7 @@
 import numpy as np
 from time import time
 from contextlib import contextmanager
+from configuration import configuration
 
 
 class Timer(object):
@@ -69,6 +70,7 @@ class Timer(object):
         self._volume = None
         self._timers[n] = self
         self._c_timings = []
+        self._c_rand_timings = []
         self._output_file = None
         self._extra_param = -1
         self._only_kernel = False
@@ -83,6 +85,10 @@ class Timer(object):
     def c_time(self, c_time):
         """Time value from the kernel wrapper."""
         self._c_timings.append(c_time)
+
+    def c_rand_time(self, c_rand_time):
+        """Time value from the kernel wrapper in the randomized case."""
+        self._c_rand_timings.append(c_rand_time)
 
     def papi_gflops(self, flp_ops, gflops):
         """Time value from the kernel wrapper."""
@@ -173,6 +179,10 @@ class Timer(object):
         return self._volume_mbw / (min(self._c_timings) * 1024.0 * 1024.0) if self.c_time_total else 0.0
 
     @property
+    def c_rvbw(self):
+        return self._volume / (max(self._c_rand_timings) * 1024.0 * 1024.0) if self.c_time_total else 0.0
+
+    @property
     def sd(self):
         """Standard deviation of recorded event time."""
         return np.std(self._timings)
@@ -223,9 +233,11 @@ class Timer(object):
                            for t in cls._timers.values()])
             c_mvbwcol = max([len(column_heads[8])] + [len('%g' % t.c_mvbw)
                             for t in cls._timers.values()])
+            c_rvbwcol = max([len(column_heads[8])] + [len('%g' % t.c_rvbw)
+                            for t in cls._timers.values()])
 
-            fmt = "%%%ds | %%%dg | %%%dd | %%%dg | %%%dg |  %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg" % (
-                namecol, totalcol, ncallscol, averagecol, sdcol, c_totalcol, c_averagecol, dvcol, bwcol, 3, c_bwcol, c_mbwcol, c_mvbwcol)
+            fmt = "%%%ds | %%%dg | %%%dd | %%%dg | %%%dg |  %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg" % (
+                namecol, totalcol, ncallscol, averagecol, sdcol, c_totalcol, c_averagecol, dvcol, bwcol, 3, c_bwcol, c_mbwcol, c_mvbwcol, c_rvbwcol)
             keys = sorted(cls._timers.keys(), key=lambda k: k[-6:])
             if cls._output_file is not None:
                 fmt += "\n"
@@ -238,10 +250,10 @@ class Timer(object):
                     xtra_param = cls._flp_ops
                 if cls._output_file is not None:
                     with open(cls._output_file, "a") as f:
-                        tbw = fmt % (t.name, t.total, t.ncalls, t.average, t.sd, t.c_time_total, t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw, t.c_mbw, t.c_mvbw)
+                        tbw = fmt % (t.name, t.total, t.ncalls, t.average, t.sd, t.c_time_total, t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw, t.c_mbw, t.c_mvbw, t.c_rvbw)
                         f.write(tbw)
                 else:
-                    print fmt % (t.name, t.total, t.ncalls, t.average, t.sd, t.c_time_total, t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw, t.c_mbw, t.c_mvbw)
+                    print fmt % (t.name, t.total, t.ncalls, t.average, t.sd, t.c_time_total, t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw, t.c_mbw, t.c_mvbw, t.c_rvbw)
 
     @classmethod
     def get_timers(cls):
@@ -291,15 +303,20 @@ def hpc_profiling(t, name):
 
 
 def add_data_volume(t, name, vol, vol_mvbw, vol_mbw):
-    Timer("%s-%s" % (t, name)).data_volume(vol, vol_mvbw, vol_mbw)
+    if not configuration['randomize']:
+        Timer("%s-%s" % (t, name)).data_volume(vol, vol_mvbw, vol_mbw)
 
 
 def add_c_time(t, name, time):
-    Timer("%s-%s" % (t, name)).c_time(time)
+    if not configuration['randomize']:
+        Timer("%s-%s" % (t, name)).c_time(time)
+    else:
+        Timer("%s-%s" % (t, name)).c_rand_time(time)
 
 
 def add_papi_gflops(t, name, flp_ops, gflops):
-    Timer("%s-%s" % (t, name)).papi_gflops(flp_ops, gflops)
+    if not configuration['randomize']:
+        Timer("%s-%s" % (t, name)).papi_gflops(flp_ops, gflops)
 
 
 def summary(filename=None):
@@ -327,7 +344,8 @@ def output_file(value):
 
 def extra_param(value):
     """Pass in information about the run to distinguish it from other runs if necessary."""
-    Timer.extra_param(value)
+    if not configuration['randomize']:
+        Timer.extra_param(value)
 
 
 def only_kernel(value):
