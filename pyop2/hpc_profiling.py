@@ -180,7 +180,7 @@ class Timer(object):
 
     @property
     def c_rvbw(self):
-        return self._volume / (max(self._c_rand_timings) * 1024.0 * 1024.0) if self.c_time_total else 0.0
+        return (self._volume / (max(self._c_rand_timings) * 1024.0 * 1024.0)) if len(self._c_rand_timings) > 0 else 0.0
 
     @property
     def sd(self):
