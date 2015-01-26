@@ -3857,20 +3857,22 @@ class ParLoop(LazyComputation):
                 vol += volume
                 mvbw_vol += volume * (2 if arg.access in [INC, WRITE] else 1)
                 if self._is_layered:
-                    mbw_vol += sum(configuration["dg_dpc"] * iterset.size * s.cdim for s in arg.data.dataset) * arg.dtype.itemsize
+                    mbw_vol += sum(configuration["dg_dpc"] * iterset.size * s.cdim for s in arg.data.dataset) * arg.dtype.itemsize \
+                               * (2 if arg.access in [INC, WRITE] else 1)
                 if configuration['randomize']:
                     # Randomize the maps
                     randomize_map(arg.map, len(arg.map.values))
             if arg._is_mat:
                 volume = (arg.data.sparsity.onz + arg.data.sparsity.nz) * arg.dtype.itemsize
                 vol += volume
-                mvbw_vol += volume
+                mvbw_vol += volume * (2 if arg.access in [INC, WRITE] else 1)
                 if self._is_layered:
                     # TO DO: Not sure how to compute MBW for this case
-                    mbw_vol += volume
+                    mbw_vol += volume * (2 if arg.access in [INC, WRITE] else 1)
                 if configuration['randomize']:
                     # Randomize the maps
-                    randomize_map(arg.map, len(arg.map.values))
+                    for m in arg.map:
+                        randomize_map(m, len(m.values))
         # Lower bound Valuable BW
         self._data_volume = vol
         # Maximal Valuable BW
