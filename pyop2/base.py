@@ -3838,6 +3838,7 @@ class ParLoop(LazyComputation):
         self._it_space = self.build_itspace(iterset)
         # Data volume computation
         unique_args = []
+        coords_exist = False
         for arg1 in args:
             freq = 0
             for arg2 in unique_args:
@@ -3845,6 +3846,8 @@ class ParLoop(LazyComputation):
                     freq += 1
             if freq == 0:
                 unique_args.append(arg1)
+            else:
+                coords_exist = True
         # VBW: Valuable BW
         vol = 0.0
         # MVBW: Maximal Valuable BW which counts the volume twice for INC and WRITE
@@ -3855,7 +3858,7 @@ class ParLoop(LazyComputation):
             if arg._is_dat:
                 volume = sum(s.size * s.cdim for s in arg.data.dataset) * arg.dtype.itemsize
                 vol += volume
-                mvbw_vol += volume * (2 if arg.access in [INC, WRITE] else 1)
+                mvbw_vol += (volume * (2 if arg.access in [INC, WRITE] else 1))
                 if self._is_layered:
                     mbw_vol += sum(configuration["dg_dpc"] * iterset.size * s.cdim for s in arg.data.dataset) * arg.dtype.itemsize \
                                * (2 if arg.access in [INC, WRITE] else 1)
@@ -3865,7 +3868,7 @@ class ParLoop(LazyComputation):
             if arg._is_mat:
                 volume = (arg.data.sparsity.onz + arg.data.sparsity.nz) * arg.dtype.itemsize
                 vol += volume
-                mvbw_vol += volume * (2 if arg.access in [INC, WRITE] else 1)
+                mvbw_vol += (volume * (2 if arg.access in [INC, WRITE] else 1))
                 if self._is_layered:
                     # TO DO: Not sure how to compute MBW for this case
                     mbw_vol += volume * (2 if arg.access in [INC, WRITE] else 1)
@@ -3878,7 +3881,7 @@ class ParLoop(LazyComputation):
         # Maximal Valuable BW
         self._data_volume_mvbw = mvbw_vol
         # Apply the correction term
-        self._data_volume_mbw = mbw_vol - configuration['dg_coords']
+        self._data_volume_mbw = mbw_vol - (configuration['dg_coords'] if coords_exist else 0.0)
 
     def _run(self):
         import pyparloop

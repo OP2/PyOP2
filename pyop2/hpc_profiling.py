@@ -134,7 +134,7 @@ class Timer(object):
     @property
     def ncalls(self):
         """Total number of recorded events."""
-        return len(self._timings)
+        return len(self._c_timings)
 
     @property
     def total(self):
@@ -149,17 +149,17 @@ class Timer(object):
     @property
     def c_time_total(self):
         """Total time spent for all recorded C timed events."""
-        return self.ncalls * min(self._c_timings)
+        return sum(self._c_timings)
 
     @property
     def c_time_average(self):
         """Average time spent per recorded event."""
-        return min(self._c_timings)
+        return self.c_time_total / self.ncalls #min(self._c_timings)
 
     @property
     def dv(self):
         if self._volume:
-            return self.ncalls * self._volume / (1024.0 * 1024.0)
+            return self.ncalls * self._volume_mvbw / 1024.0 / 1024.0
         return 0.0
 
     @property
@@ -168,19 +168,19 @@ class Timer(object):
 
     @property
     def c_bw(self):
-        return self._volume / (min(self._c_timings) * 1024.0 * 1024.0) if self.c_time_total else 0.0
+        return self._volume / self.c_time_average / 1024.0 / 1024.0 if self.c_time_total else 0.0
 
     @property
     def c_mvbw(self):
-        return self._volume_mvbw / (min(self._c_timings) * 1024.0 * 1024.0) if self.c_time_total else 0.0
+        return self._volume_mvbw / self.c_time_average / 1024.0 / 1024.0 if self.c_time_total else 0.0
 
     @property
     def c_mbw(self):
-        return self._volume_mbw / (min(self._c_timings) * 1024.0 * 1024.0) if self.c_time_total else 0.0
+        return self._volume_mbw / self.c_time_average / 1024.0 / 1024.0 if self.c_time_total else 0.0
 
     @property
     def c_rvbw(self):
-        return (self._volume / (max(self._c_rand_timings) * 1024.0 * 1024.0)) if len(self._c_rand_timings) > 0 else 0.0
+        return (self._volume_mvbw / max(self._c_rand_timings) / 1024.0 / 1024.0) if len(self._c_rand_timings) > 0 else 0.0
 
     @property
     def sd(self):
@@ -247,7 +247,7 @@ class Timer(object):
                 if cls._extra_param is not None:
                     xtra_param = cls._extra_param
                 if cls._gflops > 0.0:
-                    xtra_param = cls._flp_ops
+                    xtra_param = cls._gflops
                 if cls._output_file is not None:
                     with open(cls._output_file, "a") as f:
                         tbw = fmt % (t.name, t.total, t.ncalls, t.average, t.sd, t.c_time_total, t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw, t.c_mbw, t.c_mvbw, t.c_rvbw)
