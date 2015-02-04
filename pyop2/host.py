@@ -857,7 +857,7 @@ class JITModule(base.JITModule):
         _likwid_start = """likwid_markerStartRegion("%(region_name)s");\n"""
         _likwid_end = """likwid_markerStopRegion("%(region_name)s");\n"""
 
-        _papi_args = ", double fl_ops[1], double gflops[1]"
+        _papi_args = ", double papi_measures[6]" #", double fl_ops[1], double gflops[1]"
 
         _papi_decl = """
   float real_time, proc_time, mflops;
@@ -878,9 +878,20 @@ class JITModule(base.JITModule):
         _papi_end = """
         retval = PAPI_flops(&real_time, &proc_time, &flpops, &mflops);
         """
+        # _papi_print = """
+        # fl_ops[0] = (flpops - iflpops) / 1000000.0;
+        # gflops[0] = mflops / 1000.0;
+        # """
+
         _papi_print = """
-        fl_ops[0] = (flpops - iflpops) / 1000000.0;
-        gflops[0] = mflops / 1000.0;
+        s2 = stamp();
+        papi_measures[0] = (flpops - iflpops) / 1000000.0;
+        papi_measures[1] = mflops / 1000.0;
+        papi_measures[2] = real_time - ireal_time;
+        papi_measures[3] = proc_time - iproc_time;
+        papi_measures[4] = s1/1e9;
+        papi_measures[5] = s2/1e9;
+        return (s2 - s1)/1e9;
         """
 
         _map_decl = ""
@@ -1060,7 +1071,7 @@ class JITModule(base.JITModule):
                 'likwid_start_outer': _likwid_start % {'region_name': region_name} if configuration["likwid"] and configuration["likwid_outer"] else "",
                 'likwid_end_outer': _likwid_end % {'region_name': region_name} if configuration["likwid"] and configuration["likwid_outer"] else "",
                 'timer_start': _timer_start if configuration["hpc_profiling"] else "",
-                'timer_end': _timer_end if configuration["hpc_profiling"] else "",
+                'timer_end': _timer_end if configuration["hpc_profiling"] and not configuration['papi_flops'] else "",
                 'papi_args': _papi_args if configuration['papi_flops'] else "",
                 'papi_decl': _papi_decl if configuration['papi_flops'] else "",
                 'papi_init': _papi_init if configuration['papi_flops'] else "",

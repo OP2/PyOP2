@@ -52,6 +52,7 @@ class Timer(object):
     _output_file = None
     _flp_ops = 0
     _gflops = 0.0
+    _flp_ops_2 = 0.0
 
     def __new__(cls, name=None, timer=time):
         n = name or 'timer' + str(len(cls._timers))
@@ -71,12 +72,19 @@ class Timer(object):
         self._timers[n] = self
         self._c_timings = []
         self._c_rand_timings = []
+        self._papi_diff_timings = []
+        self._papi_start_time = -1.0
+        self._papi_end_time = -1.0
+        self._c_rand_timings = []
         self._output_file = None
         self._extra_param = -1
         self._only_kernel = False
         self._volume_mvbw = None
         self._volume_mbw = None
         self._extra_param_2 = -1
+        self._flp_ops = 0.0
+        self._flp_ops_2 = 0.0
+        self._gflops = 0.0
 
     def data_volume(self, vol, vol_mvbw, vol_mbw):
         self._volume = vol
@@ -91,10 +99,22 @@ class Timer(object):
         """Time value from the kernel wrapper in the randomized case."""
         self._c_rand_timings.append(c_rand_time)
 
-    def papi_gflops(self, flp_ops, gflops):
+    def papi_gflops(self, papi_measures):#flp_ops, gflops):
         """Time value from the kernel wrapper."""
-        Timer._flp_ops = max(Timer._flp_ops, flp_ops)
-        Timer._gflops = max(Timer._gflops, gflops)
+        # Papi measured M_FLP_OPs (just all operations (Mega), not per second)
+        self._flp_ops = max(self._flp_ops, papi_measures[0])
+        # Papi measured GFLOPS
+        self._gflops = max(self._gflops, papi_measures[1])
+        # Compute the min time it took to run the instrumented region
+        min_diff_time = min(papi_measures[2], papi_measures[3])
+        # Compute the number of FP operations
+        self._flp_ops_2 = max(self._flp_ops_2, min_diff_time * papi_measures[1])
+        # Keep track of the min diff times for each run of this process
+        self._papi_diff_timings.append(min_diff_time)
+        # Only take the first and last time stamp of the first run
+        if self._papi_start_time < 0.0:
+            self._papi_start_time = papi_measures[4]
+            self._papi_end_time = papi_measures[5]
 
     def start(self):
         """Start the timer."""
@@ -155,7 +175,7 @@ class Timer(object):
     @property
     def c_time_average(self):
         """Average time spent per recorded event."""
-        return min(self._c_timings) #self.c_time_total / self.ncalls #min(self._c_timings)
+        return self.c_time_total / self.ncalls #min(self._c_timings)
 
     @property
     def dv(self):
@@ -184,6 +204,10 @@ class Timer(object):
         return (self._volume_mvbw / max(self._c_rand_timings) / 1024.0 / 1024.0) if len(self._c_rand_timings) > 0 else 0.0
 
     @property
+    def papi_min_diff(self):
+        return min(self._papi_diff_timings)
+
+    @property
     def sd(self):
         """Standard deviation of recorded event time."""
         return np.std(self._timings)
@@ -200,6 +224,7 @@ class Timer(object):
             return
         column_heads = ("Timer", "Total time", "Calls", "Average time", "Standard Deviation", "Tot C time", "Avg C time",
                         "Tot DV (MB)", "Tot BW (MB/s)", "Tot C BW (MB/s)")
+        max_time = cls.max_span()
         if isinstance(filename, str):
             import csv
             with open(filename, 'wb') as f:
@@ -236,9 +261,15 @@ class Timer(object):
                             for t in cls._timers.values()])
             c_rvbwcol = max([len(column_heads[8])] + [len('%g' % t.c_rvbw)
                             for t in cls._timers.values()])
+            papi_diff_t = max([len(column_heads[8])] + [len('%g' % t.papi_min_diff)
+                              for t in cls._timers.values()])
+            papi_roofline_gflops = max([len(column_heads[8])] + [len('%g' % t._flp_ops)
+                                       for t in cls._timers.values()])
 
-            fmt = "%%%ds | %%%dg | %%%dd | %%%dg | %%%dg |  %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg" % (
-                namecol, totalcol, ncallscol, averagecol, sdcol, c_totalcol, c_averagecol, dvcol, bwcol, 3, c_bwcol, c_mbwcol, c_mvbwcol, c_rvbwcol)
+            fmt = "%%%ds | %%%dg | %%%dd | %%%dg | %%%dg |  %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg" % (
+                namecol, totalcol, ncallscol, averagecol, sdcol, c_totalcol,
+                c_averagecol, dvcol, bwcol, 3, c_bwcol, c_mbwcol, c_mvbwcol,
+                c_rvbwcol, papi_diff_t, papi_roofline_gflops)
             keys = sorted(cls._timers.keys(), key=lambda k: k[-6:])
             if cls._output_file is not None:
                 fmt += "\n"
@@ -246,17 +277,22 @@ class Timer(object):
                 t = cls._timers[k]
                 xtra_param = -1
                 xtra_param_2 = -1
-                if cls._extra_param is not None:
-                    xtra_param = cls._extra_param
-                if cls._gflops > 0.0:
-                    xtra_param = cls._gflops
-                    xtra_param_2 = cls._flp_ops
+                roofline_gflops = -1
+                if t._extra_param is not None:
+                    xtra_param = t._extra_param
+                if t._gflops > 0.0:
+                    xtra_param = t._gflops
+                    xtra_param_2 = t._flp_ops
+                    roofline_gflops = t._flp_ops / max_time
                 if cls._output_file is not None:
                     with open(cls._output_file, "a") as f:
-                        tbw = fmt % (t.name, t.total, t.ncalls, t.average, xtra_param_2, t.c_time_total, t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw, t.c_mbw, t.c_mvbw, t.c_rvbw)
+                        tbw = fmt % (t.name, t.total, t.ncalls, t.average, xtra_param_2, t.c_time_total, t.c_time_average, t.dv,
+                                     t.bw, xtra_param, t.c_bw, t.c_mbw, t.c_mvbw, t.c_rvbw, max_time, roofline_gflops)
                         f.write(tbw)
                 else:
-                    print fmt % (t.name, t.total, t.ncalls, t.average, xtra_param_2, t.c_time_total, t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw, t.c_mbw, t.c_mvbw, t.c_rvbw)
+                    print fmt % (t.name, t.total, t.ncalls, t.average, xtra_param_2, t.c_time_total,
+                                 t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw, t.c_mbw, t.c_mvbw,
+                                 t.c_rvbw, max_time, roofline_gflops)
 
     @classmethod
     def get_timers(cls):
@@ -296,6 +332,17 @@ class Timer(object):
         """Include a distribution of values per element."""
         cls._max_bw = value
 
+    @classmethod
+    def max_span(cls):
+        min_start_time = cls._timers.values()[0]._papi_start_time
+        max_end_time = cls._timers.values()[0]._papi_end_time
+        for t in cls._timers.values():
+            if min_start_time > t._papi_start_time:
+                min_start_time = t._papi_start_time
+            if max_end_time < t._papi_end_time:
+                max_end_time = t._papi_end_time
+        return max_end_time - min_start_time
+
 
 @contextmanager
 def hpc_profiling(t, name):
@@ -317,9 +364,9 @@ def add_c_time(t, name, time):
         Timer("%s-%s" % (t, name)).c_rand_time(time)
 
 
-def add_papi_gflops(t, name, flp_ops, gflops):
+def add_papi_gflops(t, name, papi_measures):#flp_ops, gflops):
     if not configuration['randomize']:
-        Timer("%s-%s" % (t, name)).papi_gflops(flp_ops, gflops)
+        Timer("%s-%s" % (t, name)).papi_gflops(papi_measures)#flp_ops, gflops)
 
 
 def summary(filename=None):
