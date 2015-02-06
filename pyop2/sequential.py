@@ -69,6 +69,7 @@ double %(wrapper_name)s(int start, int end,
   %(timer_start)s
   %(papi_start)s
   %(likwid_start_outer)s
+  %(times_loop_start)s
   for ( int n = start; n < end; n++ ) {
     int i = %(index_expr)s;
     %(vec_inits)s;
@@ -91,6 +92,7 @@ double %(wrapper_name)s(int start, int end,
     %(apply_offset)s;
     %(extr_loop_close)s
   }
+  %(times_loop_end)s
   %(likwid_end_outer)s
   %(papi_end)s
   %(papi_print)s

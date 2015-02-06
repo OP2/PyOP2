@@ -81,6 +81,7 @@ class Timer(object):
         self._only_kernel = False
         self._volume_mvbw = None
         self._volume_mbw = None
+        self._rand_volume_mvbw = None
         self._extra_param_2 = -1
         self._flp_ops = 0.0
         self._flp_ops_2 = 0.0
@@ -90,6 +91,9 @@ class Timer(object):
         self._volume = vol
         self._volume_mvbw = vol_mvbw
         self._volume_mbw = vol_mbw
+
+    def rand_data_volume(self, vol_mvbw):
+        self._rand_volume_mvbw = vol_mvbw
 
     def c_time(self, c_time):
         """Time value from the kernel wrapper."""
@@ -108,7 +112,7 @@ class Timer(object):
         # Compute the min time it took to run the instrumented region
         min_diff_time = min(papi_measures[2], papi_measures[3])
         # Compute the number of FP operations
-        self._flp_ops_2 = max(self._flp_ops_2, min_diff_time * papi_measures[1])
+        self._flp_ops_2 = max(self._flp_ops_2, min_diff_time * papi_measures[1] * 1000.0)
         # Keep track of the min diff times for each run of this process
         self._papi_diff_timings.append(min_diff_time)
         # Only take the first and last time stamp of the first run
@@ -189,6 +193,7 @@ class Timer(object):
 
     @property
     def c_bw(self):
+
         return self._volume / self.c_time_average / 1024.0 / 1024.0 if self.c_time_total else 0.0
 
     @property
@@ -201,11 +206,19 @@ class Timer(object):
 
     @property
     def c_rvbw(self):
-        return (self._volume_mvbw / max(self._c_rand_timings) / 1024.0 / 1024.0) if len(self._c_rand_timings) > 0 else 0.0
+        return (self._rand_volume_mvbw / max(self._c_rand_timings) / 1024.0 / 1024.0) if len(self._c_rand_timings) > 0 else 0.0
 
     @property
     def papi_min_diff(self):
         return min(self._papi_diff_timings)
+
+    @property
+    def c_start(self):
+        return self._papi_start_time
+
+    @property
+    def c_end(self):
+        return self._papi_end_time
 
     @property
     def sd(self):
@@ -224,7 +237,7 @@ class Timer(object):
             return
         column_heads = ("Timer", "Total time", "Calls", "Average time", "Standard Deviation", "Tot C time", "Avg C time",
                         "Tot DV (MB)", "Tot BW (MB/s)", "Tot C BW (MB/s)")
-        max_time = cls.max_span()
+        # max_time = cls.max_span()
         if isinstance(filename, str):
             import csv
             with open(filename, 'wb') as f:
@@ -263,13 +276,15 @@ class Timer(object):
                             for t in cls._timers.values()])
             papi_diff_t = max([len(column_heads[8])] + [len('%g' % t.papi_min_diff)
                               for t in cls._timers.values()])
+            papi_start_end = max([len(column_heads[8])] + [len('%g' % t.c_start)
+                              for t in cls._timers.values()])
             papi_roofline_gflops = max([len(column_heads[8])] + [len('%g' % t._flp_ops)
                                        for t in cls._timers.values()])
 
-            fmt = "%%%ds | %%%dg | %%%dd | %%%dg | %%%dg |  %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg" % (
+            fmt = "%%%ds | %%%dg | %%%dd | %%%dg | %%%dg |  %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%d.%dg | %%%d.%dg | %%%dg" % (
                 namecol, totalcol, ncallscol, averagecol, sdcol, c_totalcol,
                 c_averagecol, dvcol, bwcol, 3, c_bwcol, c_mbwcol, c_mvbwcol,
-                c_rvbwcol, papi_diff_t, papi_roofline_gflops)
+                c_rvbwcol, papi_start_end, papi_start_end, papi_start_end, papi_start_end, papi_roofline_gflops)
             keys = sorted(cls._timers.keys(), key=lambda k: k[-6:])
             if cls._output_file is not None:
                 fmt += "\n"
@@ -283,16 +298,17 @@ class Timer(object):
                 if t._gflops > 0.0:
                     xtra_param = t._gflops
                     xtra_param_2 = t._flp_ops
-                    roofline_gflops = t._flp_ops / max_time
+                    roofline_gflops = t._flp_ops_2
                 if cls._output_file is not None:
                     with open(cls._output_file, "a") as f:
-                        tbw = fmt % (t.name, t.total, t.ncalls, t.average, xtra_param_2, t.c_time_total, t.c_time_average, t.dv,
-                                     t.bw, xtra_param, t.c_bw, t.c_mbw, t.c_mvbw, t.c_rvbw, max_time, roofline_gflops)
+                        tbw = fmt % (t.name, t.total, t.ncalls, t.average, xtra_param_2, t.c_time_total,
+                                     t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw, t.c_mbw, t.c_mvbw,
+                                     t.c_rvbw, t.c_start, t.c_end, roofline_gflops)
                         f.write(tbw)
                 else:
                     print fmt % (t.name, t.total, t.ncalls, t.average, xtra_param_2, t.c_time_total,
                                  t.c_time_average, t.dv, t.bw, xtra_param, t.c_bw, t.c_mbw, t.c_mvbw,
-                                 t.c_rvbw, max_time, roofline_gflops)
+                                 t.c_rvbw, t.c_start, t.c_end, roofline_gflops)
 
     @classmethod
     def get_timers(cls):
@@ -332,17 +348,6 @@ class Timer(object):
         """Include a distribution of values per element."""
         cls._max_bw = value
 
-    @classmethod
-    def max_span(cls):
-        min_start_time = cls._timers.values()[0]._papi_start_time
-        max_end_time = cls._timers.values()[0]._papi_end_time
-        for t in cls._timers.values():
-            if min_start_time > t._papi_start_time:
-                min_start_time = t._papi_start_time
-            if max_end_time < t._papi_end_time:
-                max_end_time = t._papi_end_time
-        return max_end_time - min_start_time
-
 
 @contextmanager
 def hpc_profiling(t, name):
@@ -355,6 +360,8 @@ def hpc_profiling(t, name):
 def add_data_volume(t, name, vol, vol_mvbw, vol_mbw):
     if not configuration['randomize']:
         Timer("%s-%s" % (t, name)).data_volume(vol, vol_mvbw, vol_mbw)
+    else:
+        Timer("%s-%s" % (t, name)).rand_data_volume(vol_mvbw)
 
 
 def add_c_time(t, name, time):

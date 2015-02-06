@@ -90,7 +90,9 @@ class Configuration(object):
         # For extruded meshes: DG coords correction term for MBW
         "dg_coords": ("PYOP2_DG_COORDS", int, 0),
         # Randomize the mesh by mixing the maps
-        "randomize": ("PYOP2_randomize", bool, False),
+        "randomize": ("PYOP2_RANDOMIZE", bool, False),
+        # Number of times the wrapper code is being run. This is for testing only.
+        "times": ("PYOP2_TIMES", int, 1),
 
         "backend": ("PYOP2_BACKEND", str, "sequential"),
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gnu"),

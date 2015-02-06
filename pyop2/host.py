@@ -894,6 +894,9 @@ class JITModule(base.JITModule):
         return (s2 - s1)/1e9;
         """
 
+        _times_loop_start="for(int times=0; times<%(times)s; times++){\n" % {'times': str(configuration['times'])}
+        _times_loop_end="}"
+
         _map_decl = ""
         _apply_offset = ""
         _map_init = ""
@@ -1078,5 +1081,7 @@ class JITModule(base.JITModule):
                 'papi_start': _papi_start if configuration['papi_flops'] else "",
                 'papi_end': _papi_end if configuration['papi_flops'] else "",
                 'papi_print': _papi_print if configuration['papi_flops'] else "",
+                'times_loop_start': _times_loop_start if configuration['times'] > 1 else "",
+                'times_loop_end': _times_loop_end if configuration['times'] > 1 else "",
                 'itset_loop_body': '\n'.join([itset_loop_body(i, j, shape, offsets, is_facet=(self._iteration_region == ON_INTERIOR_FACETS))
                                               for i, j, shape, offsets in self._itspace])}

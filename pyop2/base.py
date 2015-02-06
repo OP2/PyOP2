@@ -3704,6 +3704,12 @@ class JITModule(Cached):
         if configuration['hpc_profiling'] is not None:
             key += ((configuration['hpc_profiling'],))
 
+        if configuration['papi_flops'] is not None:
+            key += ((configuration['papi_flops'],))
+
+        if configuration['times'] is not None:
+            key += ((configuration['times'],))
+
         # The currently defined Consts need to be part of the cache key, since
         # these need to be uploaded to the device before launching the kernel
         for c in Const._definitions():
@@ -3931,7 +3937,10 @@ class ParLoop(LazyComputation):
             if self._only_local:
                 self.reverse_halo_exchange_end()
             self.maybe_set_halo_update_needed()
-        add_data_volume('base', '%s-%s' % (region_name, self.kernel._md5), self._data_volume, self._data_volume_mvbw, self._data_volume_mbw)
+        add_data_volume('base', '%s-%s' % (region_name, self.kernel._md5),
+                                           configuration['times'] * self._data_volume,
+                                           configuration['times'] * self._data_volume_mvbw,
+                                           configuration['times'] * self._data_volume_mbw)
         add_c_time('base', '%s-%s' % (region_name, self.kernel._md5), t)
         add_papi_gflops('base', '%s-%s' % (region_name, self.kernel._md5), papi_measures)#flp_ops, gflops)
 
