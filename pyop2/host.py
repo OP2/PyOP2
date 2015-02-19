@@ -336,20 +336,20 @@ class Arg(base.Arg):
         for i, (m, d) in enumerate(zip(self.map, self.data)):
             for k in range(d.dataset.cdim if self._flatten else 1):
                 for idx in range(m.arity):
-                    val.append("%(name)s[%(j)d] += %(offset)s[%(i)d] * %(dim)s;" %
+                    val.append("%(name)s[%(j)d] += %(offset)s * %(dim)s;" %
                                {'name': self.c_vec_name(),
                                 'i': idx,
                                 'j': vec_idx,
-                                'offset': self.c_offset_name(i, 0),
+                                'offset': m.offset[idx],
                                 'dim': d.dataset.cdim})
                     vec_idx += 1
                 if is_facet:
                     for idx in range(m.arity):
-                        val.append("%(name)s[%(j)d] += %(offset)s[%(i)d] * %(dim)s;" %
+                        val.append("%(name)s[%(j)d] += %(offset)s * %(dim)s;" %
                                    {'name': self.c_vec_name(),
                                     'i': idx,
                                     'j': vec_idx,
-                                    'offset': self.c_offset_name(i, 0),
+                                    'offset': m.offset[idx],
                                     'dim': d.dataset.cdim})
                         vec_idx += 1
         return '\n'.join(val)+'\n'
@@ -515,31 +515,31 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                 for idx in range(m.arity):
                     if self._is_dat and self._flatten and d.cdim > 1:
                         for k in range(d.cdim):
-                            val.append("xtr_%(name)s[%(ind_flat)s] += %(off)s[%(ind)s] * %(dim)s;" %
+                            val.append("xtr_%(name)s[%(ind_flat)s] += %(off)d * %(dim)s;" %
                                        {'name': self.c_map_name(i, j),
-                                        'off': self.c_offset_name(i, j),
+                                        'off': m.offset[idx],
                                         'ind': idx,
                                         'ind_flat': m.arity * k + idx,
                                         'dim': d.cdim})
                     else:
-                        val.append("xtr_%(name)s[%(ind)s] += %(off)s[%(ind)s];" %
+                        val.append("xtr_%(name)s[%(ind)s] += %(off)s;" %
                                    {'name': self.c_map_name(i, j),
-                                    'off': self.c_offset_name(i, j),
+                                    'off': m.offset[idx],
                                     'ind': idx})
                 if is_facet:
                     for idx in range(m.arity):
                         if self._is_dat and self._flatten and d.cdim > 1:
                             for k in range(d.cdim):
-                                val.append("xtr_%(name)s[%(ind_flat)s] += %(off)s[%(ind)s] * %(dim)s;" %
+                                val.append("xtr_%(name)s[%(ind_flat)s] += %(off)d * %(dim)s;" %
                                            {'name': self.c_map_name(i, j),
-                                            'off': self.c_offset_name(i, j),
+                                            'off': m.offset[idx],
                                             'ind': idx,
                                             'ind_flat': m.arity * (k + d.cdim) + idx,
                                             'dim': d.cdim})
                         else:
-                            val.append("xtr_%(name)s[%(ind)s] += %(off)s[%(ind_zero)s];" %
+                            val.append("xtr_%(name)s[%(ind)s] += %(off)s;" %
                                        {'name': self.c_map_name(i, j),
-                                        'off': self.c_offset_name(i, j),
+                                        'off': m.offset[idx],
                                         'ind': m.arity + idx,
                                         'ind_zero': idx})
         return '\n'.join(val)+'\n'
@@ -625,6 +625,7 @@ class JITModule(base.JITModule):
         self._args = args
         self._direct = kwargs.get('direct', False)
         self._iteration_region = kwargs.get('iterate', ALL)
+        self._unique_args = kwargs.get('unique_args', None)
         self._initialized = True
 
     @collective
@@ -636,6 +637,14 @@ class JITModule(base.JITModule):
     @property
     def _wrapper_name(self):
         return 'wrap_%s' % self._kernel.name
+
+    @property
+    def _is_direct(self):
+        return all(a.map is None for a in self._args)
+
+    @property
+    def _is_indirect(self):
+        return not self._is_direct
 
     @collective
     def compile(self, argtypes=None, restype=None):
@@ -718,6 +727,9 @@ class JITModule(base.JITModule):
         if configuration["papi_flops"]:
             self._kernel._headers += ["#include <papi.h>"]
 
+        if configuration["iaca"]:
+            self._kernel._headers += ["#include <iacaMarks.h>"]
+
         code_to_compile = """
         #include <mat_utils.h>
         #include <stdbool.h>
@@ -754,6 +766,10 @@ class JITModule(base.JITModule):
         if configuration["papi_flops"]:
             more_args.append("-lpapi")
             more_args.append("-lpfm")
+        if configuration["iaca"]:
+            more_args.append("-liacaArchDataSNB")
+            more_args.append("-liacaXED2SNB")
+            more_args.append("-liacaLogicSNB")
         ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
                  ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()]
         if configuration["papi_flops"]:
@@ -762,6 +778,10 @@ class JITModule(base.JITModule):
             ldargs += ["-Wl,-rpath,%s" % get_papi_dir()]
             ldargs += ["-L%s/libpfm4/lib" % get_papi_dir()]
             ldargs += ["-Wl,-rpath,%s/libpfm4/lib" % get_papi_dir()]
+        if configuration["iaca"]:
+            cppargs += ["-I%s/include" % get_iaca_dir()]
+            ldargs += ["-L%s/lib" % get_iaca_dir()]
+            ldargs += ["-Wl,-rpath,%s/lib" % get_iaca_dir()]
         ldargs += more_args + self._libraries
         if self._kernel._applied_blas:
             blas_dir = blas['dir']
@@ -771,6 +791,7 @@ class JITModule(base.JITModule):
             ldargs += blas['link']
             if blas['name'] == 'eigen':
                 extension = "cpp"
+        print code_to_compile
         self._fun = compilation.load(code_to_compile,
                                      extension,
                                      self._wrapper_name,
@@ -845,7 +866,7 @@ class JITModule(base.JITModule):
              for count, arg in enumerate(self._args)
              if arg._is_global_reduction])
 
-        _vec_inits = ';\n'.join([arg.c_vec_init(is_top, self._itspace.layers, is_facet) for arg in self._args
+        _vec_inits = ';\n'.join([arg.c_vec_init(is_top, self._itspace.layers, is_facet) for arg in self._unique_args
                                  if not arg._is_mat and arg._is_vec_map])
 
         indent = lambda t, i: ('\n' + '  ' * i).join(t.split('\n'))
@@ -878,10 +899,6 @@ class JITModule(base.JITModule):
         _papi_end = """
         retval = PAPI_flops(&real_time, &proc_time, &flpops, &mflops);
         """
-        # _papi_print = """
-        # fl_ops[0] = (flpops - iflpops) / 1000000.0;
-        # gflops[0] = mflops / 1000.0;
-        # """
 
         _papi_print = """
         s2 = stamp();
@@ -893,6 +910,10 @@ class JITModule(base.JITModule):
         papi_measures[5] = s2/1e9;
         return (s2 - s1)/1e9;
         """
+
+        _iaca_start = "IACA_START"
+
+        _iaca_end = "IACA_END"
 
         _times_loop_start="for(int times=0; times<%(times)s; times++){\n" % {'times': str(configuration['times'])}
         _times_loop_end="}"
@@ -1081,6 +1102,8 @@ class JITModule(base.JITModule):
                 'papi_start': _papi_start if configuration['papi_flops'] else "",
                 'papi_end': _papi_end if configuration['papi_flops'] else "",
                 'papi_print': _papi_print if configuration['papi_flops'] else "",
+                'iaca_start': _iaca_start if configuration['iaca'] and self._is_indirect else "",
+                'iaca_end': _iaca_end if configuration['iaca'] and self._is_indirect else "",
                 'times_loop_start': _times_loop_start if configuration['times'] > 1 else "",
                 'times_loop_end': _times_loop_end if configuration['times'] > 1 else "",
                 'itset_loop_body': '\n'.join([itset_loop_body(i, j, shape, offsets, is_facet=(self._iteration_region == ON_INTERIOR_FACETS))

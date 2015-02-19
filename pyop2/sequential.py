@@ -75,6 +75,7 @@ double %(wrapper_name)s(int start, int end,
     %(vec_inits)s;
     %(map_init)s;
     %(extr_loop)s
+    %(iaca_start)s
     %(map_bcs_m)s;
     %(buffer_decl)s;
     %(buffer_gather)s
@@ -82,7 +83,6 @@ double %(wrapper_name)s(int start, int end,
     %(likwid_start_inner)s
     %(kernel_name)s(%(kernel_args)s);
     %(likwid_end_inner)s
-
     %(layout_decl)s;
     %(layout_loop)s
         %(layout_assign)s;
@@ -90,6 +90,7 @@ double %(wrapper_name)s(int start, int end,
     %(itset_loop_body)s
     %(map_bcs_p)s;
     %(apply_offset)s;
+    %(iaca_end)s
     %(extr_loop_close)s
   }
   %(times_loop_end)s
@@ -109,7 +110,7 @@ class ParLoop(host.ParLoop):
     @collective
     @lineprof
     def _compute(self, part):
-        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct, iterate=self.iteration_region)
+        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct, iterate=self.iteration_region, unique_args=self.unique_args)
         if not hasattr(self, '_jit_args'):
             self._argtypes = [ctypes.c_int, ctypes.c_int]
             self._jit_args = [0, 0]

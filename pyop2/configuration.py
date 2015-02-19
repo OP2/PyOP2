@@ -93,6 +93,8 @@ class Configuration(object):
         "randomize": ("PYOP2_RANDOMIZE", bool, False),
         # Number of times the wrapper code is being run. This is for testing only.
         "times": ("PYOP2_TIMES", int, 1),
+        # Enable intel IACA instrumentation
+        "iaca": ("PYOP2_IACA", bool, False),
 
         "backend": ("PYOP2_BACKEND", str, "sequential"),
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gnu"),

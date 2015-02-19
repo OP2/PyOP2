@@ -333,6 +333,14 @@ def get_papi_dir():
         sys.exit("You have chosen to profile using PAPI but have not provided a path to the PAPI folder.")
 
 
+def get_iaca_dir():
+    try:
+        iaca_dir = os.environ['PYOP2_IACA_DIR']
+        return iaca_dir
+    except KeyError:
+        sys.exit("You have chosen to use IACA but have not provided a path to the IACA folder. PYOP2_IACA_DIR unset.")
+
+
 def randomize_map(ord_map, cells):
     # This routine takes a mesh and creates random mesh out of it by
     # changing the numbering of the nodes.
