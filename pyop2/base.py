@@ -3929,7 +3929,7 @@ class ParLoop(LazyComputation):
         with hpc_profiling('base', '%s-%s' % (region_name, self.kernel._md5)):
             self.halo_exchange_begin()
             self.maybe_set_dat_dirty()
-            t, papi_measures = self._compute(self.it_space.iterset.core_part)
+            t, other_measures = self._compute(self.it_space.iterset.core_part)
             self.halo_exchange_end()
             self._compute(self.it_space.iterset.owned_part)
             self.reduction_begin()
@@ -3944,9 +3944,10 @@ class ParLoop(LazyComputation):
         add_data_volume('base', '%s-%s' % (region_name, self.kernel._md5),
                                            configuration['times'] * self._data_volume,
                                            configuration['times'] * self._data_volume_mvbw,
-                                           configuration['times'] * self._data_volume_mbw)
+                                           configuration['times'] * self._data_volume_mbw,
+                                           other_measures)
         add_c_time('base', '%s-%s' % (region_name, self.kernel._md5), t)
-        add_papi_gflops('base', '%s-%s' % (region_name, self.kernel._md5), papi_measures)#flp_ops, gflops)
+        add_papi_gflops('base', '%s-%s' % (region_name, self.kernel._md5), other_measures)
 
     @collective
     def _compute(self, part):

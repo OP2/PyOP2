@@ -73,8 +73,8 @@ class Timer(object):
         self._c_timings = []
         self._c_rand_timings = []
         self._papi_diff_timings = []
-        self._papi_start_time = -1.0
-        self._papi_end_time = -1.0
+        self._start_time = -1.0
+        self._end_time = -1.0
         self._c_rand_timings = []
         self._output_file = None
         self._extra_param = -1
@@ -86,11 +86,15 @@ class Timer(object):
         self._flp_ops = 0.0
         self._flp_ops_2 = 0.0
         self._gflops = 0.0
+        self._iaca_flops = 0.0
 
-    def data_volume(self, vol, vol_mvbw, vol_mbw):
+    def data_volume(self, vol, vol_mvbw, vol_mbw, other_measures):
         self._volume = vol
         self._volume_mvbw = vol_mvbw
         self._volume_mbw = vol_mbw
+        # Only take the first and last time stamp of the first run
+        self._start_time = other_measures[4]
+        self._end_time = other_measures[5]
 
     def rand_data_volume(self, vol_mvbw):
         self._rand_volume_mvbw = vol_mvbw
@@ -103,7 +107,7 @@ class Timer(object):
         """Time value from the kernel wrapper in the randomized case."""
         self._c_rand_timings.append(c_rand_time)
 
-    def papi_gflops(self, papi_measures):#flp_ops, gflops):
+    def papi_gflops(self, papi_measures):
         """Time value from the kernel wrapper."""
         # Papi measured M_FLP_OPs (just all operations (Mega), not per second)
         self._flp_ops = max(self._flp_ops, papi_measures[0])
@@ -115,10 +119,9 @@ class Timer(object):
         self._flp_ops_2 = max(self._flp_ops_2, min_diff_time * papi_measures[1] * 1000.0)
         # Keep track of the min diff times for each run of this process
         self._papi_diff_timings.append(min_diff_time)
-        # Only take the first and last time stamp of the first run
-        if self._papi_start_time < 0.0:
-            self._papi_start_time = papi_measures[4]
-            self._papi_end_time = papi_measures[5]
+
+    def iaca_flops(self, iaca_flops):
+        self._iaca_flops = iaca_flops
 
     def start(self):
         """Start the timer."""
@@ -214,11 +217,11 @@ class Timer(object):
 
     @property
     def c_start(self):
-        return self._papi_start_time
+        return self._start_time
 
     @property
     def c_end(self):
-        return self._papi_end_time
+        return self._end_time
 
     @property
     def sd(self):
@@ -299,6 +302,8 @@ class Timer(object):
                     xtra_param = t._gflops
                     xtra_param_2 = t._flp_ops
                     roofline_gflops = t._flp_ops_2
+                if t._iaca_flops > 0.0:
+                    roofline_gflops = t._iaca_flops
                 if cls._output_file is not None:
                     with open(cls._output_file, "a") as f:
                         tbw = fmt % (t.name, t.total, t.ncalls, t.average, xtra_param_2, t.c_time_total,
@@ -357,9 +362,9 @@ def hpc_profiling(t, name):
     timer.stop()
 
 
-def add_data_volume(t, name, vol, vol_mvbw, vol_mbw):
+def add_data_volume(t, name, vol, vol_mvbw, vol_mbw, other_measures):
     if not configuration['randomize']:
-        Timer("%s-%s" % (t, name)).data_volume(vol, vol_mvbw, vol_mbw)
+        Timer("%s-%s" % (t, name)).data_volume(vol, vol_mvbw, vol_mbw, other_measures)
     else:
         Timer("%s-%s" % (t, name)).rand_data_volume(vol_mvbw)
 
@@ -371,9 +376,14 @@ def add_c_time(t, name, time):
         Timer("%s-%s" % (t, name)).c_rand_time(time)
 
 
-def add_papi_gflops(t, name, papi_measures):#flp_ops, gflops):
+def add_papi_gflops(t, name, papi_measures):
     if not configuration['randomize']:
-        Timer("%s-%s" % (t, name)).papi_gflops(papi_measures)#flp_ops, gflops)
+        Timer("%s-%s" % (t, name)).papi_gflops(papi_measures)
+
+
+def add_iaca_flops(t, name, iaca_flops):
+    if not configuration['randomize']:
+        Timer("%s-%s" % (t, name)).iaca_flops(iaca_flops)
 
 
 def summary(filename=None):

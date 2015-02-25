@@ -341,6 +341,22 @@ def get_iaca_dir():
         sys.exit("You have chosen to use IACA but have not provided a path to the IACA folder. PYOP2_IACA_DIR unset.")
 
 
+def get_iaca_sys():
+    try:
+        iaca_dir = os.environ['PYOP2_IACA_SYSTEM']
+        return iaca_dir
+    except KeyError:
+        sys.exit("PYOP2_IACA_SYSTEM unset. (Set to: SNB, HSW or IVB)")
+
+
+def get_iaca_output_file():
+    try:
+        iaca_out = os.environ['PYOP2_IACA_OUT_FILE']
+        return iaca_out
+    except KeyError:
+        sys.exit("PYOP2_IACA_OUT_FILE unset.")
+
+
 def randomize_map(ord_map, cells):
     # This routine takes a mesh and creates random mesh out of it by
     # changing the numbering of the nodes.

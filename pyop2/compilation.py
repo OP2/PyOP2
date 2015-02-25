@@ -92,7 +92,7 @@ class Compiler(object):
                 raise CompilationError('Hashes of generated code differ on different ranks')
         try:
             # Are we in the cache?
-            return ctypes.CDLL(soname)
+            return ctypes.CDLL(soname), cachedir + "/" + basename
         except OSError:
             # No, let's go ahead and build
             if MPI.comm.rank == 0:
@@ -169,7 +169,7 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
             # Wait for compilation to complete
             MPI.comm.barrier()
             # Load resulting library
-            return ctypes.CDLL(soname)
+            return ctypes.CDLL(soname), cachedir + "/" + basename
 
 
 class MacCompiler(Compiler):
@@ -254,12 +254,12 @@ def load(src, extension, fn_name, cppargs=[], ldargs=[], argtypes=None, restype=
     else:
         raise CompilationError("Don't know what compiler to use for platform '%s'" %
                                platform)
-    dll = compiler.get_so(src, extension)
+    dll, basename = compiler.get_so(src, extension)
 
     fn = getattr(dll, fn_name)
     fn.argtypes = argtypes
     fn.restype = restype
-    return fn
+    return fn, basename
 
 
 def clear_cache(prompt=False):

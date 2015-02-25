@@ -47,6 +47,7 @@ from coffee.base import Node
 from coffee.plan import ASTKernel
 import coffee.plan
 from coffee.vectorizer import vect_roundup
+from hpc_profiling import add_iaca_flops
 
 
 class Kernel(base.Kernel):
@@ -767,9 +768,9 @@ class JITModule(base.JITModule):
             more_args.append("-lpapi")
             more_args.append("-lpfm")
         if configuration["iaca"]:
-            more_args.append("-liacaArchDataSNB")
-            more_args.append("-liacaXED2SNB")
-            more_args.append("-liacaLogicSNB")
+            more_args.append("-liacaArchData%(sys)s" % {'sys': get_iaca_sys()})
+            more_args.append("-liacaXED2%(sys)s" % {'sys': get_iaca_sys()})
+            more_args.append("-liacaLogic%(sys)s" % {'sys': get_iaca_sys()})
         ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
                  ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()]
         if configuration["papi_flops"]:
@@ -791,8 +792,60 @@ class JITModule(base.JITModule):
             ldargs += blas['link']
             if blas['name'] == 'eigen':
                 extension = "cpp"
-        print code_to_compile
-        self._fun = compilation.load(code_to_compile,
+        self._fun, basename = compilation.load(code_to_compile,
+                                     extension,
+                                     self._wrapper_name,
+                                     cppargs=cppargs,
+                                     ldargs=ldargs,
+                                     argtypes=argtypes,
+                                     restype=restype,
+                                     compiler=compiler.get('name'))
+        # If the IACA flag is on we can use it to generate
+        # a version of the code with instrumentation around the kernel
+        # in the non-extruded case and around the loop over the column
+        # in the extruded case.
+        # This will give us the number of cycles spent in the most
+        # intensive part of a parallel loop.
+        if configuration['iaca'] and self._is_indirect:
+            from subprocess import call
+            path_to_iaca_file = get_iaca_output_file()
+            if path_to_iaca_file != "":
+                iaca_sh = get_iaca_dir() + "/bin/iaca.sh"
+                # Only call this in the single process case.
+                # TODO: call the command line if the file doesn't exist already.
+                # TODO: Sync processes after.
+                if MPI.comm.size == 1:
+                    # Command line invocation of the IACA tool.
+                    call(["sh", iaca_sh, "-64", "-arch", get_iaca_sys(), "-o", path_to_iaca_file, basename + ".so"])
+                with open(path_to_iaca_file, "r+") as h:
+                    lines = h.readlines()
+                    ports = lines[12]
+                    port_vals = lines[14]
+                    iaca_flops = 0
+                    for line in lines:
+                        if "vmulpd" in line or "vaddpd" in line:
+                            iaca_flops += 4
+                        elif "vfmadd231pd" in line or "vfmsub231pd" in line or "vfmadd123pd" in line or "vfmsub123pd" in line or \
+                             "vfmadd132pd" in line or "vfmsub132pd" in line or "vfmadd213pd" in line or "vfmsub213pd" in line or \
+                             "vfmadd312pd" in line or "vfmsub312pd" in line or "vfmadd321pd" in line or "vfmsub321pd" in line:
+                            iaca_flops += 4
+                        elif "vaddsd" in line or "vsubsd" in line or "vmulsd" in line:
+                            iaca_flops += 1
+                        elif "vfmsub231sd" in line or "vfmadd231sd" in line or "vfmsub123sd" in line or "vfmadd123sd" in line or \
+                             "vfmsub132sd" in line or "vfmadd132sd" in line or "vfmsub213sd" in line or "vfmadd213sd" in line or \
+                             "vfmsub312sd" in line or "vfmadd312sd" in line or "vfmsub321sd" in line or "vfmadd321sd" in line:
+                            iaca_flops += 1
+                    # Multiply the iaca flops by the number of applications of the column code
+                    iaca_flops *= self._itspace.size * (self._itspace.layers - 1) * configuration['times'] / 1e6
+                    region_name = configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name
+                    add_iaca_flops('base', '%s-%s' % (region_name, self._kernel._md5), iaca_flops)
+
+            # Now create a new .so file without the IACA instrumentation
+            # The IACA instrumented code will not run anyway!
+            code_to_compile = code_to_compile.replace("IACA_START", "")
+            code_to_compile = code_to_compile.replace("IACA_END", "")
+            # Generate runnable code without IACA instrumentation
+            self._fun, _ = compilation.load(code_to_compile,
                                      extension,
                                      self._wrapper_name,
                                      cppargs=cppargs,
@@ -872,13 +925,22 @@ class JITModule(base.JITModule):
         indent = lambda t, i: ('\n' + '  ' * i).join(t.split('\n'))
 
         _timer_start = """double s1, s2;\ns1=stamp();\n"""
-        _timer_end = """s2=stamp();\nreturn (s2 - s1)/1e9;\n"""
+        _timer_end = """
+        s2=stamp();
+        other_measures[0] = 0.0;
+        other_measures[1] = 0.0;
+        other_measures[2] = 0.0;
+        other_measures[3] = 0.0;
+        other_measures[4] = s1/1e9;
+        other_measures[5] = s2/1e9;
+        return (s2 - s1)/1e9;
+        """
 
         _likwid_thread_init = """LIKWID_MARKER_THREADINIT;\n"""
         _likwid_start = """likwid_markerStartRegion("%(region_name)s");\n"""
         _likwid_end = """likwid_markerStopRegion("%(region_name)s");\n"""
 
-        _papi_args = ", double papi_measures[6]" #", double fl_ops[1], double gflops[1]"
+        _other_args = ", double other_measures[6]"
 
         _papi_decl = """
   float real_time, proc_time, mflops;
@@ -902,12 +964,12 @@ class JITModule(base.JITModule):
 
         _papi_print = """
         s2 = stamp();
-        papi_measures[0] = (flpops - iflpops) / 1000000.0;
-        papi_measures[1] = mflops / 1000.0;
-        papi_measures[2] = real_time - ireal_time;
-        papi_measures[3] = proc_time - iproc_time;
-        papi_measures[4] = s1/1e9;
-        papi_measures[5] = s2/1e9;
+        other_measures[0] = (flpops - iflpops) / 1000000.0;
+        other_measures[1] = mflops / 1000.0;
+        other_measures[2] = real_time - ireal_time;
+        other_measures[3] = proc_time - iproc_time;
+        other_measures[4] = s1/1e9;
+        other_measures[5] = s2/1e9;
         return (s2 - s1)/1e9;
         """
 
@@ -1096,7 +1158,7 @@ class JITModule(base.JITModule):
                 'likwid_end_outer': _likwid_end % {'region_name': region_name} if configuration["likwid"] and configuration["likwid_outer"] else "",
                 'timer_start': _timer_start if configuration["hpc_profiling"] else "",
                 'timer_end': _timer_end if configuration["hpc_profiling"] and not configuration['papi_flops'] else "",
-                'papi_args': _papi_args if configuration['papi_flops'] else "",
+                'other_args': _other_args if configuration["hpc_profiling"] else "",
                 'papi_decl': _papi_decl if configuration['papi_flops'] else "",
                 'papi_init': _papi_init if configuration['papi_flops'] else "",
                 'papi_start': _papi_start if configuration['papi_flops'] else "",

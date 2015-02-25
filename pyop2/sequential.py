@@ -58,7 +58,7 @@ double %(wrapper_name)s(int start, int end,
                       %(const_args)s
                       %(off_args)s
                       %(layer_arg)s
-                      %(papi_args)s) {
+                      %(other_args)s) {
   %(papi_decl)s;
   %(papi_init)s;
   %(user_code)s
@@ -164,14 +164,10 @@ class ParLoop(host.ParLoop):
                 self._jit_args.append(0)
                 self._jit_args.append(self._it_space.layers - 1)
 
-            if configuration['papi_flops']:
+            if configuration['hpc_profiling']:
                 papi_measures = np.zeros(6, dtype=np.float64)
                 self._argtypes.append(ndpointer(np.dtype('float64'), shape=(6,)))
                 self._jit_args.append(papi_measures)
-                # self._argtypes.append(ndpointer(np.dtype('float64'), shape=(1,)))
-                # self._jit_args.append(np.zeros(1, dtype=np.float64))
-                # self._argtypes.append(ndpointer(np.dtype('float64'), shape=(1,)))
-                # self._jit_args.append(np.zeros(1, dtype=np.float64))
 
         self._jit_args[0] = part.offset
         self._jit_args[1] = part.offset + part.size
@@ -180,7 +176,7 @@ class ParLoop(host.ParLoop):
         time = 0
         with timed_region("ParLoop kernel"):
             time = fun(*self._jit_args, argtypes=self._argtypes, restype=ctypes.c_double)
-        if configuration['papi_flops']:
+        if configuration['hpc_profiling']:
             ms = self._jit_args[-1]
             return time, [ms[0], ms[1], ms[2], ms[3], ms[4], ms[5]] #self._jit_args[-2][0], self._jit_args[-1][0]
         return time, np.zeros(6)
