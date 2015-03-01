@@ -66,6 +66,27 @@ class Kernel(base.Kernel):
         self._applied_ap = ast_handler.ap
         return ast_handler.gencode()
 
+    def _iaca_ast_to_c(self, ast, opts={}):
+        """Transform an Abstract Syntax Tree representing the kernel into a
+        string of code (C syntax) suitable to CPU execution which contains
+        IACA instrumentation around the main loops."""
+        if not isinstance(ast, Node):
+            print "Warning: Cannot add IACA instrumentation to non-AST kernels."
+            return None
+        iakify = 1
+        last = False
+        iaca_kernels = []
+        while (not last):
+            iaca_ast, last, nest, loop_count = coffee.utils.insert_iaca(ast, iakify)
+            if not last:
+                iakify += 1
+                ast_handler = ASTKernel(iaca_ast, self._include_dirs)
+                ast_handler.plan_cpu(opts)
+                self._applied_blas = ast_handler.blas
+                self._applied_ap = ast_handler.ap
+                iaca_kernels.append([ast_handler.gencode(), nest, loop_count])
+        return iaca_kernels
+
 
 class Arg(base.Arg):
 
@@ -647,19 +668,7 @@ class JITModule(base.JITModule):
     def _is_indirect(self):
         return not self._is_direct
 
-    @collective
-    def compile(self, argtypes=None, restype=None):
-        if hasattr(self, '_fun'):
-            # It should not be possible to pull a jit module out of
-            # the cache /with/ arguments
-            if hasattr(self, '_args'):
-                raise RuntimeError("JITModule is holding onto args, causing a memory leak (should never happen)")
-            self._fun.argtypes = argtypes
-            self._fun.restype = restype
-            return self._fun
-        # If we weren't in the cache we /must/ have arguments
-        if not hasattr(self, '_args'):
-            raise RuntimeError("JITModule has no args associated with it, should never happen")
+    def get_c_code(self, kernel_code, wrapper_code):
         strip = lambda code: '\n'.join([l for l in code.splitlines()
                                         if l.strip() and l.strip() != ';'])
 
@@ -699,7 +708,7 @@ class JITModule(base.JITModule):
             %(externc_open)s
             %(code)s
             #undef OP2_STRIDE
-            """ % {'code': self._kernel.code,
+            """ % {'code': kernel_code,
                    'externc_open': externc_open,
                    'namespace': blas_namespace,
                    'header': headers,
@@ -712,12 +721,12 @@ class JITModule(base.JITModule):
             %(namespace)s
             %(externc_open)s
             %(code)s
-            """ % {'code': self._kernel.code,
+            """ % {'code': kernel_code,
                    'externc_open': externc_open,
                    'namespace': blas_namespace,
                    'header': headers,
                    'timer': self.timer_function}
-        code_to_compile = strip(dedent(self._wrapper) % self.generate_code())
+        code_to_compile = strip(dedent(self._wrapper) % wrapper_code)
 
         _const_decs = '\n'.join([const._format_declaration()
                                 for const in Const._definitions()]) + '\n'
@@ -746,6 +755,52 @@ class JITModule(base.JITModule):
                'wrapper': code_to_compile,
                'externc_close': externc_close,
                'sys_headers': '\n'.join(self._kernel._headers)}
+        return code_to_compile
+
+    def sum_nested_values(self, iaca_kernels, val_pos):
+        # Compute the actual number of flops or cycles taking
+        # into consideration the nesting of blocks.
+        # val_pos should be either 4 or -2 for CYCLES and 5 or -1 for FLOPS
+        i_flops = 0
+        total_flops = 0
+        prev_nest = iaca_kernels[-1][1]
+        # indices       0     1        2             3              values start here -->| 4                                   5
+        # iaca code is [code, nest ID, loop counter, False/True unrolled / not unrolled, | cycles per block (IACA Throughput), flops per block]
+        for ind, ic in enumerate(reversed(iaca_kernels)):
+            if ic[1] == prev_nest:
+                i_flops += (ic[2] if ic[3] else 1) * ic[val_pos]
+            elif ic[1] < prev_nest:
+                iaca_block_flops = 0
+                for ic_prev in iaca_kernels[len(iaca_kernels) - ind:]:
+                    if prev_nest == ic_prev[1]:
+                        iaca_block_flops += ic_prev[val_pos]
+                    else:
+                        break
+                i_flops = (ic[2] if ic[3] else 1) * (i_flops + ic[val_pos] - iaca_block_flops)
+            else:
+                # Not tested yet. Might never apply to FFC kernels.
+                total_flops += i_flops
+                i_flops = (ic[2] if ic[3] else 1) * ic[val_pos]
+            prev_nest = ic[1]
+        total_flops += i_flops
+        return total_flops
+
+    @collective
+    def compile(self, argtypes=None, restype=None):
+        if hasattr(self, '_fun'):
+            # It should not be possible to pull a jit module out of
+            # the cache /with/ arguments
+            if hasattr(self, '_args'):
+                raise RuntimeError("JITModule is holding onto args, causing a memory leak (should never happen)")
+            self._fun.argtypes = argtypes
+            self._fun.restype = restype
+            return self._fun
+        # If we weren't in the cache we /must/ have arguments
+        if not hasattr(self, '_args'):
+            raise RuntimeError("JITModule has no args associated with it, should never happen")
+
+        wrapper_code = self.generate_code()
+        code_to_compile = self.get_c_code(self._kernel.code, wrapper_code)
 
         self._dump_generated_code(code_to_compile)
         if configuration["debug"]:
@@ -755,6 +810,8 @@ class JITModule(base.JITModule):
         cppargs = ["-I%s/include" % d for d in get_petsc_dir()] + \
                   ["-I%s" % d for d in self._kernel._include_dirs] + \
                   ["-I%s" % os.path.abspath(os.path.dirname(__file__))]
+
+        compiler = coffee.plan.compiler
         if compiler:
             cppargs += [compiler[coffee.plan.intrinsics['inst_set']]]
         more_args = ["-lpetsc", "-lm"]
@@ -792,14 +849,7 @@ class JITModule(base.JITModule):
             ldargs += blas['link']
             if blas['name'] == 'eigen':
                 extension = "cpp"
-        self._fun, basename = compilation.load(code_to_compile,
-                                     extension,
-                                     self._wrapper_name,
-                                     cppargs=cppargs,
-                                     ldargs=ldargs,
-                                     argtypes=argtypes,
-                                     restype=restype,
-                                     compiler=compiler.get('name'))
+
         # If the IACA flag is on we can use it to generate
         # a version of the code with instrumentation around the kernel
         # in the non-extruded case and around the loop over the column
@@ -809,50 +859,89 @@ class JITModule(base.JITModule):
         if configuration['iaca'] and self._is_indirect:
             from subprocess import call
             path_to_iaca_file = get_iaca_output_file()
+            iaca_kernels = [[code_to_compile, 0, self._itspace.layers - 1]] + self._kernel._iaca_ast_to_c(self._kernel._ast, self._kernel._opts)
+            wrapper_code['iaca_start'] = ""
+            wrapper_code['iaca_end'] = ""
+            for ind in range(1, len(iaca_kernels)):
+                iaca_kernels[ind][0] = self.get_c_code(iaca_kernels[ind][0], wrapper_code)
+
             if path_to_iaca_file != "":
                 iaca_sh = get_iaca_dir() + "/bin/iaca.sh"
-                # Only call this in the single process case.
-                # TODO: call the command line if the file doesn't exist already.
-                # TODO: Sync processes after.
-                if MPI.comm.size == 1:
-                    # Command line invocation of the IACA tool.
-                    call(["sh", iaca_sh, "-64", "-arch", get_iaca_sys(), "-o", path_to_iaca_file, basename + ".so"])
-                with open(path_to_iaca_file, "r+") as h:
-                    lines = h.readlines()
-                    ports = lines[12]
-                    port_vals = lines[14]
-                    iaca_flops = 0
-                    for line in lines:
-                        if "vmulpd" in line or "vaddpd" in line:
-                            iaca_flops += 4
-                        elif "vfmadd231pd" in line or "vfmsub231pd" in line or "vfmadd123pd" in line or "vfmsub123pd" in line or \
-                             "vfmadd132pd" in line or "vfmsub132pd" in line or "vfmadd213pd" in line or "vfmsub213pd" in line or \
-                             "vfmadd312pd" in line or "vfmsub312pd" in line or "vfmadd321pd" in line or "vfmsub321pd" in line:
-                            iaca_flops += 4
-                        elif "vaddsd" in line or "vsubsd" in line or "vmulsd" in line:
-                            iaca_flops += 1
-                        elif "vfmsub231sd" in line or "vfmadd231sd" in line or "vfmsub123sd" in line or "vfmadd123sd" in line or \
-                             "vfmsub132sd" in line or "vfmadd132sd" in line or "vfmsub213sd" in line or "vfmadd213sd" in line or \
-                             "vfmsub312sd" in line or "vfmadd312sd" in line or "vfmsub321sd" in line or "vfmadd321sd" in line:
-                            iaca_flops += 1
-                    # Multiply the iaca flops by the number of applications of the column code
-                    iaca_flops *= self._itspace.size * (self._itspace.layers - 1) * configuration['times'] / 1e6
-                    region_name = configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name
-                    add_iaca_flops('base', '%s-%s' % (region_name, self._kernel._md5), iaca_flops)
+                iaca_flops = 0
+
+                # Compiler the iaca codes one by one.
+                for ind, iaca_code in enumerate(iaca_kernels):
+                    # Each IACA code is composed of the code the nest and loop counter
+                    # TODO: Add flag to prevent loop unrolling
+                    iaca_fun, basename = compilation.load(iaca_code[0],
+                                         extension,
+                                         self._wrapper_name,
+                                         cppargs=cppargs + ["-g", "-s"],# + ['-funroll-all-loops'],
+                                         ldargs=ldargs,
+                                         argtypes=argtypes,
+                                         restype=restype,
+                                         compiler=compiler.get('name'))
+                    # For each code, compile it and then call the iaca.sh on it
+                    # Only call this in the single process case.
+                    # TODO: call the command line if the file doesn't exist already.
+                    # TODO: Sync processes after.
+                    if MPI.comm.size == 1:
+                        # Command line invocation of the IACA tool.
+                        call(["sh", iaca_sh, "-64", "-arch", get_iaca_sys(), "-o", path_to_iaca_file+"."+str(ind), basename + ".so"])
+
+                    # Once the file is generated then compute the number of flops and the number of cycles.
+                    with open(path_to_iaca_file+"."+str(ind), "r+") as h:
+                        lines = h.readlines()
+                        # Mark the loop with True: not rolled, False: unrolled
+                        for line in reversed(lines[:-1]):
+                            if not('mov' in line):
+                                iaca_kernels[ind].append("j" in line)
+                                break
+                        # Get the throughput through the ports for this code region
+                        ports = lines[8].split()
+                        # Add the block cycles
+                        iaca_kernels[ind].append(float(ports[2]))
+                        #port_vals = lines[14].split()
+                        iaca_flops = 0
+                        # TODO: Replace this loop with something nicer!!
+                        for line in lines:
+                            if "vmulpd" in line or "vaddpd" in line or "vhaddpd" in line:
+                                iaca_flops += 4
+                            elif "vfmadd231pd" in line or "vfmsub231pd" in line or "vfmadd123pd" in line or "vfmsub123pd" in line or \
+                                 "vfmadd132pd" in line or "vfmsub132pd" in line or "vfmadd213pd" in line or "vfmsub213pd" in line or \
+                                 "vfmadd312pd" in line or "vfmsub312pd" in line or "vfmadd321pd" in line or "vfmsub321pd" in line:
+                                iaca_flops += 4
+                            elif "vaddsd" in line or "vsubsd" in line or "vmulsd" in line:
+                                iaca_flops += 1
+                            elif "vfmsub231sd" in line or "vfmadd231sd" in line or "vfmsub123sd" in line or "vfmadd123sd" in line or \
+                                 "vfmsub132sd" in line or "vfmadd132sd" in line or "vfmsub213sd" in line or "vfmadd213sd" in line or \
+                                 "vfmsub312sd" in line or "vfmadd312sd" in line or "vfmsub321sd" in line or "vfmadd321sd" in line:
+                                iaca_flops += 1
+                        iaca_kernels[ind].append(iaca_flops)
+                total_flops = self.sum_nested_values(iaca_kernels, -1)
+                total_cycles = self.sum_nested_values(iaca_kernels, -2)
+
+                print "After the iaca kernels"
+                from IPython import embed; embed()
+
+                # Multiply the iaca flops by the number of applications of the column code
+                iaca_flops = total_flops * self._itspace.size * configuration['times'] / 1e6
+                region_name = configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name
+                add_iaca_flops('base', '%s-%s' % (region_name, self._kernel._md5), iaca_flops)
 
             # Now create a new .so file without the IACA instrumentation
             # The IACA instrumented code will not run anyway!
             code_to_compile = code_to_compile.replace("IACA_START", "")
             code_to_compile = code_to_compile.replace("IACA_END", "")
-            # Generate runnable code without IACA instrumentation
-            self._fun, _ = compilation.load(code_to_compile,
-                                     extension,
-                                     self._wrapper_name,
-                                     cppargs=cppargs,
-                                     ldargs=ldargs,
-                                     argtypes=argtypes,
-                                     restype=restype,
-                                     compiler=compiler.get('name'))
+        # Generate runnable code without IACA instrumentation
+        self._fun, _ = compilation.load(code_to_compile,
+                                 extension,
+                                 self._wrapper_name,
+                                 cppargs=cppargs,
+                                 ldargs=ldargs,
+                                 argtypes=argtypes,
+                                 restype=restype,
+                                 compiler=compiler.get('name'))
         # Blow away everything we don't need any more
         del self._args
         del self._kernel

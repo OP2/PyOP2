@@ -90,8 +90,8 @@ double %(wrapper_name)s(int start, int end,
     %(itset_loop_body)s
     %(map_bcs_p)s;
     %(apply_offset)s;
-    %(iaca_end)s
     %(extr_loop_close)s
+    %(iaca_end)s
   }
   %(times_loop_end)s
   %(likwid_end_outer)s
