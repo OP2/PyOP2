@@ -57,6 +57,7 @@ from hpc_profiling import hpc_profiling, add_data_volume, add_c_time, add_papi_g
 
 from coffee.base import Node
 from coffee import base as ast
+from coffee import utils as coffee_utils
 
 
 class LazyComputation(object):
@@ -3614,10 +3615,11 @@ class Kernel(Cached):
     def _ast_to_c(self, ast, opts={}):
         """Transform an Abstract Syntax Tree representing the kernel into a
         string of C code."""
+        old_ast = coffee_utils.dcopy(ast)
         if isinstance(ast, Node):
             self._ast = ast
             return ast.gencode()
-        return ast
+        return ast, old_ast
 
     @property
     def _md5(self):
@@ -3637,7 +3639,8 @@ class Kernel(Cached):
         self._include_dirs = include_dirs
         self._headers = headers
         self._user_code = user_code
-        self._code = self._ast_to_c(code, opts)
+        self._old_ast = coffee_utils.dcopy(code)
+        self._code, self._old_ast = self._ast_to_c(code, opts)
         self._initialized = True
 
     @property

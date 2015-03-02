@@ -55,16 +55,17 @@ class Kernel(base.Kernel):
     def _ast_to_c(self, ast, opts={}):
         """Transform an Abstract Syntax Tree representing the kernel into a
         string of code (C syntax) suitable to CPU execution."""
+        old_ast = coffee.utils.dcopy(ast)
         if not isinstance(ast, Node):
             self._applied_blas = False
             self._applied_ap = False
-            return ast
+            return ast, old_ast
         self._ast = ast
         ast_handler = ASTKernel(ast, self._include_dirs)
         ast_handler.plan_cpu(opts)
         self._applied_blas = ast_handler.blas
         self._applied_ap = ast_handler.ap
-        return ast_handler.gencode()
+        return ast_handler.gencode(), old_ast
 
     def _iaca_ast_to_c(self, ast, opts={}):
         """Transform an Abstract Syntax Tree representing the kernel into a
@@ -76,6 +77,11 @@ class Kernel(base.Kernel):
         iakify = 1
         last = False
         iaca_kernels = []
+        if not opts:
+            opts = {"simd_isa": 'sse',
+                    "O0": True,
+                    "compiler": 'gnu',
+                    "autotune": False}
         while (not last):
             iaca_ast, last, nest, loop_count = coffee.utils.insert_iaca(ast, iakify)
             if not last:
@@ -757,7 +763,7 @@ class JITModule(base.JITModule):
                'sys_headers': '\n'.join(self._kernel._headers)}
         return code_to_compile
 
-    def sum_nested_values(self, iaca_kernels, val_pos):
+    def sum_nested_flop_values(self, iaca_kernels, val_pos):
         # Compute the actual number of flops or cycles taking
         # into consideration the nesting of blocks.
         # val_pos should be either 4 or -2 for CYCLES and 5 or -1 for FLOPS
@@ -785,6 +791,107 @@ class JITModule(base.JITModule):
         total_flops += i_flops
         return total_flops
 
+    def sum_nested_cycle_values(self, iaca_kernels, val_pos):
+        # Compute the actual number of flops or cycles taking
+        # into consideration the nesting of blocks.
+        # val_pos should be either 4 or -2 for CYCLES and 5 or -1 for FLOPS
+        i_flops = 0
+        total_flops = 0
+        prev_nest = iaca_kernels[-1][1]
+        cycles = val_pos == 4
+        # indices       0     1        2             3              values start here -->| 4                                   5                6
+        # iaca code is [code, nest ID, loop counter, False/True unrolled / not unrolled, | cycles per block (IACA Throughput), flops per block, jumps]
+        for ind, ic in enumerate(reversed(iaca_kernels)):
+            if ic[1] == prev_nest:
+                i_flops += (ic[2] if ic[3] else 1) * ic[val_pos]
+            elif ic[1] < prev_nest:
+                if ic[6] == 1 and ic[3]:
+                    i_flops = ic[2] * ic[val_pos]
+                else:
+                    iaca_block_flops = 0
+                    for ic_prev in iaca_kernels[len(iaca_kernels) - ind:]:
+                        if prev_nest == ic_prev[1]:
+                            iaca_block_flops += ic_prev[val_pos]
+                        else:
+                            break
+                    if iaca_block_flops > ic[val_pos]:
+                        i_flops = (ic[2] if ic[3] else 1) * ic[val_pos]
+                    else:
+                        i_flops = (ic[2] if ic[3] else 1) * (i_flops + ic[val_pos] - iaca_block_flops)
+            else:
+                # Not tested yet. Might never apply to FFC kernels.
+                total_flops += i_flops
+                i_flops = (ic[2] if ic[3] else 1) * ic[val_pos]
+            prev_nest = ic[1]
+        total_flops += i_flops
+        return total_flops
+
+    def build_loop_nest_reports(self, iaca_kernels, wrapper_code, path_to_iaca_file, compilation, extension, cppargs, ldargs, argtypes, restype, compiler):
+        # wrapper_code['iaca_start'] = ""
+        # wrapper_code['iaca_end'] = ""
+        # for ind in range(1, len(iaca_kernels)):
+        #     iaca_kernels[ind][0] = self.get_c_code(iaca_kernels[ind][0], wrapper_code)
+
+        # if path_to_iaca_file != "":
+        from subprocess import call
+        iaca_sh = get_iaca_dir() + "/bin/iaca.sh"
+        iaca_flops = 0
+
+        # Compiler the iaca codes one by one.
+        for ind, iaca_code in enumerate(iaca_kernels):
+            # Each IACA code is composed of the code the nest and loop counter
+            # TODO: Add flag to prevent loop unrolling
+            iaca_fun, basename = compilation.load(iaca_code[0],
+                                 extension,
+                                 self._wrapper_name,
+                                 cppargs=cppargs,
+                                 ldargs=ldargs,
+                                 argtypes=argtypes,
+                                 restype=restype,
+                                 compiler=compiler.get('name'))
+            # For each code, compile it and then call the iaca.sh on it
+            # Only call this in the single process case.
+            # TODO: call the command line if the file doesn't exist already.
+            # TODO: Sync processes after.
+            if MPI.comm.size == 1:
+                # Command line invocation of the IACA tool.
+                call(["sh", iaca_sh, "-64", "-arch", get_iaca_sys(), "-o", path_to_iaca_file+"."+str(ind), basename + ".so"])
+
+            # Once the file is generated then compute the number of flops and the number of cycles.
+            with open(path_to_iaca_file+"."+str(ind), "r+") as h:
+                lines = h.readlines()
+                # Mark the loop with True: not rolled, False: unrolled
+                for line in reversed(lines[:-1]):
+                    if not('mov' in line):
+                        iaca_kernels[ind].append("j" in line)
+                        break
+                # Get the throughput through the ports for this code region
+                ports = lines[8].split()
+                # Add the block cycles
+                iaca_kernels[ind].append(float(ports[2]))
+                #port_vals = lines[14].split()
+                iaca_flops = 0
+                jumps = 0
+                # TODO: Replace this loop with something nicer!!
+                for line in lines[30:]:
+                    if "j" in line:
+                        jumps += 1
+                    if "vmulpd" in line or "vaddpd" in line or "vhaddpd" in line:
+                        iaca_flops += 4
+                    elif "vfmadd231pd" in line or "vfmsub231pd" in line or "vfmadd123pd" in line or "vfmsub123pd" in line or \
+                         "vfmadd132pd" in line or "vfmsub132pd" in line or "vfmadd213pd" in line or "vfmsub213pd" in line or \
+                         "vfmadd312pd" in line or "vfmsub312pd" in line or "vfmadd321pd" in line or "vfmsub321pd" in line:
+                        iaca_flops += 4
+                    elif "vaddsd" in line or "vsubsd" in line or "vmulsd" in line:
+                        iaca_flops += 1
+                    elif "vfmsub231sd" in line or "vfmadd231sd" in line or "vfmsub123sd" in line or "vfmadd123sd" in line or \
+                         "vfmsub132sd" in line or "vfmadd132sd" in line or "vfmsub213sd" in line or "vfmadd213sd" in line or \
+                         "vfmsub312sd" in line or "vfmadd312sd" in line or "vfmsub321sd" in line or "vfmadd321sd" in line:
+                        iaca_flops += 2
+                iaca_kernels[ind].append(iaca_flops)
+                iaca_kernels[ind].append(jumps)
+        return iaca_kernels
+
     @collective
     def compile(self, argtypes=None, restype=None):
         if hasattr(self, '_fun'):
@@ -801,6 +908,7 @@ class JITModule(base.JITModule):
 
         wrapper_code = self.generate_code()
         code_to_compile = self.get_c_code(self._kernel.code, wrapper_code)
+        original_code_to_compile = self.get_c_code(self._kernel._old_ast, wrapper_code)
 
         self._dump_generated_code(code_to_compile)
         if configuration["debug"]:
@@ -857,73 +965,23 @@ class JITModule(base.JITModule):
         # This will give us the number of cycles spent in the most
         # intensive part of a parallel loop.
         if configuration['iaca'] and self._is_indirect:
-            from subprocess import call
             path_to_iaca_file = get_iaca_output_file()
-            iaca_kernels = [[code_to_compile, 0, self._itspace.layers - 1]] + self._kernel._iaca_ast_to_c(self._kernel._ast, self._kernel._opts)
-            wrapper_code['iaca_start'] = ""
-            wrapper_code['iaca_end'] = ""
-            for ind in range(1, len(iaca_kernels)):
-                iaca_kernels[ind][0] = self.get_c_code(iaca_kernels[ind][0], wrapper_code)
-
             if path_to_iaca_file != "":
-                iaca_sh = get_iaca_dir() + "/bin/iaca.sh"
-                iaca_flops = 0
+                iaca_kernels = [[original_code_to_compile, 0, self._itspace.layers - 1]] + self._kernel._iaca_ast_to_c(self._kernel._old_ast)
+                iaca_cycle_kernels = [[code_to_compile, 0, self._itspace.layers - 1]] + self._kernel._iaca_ast_to_c(self._kernel._ast, self._kernel._opts)
+                wrapper_code['iaca_start'] = ""
+                wrapper_code['iaca_end'] = ""
+                for ind in range(1, len(iaca_kernels)):
+                    iaca_kernels[ind][0] = self.get_c_code(iaca_kernels[ind][0], wrapper_code)
+                    iaca_cycle_kernels[ind][0] = self.get_c_code(iaca_cycle_kernels[ind][0], wrapper_code)
 
-                # Compiler the iaca codes one by one.
-                for ind, iaca_code in enumerate(iaca_kernels):
-                    # Each IACA code is composed of the code the nest and loop counter
-                    # TODO: Add flag to prevent loop unrolling
-                    iaca_fun, basename = compilation.load(iaca_code[0],
-                                         extension,
-                                         self._wrapper_name,
-                                         cppargs=cppargs + ["-g", "-s"],# + ['-funroll-all-loops'],
-                                         ldargs=ldargs,
-                                         argtypes=argtypes,
-                                         restype=restype,
-                                         compiler=compiler.get('name'))
-                    # For each code, compile it and then call the iaca.sh on it
-                    # Only call this in the single process case.
-                    # TODO: call the command line if the file doesn't exist already.
-                    # TODO: Sync processes after.
-                    if MPI.comm.size == 1:
-                        # Command line invocation of the IACA tool.
-                        call(["sh", iaca_sh, "-64", "-arch", get_iaca_sys(), "-o", path_to_iaca_file+"."+str(ind), basename + ".so"])
+                self.build_loop_nest_reports(iaca_kernels, wrapper_code, path_to_iaca_file, compilation, extension, cppargs, ldargs, argtypes, restype, compiler)
+                self.build_loop_nest_reports(iaca_cycle_kernels, wrapper_code, path_to_iaca_file + ".cycle.", compilation, extension, cppargs, ldargs, argtypes, restype, compiler)
 
-                    # Once the file is generated then compute the number of flops and the number of cycles.
-                    with open(path_to_iaca_file+"."+str(ind), "r+") as h:
-                        lines = h.readlines()
-                        # Mark the loop with True: not rolled, False: unrolled
-                        for line in reversed(lines[:-1]):
-                            if not('mov' in line):
-                                iaca_kernels[ind].append("j" in line)
-                                break
-                        # Get the throughput through the ports for this code region
-                        ports = lines[8].split()
-                        # Add the block cycles
-                        iaca_kernels[ind].append(float(ports[2]))
-                        #port_vals = lines[14].split()
-                        iaca_flops = 0
-                        # TODO: Replace this loop with something nicer!!
-                        for line in lines:
-                            if "vmulpd" in line or "vaddpd" in line or "vhaddpd" in line:
-                                iaca_flops += 4
-                            elif "vfmadd231pd" in line or "vfmsub231pd" in line or "vfmadd123pd" in line or "vfmsub123pd" in line or \
-                                 "vfmadd132pd" in line or "vfmsub132pd" in line or "vfmadd213pd" in line or "vfmsub213pd" in line or \
-                                 "vfmadd312pd" in line or "vfmsub312pd" in line or "vfmadd321pd" in line or "vfmsub321pd" in line:
-                                iaca_flops += 4
-                            elif "vaddsd" in line or "vsubsd" in line or "vmulsd" in line:
-                                iaca_flops += 1
-                            elif "vfmsub231sd" in line or "vfmadd231sd" in line or "vfmsub123sd" in line or "vfmadd123sd" in line or \
-                                 "vfmsub132sd" in line or "vfmadd132sd" in line or "vfmsub213sd" in line or "vfmadd213sd" in line or \
-                                 "vfmsub312sd" in line or "vfmadd312sd" in line or "vfmsub321sd" in line or "vfmadd321sd" in line:
-                                iaca_flops += 1
-                        iaca_kernels[ind].append(iaca_flops)
-                total_flops = self.sum_nested_values(iaca_kernels, -1)
-                total_cycles = self.sum_nested_values(iaca_kernels, -2)
-
-                print "After the iaca kernels"
-                from IPython import embed; embed()
-
+                total_flops = self.sum_nested_flop_values(iaca_kernels, 5)
+                total_cycles = self.sum_nested_cycle_values(iaca_cycle_kernels, 4)
+                # print "After the iaca kernels"
+                # from IPython import embed; embed()
                 # Multiply the iaca flops by the number of applications of the column code
                 iaca_flops = total_flops * self._itspace.size * configuration['times'] / 1e6
                 region_name = configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name
