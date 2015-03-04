@@ -44,8 +44,11 @@ from mpi import collective
 from configuration import configuration
 from utils import as_tuple, strip
 
+from coffee.base import Node
 import coffee.plan
+from coffee import base as ast
 from coffee.plan import ASTKernel
+from coffee.vectorizer import vect_roundup
 
 
 class Kernel(base.Kernel):
@@ -651,6 +654,8 @@ class JITModule(base.JITModule):
         # If we weren't in the cache we /must/ have arguments
         if not hasattr(self, '_args'):
             raise RuntimeError("JITModule has no args associated with it, should never happen")
+        strip = lambda code: '\n'.join([l for l in code.splitlines()
+                                        if l.strip() and l.strip() != ';'])
 
         compiler = coffee.plan.compiler
         blas = coffee.plan.blas
@@ -883,12 +888,17 @@ class JITModule(base.JITModule):
             for count, arg in enumerate(self._args):
                 if not (arg._uses_itspace and arg.access in [WRITE, INC]):
                     continue
+                _buf_scatter_name = ""
                 if arg._is_mat and arg._is_mixed:
                     raise NotImplementedError
                 elif not arg._is_mat:
                     _buf_scatter[arg] = arg.c_buffer_scatter_vec(count, i, j, offsets, _buf_name[arg])
+                _addto_buf_name[arg] = _buf_scatter_name or _buf_name[arg]
             _buf_decl_scatter = ";\n".join(_buf_decl_scatter.values())
             _buf_scatter = ";\n".join(_buf_scatter.values())
+            _itspace_loop_close = '\n'.join('  ' * n + '}' for n in range(nloops - 1, -1, -1))
+            _addto_buf_name = _buf_scatter_name or _buf_name
+            _buffer_indices = "[i_0*%d + i_1]" % shape[1] if self._kernel._applied_blas else "[i_0][i_1]"
             _itspace_loop_close = '\n'.join('  ' * n + '}' for n in range(nloops - 1, -1, -1))
             if self._itspace._extruded:
                 _addtos_extruded = ';\n'.join([arg.c_addto(i, j, _buf_name[arg],
