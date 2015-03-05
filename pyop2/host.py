@@ -655,6 +655,8 @@ class JITModule(base.JITModule):
         self._iteration_region = kwargs.get('iterate', ALL)
         self._unique_args = kwargs.get('unique_args', None)
         self._initialized = True
+        self._flops_per_cell = 0
+        self._cycles_per_cell = 0
 
     @collective
     def __call__(self, *args, **kwargs):
@@ -737,14 +739,15 @@ class JITModule(base.JITModule):
         _const_decs = '\n'.join([const._format_declaration()
                                 for const in Const._definitions()]) + '\n'
 
+        profiling_headers = []
         if configuration["likwid"]:
-            self._kernel._headers += ["#include <likwid.h>"]
+            profiling_headers += ["#include <likwid.h>"]
 
         if configuration["papi_flops"]:
-            self._kernel._headers += ["#include <papi.h>"]
+            profiling_headers += ["#include <papi.h>"]
 
         if configuration["iaca"]:
-            self._kernel._headers += ["#include <iacaMarks.h>"]
+            profiling_headers += ["#include <iacaMarks.h>"]
 
         code_to_compile = """
         #include <mat_utils.h>
@@ -760,7 +763,7 @@ class JITModule(base.JITModule):
         """ % {'consts': _const_decs, 'kernel': kernel_code,
                'wrapper': code_to_compile,
                'externc_close': externc_close,
-               'sys_headers': '\n'.join(self._kernel._headers)}
+               'sys_headers': '\n'.join(self._kernel._headers + profiling_headers)}
         return code_to_compile
 
     def sum_nested_flop_values(self, iaca_kernels, val_pos):
@@ -826,7 +829,7 @@ class JITModule(base.JITModule):
         total_flops += i_flops
         return total_flops
 
-    def build_loop_nest_reports(self, iaca_kernels, wrapper_code, path_to_iaca_file, compilation, extension, cppargs, ldargs, argtypes, restype, compiler):
+    def build_loop_nest_reports(self, iaca_kernels, wrapper_code, iaca_path, compilation, extension, cppargs, ldargs, argtypes, restype, compiler):
         # wrapper_code['iaca_start'] = ""
         # wrapper_code['iaca_end'] = ""
         # for ind in range(1, len(iaca_kernels)):
@@ -853,12 +856,13 @@ class JITModule(base.JITModule):
             # Only call this in the single process case.
             # TODO: call the command line if the file doesn't exist already.
             # TODO: Sync processes after.
+            path_to_iaca_file = iaca_path + "." + str(ind)
             if MPI.comm.size == 1:
                 # Command line invocation of the IACA tool.
-                call(["sh", iaca_sh, "-64", "-arch", get_iaca_sys(), "-o", path_to_iaca_file+"."+str(ind), basename + ".so"])
-
+                call(["sh", iaca_sh, "-64", "-arch", get_iaca_sys(), "-o", path_to_iaca_file, basename + ".so"])
+            MPI.comm.barrier()
             # Once the file is generated then compute the number of flops and the number of cycles.
-            with open(path_to_iaca_file+"."+str(ind), "r+") as h:
+            with open(path_to_iaca_file, "r+") as h:
                 lines = h.readlines()
                 # Mark the loop with True: not rolled, False: unrolled
                 for line in reversed(lines[:-1]):
@@ -866,30 +870,35 @@ class JITModule(base.JITModule):
                         iaca_kernels[ind].append("j" in line)
                         break
                 # Get the throughput through the ports for this code region
-                ports = lines[8].split()
-                # Add the block cycles
-                iaca_kernels[ind].append(float(ports[2]))
-                #port_vals = lines[14].split()
-                iaca_flops = 0
-                jumps = 0
-                # TODO: Replace this loop with something nicer!!
-                for line in lines[30:]:
-                    if "j" in line:
-                        jumps += 1
-                    if "vmulpd" in line or "vaddpd" in line or "vhaddpd" in line:
-                        iaca_flops += 4
-                    elif "vfmadd231pd" in line or "vfmsub231pd" in line or "vfmadd123pd" in line or "vfmsub123pd" in line or \
-                         "vfmadd132pd" in line or "vfmsub132pd" in line or "vfmadd213pd" in line or "vfmsub213pd" in line or \
-                         "vfmadd312pd" in line or "vfmsub312pd" in line or "vfmadd321pd" in line or "vfmsub321pd" in line:
-                        iaca_flops += 4
-                    elif "vaddsd" in line or "vsubsd" in line or "vmulsd" in line:
-                        iaca_flops += 1
-                    elif "vfmsub231sd" in line or "vfmadd231sd" in line or "vfmsub123sd" in line or "vfmadd123sd" in line or \
-                         "vfmsub132sd" in line or "vfmadd132sd" in line or "vfmsub213sd" in line or "vfmadd213sd" in line or \
-                         "vfmsub312sd" in line or "vfmadd312sd" in line or "vfmsub321sd" in line or "vfmadd321sd" in line:
-                        iaca_flops += 2
-                iaca_kernels[ind].append(iaca_flops)
-                iaca_kernels[ind].append(jumps)
+                if len(lines) >= 7: 
+                    ports = lines[8].split()
+                    # Add the block cycles
+                    iaca_kernels[ind].append(float(ports[2]))
+                    #port_vals = lines[14].split()
+                    iaca_flops = 0
+                    jumps = 0
+                    # TODO: Replace this loop with something nicer!!
+                    for line in lines[30:]:
+                        if "j" in line:
+                            jumps += 1
+                        if "vmulpd" in line or "vaddpd" in line or "vhaddpd" in line:
+                            iaca_flops += 4
+                        elif "vfmadd231pd" in line or "vfmsub231pd" in line or "vfmadd123pd" in line or "vfmsub123pd" in line or \
+                             "vfmadd132pd" in line or "vfmsub132pd" in line or "vfmadd213pd" in line or "vfmsub213pd" in line or \
+                             "vfmadd312pd" in line or "vfmsub312pd" in line or "vfmadd321pd" in line or "vfmsub321pd" in line:
+                            iaca_flops += 4
+                        elif "vaddsd" in line or "vsubsd" in line or "vmulsd" in line:
+                            iaca_flops += 1
+                        elif "vfmsub231sd" in line or "vfmadd231sd" in line or "vfmsub123sd" in line or "vfmadd123sd" in line or \
+                             "vfmsub132sd" in line or "vfmadd132sd" in line or "vfmsub213sd" in line or "vfmadd213sd" in line or \
+                             "vfmsub312sd" in line or "vfmadd312sd" in line or "vfmsub321sd" in line or "vfmadd321sd" in line:
+                            iaca_flops += 2
+                    iaca_kernels[ind].append(iaca_flops)
+                    iaca_kernels[ind].append(jumps)
+                else:
+                    iaca_kernels[ind].append(0.0)
+                    iaca_kernels[ind].append(0)
+                    iaca_kernels[ind].append(0)
         return iaca_kernels
 
     @collective
@@ -967,24 +976,28 @@ class JITModule(base.JITModule):
         if configuration['iaca'] and self._is_indirect:
             path_to_iaca_file = get_iaca_output_file()
             if path_to_iaca_file != "":
-                iaca_kernels = [[original_code_to_compile, 0, self._itspace.layers - 1]] + self._kernel._iaca_ast_to_c(self._kernel._old_ast)
-                iaca_cycle_kernels = [[code_to_compile, 0, self._itspace.layers - 1]] + self._kernel._iaca_ast_to_c(self._kernel._ast, self._kernel._opts)
+                region_name = configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name
+                iaca_kernels = [[original_code_to_compile, 0, 1]] + self._kernel._iaca_ast_to_c(self._kernel._old_ast)
+                iaca_cycle_kernels = [[code_to_compile, 0, 1]] + self._kernel._iaca_ast_to_c(self._kernel._ast, self._kernel._opts)
                 wrapper_code['iaca_start'] = ""
                 wrapper_code['iaca_end'] = ""
                 for ind in range(1, len(iaca_kernels)):
                     iaca_kernels[ind][0] = self.get_c_code(iaca_kernels[ind][0], wrapper_code)
                     iaca_cycle_kernels[ind][0] = self.get_c_code(iaca_cycle_kernels[ind][0], wrapper_code)
 
-                self.build_loop_nest_reports(iaca_kernels, wrapper_code, path_to_iaca_file, compilation, extension, cppargs, ldargs, argtypes, restype, compiler)
-                self.build_loop_nest_reports(iaca_cycle_kernels, wrapper_code, path_to_iaca_file + ".cycle.", compilation, extension, cppargs, ldargs, argtypes, restype, compiler)
+                iaca_path = path_to_iaca_file + region_name + "_" + self._kernel._md5 + ".txt"
+                self.build_loop_nest_reports(iaca_kernels, wrapper_code, iaca_path, compilation, extension, cppargs, ldargs, argtypes, restype, compiler)
+                iaca_path = path_to_iaca_file + "cycle_" + region_name + "_" + self._kernel._md5 + ".txt"
+                self.build_loop_nest_reports(iaca_cycle_kernels, wrapper_code, iaca_path, compilation, extension, cppargs, ldargs, argtypes, restype, compiler)
 
                 total_flops = self.sum_nested_flop_values(iaca_kernels, 5)
                 total_cycles = self.sum_nested_cycle_values(iaca_cycle_kernels, 4)
-                # print "After the iaca kernels"
-                # from IPython import embed; embed()
+
+                self._flops_per_cell = total_flops
+                self._cycles_per_cell = total_cycles
+
                 # Multiply the iaca flops by the number of applications of the column code
-                iaca_flops = total_flops * self._itspace.size * configuration['times'] / 1e6
-                region_name = configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name
+                iaca_flops = total_flops * (self._itspace.layers - 1) * self._itspace.size * configuration['times'] / 1e6
                 add_iaca_flops('base', '%s-%s' % (region_name, self._kernel._md5), iaca_flops)
 
             # Now create a new .so file without the IACA instrumentation

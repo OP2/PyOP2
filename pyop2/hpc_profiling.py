@@ -95,6 +95,7 @@ class Timer(object):
         # Only take the first and last time stamp of the first run
         self._start_time = other_measures[4]
         self._end_time = other_measures[5]
+        self._iaca_flops = other_measures[6]
 
     def rand_data_volume(self, vol_mvbw):
         self._rand_volume_mvbw = vol_mvbw
@@ -284,10 +285,10 @@ class Timer(object):
             papi_roofline_gflops = max([len(column_heads[8])] + [len('%g' % t._flp_ops)
                                        for t in cls._timers.values()])
 
-            fmt = "%%%ds | %%%dg | %%%dd | %%%dg | %%%dg |  %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%d.%dg | %%%d.%dg | %%%dg" % (
+            fmt = "%%%ds | %%%dg | %%%dd | %%%dg | %%%dg |  %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%dg | %%%d.%dg | %%%d.%dg | %%%d.%dg" % (
                 namecol, totalcol, ncallscol, averagecol, sdcol, c_totalcol,
                 c_averagecol, dvcol, bwcol, 3, c_bwcol, c_mbwcol, c_mvbwcol,
-                c_rvbwcol, papi_start_end, papi_start_end, papi_start_end, papi_start_end, papi_roofline_gflops)
+                c_rvbwcol, papi_start_end, papi_start_end, papi_start_end, papi_start_end, papi_roofline_gflops, papi_roofline_gflops)
             keys = sorted(cls._timers.keys(), key=lambda k: k[-6:])
             if cls._output_file is not None:
                 fmt += "\n"

@@ -110,7 +110,11 @@ class ParLoop(host.ParLoop):
     @collective
     @lineprof
     def _compute(self, part):
-        fun = JITModule(self.kernel, self.it_space, *self.args, direct=self.is_direct, iterate=self.iteration_region, unique_args=self.unique_args)
+        fun = JITModule(self.kernel, self.it_space,
+                        *self.args,
+                        direct=self.is_direct,
+                        iterate=self.iteration_region,
+                        unique_args=self.unique_args)
         if not hasattr(self, '_jit_args'):
             self._argtypes = [ctypes.c_int, ctypes.c_int]
             self._jit_args = [0, 0]
@@ -178,7 +182,8 @@ class ParLoop(host.ParLoop):
             time = fun(*self._jit_args, argtypes=self._argtypes, restype=ctypes.c_double)
         if configuration['hpc_profiling']:
             ms = self._jit_args[-1]
-            return time, [ms[0], ms[1], ms[2], ms[3], ms[4], ms[5]] #self._jit_args[-2][0], self._jit_args[-1][0]
+            flops = fun._flops_per_cell * (self.it_space.layers - 1) * self.it_space.size * configuration['times'] / 1e6
+            return time, [ms[0], ms[1], ms[2], ms[3], ms[4], ms[5], flops]
         return time, np.zeros(6)
 
 
