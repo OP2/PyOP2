@@ -47,7 +47,7 @@ from coffee.base import Node
 from coffee.plan import ASTKernel
 import coffee.plan
 from coffee.vectorizer import vect_roundup
-from hpc_profiling import add_iaca_flops
+# from hpc_profiling import add_iaca_flops
 
 
 class Kernel(base.Kernel):
@@ -857,7 +857,7 @@ class JITModule(base.JITModule):
             # TODO: call the command line if the file doesn't exist already.
             # TODO: Sync processes after.
             path_to_iaca_file = iaca_path + "." + str(ind)
-            if MPI.comm.size == 1:
+            if MPI.comm.rank == 0:
                 # Command line invocation of the IACA tool.
                 call(["sh", iaca_sh, "-64", "-arch", get_iaca_sys(), "-o", path_to_iaca_file, basename + ".so"])
             MPI.comm.barrier()
@@ -997,8 +997,8 @@ class JITModule(base.JITModule):
                 self._cycles_per_cell = total_cycles
 
                 # Multiply the iaca flops by the number of applications of the column code
-                iaca_flops = total_flops * (self._itspace.layers - 1) * self._itspace.size * configuration['times'] / 1e6
-                add_iaca_flops('base', '%s-%s' % (region_name, self._kernel._md5), iaca_flops)
+                # iaca_flops = total_flops * (self._itspace.layers - 1) * self._itspace.size * configuration['times']
+                # add_iaca_flops('base', '%s-%s' % (region_name, self._kernel._md5), iaca_flops)
 
             # Now create a new .so file without the IACA instrumentation
             # The IACA instrumented code will not run anyway!

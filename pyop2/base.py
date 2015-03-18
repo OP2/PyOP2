@@ -3873,8 +3873,7 @@ class ParLoop(LazyComputation):
                 vol += volume
                 mvbw_vol += (volume * (2 if arg.access in [INC, WRITE] else 1))
                 if self._is_layered:
-                    mbw_vol += sum(configuration["dg_dpc"] * iterset.size * s.cdim for s in arg.data.dataset) * arg.dtype.itemsize \
-                               * (2 if arg.access in [INC, WRITE] else 1)
+                    mbw_vol += sum(configuration["dg_dpc"] * iterset.size * s.cdim for s in arg.data.dataset) * arg.dtype.itemsize
                 if configuration['randomize']:
                     # Randomize the maps
                     randomize_map(arg.map, len(arg.map.values))
@@ -3884,7 +3883,7 @@ class ParLoop(LazyComputation):
                 mvbw_vol += (volume * (2 if arg.access in [INC, WRITE] else 1))
                 if self._is_layered:
                     # TO DO: Not sure how to compute MBW for this case
-                    mbw_vol += volume * (2 if arg.access in [INC, WRITE] else 1)
+                    mbw_vol += volume
                 if configuration['randomize']:
                     # Randomize the maps
                     for m in arg.map:
