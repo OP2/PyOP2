@@ -33,11 +33,11 @@
 
 """Profiling classes/functions."""
 
-import numpy as np
 from time import time
 from contextlib import contextmanager
 from configuration import configuration
 from record import *
+
 
 class Timer(object):
 

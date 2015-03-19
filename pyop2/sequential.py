@@ -182,10 +182,10 @@ class ParLoop(host.ParLoop):
             time = fun(*self._jit_args, argtypes=self._argtypes, restype=ctypes.c_double)
         if configuration['hpc_profiling']:
             ms = self._jit_args[-1]
-            flops = fun._flops_per_cell * (self.it_space.layers - 1) * self.it_space.size * configuration['times']
+            flops = fun._flops_per_cell * (self.it_space.layers - 1) * self.it_space.core_size * configuration['times']
             cycles = fun._cycles_per_cell
             return time, [ms[0], ms[1], ms[2], ms[3], ms[4], ms[5], flops, cycles]
-        return time, np.zeros(6)
+        return time, np.zeros(8)
 
 
 def _setup():

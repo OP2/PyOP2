@@ -154,7 +154,7 @@ if exists(likwid_base + '/include/likwid.h'):
                                  libraries=['likwid'],
                                  runtime_library_dirs=['/usr/local/lib']))
 else:
-    print "Likwid installation not found at default location /usr/local/include/likwid.h nor at PYOP2_LIKWID_DIR=", env('PYOP2_LIKWID_DIR'), "/include/likwid.h"
+    print "Likwid installation not found at default location /usr/local/include/likwid.h nor at PYOP2_LIKWID_DIR=", env['PYOP2_LIKWID_DIR'], "/include/likwid.h"
 
 setup(name='PyOP2',
       version=versioneer.get_version(),

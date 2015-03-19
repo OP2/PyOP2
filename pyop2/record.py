@@ -31,8 +31,6 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
 # OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import numpy as np
-
 # These descriptors return the values scaled to one process or run
 AVG = lambda x: sum(x) * 1.0 / len(x) if len(x) > 0 else 0.0
 MIN = lambda x: min(x) if len(x) > 0 else 0.0
@@ -42,6 +40,7 @@ MAX = lambda x: max(x) if len(x) > 0 else 0.0
 SUM = lambda x: sum(x)
 MIN_SUM = lambda x: min(x) if len(x) > 0 else 0.0
 MAX_SUM = lambda x: max(x) if len(x) > 0 else 0.0
+
 
 class ReductionRecord(object):
 
@@ -157,7 +156,7 @@ class ReductionRecord(object):
         All the output will now be saved using the
         compact_line format.
         """
-        str_line = " | ".join(["%%%ds" % (15)] + ["%%%dg" % (15) for i in range(13)] + \
+        str_line = " | ".join(["%%%ds" % (15)] + ["%%%dg" % (15) for i in range(13)] +
                               ["%%%d.%dg" % (15, 15) for i in range(3)]) + "\n"
         values = (self._name,
                   self.python_time,
