@@ -3638,7 +3638,7 @@ class Kernel(Cached):
         self._include_dirs = include_dirs
         self._headers = headers
         self._user_code = user_code
-        self._old_ast = coffee_utils.dcopy(code) if configuration["iaca"] else None
+        self._old_ast = coffee_utils.dcopy(code)
         self._code = self._ast_to_c(code, opts)
         self._initialized = True
 

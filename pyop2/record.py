@@ -212,13 +212,13 @@ class ReductionRecord(object):
         self.papi_flops = float(words[34])
         self.cycles = float(words[36])
 
-    def plot_list(self):
+    def plot_list(self, frequency):
         return [self.runtime,
                 self.rv_runtime,
                 self.v_volume, self.m_volume, self.mv_volume,
                 self.vbw, self.mbw, self.mvbw, self.rvbw,
                 self.iaca_flops, self.papi_flops,
-                self.iaca_mflops, self.papi_mflops, self.cycles]
+                self.iaca_mflops, self.papi_mflops, self.cycles / frequency, self.c_runtime]
 
     @property
     def name(self):
@@ -278,7 +278,7 @@ class ReductionRecord(object):
 
     @property
     def cycles(self):
-        return self._reduce("cycles", self._cycles)
+        return self._reduce("cycles", self._cycles) / 1e9
 
     #################################################
     # The following methods add the values to lists #
