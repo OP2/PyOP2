@@ -92,7 +92,7 @@ class Timer(object):
 
     def c_rand_time(self, c_rand_time):
         """Time value from the kernel wrapper in the randomized case."""
-        self._record.c_rv_runtime = c_rand_time
+        self._record.rv_c_runtime = c_rand_time
 
     def papi_gflops(self, papi_measures):
         """Time value from the kernel wrapper."""
