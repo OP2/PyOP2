@@ -119,7 +119,7 @@ class ReductionRecord(object):
         self.folds["iaca_flops"] = fold_stats
         # IACA reported cycles for the loop over the columns (extruded mesh)
         self._cycles = []
-        self.folds["cycles"] = fold_stats
+        self.folds["cycles"] = SUM if self._is_proc else AVG
 
     def _ncalls(self):
         """Number of calls per process"""
@@ -218,7 +218,7 @@ class ReductionRecord(object):
                 self.v_volume, self.m_volume, self.mv_volume,
                 self.vbw, self.mbw, self.mvbw, self.rvbw,
                 self.iaca_flops, self.papi_flops,
-                self.iaca_mflops, self.papi_mflops, self.cycles / frequency, self.c_runtime]
+                self.iaca_mflops, self.papi_mflops, self.cycles * 1.0 / frequency, self.c_runtime]
 
     @property
     def name(self):
@@ -278,6 +278,8 @@ class ReductionRecord(object):
 
     @property
     def cycles(self):
+        if not self._is_proc:
+            return self._reduce("cycles", self._cycles)
         return self._reduce("cycles", self._cycles) / 1e9
 
     #################################################
@@ -358,10 +360,14 @@ class ReductionRecord(object):
 
     @property
     def runtime(self):
+        if not self._is_proc:
+            return self.end_time - self.start_time
         return self._ncalls() * (self.end_time - self.start_time)
 
     @property
     def rv_runtime(self):
+        if not self._is_proc:
+            return self.rv_end_time - self.rv_start_time
         return self._ncalls() * (self.rv_end_time - self.rv_start_time)
 
     @property
