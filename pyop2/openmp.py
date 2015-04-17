@@ -164,7 +164,7 @@ void %(wrapper_name)s(int boffset,
       int bid = blkmap[__b];
       int nelem = nelems[bid];
       int efirst = offset[bid];
-      for (int n = efirst; n < efirst+ nelem; n++ )
+      for (int n = efirst; n < efirst + nelem; n++ )
       {
         int i = %(index_expr)s;
         %(vec_inits)s;

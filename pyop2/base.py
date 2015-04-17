@@ -1911,7 +1911,7 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
                             [ast.Decl("%s*" % self.ctype, ast.Symbol("self"))],
                             body=ast.c_for("n", self.cdim,
                                            ast.Assign(ast.Symbol("self", ("n", )),
-                                                      ast.Symbol("(%s)0" % self.ctype)),
+                                                      ast.Cast(self.ctype, ast.Symbol("0"))),
                                            pragma=None))
             self._zero_kernel = _make_object('Kernel', k, 'zero')
         par_loop(self._zero_kernel, self.dataset.set, self(WRITE))
@@ -2034,7 +2034,7 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
                                       qualifiers=["const"]),
                              ast.Decl(other.ctype + "*", ast.Symbol("other"),
                                       qualifiers=["const"]),
-                             ast.Decl(self.ctype, ast.Symbol("*ret"))],
+                             ast.Decl(self.ctype + "*", ast.Symbol("ret"))],
                             ast.c_for("n", self.cdim,
                                       ast.Assign(ast.Symbol("ret", ("n", )),
                                                  ops[op](ast.Symbol("self", ("n", )),
@@ -3773,17 +3773,19 @@ class JITModule(Cached):
                 else:
                     idx = arg.idx
                 map_arity = arg.map.arity if arg.map else None
-                key += (arg.data.dim, arg.data.dtype, map_arity, idx, arg.access)
+                map_offset = str(arg.map.offset) if arg.map else ""
+                key += (arg.data.dim, arg.data.dtype, map_arity, idx, arg.access, map_offset)
             elif arg._is_mat:
                 idxs = (arg.idx[0].__class__, arg.idx[0].index,
                         arg.idx[1].index)
                 map_arities = (arg.map[0].arity, arg.map[1].arity)
+                map_offsets = (str(arg.map[0].offset), str(arg.map[1].offset))
                 # Implicit boundary conditions (extruded "top" or
                 # "bottom") affect generated code, and therefore need
                 # to be part of cache key
                 map_bcs = (arg.map[0].implicit_bcs, arg.map[1].implicit_bcs)
                 key += (arg.data.dims, arg.data.dtype, idxs,
-                        map_arities, map_bcs, arg.access)
+                        map_arities, map_bcs, arg.access, map_offsets)
 
         iterate = kwargs.get("iterate", None)
         if iterate is not None:

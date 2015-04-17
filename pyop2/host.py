@@ -47,6 +47,7 @@ from utils import as_tuple
 import coffee.plan
 from coffee import base as ast
 from coffee.plan import ASTKernel
+from coffee.utils import visit, ast_update_id
 
 
 class Kernel(base.Kernel):
@@ -227,11 +228,12 @@ class Arg(base.Arg):
                 if self.data[i, j]._is_vector_field:
                     return ast.Symbol(self.c_kernel_arg_name(i, j))
                 elif self.data[i, j]._is_scalar_field:
-                    flat_block = "(%(t)s (*)[%(dim)d])&%(name)s" % \
-                        {'t': self.ctype,
-                         'dim': shape[0],
-                         'name': self.c_kernel_arg_name(i, j)}
-                    return ast.FlatBlock(flat_block)
+                    return ast.Cast(self.ctype + "(*)[" + str(shape[0]) + "]", ast.Addr(ast.Symbol(self.c_kernel_arg_name(i, j))))
+                    # flat_block = "(%(t)s (*)[%(dim)d])&%(name)s" % \
+                    #     {'t': self.ctype,
+                    #      'dim': shape[0],
+                    #      'name': self.c_kernel_arg_name(i, j)}
+                    # return ast.FlatBlock(flat_block)
                 else:
                     raise RuntimeError("Don't know how to pass kernel arg %s" % self)
             else:
@@ -367,12 +369,12 @@ class Arg(base.Arg):
                 ret = [tmp_decl, nest]
                 addto_name = tmp_name
 
-        ret.append(ast.InCodeFunCall(addto,
-                                     ast.Symbol(self.c_arg_name(i, j)),
-                                     ast.Symbol(nrows), rows_ast,
-                                     ast.Symbol(ncols), cols_ast,
-                                     ast.Decl("const PetscScalar *", ast.Symbol(addto_name)),
-                                     ast.Symbol("INSERT_VALUES") if self.access == WRITE else ast.Symbol("ADD_VALUES")))
+        ret.append(ast.FunCall(addto,
+                               ast.Symbol(self.c_arg_name(i, j)),
+                               ast.Symbol(nrows), rows_ast,
+                               ast.Symbol(ncols), cols_ast,
+                               ast.Cast("const PetscScalar *", ast.Symbol(addto_name)),
+                               ast.Symbol("INSERT_VALUES") if self.access == WRITE else ast.Symbol("ADD_VALUES")))
         return ret
 
     def c_local_tensor_dec(self, extents, i, j):
@@ -407,9 +409,9 @@ class Arg(base.Arg):
             for k in range(d.dataset.cdim if self._flatten else 1):
                 for idx in range(m.arity):
                     lhs = ast.Symbol(self.c_vec_name(), rank=(vec_idx,))
-                    # rhs = ast.Symbol(m.offset[idx] * d.dataset.cdim)
-                    rhs = ast.Symbol(self.c_offset_name(i, 0), rank=(idx,))
-                    rhs = ast.Prod(rhs, ast.Symbol(d.dataset.cdim))
+                    rhs = ast.Symbol(m.offset[idx] * d.dataset.cdim)
+                    # rhs = ast.Symbol(self.c_offset_name(i, 0), rank=(idx,))
+                    # rhs = ast.Prod(rhs, ast.Symbol(d.dataset.cdim))
                     val_ast.append(ast.Incr(lhs, rhs))
                     # val.append("%(name)s[%(j)d] += %(off)d * %(dim)s;" %
                     #            {'name': self.c_vec_name(),
@@ -422,9 +424,9 @@ class Arg(base.Arg):
                 if is_facet:
                     for idx in range(m.arity):
                         lhs = ast.Symbol(self.c_vec_name(), rank=(vec_idx,))
-                        # rhs = ast.Symbol(m.offset[idx] * d.dataset.cdim)
-                        rhs = ast.Symbol(self.c_offset_name(i, 0), rank=(idx,))
-                        rhs = ast.Prod(rhs, ast.Symbol(d.dataset.cdim))
+                        rhs = ast.Symbol(m.offset[idx] * d.dataset.cdim)
+                        # rhs = ast.Symbol(self.c_offset_name(i, 0), rank=(idx,))
+                        # rhs = ast.Prod(rhs, ast.Symbol(d.dataset.cdim))
                         val_ast.append(ast.Incr(lhs, rhs))
                         # val.append("%(name)s[%(j)d] += %(off)d * %(dim)s;" %
                         #            {'name': self.c_vec_name(),
@@ -593,7 +595,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                         #             'sign': sign})
         if need_bottom:
             cond = ast.Eq(ast.Symbol("j_0"), ast.Symbol(0))
-            val_ast_bottom = [ast.If(cond, val_ast)]
+            val_ast_bottom = [ast.If(cond, [val_ast])]
             val_ast = []
 
         need_top = False
@@ -619,7 +621,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                         #             'sign': sign})
         if need_top:
             cond = ast.Eq(ast.Symbol("j_0"), ast.Sub(ast.Symbol("end_layer"), ast.Symbol(1)))
-            val_ast_top = [ast.If(cond, val_ast)]
+            val_ast_top = [ast.If(cond, [val_ast])]
         return val_ast_bottom + val_ast_top
 
     def ast_add_offset_map(self, is_facet=False):
@@ -636,9 +638,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                     if self._is_dat and self._flatten and d.cdim > 1:
                         for k in range(d.cdim):
                             lhs = ast.Symbol("xtr_" + self.c_map_name(i, j), rank=(m.arity * k + idx,))
-                            # rhs = ast.Symbol(m.offset[idx] * d.cdim)
-                            rhs = ast.Symbol(self.c_offset_name(i, j), rank=(idx,))
-                            rhs = ast.Prod(rhs, ast.Symbol(d.cdim))
+                            rhs = ast.Symbol(m.offset[idx] * d.cdim)
                             val_ast.append(ast.Incr(lhs, rhs))
                             # val.append("xtr_%(name)s[%(ind_flat)s] += %(off)s[%(ind)s] * %(dim)s;" %
                             #            {'name': self.c_map_name(i, j),
@@ -648,8 +648,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                             #             'dim': d.cdim})
                     else:
                         lhs = ast.Symbol("xtr_" + self.c_map_name(i, j), rank=(idx,))
-                        # rhs = ast.Symbol(m.offset[idx])
-                        rhs = ast.Symbol(self.c_offset_name(i, j), rank=(idx,))
+                        rhs = ast.Symbol(m.offset[idx])
                         val_ast.append(ast.Incr(lhs, rhs))
                         # val.append("xtr_%(name)s[%(ind)s] += %(off)s[%(ind)s];" %
                         #            {'name': self.c_map_name(i, j),
@@ -660,9 +659,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                         if self._is_dat and self._flatten and d.cdim > 1:
                             for k in range(d.cdim):
                                 lhs = ast.Symbol("xtr_" + self.c_map_name(i, j), rank=(m.arity * (k + d.cdim) + idx,))
-                                # rhs = ast.Symbol(m.offset[idx] * d.cdim)
-                                rhs = ast.Symbol(self.c_offset_name(i, j), rank=(idx,))
-                                rhs = ast.Prod(rhs, ast.Symbol(d.cdim))
+                                rhs = ast.Symbol(m.offset[idx] * d.cdim)
                                 val_ast.append(ast.Incr(lhs, rhs))
                                 # val.append("xtr_%(name)s[%(ind_flat)s] += %(off)s[%(ind)s] * %(dim)s;" %
                                 #            {'name': self.c_map_name(i, j),
@@ -672,8 +669,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                                 #             'dim': d.cdim})
                         else:
                             lhs = ast.Symbol("xtr_" + self.c_map_name(i, j), rank=(m.arity + idx,))
-                            # rhs = ast.Symbol(m.offset[idx])
-                            rhs = ast.Symbol(self.c_offset_name(i, j), rank=(idx,))
+                            rhs = ast.Symbol(m.offset[idx])
                             val_ast.append(ast.Incr(lhs, rhs))
                             # val.append("xtr_%(name)s[%(ind)s] += %(off)s[%(ind_zero)s];" %
                             #            {'name': self.c_map_name(i, j),
@@ -910,8 +906,11 @@ class JITModule(base.JITModule):
 
     def generate_code(self):
 
-        def itspace_loop(i, d):
-            return "for (int i_%d=0; i_%d<%d; ++i_%d) {" % (i, i, d, i)
+        def ast_itspace_loop(i, d, body):
+            ind = ast.Symbol("i_" + str(i))
+            return ast.For(ast.Decl("int", ind, ast.Symbol(0)),
+                           ast.Less(ind, ast.Symbol(d)),
+                           ast.Incr(ind, ast.Symbol(1)), body)
 
         def c_const_arg(c):
             return '%s *%s_' % (c.ctype, c.name)
@@ -924,10 +923,13 @@ class JITModule(base.JITModule):
             tmp = '%(name)s[%%(i)s] = %(name)s_[%%(i)s]' % d
             return ';\n'.join([tmp % {'i': i} for i in range(c.cdim)])
 
-        def extrusion_loop():
+        def ast_extrusion_loop(body):
             if self._direct:
-                return "{"
-            return "for (int j_0 = start_layer; j_0 < end_layer; ++j_0){"
+                return ast.Block(body, open_scope=True)
+            i = ast.Symbol("j_0")
+            return ast.For(ast.Decl("int", i, ast.Symbol("start_layer")),
+                           ast.Less(i, ast.Symbol("end_layer")),
+                           ast.Incr(i, ast.Symbol(1)), body)
 
         def get_kernel_decl_node(kernel_ast):
             # Find the reference to node continaing the kernel header
@@ -940,32 +942,18 @@ class JITModule(base.JITModule):
                         return c
             return None
 
-        def rename_var(kernel_ast, old_name, new_name):
-            # Because the AST representation is not consistent
-            # this function might fail. FFC pollutes names of variables with
-            # *, & and [] symbols which SHOULD NOT BE PRESENT in the name of a variable.
-            if isinstance(kernel_ast, ast.Symbol):
-                var_name = str(kernel_ast.symbol)
-                if "*" in var_name or "[" in var_name or "]" in var_name or "&" in var_name:
-                    raise RuntimeError("The variable name has been polluted with * & [ or ] characters.")
-                if var_name == old_name:
-                    print "2", kernel_ast.symbol, new_name
-                    kernel_ast.symbol = str(kernel_ast.symbol).replace(old_name, new_name)
-            elif not isinstance(kernel_ast, str):
-                print "3"
-                for child in kernel_ast.children:
-                    rename_var(child, old_name, new_name)
-            print "4"
+        def change_kernel_loop_index_ids(visitor):
+            fors = visitor['search'][ast.For]
+            for f in fors:
+                old_name = str(f.dim)
+                for_visitor = visit(f, search=ast.Symbol)
+                for symbol in for_visitor['search'][ast.Symbol]:
+                    ast_update_id(symbol, old_name, 0)
 
-        def contains_flat_block(tree):
-            # Check if the AST contains any FlatBlock nodes
-            if isinstance(tree, ast.FlatBlock):
-                return True
-            elif not isinstance(tree, str):
-                for child in tree.children:
-                    if contains_flat_block(child):
-                        return True
-            return False
+        def rename_var(visitor, old_name, new_name):
+            symbols = visitor['search'][ast.Symbol]
+            for s in symbols:
+                ast_update_id(s, old_name, new_name, replace=True)
 
         _ssinds_arg = ""
         _index_expr = "n"
@@ -1074,8 +1062,8 @@ class JITModule(base.JITModule):
                 for n, e in list(reversed(list(enumerate(_loop_size)))):
                     ast_node = ast_itspace_loop(n, e, ast_node)
                 _buf_gather[arg] = ast_node
-        _kernel_args_str = ", ".join([arg.ast_kernel_arg(count).gencode() if not arg._uses_itspace else ast.Symbol(_buf_name[arg]).gencode()
-                                     for count, arg in enumerate(self._args)])
+        _kernel_args_str = [arg.ast_kernel_arg(count) if not arg._uses_itspace else ast.Symbol(_buf_name[arg])
+                            for count, arg in enumerate(self._args)]
         _kernel_args = [arg.ast_kernel_arg(count) if not arg._uses_itspace else ast.Symbol(_buf_name[arg])
                         for count, arg in enumerate(self._args)]
         # List of AST nodes
@@ -1097,7 +1085,6 @@ class JITModule(base.JITModule):
                     _buf_scatter[arg] = arg.ast_buffer_scatter_mm(i, j, offsets, _buf_name[arg], _buf_scatter_name)
                 elif not arg._is_mat:
                     _buf_scatter[arg] = arg.ast_buffer_scatter_vec(count, i, j, offsets, _buf_name[arg])
-                _addto_buf_name[arg] = _buf_scatter_name or _buf_name[arg]
             _buf_decl_scatter = [a for a in _buf_decl_scatter.values()]
             _buf_scatter_list = []
             for a in _buf_scatter.values():
@@ -1119,10 +1106,10 @@ class JITModule(base.JITModule):
             else:
                 for count, arg in enumerate(self._args):
                     if arg._is_mat:
-                        _addtos += arg.c_addto(i, j, _buf_name[arg],
-                                               _tmp_name[arg],
-                                               _tmp_decl[arg],
-                                               applied_blas=self._kernel._applied_blas)
+                        _addtos += arg.ast_addto(i, j, _buf_name[arg],
+                                                 _tmp_name[arg],
+                                                 _tmp_decl[arg],
+                                                 applied_blas=self._kernel._applied_blas)
             # Concatenate the two lists
             inner_ast = _buf_scatter
             # If the list is not empty
@@ -1142,20 +1129,28 @@ class JITModule(base.JITModule):
         extr_loop_body += _buf_decl
         extr_loop_body += _buf_gather
         kernel_decl = None
-        if self._kernel._ast and not contains_flat_block(self._kernel._ast):
+        visitor = visit(self._kernel._ast, search=(ast.FlatBlock, ast.Symbol, ast.For))
+        if self._kernel._ast and not visitor['search'][ast.FlatBlock]:
             # We only inline kernels which are represented using ASTs and do not contain FlatBlock nodes.
             # The FlatBlock nodes contain a string of C Code which we cannot parse.
             kernel_decl = get_kernel_decl_node(self._kernel._ast)
         if kernel_decl:
+            change_kernel_loop_index_ids(visitor)
             for i, arg in enumerate(kernel_decl.args):
                 if not isinstance(_kernel_args[i], ast.Symbol):
+                    print self._kernel._ast
+                    init_visitor = visit(_kernel_args[i], search=ast.Symbol)
+                    if str(arg.sym.symbol) in [str(s.symbol) for s in init_visitor['search'][ast.Symbol]]:
+                        # If the declared variable name appears in the initilization code then
+                        # we need to give it a different name.
+                        rename_var(visitor, str(arg.sym.symbol), str(arg.sym.symbol) + "_0")
                     arg.init = _kernel_args[i]
                     extr_loop_body += [arg]
                 else:
-                    rename_var(kernel_decl, str(arg.sym.symbol), str(_kernel_args[i].symbol))
+                    rename_var(visitor, str(arg.sym.symbol), str(_kernel_args[i].symbol))
             extr_loop_body += kernel_decl.children
         else:
-            extr_loop_body += [ast.FlatBlock("%(name)s(%(args)s);\n" % {'name': self._kernel.name, 'args': _kernel_args_str})]
+            extr_loop_body += [ast.FunCall(self._kernel.name, *_kernel_args_str)]
         for i, j, shape, offsets in self._itspace:
             extr_loop_body += ast_itset_loop_body(i, j, shape, offsets, is_facet=(self._iteration_region == ON_INTERIOR_FACETS))
         extr_loop_body += _map_bcs_p
