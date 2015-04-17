@@ -929,6 +929,44 @@ class JITModule(base.JITModule):
                 return "{"
             return "for (int j_0 = start_layer; j_0 < end_layer; ++j_0){"
 
+        def get_kernel_decl_node(kernel_ast):
+            # Find the reference to node continaing the kernel header
+            if isinstance(kernel_ast, ast.FunDecl):
+                return kernel_ast
+            if kernel_ast and not isinstance(kernel_ast, str):
+                for child in kernel_ast.children:
+                    c = get_kernel_decl_node(child)
+                    if isinstance(c, ast.FunDecl):
+                        return c
+            return None
+
+        def rename_var(kernel_ast, old_name, new_name):
+            # Because the AST representation is not consistent
+            # this function might fail. FFC pollutes names of variables with
+            # *, & and [] symbols which SHOULD NOT BE PRESENT in the name of a variable.
+            if isinstance(kernel_ast, ast.Symbol):
+                var_name = str(kernel_ast.symbol)
+                if "*" in var_name or "[" in var_name or "]" in var_name or "&" in var_name:
+                    raise RuntimeError("The variable name has been polluted with * & [ or ] characters.")
+                if var_name == old_name:
+                    print "2", kernel_ast.symbol, new_name
+                    kernel_ast.symbol = str(kernel_ast.symbol).replace(old_name, new_name)
+            elif not isinstance(kernel_ast, str):
+                print "3"
+                for child in kernel_ast.children:
+                    rename_var(child, old_name, new_name)
+            print "4"
+
+        def contains_flat_block(tree):
+            # Check if the AST contains any FlatBlock nodes
+            if isinstance(tree, ast.FlatBlock):
+                return True
+            elif not isinstance(tree, str):
+                for child in tree.children:
+                    if contains_flat_block(child):
+                        return True
+            return False
+
         _ssinds_arg = ""
         _index_expr = "n"
         is_top = (self._iteration_region == ON_TOP)
@@ -1036,8 +1074,10 @@ class JITModule(base.JITModule):
                 for n, e in list(reversed(list(enumerate(_loop_size)))):
                     ast_node = ast_itspace_loop(n, e, ast_node)
                 _buf_gather[arg] = ast_node
-        _kernel_args = ", ".join([arg.ast_kernel_arg(count).gencode() if not arg._uses_itspace else ast.Symbol(_buf_name[arg]).gencode()
-                                 for count, arg in enumerate(self._args)])
+        _kernel_args_str = ", ".join([arg.ast_kernel_arg(count).gencode() if not arg._uses_itspace else ast.Symbol(_buf_name[arg]).gencode()
+                                     for count, arg in enumerate(self._args)])
+        _kernel_args = [arg.ast_kernel_arg(count) if not arg._uses_itspace else ast.Symbol(_buf_name[arg])
+                        for count, arg in enumerate(self._args)]
         # List of AST nodes
         _buf_gather = _buf_gather.values()
         # List of AST nodes
@@ -1101,7 +1141,21 @@ class JITModule(base.JITModule):
         extr_loop_body = _map_bcs_m
         extr_loop_body += _buf_decl
         extr_loop_body += _buf_gather
-        extr_loop_body += [ast.FlatBlock("%(name)s(%(args)s);" % {'name': self._kernel.name, 'args': _kernel_args})]
+        kernel_decl = None
+        if self._kernel._ast and not contains_flat_block(self._kernel._ast):
+            # We only inline kernels which are represented using ASTs and do not contain FlatBlock nodes.
+            # The FlatBlock nodes contain a string of C Code which we cannot parse.
+            kernel_decl = get_kernel_decl_node(self._kernel._ast)
+        if kernel_decl:
+            for i, arg in enumerate(kernel_decl.args):
+                if not isinstance(_kernel_args[i], ast.Symbol):
+                    arg.init = _kernel_args[i]
+                    extr_loop_body += [arg]
+                else:
+                    rename_var(kernel_decl, str(arg.sym.symbol), str(_kernel_args[i].symbol))
+            extr_loop_body += kernel_decl.children
+        else:
+            extr_loop_body += [ast.FlatBlock("%(name)s(%(args)s);\n" % {'name': self._kernel.name, 'args': _kernel_args_str})]
         for i, j, shape, offsets in self._itspace:
             extr_loop_body += ast_itset_loop_body(i, j, shape, offsets, is_facet=(self._iteration_region == ON_INTERIOR_FACETS))
         extr_loop_body += _map_bcs_p
