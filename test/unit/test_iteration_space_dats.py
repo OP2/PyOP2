@@ -112,7 +112,7 @@ class TestIterationSpaceDats:
                                  "int*", c_sym("nodes"), qualifiers=["unsigned"]),
                               Decl(
                                   "int*", c_sym("edge"), qualifiers=["unsigned"])],
-                             c_for("i", 2, Incr(c_sym("*edge"), Symbol("nodes", ("i",)))))
+                             c_for("i", 2, Incr(Deref(c_sym("edge")), Symbol("nodes", ("i",)))))
 
         op2.par_loop(op2.Kernel(kernel_sum, "kernel_sum"), edges,
                      node_vals(op2.READ, edge2node[op2.i[0]]),
@@ -148,7 +148,7 @@ class TestIterationSpaceDats:
 
         k = FunDecl("void", "k",
                     [Decl("int*", c_sym("d")), Decl("int*", c_sym("vd"))],
-                    c_for("i", 1, Incr(Symbol("vd", ("i",)), c_sym("*d"))))
+                    c_for("i", 1, Incr(Symbol("vd", ("i",)), Deref(c_sym("d")))))
         op2.par_loop(op2.Kernel(k, 'k'), node,
                      d1(op2.READ),
                      vd1(op2.INC, node2ele[op2.i[0]]))

@@ -195,7 +195,7 @@ def mass():
 
     kernel_code = FunDecl("void", "mass",
                           [Decl("double", Symbol("localTensor", (3, 3))),
-                           Decl("double*", c_sym("c0[2]"))],
+                           Decl("double*", Symbol("c0", (2,)))],
                           Block([init, assembly], open_scope=False))
 
     return op2.Kernel(kernel_code, "mass")
@@ -291,7 +291,7 @@ for (unsigned int ip = 0; ip < 3; ip++)
 
     kernel_code = FunDecl("void", "mass_ffc",
                           [Decl("double", Symbol("A", (3, 3))),
-                           Decl("double*", c_sym("x[2]"))],
+                           Decl("double*", Symbol("x", (2,)))],
                           Block([init, assembly], open_scope=False))
 
     return op2.Kernel(kernel_code, "mass_ffc")
@@ -369,7 +369,7 @@ for (unsigned int ip = 0; ip < 3; ip++)
 
     kernel_code = FunDecl("void", "rhs_ffc_itspace",
                           [Decl("double", Symbol("A", (3,))),
-                           Decl("double*", c_sym("x[2]")),
+                           Decl("double*", Symbol("x", (2,))),
                               Decl("double**", c_sym("w0"))],
                           Block([init, assembly, end], open_scope=False))
 
@@ -402,7 +402,7 @@ void zero_vec_dat(double *dat)
 def kernel_inc():
     code = c_for("i", 3,
                  c_for("j", 3,
-                       Incr(Symbol("entry", ("i", "j")), c_sym("*g"))))
+                       Incr(Symbol("entry", ("i", "j")), Deref(c_sym("g")))))
 
     kernel_code = FunDecl("void", "kernel_inc",
                           [Decl("double", Symbol("entry", (3, 3))),
@@ -416,7 +416,7 @@ def kernel_inc():
 def kernel_set():
     code = c_for("i", 3,
                  c_for("j", 3,
-                       Assign(Symbol("entry", ("i", "j")), c_sym("*g"))))
+                       Assign(Symbol("entry", ("i", "j")), Deref(c_sym("g")))))
 
     kernel_code = FunDecl("void", "kernel_set",
                           [Decl("double", Symbol("entry", (3, 3))),
@@ -816,7 +816,7 @@ class TestMixedMatrices:
                            Incr(Symbol("v", ("i", "j")), FlatBlock("d[i][0] * d[j][0]"))))
         addone = FunDecl("void", "addone_mat",
                          [Decl("double", Symbol("v", (3, 3))),
-                          Decl("double", c_sym("**d"))],
+                          Decl("double**", c_sym("d"))],
                          Block([code], open_scope=False))
 
         addone = op2.Kernel(addone, "addone_mat")
@@ -859,8 +859,8 @@ class TestMixedMatrices:
         """Assemble a simple right-hand side over a mixed space and check result."""
         dat = op2.MixedDat(mset ** 2)
         assembly = Block(
-            [Incr(Symbol("v", ("i"), ((2, 0),)), FlatBlock("d[i][0]")),
-             Incr(Symbol("v", ("i"), ((2, 1),)), FlatBlock("d[i][1]"))], open_scope=True)
+            [Incr(Symbol("v", ("i"), ((2, 0),)), Symbol("d", ("i", 0))),
+             Incr(Symbol("v", ("i"), ((2, 1),)), Symbol("d", ("i", 1)))], open_scope=True)
         kernel_code = FunDecl("void", "addone_rhs_vec",
                               [Decl("double", Symbol("v", (6,))),
                                Decl("double**", c_sym("d"))],

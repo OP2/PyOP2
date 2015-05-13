@@ -1868,7 +1868,7 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
                             [ast.Decl("%s*" % self.ctype, ast.Symbol("self"))],
                             body=ast.c_for("n", self.cdim,
                                            ast.Assign(ast.Symbol("self", ("n", )),
-                                                      ast.Symbol("(%s)0" % self.ctype)),
+                                                      ast.Cast(self.ctype, ast.Symbol("0"))),
                                            pragma=None))
             k = _make_object('Kernel', k, 'zero')
             self._zero_parloop = _make_object('ParLoop', k, self.dataset.set,
@@ -1890,9 +1890,9 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
         """Create the :class:`ParLoop` implementing copy."""
         if not hasattr(self, '_copy_kernel'):
             k = ast.FunDecl("void", "copy",
-                            [ast.Decl("%s*" % self.ctype, ast.Symbol("self"),
+                            [ast.Decl(self.ctype + "*", ast.Symbol("self"),
                                       qualifiers=["const"]),
-                             ast.Decl("%s*" % other.ctype, ast.Symbol("other"))],
+                             ast.Decl(other.ctype + "*", ast.Symbol("other"))],
                             body=ast.c_for("n", self.cdim,
                                            ast.Assign(ast.Symbol("other", ("n", )),
                                                       ast.Symbol("self", ("n", ))),
@@ -1989,11 +1989,11 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
         if np.isscalar(other):
             other = _make_object('Global', 1, data=other)
             k = ast.FunDecl("void", name,
-                            [ast.Decl("%s*" % self.ctype, ast.Symbol("self"),
+                            [ast.Decl(self.ctype + "*", ast.Symbol("self"),
                                       qualifiers=["const"]),
-                             ast.Decl("%s*" % other.ctype, ast.Symbol("other"),
+                             ast.Decl(other.ctype + "*", ast.Symbol("other"),
                                       qualifiers=["const"]),
-                             ast.Decl(self.ctype, ast.Symbol("*ret"))],
+                             ast.Decl(self.ctype + "*", ast.Symbol("ret"))],
                             ast.c_for("n", self.cdim,
                                       ast.Assign(ast.Symbol("ret", ("n", )),
                                                  ops[op](ast.Symbol("self", ("n", )),
@@ -2004,11 +2004,11 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
         else:
             self._check_shape(other)
             k = ast.FunDecl("void", name,
-                            [ast.Decl("%s*" % self.ctype, ast.Symbol("self"),
+                            [ast.Decl(self.ctype + "*", ast.Symbol("self"),
                                       qualifiers=["const"]),
-                             ast.Decl("%s*" % other.ctype, ast.Symbol("other"),
+                             ast.Decl(other.ctype + "*", ast.Symbol("other"),
                                       qualifiers=["const"]),
-                             ast.Decl("%s*" % self.ctype, ast.Symbol("ret"))],
+                             ast.Decl(self.ctype + "*", ast.Symbol("ret"))],
                             ast.c_for("n", self.cdim,
                                       ast.Assign(ast.Symbol("ret", ("n", )),
                                                  ops[op](ast.Symbol("self", ("n", )),
@@ -2029,8 +2029,8 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
         if np.isscalar(other):
             other = _make_object('Global', 1, data=other)
             k = ast.FunDecl("void", name,
-                            [ast.Decl("%s*" % self.ctype, ast.Symbol("self")),
-                             ast.Decl("%s*" % other.ctype, ast.Symbol("other"),
+                            [ast.Decl(self.ctype + "*", ast.Symbol("self")),
+                             ast.Decl(other.ctype + "*", ast.Symbol("other"),
                                       qualifiers=["const"])],
                             ast.c_for("n", self.cdim,
                                       ops[op](ast.Symbol("self", ("n", )),
@@ -2041,8 +2041,8 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
             self._check_shape(other)
             quals = ["const"] if self is not other else []
             k = ast.FunDecl("void", name,
-                            [ast.Decl("%s*" % self.ctype, ast.Symbol("self")),
-                             ast.Decl("%s*" % other.ctype, ast.Symbol("other"),
+                            [ast.Decl(self.ctype + "*", ast.Symbol("self")),
+                             ast.Decl(other.ctype + "*", ast.Symbol("other"),
                                       qualifiers=quals)],
                             ast.c_for("n", self.cdim,
                                       ops[op](ast.Symbol("self", ("n", )),
@@ -2056,7 +2056,7 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
         ops = {operator.sub: ast.Neg}
         name = "uop_%s" % op.__name__
         k = ast.FunDecl("void", name,
-                        [ast.Decl("%s*" % self.ctype, ast.Symbol("self"))],
+                        [ast.Decl(self.ctype + "*", ast.Symbol("self"))],
                         ast.c_for("n", self.cdim,
                                   ast.Assign(ast.Symbol("self", ("n", )),
                                              ops[op](ast.Symbol("self", ("n", )))),
@@ -2076,11 +2076,11 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
         ret = _make_object('Global', 1, data=0, dtype=self.dtype)
 
         k = ast.FunDecl("void", "inner",
-                        [ast.Decl("%s*" % self.ctype, ast.Symbol("self"),
+                        [ast.Decl(self.ctype + "*", ast.Symbol("self"),
                                   qualifiers=["const"]),
-                         ast.Decl("%s*" % other.ctype, ast.Symbol("other"),
+                         ast.Decl(other.ctype + "*", ast.Symbol("other"),
                                   qualifiers=["const"]),
-                         ast.Decl(self.ctype, ast.Symbol("*ret"))],
+                         ast.Decl(self.ctype + "*", ast.Symbol("ret"))],
                         ast.c_for("n", self.cdim,
                                   ast.Incr(ast.Symbol("ret", (0, )),
                                            ast.Prod(ast.Symbol("self", ("n", )),
@@ -3746,17 +3746,19 @@ class JITModule(Cached):
                 else:
                     idx = arg.idx
                 map_arity = arg.map.arity if arg.map else None
-                key += (arg.data.dim, arg.data.dtype, map_arity, idx, arg.access)
+                map_offset = str(arg.map.offset) if arg.map else ""
+                key += (arg.data.dim, arg.data.dtype, map_arity, idx, arg.access, map_offset)
             elif arg._is_mat:
                 idxs = (arg.idx[0].__class__, arg.idx[0].index,
                         arg.idx[1].index)
                 map_arities = (arg.map[0].arity, arg.map[1].arity)
+                map_offsets = (str(arg.map[0].offset), str(arg.map[1].offset))
                 # Implicit boundary conditions (extruded "top" or
                 # "bottom") affect generated code, and therefore need
                 # to be part of cache key
                 map_bcs = (arg.map[0].implicit_bcs, arg.map[1].implicit_bcs)
                 key += (arg.data.dims, arg.data.dtype, idxs,
-                        map_arities, map_bcs, arg.access)
+                        map_arities, map_bcs, arg.access, map_offsets)
 
         iterate = kwargs.get("iterate", None)
         if iterate is not None:

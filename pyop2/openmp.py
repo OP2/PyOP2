@@ -163,20 +163,12 @@ void %(wrapper_name)s(int boffset,
       int bid = blkmap[__b];
       int nelem = nelems[bid];
       int efirst = offset[bid];
-      for (int n = efirst; n < efirst+ nelem; n++ )
+      for (int n = efirst; n < efirst + nelem; n++ )
       {
         int i = %(index_expr)s;
         %(vec_inits)s;
         %(map_init)s;
-        %(extr_loop)s
-        %(map_bcs_m)s;
-        %(buffer_decl)s;
-        %(buffer_gather)s
-        %(kernel_name)s(%(kernel_args)s);
-        %(itset_loop_body)s;
-        %(map_bcs_p)s;
-        %(apply_offset)s;
-        %(extr_loop_close)s
+        %(ast_extr_loop)s;
       }
     }
     %(interm_globals_writeback)s;

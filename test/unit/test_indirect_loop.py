@@ -263,8 +263,8 @@ class TestMixedIndirectLoop:
         assembly = Incr(Symbol("d", ("j",)), Symbol("x", (0,)))
         assembly = c_for("j", 2, assembly)
         kernel_code = FunDecl("void", "kernel_inc",
-                              [Decl("double", c_sym("*d")),
-                               Decl("double", c_sym("*x"))],
+                              [Decl("double*", c_sym("d")),
+                               Decl("double*", c_sym("x"))],
                               Block([assembly], open_scope=False))
         op2.par_loop(op2.Kernel(kernel_code, "kernel_inc"), iterset,
                      mdat(op2.INC, mmap[op2.i[0]]),

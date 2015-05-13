@@ -42,10 +42,12 @@ import compilation
 from base import *
 from mpi import collective
 from configuration import configuration
-from utils import as_tuple, strip
+from utils import as_tuple
 
 import coffee.plan
+from coffee import base as ast
 from coffee.plan import ASTKernel
+from coffee.utils import visit, ast_update_id
 
 
 class Kernel(base.Kernel):
@@ -133,15 +135,48 @@ class Arg(base.Arg):
              'off_mul': ' * %d' % offset if is_top and offset is not None else '',
              'off_add': ' + %d' % offset if not is_top and offset is not None else ''}
 
-    def c_ind_data_xtr(self, idx, i, j=0, is_top=False, layers=1):
-        return "%(name)s + (xtr_%(map_name)s[%(idx)s]%(top)s%(offset)s)*%(dim)s%(off)s" % \
-            {'name': self.c_arg_name(i),
-             'map_name': self.c_map_name(i, 0),
-             'idx': idx,
-             'top': ' + start_layer' if is_top else '',
-             'dim': 1 if self._flatten else str(self.data[i].cdim),
-             'off': ' + %d' % j if j else '',
-             'offset': ' * _'+self.c_offset_name(i, 0)+'['+idx+']' if is_top else ''}
+    def ast_ind_data(self, idx, i, j=0, is_top=False, layers=1, offset=None):
+        index = ast.Prod(ast.Symbol("i"), ast.Symbol(self.map.split[i].arity))
+        index = ast.Sum(index, ast.Symbol(idx))
+        tail = ast.Symbol(self.c_map_name(i, 0), rank=(index,))
+        if is_top:
+            tail = ast.Sum(tail, ast.Symbol("start_layer"))
+            if offset:
+                tail = ast.Prod(tail, ast.Symbol(offset))
+        if not is_top and offset:
+            tail = ast.Sum(tail, offset)
+        tail = ast.Prod(tail, ast.Symbol(self.data[i].cdim))
+        if j:
+            tail = ast.Sum(tail, ast.Symbol(j))
+        return ast.Sum(ast.Symbol(self.c_arg_name(i)), tail)
+        # return "%(name)s + (%(map_name)s[i * %(arity)s + %(idx)s]%(top)s%(off_mul)s%(off_add)s)* %(dim)s%(off)s" % \
+        #     {'name': self.c_arg_name(i),
+        #      'map_name': self.c_map_name(i, 0),
+        #      'arity': self.map.split[i].arity,
+        #      'idx': idx,
+        #      'top': ' + start_layer' if is_top else '',
+        #      'dim': self.data[i].cdim,
+        #      'off': ' + %d' % j if j else '',
+        #      'off_mul': ' * %d' % offset if is_top and offset is not None else '',
+        #      'off_add': ' + %d' % offset if not is_top and offset is not None else ''}
+
+    def ast_ind_data_xtr(self, idx, i, j=0, is_top=False, layers=1):
+        tail = ast.Symbol("xtr_" + self.c_map_name(i, 0), rank=(idx,))
+        if is_top:
+            tail = ast.Sum(tail, ast.Symbol(start_layer))
+            tail = ast.Prod(tail, ast.Symbol('_'+self.c_offset_name(i, 0), rank=(idx,)))
+        tail = ast.Prod(tail, ast.Symbol(1 if self._flatten else self.data[i].cdim))
+        if j:
+            tail = ast.Sum(tail, ast.Symbol(j))
+        return ast.Sum(ast.Symbol(self.c_arg_name(i)), tail)
+        # return "%(name)s + (xtr_%(map_name)s[%(idx)s]%(top)s%(offset)s)*%(dim)s%(off)s" % \
+        #     {'name': self.c_arg_name(i),
+        #      'map_name': self.c_map_name(i, 0),
+        #      'idx': idx,
+        #      'top': ' + start_layer' if is_top else '',
+        #      'dim': 1 if self._flatten else str(self.data[i].cdim),
+        #      'off': ' + %d' % j if j else '',
+        #      'offset': ' * _'+self.c_offset_name(i, 0)+'['+idx+']' if is_top else ''}
 
     def c_kernel_arg_name(self, i, j):
         return "p_%s" % self.c_arg_name(i, j)
@@ -166,7 +201,7 @@ class Arg(base.Arg):
                     raise RuntimeError("Don't know how to pass kernel arg %s" % self)
             else:
                 if self.data is not None and self.data.dataset._extruded:
-                    return self.c_ind_data_xtr("i_%d" % self.idx.index, i, is_top=is_top, layers=layers)
+                    return self.ast_ind_data_xtr("i_%d" % self.idx.index, i, is_top=is_top, layers=layers)
                 elif self._flatten:
                     return "%(name)s + %(map_name)s[i * %(arity)s + i_0 %% %(arity)d] * %(dim)s + (i_0 / %(arity)d)" % \
                         {'name': self.c_arg_name(),
@@ -186,6 +221,48 @@ class Arg(base.Arg):
         else:
             return "%(name)s + i * %(dim)s" % {'name': self.c_arg_name(i),
                                                'dim': self.data[i].cdim}
+
+    def ast_kernel_arg(self, count, i=0, j=0, shape=(0,), is_top=False, layers=1):
+        if self._uses_itspace:
+            if self._is_mat:
+                if self.data[i, j]._is_vector_field:
+                    return ast.Symbol(self.c_kernel_arg_name(i, j))
+                elif self.data[i, j]._is_scalar_field:
+                    return ast.Cast(self.ctype + "(*)[" + str(shape[0]) + "]", ast.Addr(ast.Symbol(self.c_kernel_arg_name(i, j))))
+                    # flat_block = "(%(t)s (*)[%(dim)d])&%(name)s" % \
+                    #     {'t': self.ctype,
+                    #      'dim': shape[0],
+                    #      'name': self.c_kernel_arg_name(i, j)}
+                    # return ast.FlatBlock(flat_block)
+                else:
+                    raise RuntimeError("Don't know how to pass kernel arg %s" % self)
+            else:
+                if self.data is not None and self.data.dataset._extruded:
+                    return self.ast_ind_data_xtr("i_%d" % self.idx.index, i, is_top=is_top, layers=layers)
+                elif self._flatten:
+                    index = ast.Prod(ast.Symbol("i"), ast.Symbol(self.map.arity))
+                    index = ast.Sum(index, ast.Mod(ast.Symbol("i_0"), ast.Symbol(self.map.arity)))
+                    tail = ast.Symbol(self.c_map_name(i, 0), rank=(index,))
+                    tail = ast.Prod(tail, ast.Symbol(self.data[i].cdim))
+                    tail = ast.Sum(tail, ast.Div(ast.Symbol("i_0"), ast.Symbol(self.map.arity)))
+                    return ast.Sum(ast.Symbol(self.c_arg_name()), tail)
+                    # return "%(name)s + %(map_name)s[i * %(arity)s + i_0 %% %(arity)d] * %(dim)s + (i_0 / %(arity)d)" % \
+                    #     {'name': self.c_arg_name(),
+                    #      'map_name': self.c_map_name(0, i),
+                    #      'arity': self.map.arity,
+                    #      'dim': self.data[i].cdim}
+                else:
+                    return self.ast_ind_data("i_%d" % self.idx.index, i)
+        elif self._is_indirect:
+            if self._is_vec_map:
+                return ast.Symbol(self.c_vec_name())
+            return self.ast_ind_data(self.idx, i)
+        elif self._is_global_reduction:
+            return ast.Symbol(self.c_global_reduction_name(count))
+        elif isinstance(self.data, Global):
+            return ast.Symbol(self.c_arg_name(i))
+        else:
+            return ast.Sum(ast.Symbol(self.c_arg_name(i)), ast.Prod(ast.Symbol("i"), ast.Symbol(self.data[i].cdim)))
 
     def c_vec_init(self, is_top, layers, is_facet=False):
         is_top_init = is_top
@@ -234,17 +311,17 @@ class Arg(base.Arg):
                         vec_idx += 1
         return ";\n".join(val)
 
-    def c_addto(self, i, j, buf_name, tmp_name, tmp_decl,
-                extruded=None, is_facet=False, applied_blas=False):
+    def ast_addto(self, i, j, buf_name, tmp_name, tmp_decl,
+                  extruded=None, is_facet=False, applied_blas=False):
         maps = as_tuple(self.map, Map)
         nrows = maps[0].split[i].arity
         ncols = maps[1].split[j].arity
-        rows_str = "%s + i * %s" % (self.c_map_name(0, i), nrows)
-        cols_str = "%s + i * %s" % (self.c_map_name(1, j), ncols)
+        rows_ast = ast.Sum(ast.Symbol(self.c_map_name(0, i)), ast.Prod(ast.Symbol("i"), ast.Symbol(nrows)))
+        cols_ast = ast.Sum(ast.Symbol(self.c_map_name(1, j)), ast.Prod(ast.Symbol("i"), ast.Symbol(ncols)))
 
         if extruded is not None:
-            rows_str = extruded + self.c_map_name(0, i)
-            cols_str = extruded + self.c_map_name(1, j)
+            rows_ast = ast.Symbol(extruded + self.c_map_name(0, i))
+            cols_ast = ast.Symbol(extruded + self.c_map_name(1, j))
 
         if is_facet:
             nrows *= 2
@@ -258,50 +335,47 @@ class Arg(base.Arg):
         if self.data._is_vector_field:
             addto = 'MatSetValuesBlockedLocal'
             if self._flatten:
+                ridx_l = ast.Sum(ast.Prod(ast.Symbol(rbs), ast.Symbol("j")), ast.Symbol("k"))
+                cidx_l = ast.Sum(ast.Prod(ast.Symbol(cbs), ast.Symbol("l")), ast.Symbol("m"))
+                ridx_r = ast.Sum(ast.Prod(ast.Symbol(nrows), ast.Symbol("k")), ast.Symbol("j"))
+                cidx_r = ast.Sum(ast.Prod(ast.Symbol(ncols), ast.Symbol("m")), ast.Symbol("l"))
                 if applied_blas:
-                    idx = "[(%%(ridx)s)*%d + (%%(cidx)s)]" % rdim
+                    # idx = "[(%%(ridx)s)*%d + (%%(cidx)s)]" % rdim
+                    # We only have one rank
+                    rank_l = (ast.Sum(ast.Prod(ridx_l, ast.Symbol(rdim)), cidx_l),)
+                    rank_r = (ast.Sum(ast.Prod(ridx_r, ast.Symbol(rdim)), cidx_r),)
                 else:
-                    idx = "[%(ridx)s][%(cidx)s]"
+                    # idx = "[%(ridx)s][%(cidx)s]"
+                    # This has two ranks
+                    rank_l = (ridx_l, cidx_l)
+                    rank_r = (ridx_r, cidx_r)
                 ret = []
-                idx_l = idx % {'ridx': "%d*j + k" % rbs,
-                               'cidx': "%d*l + m" % cbs}
-                idx_r = idx % {'ridx': "j + %d*k" % nrows,
-                               'cidx': "l + %d*m" % ncols}
                 # Shuffle xxx yyy zzz into xyz xyz xyz
-                ret = ["""
-                %(tmp_decl)s;
-                for ( int j = 0; j < %(nrows)d; j++ ) {
-                   for ( int k = 0; k < %(rbs)d; k++ ) {
-                      for ( int l = 0; l < %(ncols)d; l++ ) {
-                         for ( int m = 0; m < %(cbs)d; m++ ) {
-                            %(tmp_name)s%(idx_l)s = %(buf_name)s%(idx_r)s;
-                         }
-                      }
-                   }
-                }""" % {'nrows': nrows,
-                        'ncols': ncols,
-                        'rbs': rbs,
-                        'cbs': cbs,
-                        'idx_l': idx_l,
-                        'idx_r': idx_r,
-                        'buf_name': buf_name,
-                        'tmp_decl': tmp_decl,
-                        'tmp_name': tmp_name}]
+                # %(tmp_name)s%(idx_l)s = %(buf_name)s%(idx_r)s;
+                nest = ast.Assign(ast.Symbol(tmp_name, rank=rank_l),
+                                  ast.Symbol(buf_name, rank=rank_r))
+                nest = ast.For(ast.Decl("int", ast.Symbol("m"), ast.Symbol(0)),
+                               ast.Less(ast.Symbol("m"), ast.Symbol(cbs)),
+                               ast.Incr(ast.Symbol("m"), ast.Symbol(1)), nest)
+                nest = ast.For(ast.Decl("int", ast.Symbol("l"), ast.Symbol(0)),
+                               ast.Less(ast.Symbol("l"), ast.Symbol(ncols)),
+                               ast.Incr(ast.Symbol("l"), ast.Symbol(1)), nest)
+                nest = ast.For(ast.Decl("int", ast.Symbol("k"), ast.Symbol(0)),
+                               ast.Less(ast.Symbol("k"), ast.Symbol(rbs)),
+                               ast.Incr(ast.Symbol("k"), ast.Symbol(1)), nest)
+                nest = ast.For(ast.Decl("int", ast.Symbol("j"), ast.Symbol(0)),
+                               ast.Less(ast.Symbol("j"), ast.Symbol(nrows)),
+                               ast.Incr(ast.Symbol("j"), ast.Symbol(1)), nest)
+                ret = [tmp_decl, nest]
                 addto_name = tmp_name
 
-        ret.append("""%(addto)s(%(mat)s, %(nrows)s, %(rows)s,
-                                         %(ncols)s, %(cols)s,
-                                         (const PetscScalar *)%(vals)s,
-                                         %(insert)s);""" %
-                   {'mat': self.c_arg_name(i, j),
-                    'vals': addto_name,
-                    'addto': addto,
-                    'nrows': nrows,
-                    'ncols': ncols,
-                    'rows': rows_str,
-                    'cols': cols_str,
-                    'insert': "INSERT_VALUES" if self.access == WRITE else "ADD_VALUES"})
-        return "\n".join(ret)
+        ret.append(ast.FunCall(addto,
+                               ast.Symbol(self.c_arg_name(i, j)),
+                               ast.Symbol(nrows), rows_ast,
+                               ast.Symbol(ncols), cols_ast,
+                               ast.Cast("const PetscScalar *", ast.Symbol(addto_name)),
+                               ast.Symbol("INSERT_VALUES") if self.access == WRITE else ast.Symbol("ADD_VALUES")))
+        return ret
 
     def c_local_tensor_dec(self, extents, i, j):
         if self._is_mat:
@@ -326,31 +400,43 @@ class Arg(base.Arg):
         else:
             raise RuntimeError("Don't know how to zero temp array for %s" % self)
 
-    def c_add_offset(self, is_facet=False):
+    def ast_add_offset(self, is_facet=False):
         if not self.map.iterset._extruded:
             return ""
-        val = []
+        val_ast = []
         vec_idx = 0
         for i, (m, d) in enumerate(zip(self.map, self.data)):
             for k in range(d.dataset.cdim if self._flatten else 1):
                 for idx in range(m.arity):
-                    val.append("%(name)s[%(j)d] += %(offset)s[%(i)d] * %(dim)s;" %
-                               {'name': self.c_vec_name(),
-                                'i': idx,
-                                'j': vec_idx,
-                                'offset': self.c_offset_name(i, 0),
-                                'dim': d.dataset.cdim})
+                    lhs = ast.Symbol(self.c_vec_name(), rank=(vec_idx,))
+                    rhs = ast.Symbol(m.offset[idx] * d.dataset.cdim)
+                    # rhs = ast.Symbol(self.c_offset_name(i, 0), rank=(idx,))
+                    # rhs = ast.Prod(rhs, ast.Symbol(d.dataset.cdim))
+                    val_ast.append(ast.Incr(lhs, rhs))
+                    # val.append("%(name)s[%(j)d] += %(off)d * %(dim)s;" %
+                    #            {'name': self.c_vec_name(),
+                    #             'i': idx,
+                    #             'j': vec_idx,
+                    #             'offset': self.c_offset_name(i, 0),
+                    #             'dim': d.dataset.cdim,
+                    #             'off': m.offset[idx]})
                     vec_idx += 1
                 if is_facet:
                     for idx in range(m.arity):
-                        val.append("%(name)s[%(j)d] += %(offset)s[%(i)d] * %(dim)s;" %
-                                   {'name': self.c_vec_name(),
-                                    'i': idx,
-                                    'j': vec_idx,
-                                    'offset': self.c_offset_name(i, 0),
-                                    'dim': d.dataset.cdim})
+                        lhs = ast.Symbol(self.c_vec_name(), rank=(vec_idx,))
+                        rhs = ast.Symbol(m.offset[idx] * d.dataset.cdim)
+                        # rhs = ast.Symbol(self.c_offset_name(i, 0), rank=(idx,))
+                        # rhs = ast.Prod(rhs, ast.Symbol(d.dataset.cdim))
+                        val_ast.append(ast.Incr(lhs, rhs))
+                        # val.append("%(name)s[%(j)d] += %(off)d * %(dim)s;" %
+                        #            {'name': self.c_vec_name(),
+                        #             'i': idx,
+                        #             'j': vec_idx,
+                        #             'offset': self.c_offset_name(i, 0),
+                        #             'dim': d.dataset.cdim,
+                        #             'off': m.offset[idx]})
                         vec_idx += 1
-        return '\n'.join(val)+'\n'
+        return val_ast
 
     # New globals generation which avoids false sharing.
     def c_intermediate_globals_decl(self, count):
@@ -403,56 +489,84 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                            {'name': self.c_map_name(i, j), 'dim': dim})
         return '\n'.join(val)+'\n'
 
-    def c_map_init(self, is_top=False, layers=1, is_facet=False):
+    def ast_map_init(self, is_top=False, layers=1, is_facet=False):
         if self._is_mat:
             dsets = self.data.sparsity.dsets
         else:
             dsets = (self.data.dataset,)
-        val = []
+        val_ast = []
         for i, (map, dset) in enumerate(zip(as_tuple(self.map, Map), dsets)):
             for j, (m, d) in enumerate(zip(map, dset)):
                 for idx in range(m.arity):
                     if self._is_dat and self._flatten and d.cdim > 1:
                         for k in range(d.cdim):
-                            val.append("xtr_%(name)s[%(ind_flat)s] = %(dat_dim)s * (*(%(name)s + i * %(dim)s + %(ind)s)%(off_top)s)%(offset)s;" %
-                                       {'name': self.c_map_name(i, j),
-                                        'dim': m.arity,
-                                        'ind': idx,
-                                        'dat_dim': d.cdim,
-                                        'ind_flat': m.arity * k + idx,
-                                        'offset': ' + '+str(k) if k > 0 else '',
-                                        'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else ''})
+                            lhs = ast.Symbol("xtr_" + self.c_map_name(i, j), rank=(m.arity * k + idx,))
+                            rhs = ast.Symbol(self.c_map_name(i, j), rank=(ast.Sum(ast.Prod(ast.Symbol("i"), ast.Symbol(m.arity)), ast.Symbol(idx)),))
+                            if is_top:
+                                rhs = ast.Sum(rhs, ast.Prod(ast.Symbol("start_layer"), ast.Symbol(m.offset[idx])))
+                            rhs = ast.Prod(ast.Symbol(d.cdim), rhs)
+                            if k > 0:
+                                rhs = ast.Sum(rhs, ast.Symbol(k))
+                            val_ast.append(ast.Assign(lhs, rhs))
+                            # val.append("xtr_%(name)s[%(ind_flat)s] = %(dat_dim)s * (*(%(name)s + i * %(dim)s + %(ind)s)%(off_top)s)%(offset)s;" %
+                            #            {'name': self.c_map_name(i, j),
+                            #             'dim': m.arity,
+                            #             'ind': idx,
+                            #             'dat_dim': d.cdim,
+                            #             'ind_flat': m.arity * k + idx,
+                            #             'offset': ' + '+str(k) if k > 0 else '',
+                            #             'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else ''})
                     else:
-                        val.append("xtr_%(name)s[%(ind)s] = *(%(name)s + i * %(dim)s + %(ind)s)%(off_top)s;" %
-                                   {'name': self.c_map_name(i, j),
-                                    'dim': m.arity,
-                                    'ind': idx,
-                                    'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else ''})
+                        lhs = ast.Symbol("xtr_" + self.c_map_name(i, j), rank=(idx,))
+                        rhs = ast.Symbol(self.c_map_name(i, j), rank=(ast.Sum(ast.Prod(ast.Symbol("i"), ast.Symbol(m.arity)), ast.Symbol(idx)),))
+                        if is_top:
+                            rhs = ast.Sum(rhs, ast.Prod(ast.Symbol("start_layer"), ast.Symbol(m.offset[idx])))
+                        val_ast.append(ast.Assign(lhs, rhs))
+                        # val.append("xtr_%(name)s[%(ind)s] = *(%(name)s + i * %(dim)s + %(ind)s)%(off_top)s;" %
+                        #            {'name': self.c_map_name(i, j),
+                        #             'dim': m.arity,
+                        #             'ind': idx,
+                        #             'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else ''})
                 if is_facet:
                     for idx in range(m.arity):
                         if self._is_dat and self._flatten and d.cdim > 1:
                             for k in range(d.cdim):
-                                val.append("xtr_%(name)s[%(ind_flat)s] = %(dat_dim)s * (*(%(name)s + i * %(dim)s + %(ind)s)%(off)s)%(offset)s;" %
-                                           {'name': self.c_map_name(i, j),
-                                            'dim': m.arity,
-                                            'ind': idx,
-                                            'dat_dim': d.cdim,
-                                            'ind_flat': m.arity * (k + d.cdim) + idx,
-                                            'offset': ' + '+str(k) if k > 0 else '',
-                                            'off': ' + ' + str(m.offset[idx])})
+                                lhs = ast.Symbol("xtr_" + self.c_map_name(i, j), rank=(m.arity * (k + d.cdim) + idx,))
+                                rhs = ast.Symbol(self.c_map_name(i, j), rank=(ast.Sum(ast.Prod(ast.Symbol("i"), ast.Symbol(m.arity)), ast.Symbol(idx)),))
+                                rhs = ast.Sum(rhs, ast.Symbol(m.offset[idx]))
+                                rhs = ast.Prod(rhs, ast.Symbol(d.cdim))
+                                if k > 0:
+                                    rhs = ast.Sum(rhs, ast.Symbol(k))
+                                val_ast.append(ast.Assign(lhs, rhs))
+                                # val.append("xtr_%(name)s[%(ind_flat)s] = %(dat_dim)s * (*(%(name)s + i * %(dim)s + %(ind)s)%(off)s)%(offset)s;" %
+                                #            {'name': self.c_map_name(i, j),
+                                #             'dim': m.arity,
+                                #             'ind': idx,
+                                #             'dat_dim': d.cdim,
+                                #             'ind_flat': m.arity * (k + d.cdim) + idx,
+                                #             'offset': ' + '+str(k) if k > 0 else '',
+                                #             'off': ' + ' + str(m.offset[idx])})
                         else:
-                            val.append("xtr_%(name)s[%(ind)s] = *(%(name)s + i * %(dim)s + %(ind_zero)s)%(off_top)s%(off)s;" %
-                                       {'name': self.c_map_name(i, j),
-                                        'dim': m.arity,
-                                        'ind': idx + m.arity,
-                                        'ind_zero': idx,
-                                        'off_top': ' + start_layer' if is_top else '',
-                                        'off': ' + ' + str(m.offset[idx])})
-        return '\n'.join(val)+'\n'
+                            lhs = ast.Symbol("xtr_" + self.c_map_name(i, j), rank=(idx + m.arity,))
+                            rhs = ast.Symbol(self.c_map_name(i, j), rank=(ast.Sum(ast.Prod(ast.Symbol("i"), ast.Symbol(m.arity)), ast.Symbol(idx)),))
+                            if is_top:
+                                rhs = ast.Sum(rhs, ast.Symbol("start_layer"))
+                            rhs = ast.Sum(rhs, ast.Symbol(m.offset[idx]))
+                            val_ast.append(ast.Assign(lhs, rhs))
+                            # val.append("xtr_%(name)s[%(ind)s] = *(%(name)s + i * %(dim)s + %(ind_zero)s)%(off_top)s%(off)s;" %
+                            #            {'name': self.c_map_name(i, j),
+                            #             'dim': m.arity,
+                            #             'ind': idx + m.arity,
+                            #             'ind_zero': idx,
+                            #             'off_top': ' + start_layer' if is_top else '',
+                            #             'off': ' + ' + str(m.offset[idx])})
+        return '\n'.join([a.gencode() for a in val_ast])+'\n'
 
-    def c_map_bcs(self, sign):
+    def ast_map_bcs(self, sign):
         maps = as_tuple(self.map, Map)
-        val = []
+        val_ast = []
+        val_ast_bottom = []
+        val_ast_top = []
         # To throw away boundary condition values, we subtract a large
         # value from the map to make it negative then add it on later to
         # get back to the original
@@ -469,17 +583,22 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                 need_bottom = True
                 for idx in range(m.arity):
                     if m.bottom_mask[idx] < 0:
-                        val.append("xtr_%(name)s[%(ind)s] %(sign)s= %(val)s;" %
-                                   {'name': self.c_map_name(i, j),
-                                    'val': max_int,
-                                    'ind': idx,
-                                    'sign': sign})
+                        lhs = ast.Symbol("xtr_" + self.c_map_name(i, j), rank=(idx,))
+                        rhs = ast.Symbol(max_int)
+                        if sign == '-':
+                            rhs = ast.Neg(rhs)
+                        val_ast.append(ast.Incr(lhs, rhs))
+                        # val.append("xtr_%(name)s[%(ind)s] %(sign)s= %(val)s;" %
+                        #            {'name': self.c_map_name(i, j),
+                        #             'val': max_int,
+                        #             'ind': idx,
+                        #             'sign': sign})
         if need_bottom:
-            val.insert(0, "if (j_0 == 0) {")
-            val.append("}")
+            cond = ast.Eq(ast.Symbol("j_0"), ast.Symbol(0))
+            val_ast_bottom = [ast.If(cond, [val_ast])]
+            val_ast = []
 
         need_top = False
-        pos = len(val)
         # Apply any bcs on last (top) layer
         for i, map in enumerate(maps):
             if not map.iterset._extruded:
@@ -490,22 +609,27 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                 need_top = True
                 for idx in range(m.arity):
                     if m.top_mask[idx] < 0:
-                        val.append("xtr_%(name)s[%(ind)s] %(sign)s= %(val)s;" %
-                                   {'name': self.c_map_name(i, j),
-                                    'val': max_int,
-                                    'ind': idx,
-                                    'sign': sign})
+                        lhs = ast.Symbol("xtr_" + self.c_map_name(i, j), rank=(idx,))
+                        rhs = ast.Symbol(max_int)
+                        if sign == '-':
+                            rhs = ast.Neg(rhs)
+                        val_ast.append(ast.Incr(lhs, rhs))
+                        # val.append("xtr_%(name)s[%(ind)s] %(sign)s= %(val)s;" %
+                        #            {'name': self.c_map_name(i, j),
+                        #             'val': max_int,
+                        #             'ind': idx,
+                        #             'sign': sign})
         if need_top:
-            val.insert(pos, "if (j_0 == end_layer - 1) {")
-            val.append("}")
-        return '\n'.join(val)+'\n'
+            cond = ast.Eq(ast.Symbol("j_0"), ast.Sub(ast.Symbol("end_layer"), ast.Symbol(1)))
+            val_ast_top = [ast.If(cond, [val_ast])]
+        return val_ast_bottom + val_ast_top
 
-    def c_add_offset_map(self, is_facet=False):
+    def ast_add_offset_map(self, is_facet=False):
         if self._is_mat:
             dsets = self.data.sparsity.dsets
         else:
             dsets = (self.data.dataset,)
-        val = []
+        val_ast = []
         for i, (map, dset) in enumerate(zip(as_tuple(self.map, Map), dsets)):
             if not map.iterset._extruded:
                 continue
@@ -513,34 +637,46 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                 for idx in range(m.arity):
                     if self._is_dat and self._flatten and d.cdim > 1:
                         for k in range(d.cdim):
-                            val.append("xtr_%(name)s[%(ind_flat)s] += %(off)s[%(ind)s] * %(dim)s;" %
-                                       {'name': self.c_map_name(i, j),
-                                        'off': self.c_offset_name(i, j),
-                                        'ind': idx,
-                                        'ind_flat': m.arity * k + idx,
-                                        'dim': d.cdim})
+                            lhs = ast.Symbol("xtr_" + self.c_map_name(i, j), rank=(m.arity * k + idx,))
+                            rhs = ast.Symbol(m.offset[idx] * d.cdim)
+                            val_ast.append(ast.Incr(lhs, rhs))
+                            # val.append("xtr_%(name)s[%(ind_flat)s] += %(off)s[%(ind)s] * %(dim)s;" %
+                            #            {'name': self.c_map_name(i, j),
+                            #             'off': self.c_offset_name(i, j),
+                            #             'ind': idx,
+                            #             'ind_flat': m.arity * k + idx,
+                            #             'dim': d.cdim})
                     else:
-                        val.append("xtr_%(name)s[%(ind)s] += %(off)s[%(ind)s];" %
-                                   {'name': self.c_map_name(i, j),
-                                    'off': self.c_offset_name(i, j),
-                                    'ind': idx})
+                        lhs = ast.Symbol("xtr_" + self.c_map_name(i, j), rank=(idx,))
+                        rhs = ast.Symbol(m.offset[idx])
+                        val_ast.append(ast.Incr(lhs, rhs))
+                        # val.append("xtr_%(name)s[%(ind)s] += %(off)s[%(ind)s];" %
+                        #            {'name': self.c_map_name(i, j),
+                        #             'off': self.c_offset_name(i, j),
+                        #             'ind': idx})
                 if is_facet:
                     for idx in range(m.arity):
                         if self._is_dat and self._flatten and d.cdim > 1:
                             for k in range(d.cdim):
-                                val.append("xtr_%(name)s[%(ind_flat)s] += %(off)s[%(ind)s] * %(dim)s;" %
-                                           {'name': self.c_map_name(i, j),
-                                            'off': self.c_offset_name(i, j),
-                                            'ind': idx,
-                                            'ind_flat': m.arity * (k + d.cdim) + idx,
-                                            'dim': d.cdim})
+                                lhs = ast.Symbol("xtr_" + self.c_map_name(i, j), rank=(m.arity * (k + d.cdim) + idx,))
+                                rhs = ast.Symbol(m.offset[idx] * d.cdim)
+                                val_ast.append(ast.Incr(lhs, rhs))
+                                # val.append("xtr_%(name)s[%(ind_flat)s] += %(off)s[%(ind)s] * %(dim)s;" %
+                                #            {'name': self.c_map_name(i, j),
+                                #             'off': self.c_offset_name(i, j),
+                                #             'ind': idx,
+                                #             'ind_flat': m.arity * (k + d.cdim) + idx,
+                                #             'dim': d.cdim})
                         else:
-                            val.append("xtr_%(name)s[%(ind)s] += %(off)s[%(ind_zero)s];" %
-                                       {'name': self.c_map_name(i, j),
-                                        'off': self.c_offset_name(i, j),
-                                        'ind': m.arity + idx,
-                                        'ind_zero': idx})
-        return '\n'.join(val)+'\n'
+                            lhs = ast.Symbol("xtr_" + self.c_map_name(i, j), rank=(m.arity + idx,))
+                            rhs = ast.Symbol(m.offset[idx])
+                            val_ast.append(ast.Incr(lhs, rhs))
+                            # val.append("xtr_%(name)s[%(ind)s] += %(off)s[%(ind_zero)s];" %
+                            #            {'name': self.c_map_name(i, j),
+                            #             'off': self.c_offset_name(i, j),
+                            #             'ind': m.arity + idx,
+                            #             'ind_zero': idx})
+        return val_ast
 
     def c_offset_init(self):
         maps = as_tuple(self.map, Map)
@@ -554,41 +690,66 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
             return ""
         return ", " + ", ".join(val)
 
-    def c_buffer_decl(self, size, idx, buf_name, is_facet=False, init=True):
+    def ast_buffer_decl(self, size, idx, buf_name, is_facet=False, init=True):
         buf_type = self.data.ctype
         dim = len(size)
         compiler = coffee.plan.compiler
         isa = coffee.plan.isa
         align = compiler['align'](isa["alignment"]) if compiler and size[-1] % isa["dp_reg"] == 0 else ""
-        init_expr = " = " + "{" * dim + "0.0" + "}" * dim if self.access in [WRITE, INC] else ""
-        if not init:
-            init_expr = ""
+        sizes = tuple([d * (2 if is_facet else 1) for d in size])
+        buf = ast.Symbol(buf_name, rank=sizes)
+        init = ast.ArrayInit("%(init)s" % {"init": "{" * dim + "0.0" + "}" * dim})
+        if init:
+            return ast.Decl(buf_type, buf, init, attributes=[align])
+        return ast.Decl(buf_type, buf, attributes=[align])
 
-        return "%(typ)s %(name)s%(dim)s%(align)s%(init)s" % \
-            {"typ": buf_type,
-             "name": buf_name,
-             "dim": "".join(["[%d]" % (d * (2 if is_facet else 1)) for d in size]),
-             "align": " " + align,
-             "init": init_expr}
-
-    def c_buffer_gather(self, size, idx, buf_name):
+    def ast_buffer_gather(self, size, idx, buf_name):
         dim = 1 if self._flatten else self.data.cdim
-        return ";\n".join(["%(name)s[i_0*%(dim)d%(ofs)s] = *(%(ind)s%(ofs)s);\n" %
-                           {"name": buf_name,
-                            "dim": dim,
-                            "ind": self.c_kernel_arg(idx),
-                            "ofs": " + %s" % j if j else ""} for j in range(dim)])
+        val_ast = []
+        for j in range(dim):
+            index = ast.Prod(ast.Symbol("i_0"), ast.Symbol(dim))
+            if j:
+                index = ast.Sum(index, ast.Symbol(j))
+            lhs = ast.Symbol(buf_name, rank=(index,))
+            # rhs = ast.Symbol(self.c_kernel_arg(idx), rank=(ast.Symbol(j),))
+            rhs = self.c_kernel_arg(idx)
+            if j:
+                rhs = ast.Sum(rhs, ast.Symbol(j))
+            rhs = ast.Deref(rhs)
+            val_ast.append(ast.Assign(lhs, rhs))
+        return val_ast
+        # return ";\n".join(["%(name)s[i_0*%(dim)d%(ofs)s] = *(%(ind)s%(ofs)s);\n" %
+        #                    {"name": buf_name,
+        #                     "dim": dim,
+        #                     "ind": self.c_kernel_arg(idx),
+        #                     "ofs": " + %s" % j if j else ""} for j in range(dim)])
 
-    def c_buffer_scatter_vec(self, count, i, j, mxofs, buf_name):
+    def ast_buffer_scatter_vec(self, count, i, j, mxofs, buf_name):
         dim = 1 if self._flatten else self.data.split[i].cdim
-        return ";\n".join(["*(%(ind)s%(nfofs)s) %(op)s %(name)s[i_0*%(dim)d%(nfofs)s%(mxofs)s]" %
-                           {"ind": self.c_kernel_arg(count, i, j),
-                            "op": "=" if self.access == WRITE else "+=",
-                            "name": buf_name,
-                            "dim": dim,
-                            "nfofs": " + %d" % o if o else "",
-                            "mxofs": " + %d" % (mxofs[0] * dim) if mxofs else ""}
-                           for o in range(dim)])
+        val_ast = []
+        for o in range(dim):
+            lhs = self.c_kernel_arg(count, i, j)
+            index = ast.Prod(ast.Symbol("i_0"), ast.Symbol(dim))
+            if o:
+                index = ast.Sum(index, ast.Symbol(o))
+                lhs = ast.Sum(lhs, ast.Symbol(o))
+            lhs = ast.Deref(lhs)
+            if mxofs:
+                index = ast.Sum(index, ast.Symbol(mxofs[0] * dim))
+            rhs = ast.Symbol(buf_name, rank=(index,))
+            if self.access == WRITE:
+                val_ast.append(ast.Assign(lhs, rhs))
+            else:
+                val_ast.append(ast.Incr(lhs, rhs))
+        return val_ast
+        # return ";\n".join(["*(%(ind)s%(nfofs)s) %(op)s %(name)s[i_0*%(dim)d%(nfofs)s%(mxofs)s]" %
+        #                    {"ind": self.c_kernel_arg(count, i, j),
+        #                     "op": "=" if self.access == WRITE else "+=",
+        #                     "name": buf_name,
+        #                     "dim": dim,
+        #                     "nfofs": " + %d" % o if o else "",
+        #                     "mxofs": " + %d" % (mxofs[0] * dim) if mxofs else ""}
+        #                    for o in range(dim)])
 
 
 class JITModule(base.JITModule):
@@ -737,8 +898,11 @@ class JITModule(base.JITModule):
 
     def generate_code(self):
 
-        def itspace_loop(i, d):
-            return "for (int i_%d=0; i_%d<%d; ++i_%d) {" % (i, i, d, i)
+        def ast_itspace_loop(i, d, body):
+            ind = ast.Symbol("i_" + str(i))
+            return ast.For(ast.Decl("int", ind, ast.Symbol(0)),
+                           ast.Less(ind, ast.Symbol(d)),
+                           ast.Incr(ind, ast.Symbol(1)), body)
 
         def c_const_arg(c):
             return '%s *%s_' % (c.ctype, c.name)
@@ -751,10 +915,37 @@ class JITModule(base.JITModule):
             tmp = '%(name)s[%%(i)s] = %(name)s_[%%(i)s]' % d
             return ';\n'.join([tmp % {'i': i} for i in range(c.cdim)])
 
-        def extrusion_loop():
+        def ast_extrusion_loop(body):
             if self._direct:
-                return "{"
-            return "for (int j_0 = start_layer; j_0 < end_layer; ++j_0){"
+                return ast.Block(body, open_scope=True)
+            i = ast.Symbol("j_0")
+            return ast.For(ast.Decl("int", i, ast.Symbol("start_layer")),
+                           ast.Less(i, ast.Symbol("end_layer")),
+                           ast.Incr(i, ast.Symbol(1)), body)
+
+        def get_kernel_decl_node(kernel_ast):
+            # Find the reference to node continaing the kernel header
+            if isinstance(kernel_ast, ast.FunDecl):
+                return kernel_ast
+            if kernel_ast and not isinstance(kernel_ast, str):
+                for child in kernel_ast.children:
+                    c = get_kernel_decl_node(child)
+                    if isinstance(c, ast.FunDecl):
+                        return c
+            return None
+
+        def change_kernel_loop_index_ids(visitor):
+            fors = visitor['search'][ast.For]
+            for f in fors:
+                old_name = str(f.dim)
+                for_visitor = visit(f, search=ast.Symbol)
+                for symbol in for_visitor['search'][ast.Symbol]:
+                    ast_update_id(symbol, old_name, 0)
+
+        def rename_var(visitor, old_name, new_name):
+            symbols = visitor['search'][ast.Symbol]
+            for s in symbols:
+                ast_update_id(s, old_name, new_name, replace=True)
 
         _ssinds_arg = ""
         _index_expr = "n"
@@ -799,12 +990,10 @@ class JITModule(base.JITModule):
         indent = lambda t, i: ('\n' + '  ' * i).join(t.split('\n'))
 
         _map_decl = ""
-        _apply_offset = ""
+        _apply_offset = []
         _map_init = ""
-        _extr_loop = ""
-        _extr_loop_close = ""
-        _map_bcs_m = ""
-        _map_bcs_p = ""
+        _map_bcs_m = []
+        _map_bcs_p = []
         _layer_arg = ""
         if self._itspace._extruded:
             _layer_arg = ", int start_layer, int end_layer"
@@ -812,16 +1001,20 @@ class JITModule(base.JITModule):
                                  if arg._uses_itspace or arg._is_vec_map])
             _map_decl += ';\n'.join([arg.c_map_decl(is_facet=is_facet)
                                      for arg in self._args if arg._uses_itspace])
-            _map_init += ';\n'.join([arg.c_map_init(is_top=is_top, layers=self._itspace.layers, is_facet=is_facet)
+            _map_init += ';\n'.join([arg.ast_map_init(is_top=is_top, layers=self._itspace.layers, is_facet=is_facet)
                                      for arg in self._args if arg._uses_itspace])
-            _map_bcs_m += ';\n'.join([arg.c_map_bcs("-") for arg in self._args if arg._is_mat])
-            _map_bcs_p += ';\n'.join([arg.c_map_bcs("+") for arg in self._args if arg._is_mat])
-            _apply_offset += ';\n'.join([arg.c_add_offset_map(is_facet=is_facet)
-                                         for arg in self._args if arg._uses_itspace])
-            _apply_offset += ';\n'.join([arg.c_add_offset(is_facet=is_facet)
-                                         for arg in self._args if arg._is_vec_map])
-            _extr_loop = '\n' + extrusion_loop()
-            _extr_loop_close = '}\n'
+            for arg in self._args:
+                if arg._is_mat:
+                    _map_bcs_m += arg.ast_map_bcs("-")
+            for arg in self._args:
+                if arg._is_mat:
+                    _map_bcs_p += arg.ast_map_bcs("+")
+            for arg in self._args:
+                if arg._uses_itspace:
+                    _apply_offset += arg.ast_add_offset_map(is_facet=is_facet)
+            for arg in self._args:
+                if arg._is_vec_map:
+                    _apply_offset += arg.ast_add_offset(is_facet=is_facet)
         else:
             _off_args = ""
 
@@ -851,77 +1044,113 @@ class JITModule(base.JITModule):
             else:
                 if self._kernel._applied_blas:
                     _buf_size = [reduce(lambda x, y: x*y, _buf_size)]
-            _buf_decl[arg] = arg.c_buffer_decl(_buf_size, count, _buf_name[arg], is_facet=is_facet)
-            _tmp_decl[arg] = arg.c_buffer_decl(_buf_size, count, _tmp_name[arg], is_facet=is_facet,
-                                               init=False)
+            # Lists of ASTs
+            _buf_decl[arg] = arg.ast_buffer_decl(_buf_size, count, _buf_name[arg], is_facet=is_facet)
+            _tmp_decl[arg] = arg.ast_buffer_decl(_buf_size, count, _tmp_name[arg], is_facet=is_facet, init=False)
             if arg.access not in [WRITE, INC]:
-                _itspace_loops = '\n'.join(['  ' * n + itspace_loop(n, e) for n, e in enumerate(_loop_size)])
-                _buf_gather[arg] = arg.c_buffer_gather(_buf_size, count, _buf_name[arg])
-                _itspace_loop_close = '\n'.join('  ' * n + '}' for n in range(len(_loop_size) - 1, -1, -1))
-                _buf_gather[arg] = "\n".join([_itspace_loops, _buf_gather[arg], _itspace_loop_close])
-        _kernel_args = ', '.join([arg.c_kernel_arg(count) if not arg._uses_itspace else _buf_name[arg]
-                                  for count, arg in enumerate(self._args)])
-        _buf_gather = ";\n".join(_buf_gather.values())
-        _buf_decl = ";\n".join(_buf_decl.values())
+                # List of buffer gather ASTs
+                ast_node = arg.ast_buffer_gather(_buf_size, count, _buf_name[arg])
+                for n, e in list(reversed(list(enumerate(_loop_size)))):
+                    ast_node = ast_itspace_loop(n, e, ast_node)
+                _buf_gather[arg] = ast_node
+        _kernel_args_str = [arg.ast_kernel_arg(count) if not arg._uses_itspace else ast.Symbol(_buf_name[arg])
+                            for count, arg in enumerate(self._args)]
+        _kernel_args = [arg.ast_kernel_arg(count) if not arg._uses_itspace else ast.Symbol(_buf_name[arg])
+                        for count, arg in enumerate(self._args)]
+        # List of AST nodes
+        _buf_gather = _buf_gather.values()
+        # List of AST nodes
+        _buf_decl = _buf_decl.values()
 
-        def itset_loop_body(i, j, shape, offsets, is_facet=False):
-            nloops = len(shape)
-            mult = 1
-            if is_facet:
-                mult = 2
-            _itspace_loops = '\n'.join(['  ' * n + itspace_loop(n, e*mult) for n, e in enumerate(shape)])
+        def ast_itset_loop_body(i, j, shape, offsets, is_facet=False):
+            mult = 2 if is_facet else 1
+
             _buf_decl_scatter, _buf_scatter = {}, {}
             for count, arg in enumerate(self._args):
                 if not (arg._uses_itspace and arg.access in [WRITE, INC]):
                     continue
+                _buf_scatter_name = ""
                 if arg._is_mat and arg._is_mixed:
-                    raise NotImplementedError
+                    _buf_scatter_name = "scatter_buffer_%s" % arg.c_arg_name(i, j)
+                    _buf_decl_scatter[arg] = ast.Decl(arg.data.ctype, ast.Symbol(_buf_scatter_name, rank=shape))
+                    _buf_scatter[arg] = arg.ast_buffer_scatter_mm(i, j, offsets, _buf_name[arg], _buf_scatter_name)
                 elif not arg._is_mat:
-                    _buf_scatter[arg] = arg.c_buffer_scatter_vec(count, i, j, offsets, _buf_name[arg])
-            _buf_decl_scatter = ";\n".join(_buf_decl_scatter.values())
-            _buf_scatter = ";\n".join(_buf_scatter.values())
-            _itspace_loop_close = '\n'.join('  ' * n + '}' for n in range(nloops - 1, -1, -1))
+                    _buf_scatter[arg] = arg.ast_buffer_scatter_vec(count, i, j, offsets, _buf_name[arg])
+            _buf_decl_scatter = [a for a in _buf_decl_scatter.values()]
+            _buf_scatter_list = []
+            for a in _buf_scatter.values():
+                if isinstance(a, list):
+                    _buf_scatter_list += a
+                else:
+                    _buf_scatter_list += [a]
+            _buf_scatter = _buf_scatter_list
+            _addtos_extruded = []
+            _addtos = []
             if self._itspace._extruded:
-                _addtos_extruded = ';\n'.join([arg.c_addto(i, j, _buf_name[arg],
-                                                           _tmp_name[arg],
-                                                           _tmp_decl[arg],
-                                                           "xtr_", is_facet=is_facet,
-                                                           applied_blas=self._kernel._applied_blas)
-                                               for arg in self._args if arg._is_mat])
-                _addtos = ""
+                for arg in self._args:
+                    if arg._is_mat:
+                        _addtos_extruded += arg.ast_addto(i, j, _buf_name[arg],
+                                                          _tmp_name[arg],
+                                                          _tmp_decl[arg],
+                                                          "xtr_", is_facet=is_facet,
+                                                          applied_blas=self._kernel._applied_blas)
             else:
-                _addtos_extruded = ""
-                _addtos = ';\n'.join([arg.c_addto(i, j, _buf_name[arg],
-                                                  _tmp_name[arg],
-                                                  _tmp_decl[arg],
-                                                  applied_blas=self._kernel._applied_blas)
-                                      for count, arg in enumerate(self._args) if arg._is_mat])
+                for count, arg in enumerate(self._args):
+                    if arg._is_mat:
+                        _addtos += arg.ast_addto(i, j, _buf_name[arg],
+                                                 _tmp_name[arg],
+                                                 _tmp_decl[arg],
+                                                 applied_blas=self._kernel._applied_blas)
+            # Concatenate the two lists
+            inner_ast = _buf_scatter
+            # If the list is not empty
+            if inner_ast:
+                for n, e in list(reversed(list(enumerate(shape)))):
+                    inner_ast = ast_itspace_loop(n, e*mult, inner_ast)
+                inner_ast = [inner_ast]
+            else:
+                inner_ast = []
 
-            if not _buf_scatter:
-                _itspace_loops = ''
-                _itspace_loop_close = ''
+            inner_ast = _buf_decl_scatter + inner_ast
+            inner_ast += _addtos_extruded
+            inner_ast += _addtos
+            return inner_ast
 
-            template = """
-    %(itspace_loops)s
-    %(ind)s%(buffer_scatter)s;
-    %(itspace_loop_close)s
-    %(ind)s%(addtos_extruded)s;
-    %(addtos)s;
-"""
+        extr_loop_body = _map_bcs_m
+        extr_loop_body += _buf_decl
+        extr_loop_body += _buf_gather
+        kernel_decl = None
+        visitor = visit(self._kernel._ast, search=(ast.FlatBlock, ast.Symbol, ast.For))
+        if self._kernel._ast and not visitor['search'][ast.FlatBlock]:
+            # We only inline kernels which are represented using ASTs and do not contain FlatBlock nodes.
+            # The FlatBlock nodes contain a string of C Code which we cannot parse.
+            kernel_decl = get_kernel_decl_node(self._kernel._ast)
+        if kernel_decl:
+            change_kernel_loop_index_ids(visitor)
+            for i, arg in enumerate(kernel_decl.args):
+                if not isinstance(_kernel_args[i], ast.Symbol):
+                    print self._kernel._ast
+                    init_visitor = visit(_kernel_args[i], search=ast.Symbol)
+                    if str(arg.sym.symbol) in [str(s.symbol) for s in init_visitor['search'][ast.Symbol]]:
+                        # If the declared variable name appears in the initilization code then
+                        # we need to give it a different name.
+                        rename_var(visitor, str(arg.sym.symbol), str(arg.sym.symbol) + "_0")
+                    arg.init = _kernel_args[i]
+                    extr_loop_body += [arg]
+                else:
+                    rename_var(visitor, str(arg.sym.symbol), str(_kernel_args[i].symbol))
+            extr_loop_body += kernel_decl.children
+        else:
+            extr_loop_body += [ast.FunCall(self._kernel.name, *_kernel_args_str)]
+        for i, j, shape, offsets in self._itspace:
+            extr_loop_body += ast_itset_loop_body(i, j, shape, offsets, is_facet=(self._iteration_region == ON_INTERIOR_FACETS))
+        extr_loop_body += _map_bcs_p
+        extr_loop_body += _apply_offset
 
-            return template % {
-                'ind': '  ' * nloops,
-                'itspace_loops': indent(_itspace_loops, 2),
-                'buffer_scatter': _buf_scatter,
-                'itspace_loop_close': indent(_itspace_loop_close, 2),
-                'addtos_extruded': indent(_addtos_extruded, 2 + nloops),
-                'apply_offset': indent(_apply_offset, 3),
-                'extr_loop_close': indent(_extr_loop_close, 2),
-                'addtos': indent(_addtos, 2),
-            }
-
-        return {'kernel_name': self._kernel.name,
-                'wrapper_name': self._wrapper_name,
+        extr_loop = ast.Block(extr_loop_body)
+        if self._itspace._extruded:
+            extr_loop = ast_extrusion_loop(extr_loop_body)
+        return {'wrapper_name': self._wrapper_name,
                 'ssinds_arg': _ssinds_arg,
                 'index_expr': _index_expr,
                 'wrapper_args': _wrapper_args,
@@ -935,16 +1164,7 @@ class JITModule(base.JITModule):
                 'map_decl': indent(_map_decl, 2),
                 'vec_decs': indent(_vec_decs, 2),
                 'map_init': indent(_map_init, 5),
-                'apply_offset': indent(_apply_offset, 3),
-                'extr_loop': indent(_extr_loop, 5),
-                'map_bcs_m': indent(_map_bcs_m, 5),
-                'map_bcs_p': indent(_map_bcs_p, 5),
-                'extr_loop_close': indent(_extr_loop_close, 2),
+                'ast_extr_loop': extr_loop.gencode(),
                 'interm_globals_decl': indent(_intermediate_globals_decl, 3),
                 'interm_globals_init': indent(_intermediate_globals_init, 3),
-                'interm_globals_writeback': indent(_intermediate_globals_writeback, 3),
-                'buffer_decl': _buf_decl,
-                'buffer_gather': _buf_gather,
-                'kernel_args': _kernel_args,
-                'itset_loop_body': '\n'.join([itset_loop_body(i, j, shape, offsets, is_facet=(self._iteration_region == ON_INTERIOR_FACETS))
-                                              for i, j, shape, offsets in self._itspace])}
+                'interm_globals_writeback': indent(_intermediate_globals_writeback, 3)}
