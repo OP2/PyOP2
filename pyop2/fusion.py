@@ -148,10 +148,9 @@ class Kernel(sequential.Kernel, tuple):
 
     @classmethod
     def _cache_key(cls, kernels, fused_ast=None, loop_chain_index=None):
-        keys = "".join([super(Kernel, cls)._cache_key(k._original_ast.gencode(),
-                                                      k._name, k._opts, k._include_dirs,
-                                                      k._headers, k._user_code)
-                        for k in kernels])
+        keys = "".join([super(Kernel, cls)._cache_key(
+            k._original_ast.gencode() if k._original_ast else k._code,
+            k._name, k._opts, k._include_dirs, k._headers, k._user_code) for k in kernels])
         return str(loop_chain_index) + keys
 
     def _ast_to_c(self, asts, opts):
@@ -189,7 +188,7 @@ class Kernel(sequential.Kernel, tuple):
             self._ast = None
             kernels = OrderedDict(zip([k.cache_key[1:] for k in kernels], kernels)).values()
             self._code = "\n".join([super(Kernel, k)._ast_to_c(dcopy(k._original_ast), k._opts)
-                                    for k in kernels])
+                                    if k._original_ast else k._code for k in kernels])
         self._original_ast = self._ast
 
         kernels = as_tuple(kernels, (Kernel, sequential.Kernel, base.Kernel))
