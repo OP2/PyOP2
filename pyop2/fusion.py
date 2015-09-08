@@ -215,7 +215,7 @@ class IterationSpace(base.IterationSpace):
     """A simple bag of :class:`IterationSpace` objects."""
 
     def __init__(self, all_itspaces):
-        super(IterationSpace, self).__init__([i._iterset for i in all_itspaces])
+        self._iterset = [i._iterset for i in all_itspaces]
 
     def __str__(self):
         output = "OP2 Fused Iteration Space:"
