@@ -42,6 +42,7 @@ import numpy as np
 import ctypes
 import operator
 import types
+from collections import namedtuple
 from hashlib import md5
 
 from configuration import configuration
@@ -4050,7 +4051,129 @@ class ParLoop(LazyComputation):
         return ()
 
     @property
-    def num_flops(self):
+    def perfect_cache_data_volume(self):
+        """The useful data volume of this :class:`ParLoop`.
+
+        This is the process-local data volume (you will need to
+        perform an MPI reduction to get the global data volume).
+
+        Returns a namedtuple of with slots `stores` and `loads`.
+        Since we don't optimize for non-temporal stores, data accessed
+        with `WRITE` is assumed to contribute to both the load and
+        store counts.
+
+        This assumes a "perfect" cache: i.e. perfect reuse (each data
+        item is touched exactly once).  Only :class:`Dat` arguments
+        are considered, so this underestimates for :class:`Mat`
+        assembly.
+
+        """
+        DataVolume = namedtuple("DataVolume", ["loads", "stores"])
+        loads = 0
+        stores = 0
+        seen = set()
+        size = lambda x: x.size
+        if self.needs_exec_halo:
+            size = lambda x: x.exec_size
+
+        def nbytes(dat):
+            return size(dat.dataset) * dat.cdim * dat.dtype.itemsize
+        for arg in self.dat_args:
+            dat = arg.data
+            if dat in seen:
+                continue
+            seen.add(dat)
+            bytes = nbytes(dat)
+            loads += bytes
+            if arg.access is not READ:
+                stores += bytes
+        return DataVolume(loads=loads, stores=stores)
+
+    @property
+    def pessimal_cache_data_volume(self):
+        """The useful data volume of this :class:`ParLoop`.
+
+        This is the process-local data volume (you will need to
+        perform an MPI reduction to get the global data volume).
+
+        Returns a namedtuple of with slots `stores` and `loads`.
+        Since we don't optimize for non-temporal stores, data accessed
+        with `WRITE` is assumed to contribute to both the load and
+        store counts.
+
+        This assumes a "pessimal" cache: i.e. no reuse (each data item
+        is never in cache when it is accessed).  Only :class:`Dat`
+        arguments are considered, so this underestimates for
+        :class:`Mat` assembly.
+
+        """
+        DataVolume = namedtuple("DataVolume", ["loads", "stores"])
+        bytes = self.kernel_bytes
+        loads = bytes.loads
+        stores = bytes.stores
+        size = self.iterset.size
+        if self.needs_exec_halo:
+            size = self.iterset.exec_size
+        if self.iterset._extruded:
+            region = self.iteration_region
+            nlayer = self.iterset.layers - 1
+            if region in [ON_BOTTOM, ON_TOP]:
+                nlayer = 1
+            if region is ON_INTERIOR_FACETS:
+                nlayer -= 1
+            size *= nlayer
+        # Multiply by size of par_loop
+        loads *= size
+        stores *= size
+        return DataVolume(loads=loads, stores=stores)
+
+    @property
+    def kernel_bytes(self):
+        """Return the number of bytes a Kernel touches.
+
+        Three slots are returned:
+
+        :data:`loads`: the bytes loaded by the kernel
+        :data:`stores`: the bytes stored by the kernel
+        :data:`bytes`: the bytes touched by the kernel (through arguments).
+
+        Note that we assume that the compiled code does not use
+        non-temporal stores for :data:`WRITE` kernel arguments (and
+        hence a :data:`WRITE` arg contributes to both loads and
+        stores).
+        """
+        DataVolume = namedtuple("DataVolume", ["loads", "stores", "bytes"])
+        seen = set()
+        loads = 0
+        stores = 0
+        total_bytes = 0
+        def nbytes(arg, self):
+            dat = arg.data
+            # Extruded on interior facets (map arity is double what
+            # the map says it is)
+            facet_mult = 1
+            if self.iteration_region is ON_INTERIOR_FACETS:
+                facet_mult = 2
+            nvals = 1 if arg._is_direct else (arg.map.arity*facet_mult)
+            return nvals * dat.cdim * dat.dtype.itemsize
+        # Count data volume for single kernel invocation
+        for arg in self.dat_args:
+            dat = arg.data
+            if dat in seen:
+                continue
+            seen.add(dat)
+            bytes = nbytes(arg, self)
+            loads += bytes
+            total_bytes += bytes
+            if arg.access is not READ:
+                stores += bytes
+
+        return DataVolume(loads=loads, stores=stores, bytes=total_bytes)
+
+    @property
+    def total_flops(self):
+        """Return an estimate of the total flops executed by this
+        :class:`ParLoop`"""
         iterset = self.iterset
         size = iterset.size
         if self.needs_exec_halo:
@@ -4062,6 +4185,20 @@ class ParLoop(LazyComputation):
             elif region not in [ON_TOP, ON_BOTTOM]:
                 size *= iterset.layers - 1
         return size * self._kernel.num_flops
+
+    @property
+    def arithmetic_intensity(self):
+        """Return an estimate of the arithmetic intensity of this
+    :class:`ParLoop`.
+
+        Two values are returned, one assuming perfect reuse of data,
+        the other assuming pessimal (no reuse) of data."""
+        AI = namedtuple("AI", ["perfect", "pessimal"])
+        flops = float(self.total_flops)
+        perfect_bytes = sum(self.perfect_cache_data_volume)
+        pessimal_bytes = sum(self.pessimal_cache_data_volume)
+        return AI(perfect=flops/perfect_bytes,
+                  pessimal=flops/pessimal_bytes)
 
     def log_flops(self):
         pass

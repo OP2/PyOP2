@@ -751,7 +751,7 @@ class Mat(base.Mat, CopyOnWrite):
 class ParLoop(base.ParLoop):
 
     def log_flops(self):
-        PETSc.Log.logFlops(self.num_flops)
+        PETSc.Log.logFlops(self.total_flops)
 
 # FIXME: Eventually (when we have a proper OpenCL solver) this wants to go in
 # sequential
