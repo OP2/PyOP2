@@ -54,6 +54,7 @@ from backends import _make_object
 from mpi import MPI, _MPI, _check_comm, collective
 from profiling import timed_region, timed_function
 from version import __version__ as version
+from hpc_profiling import hpc_profiling, add_data_volume, add_c_time
 
 from coffee.base import Node
 from coffee.visitors import FindInstances, EstimateFlops
@@ -3772,6 +3773,10 @@ class Kernel(Cached):
         string of C code."""
         return ast.gencode()
 
+    @property
+    def _md5(self):
+        return md5(self.code + self.name).hexdigest()[:6]
+
     def __init__(self, code, name, opts={}, include_dirs=[], headers=[],
                  user_code=""):
         # Protect against re-initialization when retrieved from cache
@@ -3803,6 +3808,8 @@ class Kernel(Cached):
             self._ast = code
             self._code = self._ast_to_c(self._ast, self._opts)
             self._attached_info = False
+        # self._old_ast = coffee_utils.dcopy(code)
+        # self._code = self._ast_to_c(code, opts)
         self._initialized = True
 
     @property
@@ -3878,6 +3885,21 @@ class JITModule(Cached):
         iterate = kwargs.get("iterate", None)
         if iterate is not None:
             key += ((iterate,))
+
+        if configuration['likwid'] is not None:
+            key += ((configuration['likwid'],))
+
+        if configuration['hpc_profiling'] is not None:
+            key += ((configuration['hpc_profiling'],))
+
+        if configuration['papi_flops'] is not None:
+            key += ((configuration['papi_flops'],))
+
+        if configuration['iaca'] is not None:
+            key += ((configuration['iaca'],))
+
+        if configuration['times'] is not None:
+            key += ((configuration['times'],))
 
         # The currently defined Consts need to be part of the cache key, since
         # these need to be uploaded to the device before launching the kernel
@@ -4014,6 +4036,39 @@ class ParLoop(LazyComputation):
                     raise RuntimeError("Iteration over a LocalSet does not make sense for RW args")
 
         self._it_space = self.build_itspace(iterset)
+        # VBW: Valuable BW
+        vol = 0.0
+        # MVBW: Maximal Valuable BW which counts the volume twice for INC and WRITE
+        mvbw_vol = 0.0
+        # MBW: Maximal BW which counts in the horizontal misses
+        mbw_vol = 0.0
+        for arg in self.unique_args:
+            if arg._is_dat:
+                volume = sum(s.size * s.cdim for s in arg.data.dataset) * arg.dtype.itemsize
+                vol += volume
+                mvbw_vol += (volume * (2 if arg.access in [INC, WRITE] else 1))
+                if self._is_layered:
+                    mbw_vol += sum(configuration["dg_dpc"] * iterset.size * s.cdim for s in arg.data.dataset) * arg.dtype.itemsize
+                if configuration['randomize']:
+                    # Randomize the maps
+                    randomize_map(arg.map, len(arg.map.values))
+            if arg._is_mat:
+                volume = (arg.data.sparsity.onz + arg.data.sparsity.nz) * arg.dtype.itemsize
+                vol += volume
+                mvbw_vol += (volume * (2 if arg.access in [INC, WRITE] else 1))
+                if self._is_layered:
+                    # TO DO: Not sure how to compute MBW for this case
+                    mbw_vol += volume
+                if configuration['randomize']:
+                    # Randomize the maps
+                    for m in arg.map:
+                        randomize_map(m, len(m.values))
+        # Lower bound Valuable BW
+        self._data_volume = vol
+        # Maximal Valuable BW
+        self._data_volume_mvbw = mvbw_vol
+        # Apply the correction term
+        self._data_volume_mbw = mbw_vol - (configuration['dg_coords'] if self.coords_exist else 0.0)
 
         # Attach semantic information to the kernel's AST
         # Only need to do this once, since the kernel "defines" the
@@ -4028,7 +4083,12 @@ class ParLoop(LazyComputation):
             self._kernel._attached_info = True
 
     def _run(self):
-        return self.compute()
+        import pyparloop
+        if isinstance(self._kernel, pyparloop.Kernel) or not configuration["hpc_profiling"]:
+            return self.compute()
+        if self.is_direct and configuration["only_indirect_loops"]:
+            return self.compute()
+        return self.hpc_profiled_compute()
 
     def prepare_arglist(self, iterset, *args):
         """Prepare the argument list for calling generated code.
@@ -4093,6 +4153,34 @@ class ParLoop(LazyComputation):
         :arg arglist: The arguments to pass to the compiled code (may
              be ignored by the backend, depending on the exact implementation)"""
         raise RuntimeError("Must select a backend")
+
+    @timed_function('ParLoop compute')
+    def hpc_profiled_compute(self):
+        """Executes the kernel over all members of the iteration space."""
+        region_name = configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name
+        with hpc_profiling('base', '%s-%s' % (region_name, self.kernel._md5)):
+            self.halo_exchange_begin()
+            self.maybe_set_dat_dirty()
+            # t, other_measures = self._compute(self.it_space.iterset.core_part)
+            t = self._compute(self.it_space.iterset.core_part)
+            self.halo_exchange_end()
+            self._compute(self.it_space.iterset.owned_part)
+            self.reduction_begin()
+            if self._only_local:
+                self.reverse_halo_exchange_begin()
+            if not self._only_local and self.needs_exec_halo:
+                self._compute(self.it_space.iterset.exec_part)
+            self.reduction_end()
+            if self._only_local:
+                self.reverse_halo_exchange_end()
+            self.maybe_set_halo_update_needed()
+        add_data_volume('base', '%s-%s' % (region_name, self.kernel._md5),
+                        configuration['times'] * self._data_volume,
+                        configuration['times'] * self._data_volume_mvbw,
+                        configuration['times'] * self._data_volume_mbw,
+                        other_measures)
+        add_c_time('base', '%s-%s' % (region_name, self.kernel._md5), t)
+        # add_papi_gflops('base', '%s-%s' % (region_name, self.kernel._md5), other_measures)
 
     @collective
     @timed_function('ParLoop halo exchange begin')
@@ -4290,6 +4378,34 @@ class ParLoop(LazyComputation):
         """Flag which triggers extrusion"""
         return self._is_layered
 
+    @property
+    def unique_args(self):
+        """Return a list of unique args."""
+        u_args = []
+        for arg1 in self.args:
+            freq = 0
+            for arg2 in u_args:
+                if arg1 == arg2:
+                    freq += 1
+            if freq == 0:
+                u_args.append(arg1)
+        return u_args
+
+    @property
+    def coords_exist(self):
+        c_exist = False
+        u_args = []
+        for arg1 in self.args:
+            freq = 0
+            for arg2 in u_args:
+                if arg1 == arg2:
+                    freq += 1
+            if freq == 0:
+                u_args.append(arg1)
+            else:
+                c_exist = True
+        return c_exist
+
     @cached_property
     def iteration_region(self):
         """Specifies the part of the mesh the parallel loop will
@@ -4297,6 +4413,7 @@ class ParLoop(LazyComputation):
         a certain part of an extruded mesh, for example on top cells, bottom cells or
         interior facets."""
         return self._iteration_region
+
 
 DEFAULT_SOLVER_PARAMETERS = {'ksp_type': 'cg',
                              'pc_type': 'jacobi',

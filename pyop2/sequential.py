@@ -46,35 +46,59 @@ from utils import as_tuple, cached_property
 
 
 class JITModule(host.JITModule):
+    _system_headers = []
 
     _wrapper = """
-void %(wrapper_name)s(int start, int end,
+double %(wrapper_name)s(int start, int end,
                       %(ssinds_arg)s
                       %(wrapper_args)s
                       %(const_args)s
                       %(off_args)s
-                      %(layer_arg)s) {
+                      %(layer_arg)s
+                      %(other_args)s) {
+  %(papi_decl)s;
+  %(papi_init)s;
   %(user_code)s
   %(wrapper_decs)s;
   %(const_inits)s;
   %(map_decl)s
   %(vec_decs)s;
+  %(timer_start)s
+  %(papi_start)s
+  %(likwid_start_outer)s
+  %(times_loop_start)s
   for ( int n = start; n < end; n++ ) {
     int i = %(index_expr)s;
     %(vec_inits)s;
     %(map_init)s;
     %(extr_loop)s
+    %(iaca_start)s
     %(map_bcs_m)s;
     %(buffer_decl)s;
     %(buffer_gather)s
+
+    %(likwid_start_inner)s
     %(kernel_name)s(%(kernel_args)s);
+    %(likwid_end_inner)s
+
     %(itset_loop_body)s
     %(map_bcs_p)s;
     %(apply_offset)s;
     %(extr_loop_close)s
+    %(iaca_end)s
   }
+  %(times_loop_end)s
+  %(likwid_end_outer)s
+  %(papi_end)s
+  %(papi_print)s
+  %(timer_end)s
 }
 """
+
+    # %(layout_decl)s;
+    # %(layout_loop)s
+    #     %(layout_assign)s;
+    # %(layout_loop_close)s
 
     def set_argtypes(self, iterset, *args):
         argtypes = [ctypes.c_int, ctypes.c_int]
@@ -159,8 +183,11 @@ class ParLoop(host.ParLoop):
 
     @collective
     def _compute(self, part, fun, *arglist):
+        time = 0.0
         with timed_region("ParLoop kernel"):
-            fun(part.offset, part.offset + part.size, *arglist)
+            # time = fun(*self._jit_args, argtypes=self._argtypes, restype=ctypes.c_double)
+            time = fun(part.offset, part.offset + part.size, *arglist)
+        return time
 
 
 def _setup():

@@ -41,6 +41,7 @@ import numpy as np
 from decorator import decorator
 import argparse
 from subprocess import Popen, PIPE
+import random
 
 from exceptions import DataTypeError, DataValueError
 from configuration import configuration
@@ -348,3 +349,49 @@ def get_petsc_dir():
 
 Set the environment variable PETSC_DIR to your local PETSc base
 directory or install PETSc from PyPI: pip install petsc""")
+
+
+def get_papi_dir():
+    try:
+        papi_dir = os.environ['PYOP2_PAPI_DIR']
+        return papi_dir
+    except KeyError:
+        sys.exit("You have chosen to profile using PAPI but have not provided a path to the PAPI folder.")
+
+
+def get_iaca_dir():
+    try:
+        iaca_dir = os.environ['PYOP2_IACA_DIR']
+        return iaca_dir
+    except KeyError:
+        sys.exit("You have chosen to use IACA but have not provided a path to the IACA folder. PYOP2_IACA_DIR unset.")
+
+
+def get_iaca_sys():
+    try:
+        iaca_dir = os.environ['PYOP2_IACA_SYSTEM']
+        return iaca_dir
+    except KeyError:
+        sys.exit("PYOP2_IACA_SYSTEM unset. (Set to: SNB, HSW or IVB)")
+
+
+def get_iaca_output_file():
+    try:
+        iaca_out = os.environ['PYOP2_IACA_OUT_FILE']
+        return iaca_out
+    except KeyError:
+        sys.exit("PYOP2_IACA_OUT_FILE unset.")
+
+
+def randomize_map(ord_map, cells):
+    # This routine takes a mesh and creates random mesh out of it by
+    # changing the numbering of the nodes.
+    # After this the cells are also re-numbered by interchanging the maps.
+    random.seed()
+
+    for i in range(cells):
+        rand_pos = random.randint(i, cells - 1)
+        for j in range(ord_map.arity):
+            aux = ord_map.values[i][j]
+            ord_map.values[i][j] = ord_map.values[rand_pos][j]
+            ord_map.values[rand_pos][j] = aux

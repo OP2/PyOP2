@@ -44,10 +44,11 @@ from base import *
 from petsc_base import ParLoop  # noqa: pass-through
 from mpi import collective
 from configuration import configuration
-from utils import as_tuple, strip
+from utils import as_tuple
 
 import coffee.plan
 from coffee.plan import ASTKernel
+# from hpc_profiling import add_iaca_flops
 
 
 class Kernel(base.Kernel):
@@ -60,6 +61,34 @@ class Kernel(base.Kernel):
         ast_handler.plan_cpu(self._opts)
         self._applied_blas = ast_handler.blas
         return ast_handler.gencode()
+
+    def _iaca_ast_to_c(self, ast, opts={}):
+        """Transform an Abstract Syntax Tree representing the kernel into a
+        string of code (C syntax) suitable to CPU execution which contains
+        IACA instrumentation around the main loops."""
+        if not isinstance(ast, Node):
+            print "Warning: Cannot add IACA instrumentation to non-AST kernels."
+            return None
+        iakify = 1
+        last = False
+        iaca_kernels = []
+        if not opts:
+            opts = {"simd_isa": 'sse',
+                    "O0": True,
+                    "compiler": 'gnu',
+                    "autotune": False}
+        while (not last):
+            iaca_ast, last, nest, loop_count = coffee.utils.insert_iaca(ast, iakify)
+            if not last:
+                iakify += 1
+                # ast_handler = ASTKernel(iaca_ast, self._include_dirs)
+                # ast_handler.plan_cpu(opts)
+                # self._applied_blas = ast_handler.blas
+                # self._applied_ap = ast_handler.ap
+                # iaca_kernels.append([ast_handler.gencode(), nest, loop_count])
+                # from IPython import embed; embed()
+                iaca_kernels.append([iaca_ast.gencode(), nest, loop_count])
+        return iaca_kernels
 
 
 class Arg(base.Arg):
@@ -408,21 +437,25 @@ class Arg(base.Arg):
         for i, (m, d) in enumerate(zip(self.map, self.data)):
             for k in range(d.cdim if self._flatten else 1):
                 for idx in range(m.arity):
-                    val.append("%(name)s[%(j)d] += %(offset)s[%(i)d] * %(dim)s;" %
+                    val.append("%(name)s[%(j)d] += %(offset)s * %(dim)s;" %
                                {'name': self.c_vec_name(),
                                 'i': idx,
                                 'j': vec_idx,
-                                'offset': self.c_offset_name(i, 0),
-                                'dim': d.cdim})
+                                # 'offset': self.c_offset_name(i, 0),
+                                # 'dim': d.cdim})
+                                'offset': m.offset[idx],
+                                'dim': d.dataset.cdim})
                     vec_idx += 1
                 if is_facet:
                     for idx in range(m.arity):
-                        val.append("%(name)s[%(j)d] += %(offset)s[%(i)d] * %(dim)s;" %
+                        val.append("%(name)s[%(j)d] += %(offset)s * %(dim)s;" %
                                    {'name': self.c_vec_name(),
                                     'i': idx,
                                     'j': vec_idx,
-                                    'offset': self.c_offset_name(i, 0),
-                                    'dim': d.cdim})
+                                    # 'offset': self.c_offset_name(i, 0),
+                                    # 'dim': d.cdim})
+                                    'offset': m.offset[idx],
+                                    'dim': d.dataset.cdim})
                         vec_idx += 1
         return '\n'.join(val)+'\n'
 
@@ -587,31 +620,31 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                 for idx in range(m.arity):
                     if self._is_dat and self._flatten and d.cdim > 1:
                         for k in range(d.cdim):
-                            val.append("xtr_%(name)s[%(ind_flat)s] += %(off)s[%(ind)s] * %(dim)s;" %
+                            val.append("xtr_%(name)s[%(ind_flat)s] += %(off)d * %(dim)s;" %
                                        {'name': self.c_map_name(i, j),
-                                        'off': self.c_offset_name(i, j),
+                                        'off': m.offset[idx],
                                         'ind': idx,
                                         'ind_flat': m.arity * k + idx,
                                         'dim': d.cdim})
                     else:
-                        val.append("xtr_%(name)s[%(ind)s] += %(off)s[%(ind)s];" %
+                        val.append("xtr_%(name)s[%(ind)s] += %(off)s;" %
                                    {'name': self.c_map_name(i, j),
-                                    'off': self.c_offset_name(i, j),
+                                    'off': m.offset[idx],
                                     'ind': idx})
                 if is_facet:
                     for idx in range(m.arity):
                         if self._is_dat and self._flatten and d.cdim > 1:
                             for k in range(d.cdim):
-                                val.append("xtr_%(name)s[%(ind_flat)s] += %(off)s[%(ind)s] * %(dim)s;" %
+                                val.append("xtr_%(name)s[%(ind_flat)s] += %(off)d * %(dim)s;" %
                                            {'name': self.c_map_name(i, j),
-                                            'off': self.c_offset_name(i, j),
+                                            'off': m.offset[idx],
                                             'ind': idx,
                                             'ind_flat': m.arity * (k + d.cdim) + idx,
                                             'dim': d.cdim})
                         else:
-                            val.append("xtr_%(name)s[%(ind)s] += %(off)s[%(ind_zero)s];" %
+                            val.append("xtr_%(name)s[%(ind)s] += %(off)s;" %
                                        {'name': self.c_map_name(i, j),
-                                        'off': self.c_offset_name(i, j),
+                                        'off': m.offset[idx],
                                         'ind': m.arity + idx,
                                         'ind_zero': idx})
         return '\n'.join(val)+'\n'
@@ -697,12 +730,15 @@ class JITModule(base.JITModule):
         self._args = args
         self._direct = kwargs.get('direct', False)
         self._iteration_region = kwargs.get('iterate', ALL)
+        self._unique_args = kwargs.get('unique_args', None)
         self._initialized = True
         # Copy the class variables, so we don't overwrite them
         self._cppargs = dcopy(type(self)._cppargs)
         self._libraries = dcopy(type(self)._libraries)
         self._system_headers = dcopy(type(self)._system_headers)
         self.set_argtypes(itspace.iterset, *args)
+        self._flops_per_cell = 0
+        self._cycles_per_cell = 0
         self.compile()
 
     @collective
@@ -713,11 +749,17 @@ class JITModule(base.JITModule):
     def _wrapper_name(self):
         return 'wrap_%s' % self._kernel.name
 
-    @collective
-    def compile(self):
-        # If we weren't in the cache we /must/ have arguments
-        if not hasattr(self, '_args'):
-            raise RuntimeError("JITModule has no args associated with it, should never happen")
+    @property
+    def _is_direct(self):
+        return all(a.map is None for a in self._args)
+
+    @property
+    def _is_indirect(self):
+        return not self._is_direct
+
+    def get_c_code(self, kernel_code, wrapper_code):
+        strip = lambda code: '\n'.join([l for l in code.splitlines()
+                                        if l.strip() and l.strip() != ';'])
 
         compiler = coffee.plan.compiler
         blas = coffee.plan.blas
@@ -728,33 +770,65 @@ class JITModule(base.JITModule):
             if blas['name'] == 'eigen':
                 externc_open = 'extern "C" {'
                 externc_close = '}'
+
+        self.timer_function = """
+        #include <time.h>
+        #include <sys/types.h>
+        #include <stdlib.h>
+
+        long stamp()
+        {
+          struct timespec tv;
+          long _stamp;
+          clock_gettime(CLOCK_MONOTONIC, &tv);
+          _stamp = tv.tv_sec * 1000 * 1000 * 1000 + tv.tv_nsec;
+          return _stamp;
+        }
+        """
+
         headers = "\n".join([compiler.get('vect_header', ""), blas_header])
         if any(arg._is_soa for arg in self._args):
             kernel_code = """
             #define OP2_STRIDE(a, idx) a[idx]
+            #define _POSIX_C_SOURCE 199309L
+            %(timer)s
             %(header)s
             %(namespace)s
             %(externc_open)s
             %(code)s
             #undef OP2_STRIDE
-            """ % {'code': self._kernel.code(),
+            """ % {'code': kernel_code,
                    'externc_open': externc_open,
                    'namespace': blas_namespace,
-                   'header': headers}
+                   'header': headers,
+                   'timer': self.timer_function if configuration["hpc_profiling"] else ""}
         else:
             kernel_code = """
+            #define _POSIX_C_SOURCE 199309L
+            %(timer)s
             %(header)s
             %(namespace)s
             %(externc_open)s
             %(code)s
-            """ % {'code': self._kernel.code(),
+            """ % {'code': kernel_code,
                    'externc_open': externc_open,
                    'namespace': blas_namespace,
-                   'header': headers}
-        code_to_compile = strip(dedent(self._wrapper) % self.generate_code())
+                   'header': headers,
+                   'timer': self.timer_function if configuration["hpc_profiling"] else ""}
+        code_to_compile = strip(dedent(self._wrapper) % wrapper_code)
 
         _const_decs = '\n'.join([const._format_declaration()
                                 for const in Const._definitions()]) + '\n'
+
+        profiling_headers = []
+        if configuration["likwid"]:
+            profiling_headers += ["#include <likwid.h>"]
+
+        if configuration["papi_flops"]:
+            profiling_headers += ["#include <papi.h>"]
+
+        if configuration["iaca"]:
+            profiling_headers += ["#include <iacaMarks.h>"]
 
         code_to_compile = """
         #include <petsc.h>
@@ -770,7 +844,168 @@ class JITModule(base.JITModule):
         """ % {'consts': _const_decs, 'kernel': kernel_code,
                'wrapper': code_to_compile,
                'externc_close': externc_close,
-               'sys_headers': '\n'.join(self._kernel._headers + self._system_headers)}
+               'sys_headers': '\n'.join(self._kernel._headers + self._system_headers + profiling_headers)}
+        return code_to_compile
+
+    def sum_nested_flop_values(self, iaca_kernels, val_pos):
+        # Compute the actual number of flops or cycles taking
+        # into consideration the nesting of blocks.
+        # val_pos should be either 4 or -2 for CYCLES and 5 or -1 for FLOPS
+        i_flops = 0
+        total_flops = 0
+        prev_nest = iaca_kernels[-1][1]
+        # indices       0     1        2             3              values start here -->| 4                                   5
+        # iaca code is [code, nest ID, loop counter, False/True unrolled / not unrolled, | cycles per block (IACA Throughput), flops per block]
+        for ind, ic in enumerate(reversed(iaca_kernels)):
+            if ic[1] == prev_nest:
+                i_flops += (ic[2] if ic[3] else 1) * ic[val_pos]
+                # print "same nest: ", i_flops
+            elif ic[1] < prev_nest:
+                iaca_block_flops = 0
+                for ic_prev in iaca_kernels[len(iaca_kernels) - ind:]:
+                    if prev_nest == ic_prev[1]:
+                        iaca_block_flops += ic_prev[val_pos]
+                    # else:
+                    #     break
+                curr_flops = (ic[2] if ic[3] else 1) * (i_flops + ic[val_pos] - iaca_block_flops)
+                if ic[6] == 1:
+                    i_flops = min(curr_flops, (ic[2] if ic[3] else 1) * ic[val_pos])
+                else:
+                    i_flops = curr_flops
+                # print "prev nest greater: ", i_flops
+            else:
+                # Not tested yet. Might never apply to FFC kernels.
+                total_flops += i_flops
+                i_flops = (ic[2] if ic[3] else 1) * ic[val_pos]
+                # print "prev nest smaller: ", i_flops
+            prev_nest = ic[1]
+        total_flops += i_flops
+        return total_flops
+
+    def sum_nested_cycle_values(self, iaca_kernels, val_pos):
+        # Compute the actual number of flops or cycles taking
+        # into consideration the nesting of blocks.
+        # val_pos should be either 4 or -2 for CYCLES and 5 or -1 for FLOPS
+        i_flops = 0
+        total_flops = 0
+        prev_nest = iaca_kernels[-1][1]
+        # indices       0     1        2             3              values start here -->| 4                                   5                6
+        # iaca code is [code, nest ID, loop counter, False/True unrolled / not unrolled, | cycles per block (IACA Throughput), flops per block, jumps]
+        for ind, ic in enumerate(reversed(iaca_kernels)):
+            # if current loop is on the same nest level as the previous one
+            if ic[1] == prev_nest:
+                # Add the cycles or flops and multiply by loop counter if the loop is not unrolled
+                i_flops += (ic[2] if ic[3] else 1) * ic[val_pos]
+                # print "same nest: ", i_flops
+            # if the current loop contains the previous one (has a lower nest number).
+            elif ic[1] < prev_nest:
+                # if there is only one jump instruction and the loop is not unrolled (i.e. inner loops unrolled but current not unrolled)
+                if ic[6] == 1 and ic[3]:
+                    # loop counter times the number of cycles
+                    i_flops = ic[2] * ic[val_pos]
+                    # print "greater nest 1: ", i_flops
+                else:
+                    # sum up the values for the static cycle counts for the loops contaied in the current loop
+                    # regardless of their unrolled/not unrolled status
+                    iaca_block_flops = 0
+                    for ic_prev in iaca_kernels[len(iaca_kernels) - ind:]:
+                        if prev_nest == ic_prev[1]:
+                            iaca_block_flops += ic_prev[val_pos]
+                        # else:
+                        #     break
+                    # if there are less cycles to be done in the current loop then return that count
+                    if iaca_block_flops > ic[val_pos]:
+                        i_flops = (ic[2] if ic[3] else 1) * ic[val_pos]
+                        # print "greater nest 2: ", i_flops
+                    else:
+                        # iflops contains the flop count for the inner loops, add to that the flops generated by the rest of the code
+                        # in the current loop
+                        i_flops = (ic[2] if ic[3] else 1) * (i_flops + ic[val_pos] - iaca_block_flops)
+                        # print "greater nest 3: ", i_flops
+            else:
+                # Not tested yet. Might never apply to FFC kernels.
+                total_flops += i_flops
+                i_flops = (ic[2] if ic[3] else 1) * ic[val_pos]
+                # print "smaller nest: ", i_flops
+            prev_nest = ic[1]
+        total_flops += i_flops
+        return total_flops
+
+    def build_loop_nest_reports(self, iaca_kernels, wrapper_code, iaca_path, compilation, extension, cppargs, ldargs, argtypes, restype, compiler):
+        from subprocess import call
+        iaca_sh = get_iaca_dir() + "/bin/iaca.sh"
+        iaca_flops = 0
+
+        # Compiler the iaca codes one by one.
+        for ind, iaca_code in enumerate(iaca_kernels):
+            # Each IACA code is composed of the code the nest and loop counter
+            # TODO: Add flag to prevent loop unrolling
+            iaca_fun, basename = compilation.load(iaca_code[0],
+                                                  extension,
+                                                  self._wrapper_name,
+                                                  cppargs=cppargs,
+                                                  ldargs=ldargs,
+                                                  argtypes=argtypes,
+                                                  restype=restype,
+                                                  compiler=compiler.get('name'))
+            # For each code, compile it and then call the iaca.sh on it
+            # Only call this in the single process case.
+            # TODO: call the command line if the file doesn't exist already.
+            # TODO: Sync processes after.
+            path_to_iaca_file = iaca_path + "." + str(ind)
+            if MPI.comm.rank == 0:
+                # Command line invocation of the IACA tool.
+                call(["sh", iaca_sh, "-64", "-arch", get_iaca_sys(), "-o", path_to_iaca_file, basename + ".so"])
+            MPI.comm.barrier()
+            # Once the file is generated then compute the number of flops and the number of cycles.
+            with open(path_to_iaca_file, "r+") as h:
+                lines = h.readlines()
+                # Mark the loop with True: not rolled, False: unrolled
+                for line in reversed(lines[:-1]):
+                    if not('mov' in line):
+                        iaca_kernels[ind].append("j" in line)
+                        break
+                # Get the throughput through the ports for this code region
+                if len(lines) >= 7:
+                    ports = lines[8].split()
+                    # Add the block cycles
+                    iaca_kernels[ind].append(float(ports[2]))
+                    iaca_flops = 0
+                    jumps = 0
+                    # TODO: Replace this loop with something more robust!!
+                    for line in lines[30:]:
+                        if "j" in line:
+                            jumps += 1
+                        if "vmulpd" in line or "vaddpd" in line or "vhaddpd" in line:
+                            iaca_flops += 4
+                        elif "vfmadd231pd" in line or "vfmsub231pd" in line or "vfmadd123pd" in line or "vfmsub123pd" in line or \
+                             "vfmadd132pd" in line or "vfmsub132pd" in line or "vfmadd213pd" in line or "vfmsub213pd" in line or \
+                             "vfmadd312pd" in line or "vfmsub312pd" in line or "vfmadd321pd" in line or "vfmsub321pd" in line:
+                            iaca_flops += 4
+                        elif "vaddsd" in line or "vsubsd" in line or "vmulsd" in line:
+                            iaca_flops += 1
+                        elif "vfmsub231sd" in line or "vfmadd231sd" in line or "vfmsub123sd" in line or "vfmadd123sd" in line or \
+                             "vfmsub132sd" in line or "vfmadd132sd" in line or "vfmsub213sd" in line or "vfmadd213sd" in line or \
+                             "vfmsub312sd" in line or "vfmadd312sd" in line or "vfmsub321sd" in line or "vfmadd321sd" in line:
+                            iaca_flops += 2
+                    iaca_kernels[ind].append(iaca_flops)
+                    iaca_kernels[ind].append(jumps)
+                else:
+                    iaca_kernels[ind].append(0.0)
+                    iaca_kernels[ind].append(0)
+                    iaca_kernels[ind].append(0)
+        return iaca_kernels
+
+    @collective
+    def compile(self, argtypes=None, restype=None):
+        # If we weren't in the cache we /must/ have arguments
+        if not hasattr(self, '_args'):
+            raise RuntimeError("JITModule has no args associated with it, should never happen")
+
+        wrapper_code = self.generate_code()
+        code_to_compile = self.get_c_code(self._kernel.code(), wrapper_code)
+        if configuration["iaca"]:
+            original_code_to_compile = self.get_c_code(self._kernel._old_ast, wrapper_code)
 
         self._dump_generated_code(code_to_compile)
         if configuration["debug"]:
@@ -781,11 +1016,38 @@ class JITModule(base.JITModule):
         cppargs += ["-I%s/include" % d for d in get_petsc_dir()] + \
                    ["-I%s" % d for d in self._kernel._include_dirs] + \
                    ["-I%s" % os.path.abspath(os.path.dirname(__file__))]
-        if compiler:
-            cppargs += [compiler[coffee.plan.isa['inst_set']]]
+
+        compiler = coffee.plan.compiler
+        # if compiler:
+        #     cppargs += [compiler[coffee.plan.isa['inst_set']]]
+        more_args = ["-lpetsc", "-lm"]
+        if configuration["hpc_profiling"]:
+            more_args.append("-lrt")
+            cppargs += ["-D_POSIX_C_SOURCE=199309L"]
+        if configuration["likwid"]:
+            more_args.append("-llikwid")
+            cppargs += ["-DLIKWID_PERFMON"]
+        if configuration["papi_flops"]:
+            more_args.append("-lpapi")
+            more_args.append("-lpfm")
+        if configuration["iaca"]:
+            more_args.append("-liacaArchData%(sys)s" % {'sys': get_iaca_sys()})
+            more_args.append("-liacaXED2%(sys)s" % {'sys': get_iaca_sys()})
+            more_args.append("-liacaLogic%(sys)s" % {'sys': get_iaca_sys()})
+
         ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
-                 ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()] + \
-                 ["-lpetsc", "-lm"] + self._libraries
+                 ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()]
+        if configuration["papi_flops"]:
+            cppargs += ["-I%s" % get_papi_dir()]
+            ldargs += ["-L%s" % get_papi_dir()]
+            ldargs += ["-Wl,-rpath,%s" % get_papi_dir()]
+            ldargs += ["-L%s/libpfm4/lib" % get_papi_dir()]
+            ldargs += ["-Wl,-rpath,%s/libpfm4/lib" % get_papi_dir()]
+        if configuration["iaca"]:
+            cppargs += ["-I%s/include" % get_iaca_dir()]
+            ldargs += ["-L%s/lib" % get_iaca_dir()]
+            ldargs += ["-Wl,-rpath,%s/lib" % get_iaca_dir()]
+        ldargs += more_args + self._libraries
         if self._kernel._applied_blas:
             blas_dir = blas['dir']
             if blas_dir:
@@ -794,14 +1056,52 @@ class JITModule(base.JITModule):
             ldargs += blas['link']
             if blas['name'] == 'eigen':
                 extension = "cpp"
-        self._fun = compilation.load(code_to_compile,
-                                     extension,
-                                     self._wrapper_name,
-                                     cppargs=cppargs,
-                                     ldargs=ldargs,
-                                     argtypes=self._argtypes,
-                                     restype=None,
-                                     compiler=compiler.get('name'))
+        # self._fun = compilation.load(code_to_compile,
+        #                              extension,
+        #                              self._wrapper_name,
+        #                              cppargs=cppargs,
+        #                              ldargs=ldargs,
+        #                              argtypes=self._argtypes,
+        #                              restype=None,
+        #                              compiler=compiler.get('name'))
+
+        # If the IACA flag is on we can use it to generate
+        # a version of the code with instrumentation around the kernel
+        # in the non-extruded case and around the loop over the column
+        # in the extruded case.
+        # This will give us the number of cycles spent in the most
+        # intensive part of a parallel loop.
+        if configuration['iaca'] and self._is_indirect:
+            path_to_iaca_file = get_iaca_output_file()
+            if path_to_iaca_file != "":
+                region_name = configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name
+                iaca_kernels = [[original_code_to_compile, 0, 1]] + self._kernel._iaca_ast_to_c(self._kernel._old_ast)
+                iaca_cycle_kernels = [[code_to_compile, 0, 1]] + self._kernel._iaca_ast_to_c(self._kernel._ast, self._kernel._opts)
+                wrapper_code['iaca_start'] = ""
+                wrapper_code['iaca_end'] = ""
+                for ind in range(1, len(iaca_kernels)):
+                    iaca_kernels[ind][0] = self.get_c_code(iaca_kernels[ind][0], wrapper_code)
+                for ind in range(1, len(iaca_cycle_kernels)):
+                    iaca_cycle_kernels[ind][0] = self.get_c_code(iaca_cycle_kernels[ind][0], wrapper_code)
+                iaca_path = path_to_iaca_file + region_name + "_" + self._kernel._md5 + ".txt"
+                self.build_loop_nest_reports(iaca_kernels, wrapper_code, iaca_path, compilation, extension, cppargs, ldargs, argtypes, restype, compiler)
+                iaca_path = path_to_iaca_file + "cycle_" + region_name + "_" + self._kernel._md5 + ".txt"
+                self.build_loop_nest_reports(iaca_cycle_kernels, wrapper_code, iaca_path, compilation, extension, cppargs, ldargs, argtypes, restype, compiler)
+                self._flops_per_cell = self.sum_nested_flop_values(iaca_kernels, 5)
+                self._cycles_per_cell = self.sum_nested_cycle_values(iaca_cycle_kernels, 4)
+            # Now create a new .so file without the IACA instrumentation
+            # The IACA instrumented code will not run anyway!
+            code_to_compile = code_to_compile.replace("IACA_START", "")
+            code_to_compile = code_to_compile.replace("IACA_END", "")
+        # Generate runnable code without IACA instrumentation
+        self._fun, _ = compilation.load(code_to_compile,
+                                        extension,
+                                        self._wrapper_name,
+                                        cppargs=cppargs,
+                                        ldargs=ldargs,
+                                        argtypes=self._argtypes,
+                                        restype=restype,
+                                        compiler=compiler.get('name'))
         # Blow away everything we don't need any more
         del self._args
         del self._kernel
@@ -867,10 +1167,69 @@ class JITModule(base.JITModule):
              for count, arg in enumerate(self._args)
              if arg._is_global_reduction])
 
+        # _vec_inits = ';\n'.join([arg.c_vec_init(is_top, self._itspace.layers, is_facet=is_facet) for arg in self._args
         _vec_inits = ';\n'.join([arg.c_vec_init(is_top, self._itspace.layers, is_facet=is_facet) for arg in self._args
                                  if not arg._is_mat and arg._is_vec_map])
 
         indent = lambda t, i: ('\n' + '  ' * i).join(t.split('\n'))
+
+        _timer_start = """double s1, s2;\ns1=stamp();\n"""
+        _timer_end = """
+        s2=stamp();
+        return (s2 - s1)/1e9;
+        """
+
+        # other_measures[0] = 0.0;
+        # other_measures[1] = 0.0;
+        # other_measures[2] = 0.0;
+        # other_measures[3] = 0.0;
+        # other_measures[4] = s1/1e9;
+        # other_measures[5] = s2/1e9;
+
+        _likwid_thread_init = """LIKWID_MARKER_THREADINIT;\n"""
+        _likwid_start = """likwid_markerStartRegion("%(region_name)s");\n"""
+        _likwid_end = """likwid_markerStopRegion("%(region_name)s");\n"""
+
+        _other_args = ", double other_measures[6]"
+
+        _papi_decl = """
+  float real_time, proc_time, mflops;
+  long long flpops;
+  float ireal_time, iproc_time, imflops;
+  long long iflpops;
+  int retval;
+        """
+
+        _papi_init = """
+        retval = PAPI_library_init(PAPI_VER_CURRENT);
+        """
+
+        _papi_start = """
+        retval = PAPI_flops(&ireal_time, &iproc_time, &iflpops, &imflops);
+        """
+
+        _papi_end = """
+        retval = PAPI_flops(&real_time, &proc_time, &flpops, &mflops);
+        """
+
+        _papi_print = """
+        s2 = stamp();
+        return (s2 - s1)/1e9;
+        """
+
+        # other_measures[0] = (flpops - iflpops);
+        # other_measures[1] = mflops / 1000.0;
+        # other_measures[2] = real_time - ireal_time;
+        # other_measures[3] = proc_time - iproc_time;
+        # other_measures[4] = s1/1e9;
+        # other_measures[5] = s2/1e9;
+
+        _iaca_start = "IACA_START"
+
+        _iaca_end = "IACA_END"
+
+        _times_loop_start = "for(int times=0; times<%(times)s; times++){\n" % {'times': str(configuration['times'])}
+        _times_loop_end = "}"
 
         _map_decl = ""
         _apply_offset = ""
@@ -994,6 +1353,9 @@ class JITModule(base.JITModule):
                 'addtos': indent(_addtos, 2),
             }
 
+        region_name = configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name
+        if configuration['likwid'] and configuration["likwid_inner"] and configuration["likwid_outer"]:
+            raise RuntimeError("Not allowed to set both likwid_inner and likwid_outer config flags!")
         return {'kernel_name': self._kernel.name,
                 'wrapper_name': self._wrapper_name,
                 'ssinds_arg': _ssinds_arg,
@@ -1020,5 +1382,24 @@ class JITModule(base.JITModule):
                 'buffer_decl': _buf_decl,
                 'buffer_gather': _buf_gather,
                 'kernel_args': _kernel_args,
+                "region_name": configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name,
+                'likwid_thread_init_outer': _likwid_thread_init if configuration["likwid"] and configuration["likwid_outer"] else "",
+                'likwid_thread_init_inner': _likwid_thread_init if configuration["likwid"] and configuration["likwid_inner"] else "",
+                'likwid_start_inner': _likwid_start % {'region_name': region_name} if configuration["likwid"] and configuration["likwid_inner"] else "",
+                'likwid_end_inner': _likwid_end % {'region_name': region_name} if configuration["likwid"] and configuration["likwid_inner"] else "",
+                'likwid_start_outer': _likwid_start % {'region_name': region_name} if configuration["likwid"] and configuration["likwid_outer"] else "",
+                'likwid_end_outer': _likwid_end % {'region_name': region_name} if configuration["likwid"] and configuration["likwid_outer"] else "",
+                'timer_start': _timer_start if configuration["hpc_profiling"] else "",
+                'timer_end': _timer_end if configuration["hpc_profiling"] and not configuration['papi_flops'] else "",
+                'other_args': _other_args if configuration["hpc_profiling"] else "",
+                'papi_decl': _papi_decl if configuration['papi_flops'] else "",
+                'papi_init': _papi_init if configuration['papi_flops'] else "",
+                'papi_start': _papi_start if configuration['papi_flops'] else "",
+                'papi_end': _papi_end if configuration['papi_flops'] else "",
+                'papi_print': _papi_print if configuration['papi_flops'] else "",
+                'iaca_start': _iaca_start if configuration['iaca'] and self._is_indirect else "",
+                'iaca_end': _iaca_end if configuration['iaca'] and self._is_indirect else "",
+                'times_loop_start': _times_loop_start if configuration['times'] > 1 else "",
+                'times_loop_end': _times_loop_end if configuration['times'] > 1 else "",
                 'itset_loop_body': '\n'.join([itset_loop_body(i, j, shape, offsets, is_facet=(self._iteration_region == ON_INTERIOR_FACETS))
                                               for i, j, shape, offsets in self._itspace])}

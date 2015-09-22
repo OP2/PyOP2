@@ -101,7 +101,7 @@ class Compiler(object):
                 raise CompilationError("Generated code differs across ranks (see output in %s)" % output)
         try:
             # Are we in the cache?
-            return ctypes.CDLL(soname)
+            return ctypes.CDLL(soname), cachedir + "/" + basename
         except OSError:
             # No, let's go ahead and build
             if MPI.comm.rank == 0:
@@ -183,7 +183,7 @@ Original error: %s""" % (ld, retval, logfile, errfile, e))
             # Wait for compilation to complete
             MPI.comm.barrier()
             # Load resulting library
-            return ctypes.CDLL(soname)
+            return ctypes.CDLL(soname), cachedir + "/" + basename
 
 
 class MacCompiler(Compiler):
@@ -215,7 +215,9 @@ class LinuxCompiler(Compiler):
         # This is the default in Ubuntu 14.04 so work around this
         # problem by turning ivopts off.
         # For 4.6 we need to turn off more, so go to no-tree-vectorize
-        opt_flags = ['-g', '-O3', '-fno-tree-vectorize']
+
+        # Maybe include '-ftree-slp-vectorize'
+        opt_flags = ['-O3', '-ffast-math', '-fassociative-math']  # '-march=native'
         if configuration['debug']:
             opt_flags = ['-O0', '-g']
 
@@ -266,12 +268,12 @@ def load(src, extension, fn_name, cppargs=[], ldargs=[], argtypes=None, restype=
     else:
         raise CompilationError("Don't know what compiler to use for platform '%s'" %
                                platform)
-    dll = compiler.get_so(src, extension)
+    dll, basename = compiler.get_so(src, extension)
 
     fn = getattr(dll, fn_name)
     fn.argtypes = argtypes
     fn.restype = restype
-    return fn
+    return fn, basename
 
 
 def clear_cache(prompt=False):

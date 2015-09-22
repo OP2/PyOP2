@@ -115,6 +115,10 @@ def init(**kwargs):
     init_coffee(configuration['simd_isa'], configuration['compiler'],
                 configuration['blas'])
 
+    if configuration['likwid']:
+        import likwid
+        likwid.initialise()
+
 
 @atexit.register
 @collective
@@ -129,6 +133,9 @@ def exit():
         from profiling import summary
         print '**** PyOP2 timings summary ****'
         summary()
+    if configuration['likwid']:
+        import likwid
+        likwid.finalise()
     configuration.reset()
 
     if backends.get_backend() != 'pyop2.void':

@@ -136,7 +136,7 @@ class JITModule(host.JITModule):
     _system_headers = ['#include <omp.h>']
 
     _wrapper = """
-void %(wrapper_name)s(int boffset,
+double %(wrapper_name)s(int boffset,
                       int nblocks,
                       int *blkmap,
                       int *offset,
@@ -149,6 +149,7 @@ void %(wrapper_name)s(int boffset,
   %(user_code)s
   %(wrapper_decs)s;
   %(const_inits)s;
+  %(timer_start)s
   #pragma omp parallel shared(boffset, nblocks, nelems, blkmap)
   {
     %(map_decl)s
@@ -181,6 +182,7 @@ void %(wrapper_name)s(int boffset,
     }
     %(interm_globals_writeback)s;
   }
+  %(timer_end)s
 }
 """
 
@@ -280,7 +282,6 @@ class ParLoop(device.ParLoop, host.ParLoop):
             else:
                 arglist.append(0)
                 arglist.append(iterset.layers - 1)
-
         return arglist
 
     @cached_property
@@ -291,6 +292,7 @@ class ParLoop(device.ParLoop, host.ParLoop):
     @collective
     @lineprof
     def _compute(self, part, fun, *arglist):
+        time = 0.0
         if part.size > 0:
             # TODO: compute partition size
             plan = self._get_plan(part, 1024)
@@ -301,8 +303,10 @@ class ParLoop(device.ParLoop, host.ParLoop):
             for c in range(plan.ncolors):
                 nblocks = plan.ncolblk[c]
                 with timed_region("ParLoop kernel"):
-                    fun(boffset, nblocks, blkmap, offset, nelems, *arglist)
+                    res = fun(boffset, nblocks, blkmap, offset, nelems, *arglist)
+                    time += res if res else 0.0
                 boffset += nblocks
+        return time
 
     def _get_plan(self, part, part_size):
         if self._is_indirect:

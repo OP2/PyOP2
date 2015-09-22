@@ -37,6 +37,7 @@ import os
 from tempfile import gettempdir
 
 from exceptions import ConfigurationError
+from contextlib import contextmanager
 
 
 class Configuration(dict):
@@ -70,6 +71,36 @@ class Configuration(dict):
     """
     # name, env variable, type, default, write once
     DEFAULTS = {
+        # Enable profiling of the wrapper functions.
+        "hpc_profiling": ("PYOP2_HPC_PROFILING", bool, False),
+        # Turn on likwid. TODO: make it true when
+        # either inner or outer likwid flags are true
+        "likwid": ("PYOP2_LIKWID", bool, False),
+        # add likwid instrumentation for the kernel
+        # can be enbaled or disabled at any point in the code
+        "likwid_inner": ("PYOP2_LIKWID_INNER", bool, False),
+        # add likwid instrumentation for the wrapper (includes kernel too)
+        # can be enbaled or disabled at any point in the code
+        "likwid_outer": ("PYOP2_LIKWID_OUTER", bool, False),
+        # Give a suitable name to the region we want to measure
+        "region_name": ("PYOP2_REGION_NAME", str, "default"),
+        # Measure the time around the kernel only
+        "only_kernel": ("PYOP2_ONLY_KERNEL", bool, False),
+        # For a given code region only report the indirect loops
+        "only_indirect_loops": ("PYOP2_ONLY_INDIRECT_LOOPS", bool, False),
+        # For a given code region only report the indirect loops
+        "papi_flops": ("PYOP2_PAPI_FLOPS", bool, False),
+        # For extruded meshes: horizontally DG dofs per column
+        "dg_dpc": ("PYOP2_DG_DPC", int, 0),
+        # For extruded meshes: DG coords correction term for MBW
+        "dg_coords": ("PYOP2_DG_COORDS", int, 0),
+        # Randomize the mesh by mixing the maps
+        "randomize": ("PYOP2_RANDOMIZE", bool, False),
+        # Number of times the wrapper code is being run. This is for testing only.
+        "times": ("PYOP2_TIMES", int, 1),
+        # Enable intel IACA instrumentation
+        "iaca": ("PYOP2_IACA", bool, False),
+
         "backend": ("PYOP2_BACKEND", str, "sequential"),
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gnu"),
         "simd_isa": ("PYOP2_SIMD_ISA", str, "sse"),
@@ -144,3 +175,17 @@ class Configuration(dict):
         super(Configuration, self).__setitem__(key, value)
 
 configuration = Configuration()
+
+
+@contextmanager
+def configure(flag, value):
+    old_value = configuration[flag]
+    configuration[flag] = value
+    if configuration["likwid"]:
+        import likwid
+        likwid.initialise()
+    yield
+    if configuration["likwid"]:
+        import likwid
+        likwid.finalise()
+    configuration[flag] = old_value
