@@ -37,6 +37,7 @@ from time import time
 from contextlib import contextmanager
 from configuration import configuration
 from record import *
+import numpy as np
 
 
 class Timer(object):
@@ -188,7 +189,7 @@ def hpc_profiling(t, name):
     timer.stop()
 
 
-def add_data_volume(t, name, vol, vol_mvbw, vol_mbw, other_measures):
+def add_data_volume(t, name, vol, vol_mvbw, vol_mbw, other_measures=np.zeros(8)):
     if not configuration['randomize']:
         Timer("%s-%s" % (t, name)).data_volume(vol, vol_mvbw, vol_mbw, other_measures)
     else:

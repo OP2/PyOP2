@@ -3775,7 +3775,7 @@ class Kernel(Cached):
 
     @property
     def _md5(self):
-        return md5(self.code + self.name).hexdigest()[:6]
+        return md5(str(hash(self._user_code)) + self._name).hexdigest()[:6]
 
     def __init__(self, code, name, opts={}, include_dirs=[], headers=[],
                  user_code=""):
@@ -4160,27 +4160,28 @@ class ParLoop(LazyComputation):
         region_name = configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name
         with hpc_profiling('base', '%s-%s' % (region_name, self.kernel._md5)):
             self.halo_exchange_begin()
-            self.maybe_set_dat_dirty()
+            iterset = self.iterset
+            arglist = self.prepare_arglist(iterset, *self.args)
+            fun = self._jitmodule
             # t, other_measures = self._compute(self.it_space.iterset.core_part)
-            t = self._compute(self.it_space.iterset.core_part)
+            t, measures = self._compute(iterset.core_part, fun, *arglist)
             self.halo_exchange_end()
-            self._compute(self.it_space.iterset.owned_part)
+            self._compute(iterset.owned_part, fun, *arglist)
             self.reduction_begin()
             if self._only_local:
                 self.reverse_halo_exchange_begin()
-            if not self._only_local and self.needs_exec_halo:
-                self._compute(self.it_space.iterset.exec_part)
-            self.reduction_end()
-            if self._only_local:
                 self.reverse_halo_exchange_end()
-            self.maybe_set_halo_update_needed()
+            if self.needs_exec_halo:
+                self._compute(iterset.exec_part, fun, *arglist)
+            self.reduction_end()
+            self.update_arg_data_state()
+            self.log_flops()
         add_data_volume('base', '%s-%s' % (region_name, self.kernel._md5),
                         configuration['times'] * self._data_volume,
                         configuration['times'] * self._data_volume_mvbw,
                         configuration['times'] * self._data_volume_mbw,
-                        other_measures)
+                        measures)
         add_c_time('base', '%s-%s' % (region_name, self.kernel._md5), t)
-        # add_papi_gflops('base', '%s-%s' % (region_name, self.kernel._md5), other_measures)
 
     @collective
     @timed_function('ParLoop halo exchange begin')

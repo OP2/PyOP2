@@ -34,6 +34,7 @@
 """OP2 OpenMP backend."""
 
 import ctypes
+from numpy.ctypeslib import ndpointer
 import math
 import numpy as np
 import os
@@ -220,6 +221,9 @@ double %(wrapper_name)s(int boffset,
             argtypes.append(ctypes.c_int)
             argtypes.append(ctypes.c_int)
 
+        if configuration['hpc_profiling']:
+            argtypes.append(ndpointer(np.dtype('float64'), shape=(8,)))
+
         self._argtypes = argtypes
 
     def generate_code(self):
@@ -282,6 +286,10 @@ class ParLoop(device.ParLoop, host.ParLoop):
             else:
                 arglist.append(0)
                 arglist.append(iterset.layers - 1)
+
+        if configuration['hpc_profiling']:
+            arglist.append(np.zeros(8, dtype=np.float64))
+
         return arglist
 
     @cached_property
@@ -293,6 +301,7 @@ class ParLoop(device.ParLoop, host.ParLoop):
     @lineprof
     def _compute(self, part, fun, *arglist):
         time = 0.0
+        measures = np.zeros(8, np.float64)
         if part.size > 0:
             # TODO: compute partition size
             plan = self._get_plan(part, 1024)
@@ -306,7 +315,10 @@ class ParLoop(device.ParLoop, host.ParLoop):
                     res = fun(boffset, nblocks, blkmap, offset, nelems, *arglist)
                     time += res if res else 0.0
                 boffset += nblocks
-        return time
+                if configuration['hpc_profiling']:
+                    for i, value in enumerate(arglist[-1]):
+                        measures[i] += arglist[-1][i]
+        return time, measures
 
     def _get_plan(self, part, part_size):
         if self._is_indirect:

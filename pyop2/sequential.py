@@ -34,6 +34,7 @@
 """OP2 sequential backend."""
 
 import ctypes
+from numpy.ctypeslib import ndpointer
 
 from base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS
 from exceptions import *
@@ -128,6 +129,9 @@ double %(wrapper_name)s(int start, int end,
             argtypes.append(ctypes.c_int)
             argtypes.append(ctypes.c_int)
 
+        if configuration['hpc_profiling']:
+            argtypes.append(ndpointer(np.dtype('float64'), shape=(8,)))
+
         self._argtypes = argtypes
 
 
@@ -174,6 +178,10 @@ class ParLoop(host.ParLoop):
             else:
                 arglist.append(0)
                 arglist.append(iterset.layers - 1)
+
+        if configuration['hpc_profiling']:
+            arglist.append(np.zeros(8, dtype=np.float64))
+
         return arglist
 
     @cached_property
@@ -187,7 +195,10 @@ class ParLoop(host.ParLoop):
         with timed_region("ParLoop kernel"):
             # time = fun(*self._jit_args, argtypes=self._argtypes, restype=ctypes.c_double)
             time = fun(part.offset, part.offset + part.size, *arglist)
-        return time
+            if configuration['hpc_profiling']:
+                measures = arglist[-1]
+                return time, measures
+        return time, np.zeros(8)
 
 
 def _setup():

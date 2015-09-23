@@ -1100,7 +1100,7 @@ class JITModule(base.JITModule):
                                         cppargs=cppargs,
                                         ldargs=ldargs,
                                         argtypes=self._argtypes,
-                                        restype=restype,
+                                        restype=ctypes.c_double,
                                         compiler=compiler.get('name'))
         # Blow away everything we don't need any more
         del self._args
@@ -1176,15 +1176,14 @@ class JITModule(base.JITModule):
         _timer_start = """double s1, s2;\ns1=stamp();\n"""
         _timer_end = """
         s2=stamp();
+        other_measures[0] = 0.0;
+        other_measures[1] = 0.0;
+        other_measures[2] = 0.0;
+        other_measures[3] = 0.0;
+        other_measures[4] = s1/1e9;
+        other_measures[5] = s2/1e9;
         return (s2 - s1)/1e9;
         """
-
-        # other_measures[0] = 0.0;
-        # other_measures[1] = 0.0;
-        # other_measures[2] = 0.0;
-        # other_measures[3] = 0.0;
-        # other_measures[4] = s1/1e9;
-        # other_measures[5] = s2/1e9;
 
         _likwid_thread_init = """LIKWID_MARKER_THREADINIT;\n"""
         _likwid_start = """likwid_markerStartRegion("%(region_name)s");\n"""
@@ -1214,15 +1213,14 @@ class JITModule(base.JITModule):
 
         _papi_print = """
         s2 = stamp();
+        other_measures[0] = (flpops - iflpops);
+        other_measures[1] = mflops / 1000.0;
+        other_measures[2] = real_time - ireal_time;
+        other_measures[3] = proc_time - iproc_time;
+        other_measures[4] = s1/1e9;
+        other_measures[5] = s2/1e9;
         return (s2 - s1)/1e9;
         """
-
-        # other_measures[0] = (flpops - iflpops);
-        # other_measures[1] = mflops / 1000.0;
-        # other_measures[2] = real_time - ireal_time;
-        # other_measures[3] = proc_time - iproc_time;
-        # other_measures[4] = s1/1e9;
-        # other_measures[5] = s2/1e9;
 
         _iaca_start = "IACA_START"
 
