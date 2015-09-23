@@ -217,6 +217,7 @@ class LinuxCompiler(Compiler):
         # For 4.6 we need to turn off more, so go to no-tree-vectorize
 
         # Maybe include '-ftree-slp-vectorize'
+        print "Using the GCC compiler."
         opt_flags = ['-O3', '-ffast-math', '-fassociative-math']  # '-march=native'
         if configuration['debug']:
             opt_flags = ['-O0', '-g']
@@ -225,6 +226,23 @@ class LinuxCompiler(Compiler):
         ldargs = ['-shared'] + ldargs
         super(LinuxCompiler, self).__init__("mpicc", cppargs=cppargs, ldargs=ldargs)
 
+class LinuxClangCompiler(Compiler):
+    """A compiler for building a shared library on linux systems.
+
+    :arg cppargs: A list of arguments to pass to the Clang/LLVM compiler
+         (optional).
+    :arg ldargs: A list of arguments to pass to the linker (optional)."""
+    def __init__(self, cppargs=[], ldargs=[]):
+        # -fopenmp=libomp -O3 -omptargets=nvptx64sm_35-nvidia-linux
+        print "Using the CLANG/LLVM compiler."
+        # '-ffast-math', '-fassociative-math'
+        opt_flags = ['-fopenmp=libomp', '-O3', '-omptargets=nvptx64sm_35-nvidia-linux', '-v']
+        if configuration['debug']:
+            opt_flags = ['-O0', '-g']
+
+        cppargs =  opt_flags + cppargs
+        ldargs = ['-shared'] + ldargs
+        super(LinuxClangCompiler, self).__init__("mpicc", cppargs=cppargs, ldargs=ldargs)
 
 class LinuxIntelCompiler(Compiler):
     """The intel compiler for building a shared library on linux systems.
@@ -259,8 +277,11 @@ def load(src, extension, fn_name, cppargs=[], ldargs=[], argtypes=None, restype=
     :arg compiler: The name of the C compiler (intel, ``None`` for default)."""
     platform = sys.platform
     if platform.find('linux') == 0:
+        print "Compiler: ",compiler
         if compiler == 'intel':
             compiler = LinuxIntelCompiler(cppargs, ldargs)
+        elif compiler == "clang":
+            compiler = LinuxClangCompiler(cppargs, ldargs)
         else:
             compiler = LinuxCompiler(cppargs, ldargs)
     elif platform.find('darwin') == 0:

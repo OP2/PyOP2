@@ -136,6 +136,58 @@ class JITModule(host.JITModule):
     _libraries = [ompflag] + [os.environ.get('OMP_LIBS') or omplib]
     _system_headers = ['#include <omp.h>']
 
+#     _wrapper = """
+# double %(wrapper_name)s(int boffset,
+#                       int nblocks,
+#                       int *blkmap,
+#                       int *offset,
+#                       int *nelems,
+#                       %(ssinds_arg)s
+#                       %(wrapper_args)s
+#                       %(const_args)s
+#                       %(off_args)s
+#                       %(layer_arg)s
+#                       %(other_args)s) {
+#   %(user_code)s
+#   %(wrapper_decs)s;
+#   %(const_inits)s;
+#   %(timer_start)s
+#   #pragma omp parallel shared(boffset, nblocks, nelems, blkmap)
+#   {
+#     %(map_decl)s
+#     int tid = omp_get_thread_num();
+#     %(interm_globals_decl)s;
+#     %(interm_globals_init)s;
+#     %(vec_decs)s;
+
+#     #pragma omp for schedule(static)
+#     for ( int __b = boffset; __b < boffset + nblocks; __b++ )
+#     {
+#       int bid = blkmap[__b];
+#       int nelem = nelems[bid];
+#       int efirst = offset[bid];
+#       for (int n = efirst; n < efirst+ nelem; n++ )
+#       {
+#         int i = %(index_expr)s;
+#         %(vec_inits)s;
+#         %(map_init)s;
+#         %(extr_loop)s
+#         %(map_bcs_m)s;
+#         %(buffer_decl)s;
+#         %(buffer_gather)s
+#         %(kernel_name)s(%(kernel_args)s);
+#         %(itset_loop_body)s;
+#         %(map_bcs_p)s;
+#         %(apply_offset)s;
+#         %(extr_loop_close)s
+#       }
+#     }
+#     %(interm_globals_writeback)s;
+#   }
+#   %(timer_end)s
+# }
+# """
+
     _wrapper = """
 double %(wrapper_name)s(int boffset,
                       int nblocks,
@@ -146,7 +198,8 @@ double %(wrapper_name)s(int boffset,
                       %(wrapper_args)s
                       %(const_args)s
                       %(off_args)s
-                      %(layer_arg)s) {
+                      %(layer_arg)s
+                      %(other_args)s) {
   %(user_code)s
   %(wrapper_decs)s;
   %(const_inits)s;
@@ -318,7 +371,8 @@ class ParLoop(device.ParLoop, host.ParLoop):
                 if configuration['hpc_profiling']:
                     for i, value in enumerate(arglist[-1]):
                         measures[i] += arglist[-1][i]
-        return time, measures
+                    print measures
+        return time, [ m for m in measures ]
 
     def _get_plan(self, part, part_size):
         if self._is_indirect:

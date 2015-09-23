@@ -62,33 +62,33 @@ class Kernel(base.Kernel):
         self._applied_blas = ast_handler.blas
         return ast_handler.gencode()
 
-    def _iaca_ast_to_c(self, ast, opts={}):
-        """Transform an Abstract Syntax Tree representing the kernel into a
-        string of code (C syntax) suitable to CPU execution which contains
-        IACA instrumentation around the main loops."""
-        if not isinstance(ast, Node):
-            print "Warning: Cannot add IACA instrumentation to non-AST kernels."
-            return None
-        iakify = 1
-        last = False
-        iaca_kernels = []
-        if not opts:
-            opts = {"simd_isa": 'sse',
-                    "O0": True,
-                    "compiler": 'gnu',
-                    "autotune": False}
-        while (not last):
-            iaca_ast, last, nest, loop_count = coffee.utils.insert_iaca(ast, iakify)
-            if not last:
-                iakify += 1
-                # ast_handler = ASTKernel(iaca_ast, self._include_dirs)
-                # ast_handler.plan_cpu(opts)
-                # self._applied_blas = ast_handler.blas
-                # self._applied_ap = ast_handler.ap
-                # iaca_kernels.append([ast_handler.gencode(), nest, loop_count])
-                # from IPython import embed; embed()
-                iaca_kernels.append([iaca_ast.gencode(), nest, loop_count])
-        return iaca_kernels
+    # def _iaca_ast_to_c(self, ast, opts={}):
+    #     """Transform an Abstract Syntax Tree representing the kernel into a
+    #     string of code (C syntax) suitable to CPU execution which contains
+    #     IACA instrumentation around the main loops."""
+    #     if not isinstance(ast, Node):
+    #         print "Warning: Cannot add IACA instrumentation to non-AST kernels."
+    #         return None
+    #     iakify = 1
+    #     last = False
+    #     iaca_kernels = []
+    #     if not opts:
+    #         opts = {"simd_isa": 'sse',
+    #                 "O0": True,
+    #                 "compiler": 'gnu',
+    #                 "autotune": False}
+    #     while (not last):
+    #         iaca_ast, last, nest, loop_count = coffee.utils.insert_iaca(ast, iakify)
+    #         if not last:
+    #             iakify += 1
+    #             # ast_handler = ASTKernel(iaca_ast, self._include_dirs)
+    #             # ast_handler.plan_cpu(opts)
+    #             # self._applied_blas = ast_handler.blas
+    #             # self._applied_ap = ast_handler.ap
+    #             # iaca_kernels.append([ast_handler.gencode(), nest, loop_count])
+    #             # from IPython import embed; embed()
+    #             iaca_kernels.append([iaca_ast.gencode(), nest, loop_count])
+    #     return iaca_kernels
 
 
 class Arg(base.Arg):
@@ -1037,6 +1037,12 @@ class JITModule(base.JITModule):
 
         ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
                  ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()]
+        print "Setup LOMP", compiler
+        if compiler["name"] == "clang":
+            print "Setup LOMP"
+            cppargs += ["-I/localhd/gbercea/lomp/lomp/source/"]
+            ldargs += ["-L/localhd/gbercea/lomp/lomp/source/lib64"]
+            ldargs += ["-Wl,-rpath,/localhd/gbercea/lomp/lomp/source/lib64"]
         if configuration["papi_flops"]:
             cppargs += ["-I%s" % get_papi_dir()]
             ldargs += ["-L%s" % get_papi_dir()]
