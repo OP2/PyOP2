@@ -129,6 +129,11 @@ def exit():
         from profiling import summary
         print '**** PyOP2 timings summary ****'
         summary()
+        print '**** PerfData ****'
+        data = base.ParLoop.perfdata
+        print "NAME FLOPS PERF PESSIMAL TIMINGS"
+        for k, v in data.items():
+            print "%s %s" % (k, v)
     configuration.reset()
 
     if backends.get_backend() != 'pyop2.void':

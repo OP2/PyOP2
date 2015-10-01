@@ -42,6 +42,7 @@ import numpy as np
 import ctypes
 import operator
 import types
+import time
 from collections import namedtuple
 from hashlib import md5
 
@@ -3959,6 +3960,12 @@ ON_INTERIOR_FACETS = IterationRegion("ON_INTERIOR_FACETS")
 ALL = IterationRegion("ALL")
 """Iterate over all cells of an extruded mesh."""
 
+import collections
+PerformanceData = collections.namedtuple('PerformanceData',
+                                         ['flops',
+                                          'perfect_bytes',
+                                          'pessimal_bytes',
+                                          'timings'])
 
 class ParLoop(LazyComputation):
     """Represents the kernel, iteration space and arguments of a parallel loop
@@ -3973,6 +3980,8 @@ class ParLoop(LazyComputation):
     which region of an :class:`ExtrudedSet` the parallel loop should
     iterate over.
     """
+
+    perfdata = {}
 
     @validate_type(('kernel', Kernel, KernelTypeError),
                    ('iterset', Set, SetTypeError))
@@ -3999,6 +4008,7 @@ class ParLoop(LazyComputation):
         self._kernel = kernel
         self._is_layered = iterset._extruded
         self._iteration_region = kwargs.get("iterate", None)
+        self._name = kwargs.get("name", None)
         # Are we only computing over owned set entities?
         self._only_local = isinstance(iterset, LocalSet)
 
@@ -4214,6 +4224,7 @@ class ParLoop(LazyComputation):
     @collective
     def compute(self):
         """Executes the kernel over all members of the iteration space."""
+        start = time.time()
         self.halo_exchange_begin()
         iterset = self.iterset
         arglist = self.prepare_arglist(iterset, *self.args)
@@ -4228,6 +4239,15 @@ class ParLoop(LazyComputation):
         if self.needs_exec_halo:
             self._compute(iterset.exec_part, fun, *arglist)
         self.reduction_end()
+        end = time.time()
+        if self._name is not None:
+            perf = ParLoop.perfdata.get(self._name,
+                                        PerformanceData(flops=self.total_flops,
+                                                        perfect_bytes=self.perfect_cache_data_volume,
+                                                        pessimal_bytes=self.pessimal_cache_data_volume,
+                                                        timings=[]))
+            ParLoop.perfdata[self._name] = perf
+            perf.timings.append(end - start)
         self.update_arg_data_state()
         self.log_flops()
 
