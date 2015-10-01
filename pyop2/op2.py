@@ -47,6 +47,7 @@ from utils import validate_type
 from exceptions import MatTypeError, DatTypeError
 from coffee.plan import init_coffee
 from versioning import modifies_arguments
+from performancedata import PerformanceData
 
 __all__ = ['configuration', 'READ', 'WRITE', 'RW', 'INC', 'MIN', 'MAX',
            'ON_BOTTOM', 'ON_TOP', 'ON_INTERIOR_FACETS', 'ALL',
@@ -129,11 +130,30 @@ def exit():
         from profiling import summary
         print '**** PyOP2 timings summary ****'
         summary()
-        print '**** PerfData ****'
-        data = base.ParLoop.perfdata
-        print "NAME FLOPS PERF PESSIMAL TIMINGS"
-        for k, v in data.items():
-            print "%s %s" % (k, v)
+        with open(configuration['perf_logfile'],'w') as f:
+            print >> f, '**** PerfData ****'
+            data = base.ParLoop.perfdata
+            print >> f, ''
+            print >> f, '** Timing [s] **'
+            print >> f, PerformanceData.header()
+            for x in data.values():
+                print >> f, x.timing_str()
+            print >> f, ''
+            print >> f, '** Floating point performance [GFLOPs] **'
+            print >> f, PerformanceData.header()
+            for x in data.values():
+                print >> f, x.flops_str()
+            print >> f, ''
+            print >> f, '** memory BW (perfect caching) [GB/s] **'
+            print >> f, PerformanceData.header()
+            for x in data.values():
+                 print >> f, x.perfect_bandwidth_str()
+            print >> f, ''
+            print >> f, '** memory BW (pessimal caching) [GB/s] **'
+            print >> f, PerformanceData.header()
+            for x in data.values():
+                print >> f, x.pessimal_bandwidth_str()
+            print >> f, ''
     configuration.reset()
 
     if backends.get_backend() != 'pyop2.void':

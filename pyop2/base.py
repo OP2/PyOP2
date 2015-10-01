@@ -62,6 +62,7 @@ from coffee.base import Node
 from coffee.visitors import FindInstances, EstimateFlops
 from coffee import base as ast
 
+from performancedata import PerformanceData
 
 class LazyComputation(object):
 
@@ -3960,13 +3961,6 @@ ON_INTERIOR_FACETS = IterationRegion("ON_INTERIOR_FACETS")
 ALL = IterationRegion("ALL")
 """Iterate over all cells of an extruded mesh."""
 
-import collections
-PerformanceData = collections.namedtuple('PerformanceData',
-                                         ['flops',
-                                          'perfect_bytes',
-                                          'pessimal_bytes',
-                                          'timings'])
-
 class ParLoop(LazyComputation):
     """Represents the kernel, iteration space and arguments of a parallel loop
     invocation.
@@ -4241,13 +4235,15 @@ class ParLoop(LazyComputation):
         self.reduction_end()
         end = time.time()
         if self._name is not None:
-            perf = ParLoop.perfdata.get(self._name,
-                                        PerformanceData(flops=self.total_flops,
-                                                        perfect_bytes=self.perfect_cache_data_volume,
-                                                        pessimal_bytes=self.pessimal_cache_data_volume,
-                                                        timings=[]))
+            try:
+                perf = ParLoop.perfdata[self._name]
+            except KeyError:
+                perf = PerformanceData(self._name,
+                                       self.total_flops,
+                                       self.perfect_cache_data_volume,
+                                       self.pessimal_cache_data_volume)
+            perf.add_timing(end - start)
             ParLoop.perfdata[self._name] = perf
-            perf.timings.append(end - start)
         self.update_arg_data_state()
         self.log_flops()
 

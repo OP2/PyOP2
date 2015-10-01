@@ -66,6 +66,7 @@ class Configuration(dict):
     :param print_summary: Should PyOP2 print a summary of timings at
         program exit?
     :param profiling: Profiling mode (CUDA kernels are launched synchronously)
+    "param perf_logfile: Output file for performance data logging
     :param matnest: Should matrices on mixed maps be built as nests? (Default yes)
     """
     # name, env variable, type, default, write once
@@ -89,6 +90,7 @@ class Configuration(dict):
         "print_cache_size": ("PYOP2_PRINT_CACHE_SIZE", bool, False),
         "print_summary": ("PYOP2_PRINT_SUMMARY", bool, False),
         "profiling": ("PYOP2_PROFILING", bool, False),
+        "perf_logfile":("PYOP2_PERF_LOGFILE",str,"performance.log"),
         "dump_gencode_path": ("PYOP2_DUMP_GENCODE_PATH", str,
                               os.path.join(gettempdir(), "pyop2-gencode")),
         "matnest": ("PYOP2_MATNEST", bool, True),
