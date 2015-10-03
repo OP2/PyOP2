@@ -131,8 +131,13 @@ def exit():
         print '**** PyOP2 timings summary ****'
         summary()
         with open(configuration['perf_logfile'],'w') as f:
-            print >> f, '**** PerfData ****'
+            print >> f, '**** Performance data ****'
+            print >> f, ''
             data = base.ParLoop.perfdata
+            print >> f, '** Loop properties **'
+            print >> f, PerformanceData.properties_header()
+            for x in data.values():
+                print >> f, x.properties_str()
             print >> f, ''
             print >> f, '** Timing [s] **'
             print >> f, PerformanceData.header()

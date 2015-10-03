@@ -89,3 +89,49 @@ class PerformanceData(object):
             else:
                 s += ', '
         return s
+    
+    @staticmethod
+    def properties_header():
+        """Print out header for loop properties"""
+        s = ('%24s' % '')+' '
+        s += ('%10s' % 'GFLOPs')+' '
+        s += ('%32s' % 'perfect caching [GB]')+' '
+        s += ('%32s' % 'pessimal caching [GB]')+' '
+        s += ('%21s' % 'arithmetic intensity')+'\n'
+        s += ('%24s' % '')+' '
+        s += ('%10s' % '')+' '
+        for i in range(2):
+            s += ('%10s' % 'loads')+' '
+            s += ('%10s' % 'stores')+' '
+            s += ('%10s' % 'total')+' '
+        s += ('%10s' % 'perfect')+' '
+        s += ('%10s' % 'pessimal')
+        return s
+
+    def properties_str(self):
+        """Print out properties of loop
+
+        * Label
+        * Loads/stores/loads+stores [perfect caching]
+        * Loads/stores/loads+stores [pessimal caching]
+        * artithmetic intensity [perfect and pessimal caching]
+        """
+        s = ('%24s' % self._label)+' '
+        # Floating point performance
+        s += ('%10.3e' % (1.0E-9*self._flops))+' '
+        # Perfect caching memory traffic
+        s += ('%10.3e' % (1.0E-9*self._perfect_bytes.loads))+' '
+        s += ('%10.3e' % (1.0E-9*self._perfect_bytes.stores))+' '
+        s += ('%10.3e' % (1.0E-9*(self._perfect_bytes.loads+ \
+                                  self._perfect_bytes.stores)))+' '
+        # Pessimal caching memory traffic
+        s += ('%10.3e' % (1.0E-9*self._pessimal_bytes.loads))+' '
+        s += ('%10.3e' % (1.0E-9*self._pessimal_bytes.stores))+' '
+        s += ('%10.3e' % (1.0E-9*(self._pessimal_bytes.loads+ \
+                                  self._pessimal_bytes.stores)))+' '
+        # Arithmetic intensity
+        s += ('%10.3e' % (self._flops/(self._perfect_bytes.loads + \
+                                      self._perfect_bytes.stores)))
+        s += ('%10.3e' % (self._flops/(self._pessimal_bytes.loads + \
+                                      self._pessimal_bytes.stores)))
+        return s
