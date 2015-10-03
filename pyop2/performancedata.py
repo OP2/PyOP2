@@ -50,7 +50,7 @@ class PerformanceData(object):
 
     @staticmethod
     def header():
-        '''string with column header'''
+        """string with column header"""
         s = ''
         s += ('%24s' % '')+' '
         s += ('%10s' % 'calls')+' '
@@ -62,7 +62,7 @@ class PerformanceData(object):
         return s
 
     def _stat_str(self,data):
-        '''Data summary string
+        """Data summary string
         
         Convert data to a string which contains the following information:
         * label
@@ -74,7 +74,7 @@ class PerformanceData(object):
         * Raw data in the form (x_1,x_2,...,x_n)
 
         :arg data: numpy array with raw data
-        '''
+        """
         ndata = np.array(data)
         s = ('%24s' % self._label)+' '
         s += ('%10d' % len(ndata))+' '
