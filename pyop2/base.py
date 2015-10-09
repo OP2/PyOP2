@@ -64,6 +64,8 @@ from coffee import base as ast
 
 from performancedata import PerformanceData
 
+import compilation
+
 class LazyComputation(object):
 
     """Helper class holding computation to be carried later on.
@@ -4177,7 +4179,15 @@ class ParLoop(LazyComputation):
     @property
     def total_flops(self):
         """Return an estimate of the total flops executed by this
-        :class:`ParLoop`"""
+        :class:`ParLoop`
+        
+        To count the number of FLOPs, the kernel code is compiled with
+        all 'double' and 'float' variables replaced by instances of
+        the 'LoggedDouble' class (defined in loggedtypes.hh). This class
+        records the number of floating point operations carried out on its
+        instances. If the kernel is executed it will record the number of
+        FLOPs which is the returned by the wrapper code.
+        """
         iterset = self.iterset
         size = iterset.size
         if self.needs_exec_halo:
@@ -4188,7 +4198,55 @@ class ParLoop(LazyComputation):
                 size *= iterset.layers - 2
             elif region not in [ON_TOP, ON_BOTTOM]:
                 size *= iterset.layers - 1
-        return size * self._kernel.num_flops
+        parameters = ''
+        definitions = ''
+        # Create a list of parameters and inistialise them
+        for i,arg in enumerate(self.args):
+            M = arg.data.cdim
+            data_type = arg.data.ctype
+            varname = 'var__'+str(i)+'__'
+            parameters += varname+','
+            if (arg._is_dat):
+                definitions += data_type+'** '+varname+';\n'
+                N = arg.map.arity
+                definitions += varname+' = ('+data_type+'**) '
+                definitions += 'malloc('+str(N)+'*sizeof('+data_type+'*));\n'
+                definitions += 'for (int i=0;i<'+str(N)+'; ++i) {'
+                definitions += varname+'[i] = ('+data_type+'*) '
+                definitions += 'malloc('+str(M)+'*sizeof('+data_type+'));'
+                definitions += '}\n'
+            elif (arg._is_global):
+                definitions += data_type+'* '+varname+';\n'
+                definitions += varname+' = ('+data_type+'*) '
+                definitions += 'malloc('+str(M)+'*sizeof('+data_type+'));\n'
+            else:
+                raise RuntimeError('Performance Logging only supported for Dat and Global arguments')
+        parameters = parameters[:-1]
+        # The actual source code
+        code = '''                                                                       #include <stdlib.h>
+          #include "%(HEADER_PATH)s/loggedtypes.hh"
+          %(KERNEL_CODE)s                                         
+          extern "C" {                                                       
+            int count_flops() {
+              %(DEFINITIONS)s
+              LoggedDouble::resetTotalFlops();
+              %(KERNEL_NAME)s(%(PARAMETERS)s);
+              return LoggedDouble::getTotalFlops();
+            }
+            int main(int argc, char* argv[]) {}
+          }
+        ''' % {'HEADER_PATH':os.path.dirname(os.path.abspath(__file__)),
+               'DEFINITIONS':definitions,
+               'KERNEL_NAME':self._kernel.name,
+               'KERNEL_CODE':self._kernel.code(),
+               'PARAMETERS':parameters}
+        s = code.replace('double','LoggedDouble').replace('float','LoggedDouble')
+        args = []
+        compiler = compilation.Compiler('g++')
+        lib = compiler.get_so(s,'cpp')
+        method = lib['count_flops']
+        flops = method(*args)
+        return flops * size
 
     @property
     def arithmetic_intensity(self):
