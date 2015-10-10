@@ -116,6 +116,53 @@ def init(**kwargs):
     init_coffee(configuration['simd_isa'], configuration['compiler'],
                 configuration['blas'])
 
+def performance_summary():
+    """Write detailled performance data to file"""
+    data = base.ParLoop.perfdata
+    for x in data.values():
+        x.all_gather(MPI.comm)
+    if (MPI.comm.rank == 0):
+        with open(configuration['perf_logfile'],'w') as f:
+            print >> f, '**** Performance data ****'
+            print >> f, ''
+            print >> f, ('='*40)+' Summary '+('='*40)
+            print >> f, ''
+            print >> f, '** Loop properties **'
+            print >> f, ''
+            print >> f, '  Maximum and minimum over all processors.'
+            print >> f, ''
+            print >> f, PerformanceData.quantities_header()
+            for x in data.values():
+                print >> f, x.quantities_str(minimum=True)
+                print >> f, x.quantities_str(minimum=False)
+            print >> f, ''
+            print >> f, '  Times are obtained by taking the maximum value over all processors.'
+            print >> f, '  Lower bounds for floating point performance and bandwidth are obtained by taking the minimum over all processors.'
+            print >> f, '  min/avg/max and standard deviation are computed overall loop invocations; see final column for raw data'
+            for property in ('timing','flops','bandwidth_perfect','bandwidth_pessimal'):
+                print >> f, ''
+                print >> f, '** '+PerformanceData.label[property]+' **'
+                print >> f, PerformanceData.header()
+                for x in data.values():
+                    print >> f, x.data_str(property)
+            print >> f, ''
+            print >> f, ('='*40)+' Breakdown by processor '+('='*40)
+            print >> f, ''
+            print >> f, '** Loop properties **'
+            print >> f, ''
+            print >> f, PerformanceData.quantities_header()
+            for x in data.values():
+                for p in range(MPI.comm.size):
+                    print >> f, x.quantities_str(p=p)
+            for property in ('timing','flops','bandwidth_perfect','bandwidth_pessimal'):
+                print >> f, ''
+                print >> f, '** '+PerformanceData.label[property]+' **'
+                print >> f, PerformanceData.header()
+                for x in data.values():
+                    for p in range(MPI.comm.size):
+                        print >> f, x.data_str(property,p)
+                    print >> f, ''
+
 
 @atexit.register
 @collective
@@ -130,20 +177,8 @@ def exit():
         from profiling import summary
         print '**** PyOP2 timings summary ****'
         summary()
-        with open(configuration['perf_logfile'],'w') as f:
-            print >> f, '**** Performance data ****'
-            print >> f, ''
-            data = base.ParLoop.perfdata
-            print >> f, '** Loop properties **'
-            print >> f, PerformanceData.properties_header()
-            for x in data.values():
-                print >> f, x.properties_str()
-            for property in ('timing','flops','bandwidth_perfect','bandwidth_pessimal'):
-                print >> f, ''
-                print >> f, '** '+PerformanceData.label[property]+' **'
-                print >> f, PerformanceData.header()
-                for x in data.values():
-                    print >> f, x.data_str(property)
+    if configuration['print_summary']:
+        performance_summary()
     configuration.reset()
 
     if backends.get_backend() != 'pyop2.void':

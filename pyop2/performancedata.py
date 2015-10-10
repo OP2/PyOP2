@@ -1,4 +1,5 @@
 import numpy as np
+from mpi4py import MPI
 
 class PerformanceData(object):
     label={'timing':'Time [s]',
@@ -20,13 +21,25 @@ class PerformanceData(object):
     """
     def __init__(self,label,flops,perfect_bytes,pessimal_bytes):
         self._label = label
-        self._flops = flops
-        self._perfect_bytes = perfect_bytes
-        self._pessimal_bytes = pessimal_bytes
-        self._data= {'timing':np.empty(0),
-                     'flops':np.empty(0),
-                     'bandwidth_perfect':np.empty(0),
-                     'bandwidth_pessimal':np.empty(0)}
+        quantities = ('timing','flops','bandwidth_perfect','bandwidth_pessimal')
+        self._data = {quantity:np.empty(0) for quantity in quantities}
+        self._data_global = {quantity:None for quantity in quantities}
+        self._props = {'flops':1.E-9*flops,
+                       'bandwidth_perfect_loads':1.E-9*perfect_bytes.loads,
+                       'bandwidth_perfect_stores':1.E-9*perfect_bytes.stores,
+                       'bandwidth_perfect':1.E-9*(perfect_bytes.loads + \
+                                                  perfect_bytes.stores),
+                       'bandwidth_pessimal_loads':1.E-9*pessimal_bytes.loads,
+                       'bandwidth_pessimal_stores':1.E-9*pessimal_bytes.stores,
+                       'bandwidth_pessimal':1.E-9*(pessimal_bytes.loads + \
+                                                   pessimal_bytes.stores),
+                       'intensity_perfect':flops/float(perfect_bytes.loads+ \
+                                                       perfect_bytes.stores),
+                       'intensity_pessimal':flops/float(pessimal_bytes.loads+ \
+                                                        pessimal_bytes.stores)}
+        self._props_global = {quantity:None for quantity in self._props.keys()}
+        # Flag to check whether data has been gathered in paralled
+        self._allgathered=False
 
     def add_timing(self,t):
         """Add another timing data point.
@@ -34,30 +47,57 @@ class PerformanceData(object):
         :arg t: New timing to add
         """
         self._data["timing"] = np.append(self._data["timing"],t)
-        self._data["flops"] = \
-            np.append(self._data["flops"],1.09E-9*self._flops/t)
-        mem_perfect = self._perfect_bytes.loads + \
-                      self._perfect_bytes.stores
-        self._data["bandwidth_perfect"] = \
-            np.append(self._data["bandwidth_perfect"],1.0E-9*mem_perfect/t)
-        mem_pessimal = self._pessimal_bytes.loads + \
-                       self._pessimal_bytes.stores
-        self._data["bandwidth_pessimal"] = \
-            np.append(self._data["bandwidth_pessimal"],1.0E-9*mem_pessimal/t)
+        for quantity in ('flops','bandwidth_perfect','bandwidth_pessimal'):
+            self._data[quantity] = np.append(self._data[quantity],
+                                             self._props[quantity]/t)
+        self._allgathered = False
 
-    def data_str(self,property):
-        """Return string with information on a particular property
+    def all_gather(self,comm):
+        """Gather all data
 
-        :arg property: Property to print (timing, flops, bandwidth_perfect
-                       or bandwidth_pessimal)
+        :arg comm: MPI communicator
         """
-        return self._stat_str(self._data[property])
+        # Gather measured data
+        for quantity in self._data.keys():
+            data_global = np.zeros((comm.Get_size(),len(self._data[quantity])))
+            comm.Allgather([self._data[quantity],MPI.DOUBLE],
+                           [data_global,MPI.DOUBLE])
+            self._data_global[quantity] = data_global
+        # Gather loop properties
+        for quantity in self._props.keys():
+            props_global = np.zeros(comm.Get_size())
+            tmp = np.array([self._props[quantity]])
+            comm.Allgather([tmp,MPI.DOUBLE],
+                           [props_global,MPI.DOUBLE])
+            self._props_global[quantity] = props_global
+        self._allgathered = True
+
+    def data_str(self,quantity,p=None):
+        """Return string with information on a particular quantity
+
+        :arg quantity: Quantity to print (timing, flops, bandwidth_perfect
+                       or bandwidth_pessimal)
+        :arg p: processor rank. If none, takes max/min over all processors
+        """
+        assert(self._allgathered)
+        if p==None:
+            if (quantity == 'timing'):
+                # Calculate the maximal time...
+                return self._stat_str(np.amax(self._data_global[quantity],0))
+            else:
+                # ... but minimal FLOPs and BW to get a conservative estimate 
+                return self._stat_str(np.amin(self._data_global[quantity],0))
+        else:
+            # Return quantity on processor p
+            return self._stat_str(self._data_global[quantity][p],p)
+
 
     @staticmethod
     def header():
         """string with column header"""
         s = ''
         s += ('%24s' % '')+' '
+        s += (' %8s ' % 'proc')+' '
         s += ('%10s' % 'calls')+' '
         s += ('%10s' % 'min')+' '
         s += ('%10s' % 'avg')+' '
@@ -66,7 +106,7 @@ class PerformanceData(object):
         s += ' raw data'
         return s
 
-    def _stat_str(self,data):
+    def _stat_str(self,data,p=None):
         """Data summary string
         
         Convert data to a string which contains the following information:
@@ -79,9 +119,14 @@ class PerformanceData(object):
         * Raw data in the form (x_1,x_2,...,x_n)
 
         :arg data: numpy array with raw data
+        :arg p: processor (None for parallel min/max)
         """
         ndata = np.array(data)
         s = ('%24s' % self._label)+' '
+        if (p==None):
+            s += ('[%8s]' % 'all')+' '
+        else:
+            s += ('[%8d]' % p)+' '
         s += ('%10d' % len(ndata))+' '
         s += ('%10.3e' % np.amin(ndata))+' '
         s += ('%10.3e' % np.mean(ndata))+' '
@@ -96,9 +141,10 @@ class PerformanceData(object):
         return s
     
     @staticmethod
-    def properties_header():
-        """Print out header for loop properties"""
+    def quantities_header():
+        """Print out header for loop quantities"""
         s = ('%24s' % '')+' '
+        s += (' %8s ' % 'proc')+' '
         s += ('%10s' % 'GFLOPs')+' '
         s += ('%32s' % 'perfect caching [GB]')+' '
         s += ('%32s' % 'pessimal caching [GB]')+' '
@@ -113,30 +159,43 @@ class PerformanceData(object):
         s += ('%10s' % 'pessimal')
         return s
 
-    def properties_str(self):
-        """Print out properties of loop
+    def quantities_str(self,p=None,minimum=True):
+        """Print out quantities of loop
 
         * Label
         * Loads/stores/loads+stores [perfect caching]
         * Loads/stores/loads+stores [pessimal caching]
         * arithmetic intensity [perfect and pessimal caching]
+
+        :arg p: Processor rank (None to print out min/max)
+        :arg minimum: If p is None, print minimum value (maximum otherwise)
         """
+        assert(self._allgathered)
         s = ('%24s' % self._label)+' '
+        if (p==None):
+            if (minimum):
+                s += ('[%8s]' % 'min')+' '
+            else:
+                s += ('[%8s]' % 'max')+' '
+        else:
+            s += ('[%8d]' % p)+' '
+
         # Floating point performance
-        s += ('%10.3e' % (1.0E-9*self._flops))+' '
-        # Perfect caching memory traffic
-        s += ('%10.3e' % (1.0E-9*self._perfect_bytes.loads))+' '
-        s += ('%10.3e' % (1.0E-9*self._perfect_bytes.stores))+' '
-        s += ('%10.3e' % (1.0E-9*(self._perfect_bytes.loads+ \
-                                  self._perfect_bytes.stores)))+' '
-        # Pessimal caching memory traffic
-        s += ('%10.3e' % (1.0E-9*self._pessimal_bytes.loads))+' '
-        s += ('%10.3e' % (1.0E-9*self._pessimal_bytes.stores))+' '
-        s += ('%10.3e' % (1.0E-9*(self._pessimal_bytes.loads+ \
-                                  self._pessimal_bytes.stores)))+' '
-        # Arithmetic intensity
-        s += ('%10.3e' % (self._flops/(self._perfect_bytes.loads + \
-                                      self._perfect_bytes.stores)))
-        s += ('%10.3e' % (self._flops/(self._pessimal_bytes.loads + \
-                                      self._pessimal_bytes.stores)))
+        for quantity in ('flops',
+                         'bandwidth_perfect_loads',
+                         'bandwidth_perfect_stores',
+                         'bandwidth_perfect',
+                         'bandwidth_pessimal_loads',
+                         'bandwidth_pessimal_stores',
+                         'bandwidth_pessimal',
+                         'intensity_perfect',
+                         'intensity_pessimal'):
+            if (p==None):
+                if (minimum):
+                    tmp = np.amin(self._props_global[quantity])
+                else:
+                    tmp = np.amax(self._props_global[quantity])
+            else:
+                tmp = self._props_global[quantity][p]
+            s += ('%10.3e' % tmp)+' '
         return s
