@@ -1,6 +1,10 @@
 import numpy as np
 
 class PerformanceData(object):
+    label={'timing':'Time [s]',
+           'flops':'Floating point performance [GFLOPs]',
+           'bandwidth_perfect':'memory BW (perfect caching) [GB/s]',
+           'bandwidth_pessimal':'memory BW (pessimal caching) [GB/s]'}
     """Class holding performance data.
 
     Stores the FLOP and memory reference count of a particular
@@ -19,34 +23,35 @@ class PerformanceData(object):
         self._flops = flops
         self._perfect_bytes = perfect_bytes
         self._pessimal_bytes = pessimal_bytes
-        self._timings = []
+        self._data= {'timing':np.empty(0),
+                     'flops':np.empty(0),
+                     'bandwidth_perfect':np.empty(0),
+                     'bandwidth_pessimal':np.empty(0)}
 
     def add_timing(self,t):
         """Add another timing data point.
 
         :arg t: New timing to add
         """
-        self._timings.append(t)
+        self._data["timing"] = np.append(self._data["timing"],t)
+        self._data["flops"] = \
+            np.append(self._data["flops"],1.09E-9*self._flops/t)
+        mem_perfect = self._perfect_bytes.loads + \
+                      self._perfect_bytes.stores
+        self._data["bandwidth_perfect"] = \
+            np.append(self._data["bandwidth_perfect"],1.0E-9*mem_perfect/t)
+        mem_pessimal = self._pessimal_bytes.loads + \
+                       self._pessimal_bytes.stores
+        self._data["bandwidth_pessimal"] = \
+            np.append(self._data["bandwidth_pessimal"],1.0E-9*mem_pessimal/t)
 
-    def timing_str(self):
-        """Return string with timing information"""
-        return self._stat_str(self._timings)
+    def data_str(self,property):
+        """Return string with information on a particular property
 
-    def flops_str(self):
-        """Return string with FLOPs information"""
-        return self._stat_str([1.09E-9*self._flops/t for t in self._timings])
-
-    def perfect_bandwidth_str(self):
-        """Return string with perfect caching memory bandwidth"""
-        mem_traffic = self._perfect_bytes.loads + \
-            self._perfect_bytes.stores
-        return self._stat_str([1.0E-9*mem_traffic/t for t in self._timings])
-
-    def pessimal_bandwidth_str(self):
-        """Return string with pessimal caching memory bandwidth"""
-        mem_traffic = self._pessimal_bytes.loads + \
-            self._pessimal_bytes.stores
-        return self._stat_str([1.0E-9*mem_traffic/t for t in self._timings])
+        :arg property: Property to print (timing, flops, bandwidth_perfect
+                       or bandwidth_pessimal)
+        """
+        return self._stat_str(self._data[property])
 
     @staticmethod
     def header():

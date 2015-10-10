@@ -138,27 +138,12 @@ def exit():
             print >> f, PerformanceData.properties_header()
             for x in data.values():
                 print >> f, x.properties_str()
-            print >> f, ''
-            print >> f, '** Timing [s] **'
-            print >> f, PerformanceData.header()
-            for x in data.values():
-                print >> f, x.timing_str()
-            print >> f, ''
-            print >> f, '** Floating point performance [GFLOPs] **'
-            print >> f, PerformanceData.header()
-            for x in data.values():
-                print >> f, x.flops_str()
-            print >> f, ''
-            print >> f, '** memory BW (perfect caching) [GB/s] **'
-            print >> f, PerformanceData.header()
-            for x in data.values():
-                 print >> f, x.perfect_bandwidth_str()
-            print >> f, ''
-            print >> f, '** memory BW (pessimal caching) [GB/s] **'
-            print >> f, PerformanceData.header()
-            for x in data.values():
-                print >> f, x.pessimal_bandwidth_str()
-            print >> f, ''
+            for property in ('timing','flops','bandwidth_perfect','bandwidth_pessimal'):
+                print >> f, ''
+                print >> f, '** '+PerformanceData.label[property]+' **'
+                print >> f, PerformanceData.header()
+                for x in data.values():
+                    print >> f, x.data_str(property)
     configuration.reset()
 
     if backends.get_backend() != 'pyop2.void':
