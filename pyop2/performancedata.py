@@ -114,7 +114,7 @@ class PerformanceData(object):
         * Label
         * Loads/stores/loads+stores [perfect caching]
         * Loads/stores/loads+stores [pessimal caching]
-        * artithmetic intensity [perfect and pessimal caching]
+        * arithmetic intensity [perfect and pessimal caching]
         """
         s = ('%24s' % self._label)+' '
         # Floating point performance
