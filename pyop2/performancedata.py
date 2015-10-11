@@ -150,6 +150,7 @@ class PerformanceData(object):
         s += ('%32s' % 'pessimal caching [GB]')+' '
         s += ('%21s' % 'arithmetic intensity')+'\n'
         s += ('%24s' % '')+' '
+        s += (' %8s ' % '')+' '
         s += ('%10s' % '')+' '
         for i in range(2):
             s += ('%10s' % 'loads')+' '
