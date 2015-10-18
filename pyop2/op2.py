@@ -56,7 +56,7 @@ __all__ = ['configuration', 'READ', 'WRITE', 'RW', 'INC', 'MIN', 'MAX',
            'LocalSet', 'MixedSet', 'Subset', 'DataSet', 'MixedDataSet', 'Halo',
            'Dat', 'MixedDat', 'Mat', 'Const', 'Global', 'Map', 'MixedMap',
            'Sparsity', 'Solver', 'par_loop', 'solve',
-           'DatView']
+           'DatView','performance_summary']
 
 
 def initialised():
