@@ -4205,6 +4205,7 @@ class ParLoop(LazyComputation):
                 size *= iterset.layers - 1
         parameters = ''
         definitions = ''
+        deallocations = ''
         # Create a list of parameters and inistialise them
         for i,arg in enumerate(self.args):
             M = arg.data.cdim
@@ -4220,10 +4221,15 @@ class ParLoop(LazyComputation):
                 definitions += varname+'[i] = ('+data_type+'*) '
                 definitions += 'malloc('+str(M)+'*sizeof('+data_type+'));'
                 definitions += '}\n'
+                deallocations += 'for (int i=0;i<'+str(N)+';++i) {'
+                deallocations += 'free('+varname+'[i]);'
+                deallocations += '}\n'
+                deallocations += 'free('+varname+');\n'
             elif (arg._is_global):
                 definitions += data_type+'* '+varname+';\n'
                 definitions += varname+' = ('+data_type+'*) '
                 definitions += 'malloc('+str(M)+'*sizeof('+data_type+'));\n'
+                deallocations += 'free('+varname+');\n'
             else:
                 raise RuntimeError('Performance Logging only supported for Dat and Global arguments')
         parameters = parameters[:-1]
@@ -4238,12 +4244,14 @@ class ParLoop(LazyComputation):
               %(DEFINITIONS)s
               LoggedDouble::resetTotalFlops();
               %(KERNEL_NAME)s(%(PARAMETERS)s);
+              %(DEALLOCATIONS)s
               return LoggedDouble::getTotalFlops();
             }
             int main(int argc, char* argv[]) {}
           }
         ''' % {'HEADER_PATH':os.path.dirname(os.path.abspath(__file__)),
                'DEFINITIONS':definitions,
+               'DEALLOCATIONS':deallocations,
                'KERNEL_NAME':self._kernel.name,
                'KERNEL_CODE':self._kernel.code(),
                'PARAMETERS':parameters}
