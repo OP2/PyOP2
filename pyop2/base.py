@@ -4229,6 +4229,7 @@ class ParLoop(LazyComputation):
         parameters = parameters[:-1]
         # The actual source code
         code = '''                                                                       #include <stdlib.h>
+          #include <math.h>
           #include "%(HEADER_PATH)s/loggedtypes.hh"
           %(KERNEL_CODE)s                                         
           extern "C" {                                                       
