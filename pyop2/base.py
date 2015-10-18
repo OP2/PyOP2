@@ -4228,8 +4228,9 @@ class ParLoop(LazyComputation):
                 raise RuntimeError('Performance Logging only supported for Dat and Global arguments')
         parameters = parameters[:-1]
         # The actual source code
-        code = '''                                                                       #include <stdlib.h>
+        code = '''
           #include <math.h>
+          #include <stdlib.h>
           #include "%(HEADER_PATH)s/loggedtypes.hh"
           %(KERNEL_CODE)s                                         
           extern "C" {                                                       
