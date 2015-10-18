@@ -3975,18 +3975,13 @@ class ParLoop(LazyComputation):
     An optional keyword argument, ``iterate``, can be used to specify
     which region of an :class:`ExtrudedSet` the parallel loop should
     iterate over.
-
-    :arg measure_flops: Measure the number of floating point operations
-                        by executing the kernel code with the overloaded
-                        double type. This might not be possible for some
-                        kernels that use mathematical functions.
     """
 
     perfdata = {}
 
     @validate_type(('kernel', Kernel, KernelTypeError),
                    ('iterset', Set, SetTypeError))
-    def __init__(self, kernel, iterset, measure_flops=False, *args, **kwargs):
+    def __init__(self, kernel, iterset, *args, **kwargs):
         LazyComputation.__init__(self,
                                  set([a.data for a in args if a.access in [READ, RW, INC]]) | Const._defs,
                                  set([a.data for a in args if a.access in [RW, WRITE, MIN, MAX, INC]]),
@@ -4004,7 +3999,7 @@ class ParLoop(LazyComputation):
                 self._reduced_globals[i] = glob
                 args[i].data = _make_object('Global', glob.dim, data=np.zeros_like(glob.data_ro), dtype=glob.dtype)
 
-        self._measure_flops=measure_flops
+        self._measure_flops=kwargs.get("measure_flops",False)
         # Always use the current arguments, also when we hit cache
         self._actual_args = args
         self._kernel = kernel
