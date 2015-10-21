@@ -4209,12 +4209,12 @@ class ParLoop(LazyComputation):
         # Create a list of parameters and inistialise them
         for i,arg in enumerate(self.args):
             M = arg.data.cdim
-            if arg.map.iterset._extruded:
-                M *= arg.map.iterset.layers
             data_type = arg.data.ctype
             varname = 'var__'+str(i)+'__'
             parameters += varname+','
             if (arg._is_dat):
+                if arg.map.iterset._extruded:
+                    M *= arg.map.iterset.layers
                 definitions += data_type+'** '+varname+';\n'
                 N = arg.map.arity
                 definitions += varname+' = ('+data_type+'**) '
