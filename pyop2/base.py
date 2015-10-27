@@ -4161,8 +4161,13 @@ class ParLoop(LazyComputation):
             facet_mult = 1
             if self.iteration_region is ON_INTERIOR_FACETS:
                 facet_mult = 2
+            # Special case, iterating over base mesh, accessing
+            # extruded data in column.
+            nmult = 1
+            if not self.iterset._extruded and dat.dataset._extruded:
+                nmult = dat.dataset.layers - 1
             nvals = 1 if arg._is_direct else (arg.map.arity*facet_mult)
-            return nvals * dat.cdim * dat.dtype.itemsize
+            return nvals * dat.cdim * dat.dtype.itemsize * nmult
         # Count data volume for single kernel invocation
         for arg in self.dat_args:
             dat = arg.data
