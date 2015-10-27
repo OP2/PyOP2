@@ -4215,22 +4215,21 @@ class ParLoop(LazyComputation):
         for i,arg in enumerate(self.args):
             M = arg.data.cdim
             data_type = arg.data.ctype
-            varname = 'var__'+str(i)+'__'
+            varname = 'var__'+str(i)
             parameters += varname+','
             if (arg._is_dat):
                 if arg.map.iterset._extruded:
                     M *= arg.map.iterset.layers
                 definitions += data_type+'** '+varname+';\n'
+                definitions += data_type+'* '+varname+'__;\n'
                 N = arg.map.arity
                 definitions += varname+' = ('+data_type+'**) '
                 definitions += 'malloc('+str(N)+'*sizeof('+data_type+'*));\n'
+                definitions += varname+'__ = ('+data_type+'*) malloc('+str(N*M)+'*sizeof('+data_type+'));\n'
                 definitions += 'for (int i=0;i<'+str(N)+'; ++i) {'
-                definitions += varname+'[i] = ('+data_type+'*) '
-                definitions += 'malloc('+str(M)+'*sizeof('+data_type+'));'
+                definitions += varname+'[i] = &'+varname+'__[i*'+str(M)+'];'
                 definitions += '}\n'
-                deallocations += 'for (int i=0;i<'+str(N)+';++i) {'
-                deallocations += 'free('+varname+'[i]);'
-                deallocations += '}\n'
+                deallocations += 'free('+varname+'__);'
                 deallocations += 'free('+varname+');\n'
             elif (arg._is_global):
                 definitions += data_type+'* '+varname+';\n'
