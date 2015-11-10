@@ -33,6 +33,10 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
 # OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import sys
+# CX1 hack
+sys.path.remove('/apps/python/2.7.3/lib/python2.7/site-packages/petsc4py-3.5-py2.7-linux-x86_64.egg')
+
 try:
     from setuptools import setup, Extension
 except ImportError:
@@ -40,7 +44,6 @@ except ImportError:
     from distutils.extension import Extension
 from glob import glob
 from os import environ as env
-import sys
 import numpy as np
 import petsc4py
 import versioneer
@@ -158,7 +161,7 @@ setup(name='PyOP2',
                    Extension('pyop2.sparsity', sparsity_sources,
                              include_dirs=['pyop2'] + includes, language="c++",
                              libraries=["petsc"],
-                             extra_link_args=["-L%s/lib" % d for d in petsc_dirs] +
-                             ["-Wl,-rpath,%s/lib" % d for d in petsc_dirs]),
+                             library_dirs=["%s/lib" % d for d in petsc_dirs],
+                             extra_link_args=["-Wl,-rpath,%s/lib" % d for d in petsc_dirs]),
                    Extension('pyop2.computeind', computeind_sources,
                              include_dirs=numpy_includes)])
