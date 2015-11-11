@@ -825,7 +825,8 @@ class JITModule(base.JITModule):
         cppargs = self._cppargs
         cppargs += ["-I%s/include" % d for d in get_petsc_dir()] + \
                    ["-I%s" % d for d in self._kernel._include_dirs] + \
-                   ["-I%s" % os.path.abspath(os.path.dirname(__file__))]
+                   ["-I%s" % os.path.abspath(os.path.dirname(__file__))] + \
+                   ["-I%s" % os.environ['MPI_INCLUDE']]
         if compiler:
             cppargs += [compiler[coffee.plan.isa['inst_set']]]
         ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
