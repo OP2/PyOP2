@@ -64,7 +64,7 @@ class ReductionRecord(object):
                  layers=None,
                  space_name=None,
                  fold_bw=SUM,
-                 fold_time=AVG,
+                 fold_time=MIN,
                  fold_stats=SUM,
                  is_proc=False):
         # Name of the parallel loop
@@ -79,6 +79,7 @@ class ReductionRecord(object):
         self._fold_stats = fold_stats
         # If the reduction is within one process then is_proc is True
         self._is_proc = is_proc
+
         # Python measures runtime
         self._python_time = []
         self.folds["python_time"] = fold_time
@@ -120,6 +121,11 @@ class ReductionRecord(object):
         # IACA reported cycles for the loop over the columns (extruded mesh)
         self._cycles = []
         self.folds["cycles"] = SUM if self._is_proc else AVG
+        # Teams and thread_limit
+        self._teams = []
+        self._thread_limit = []
+        # NVLINK info
+        self._nvlink_info = []
 
     def _ncalls(self):
         """Number of calls per process"""
@@ -147,6 +153,9 @@ class ReductionRecord(object):
         self._iaca_flops = []
         self._papi_flops = []
         self._cycles = []
+        self._teams = []
+        self._thread_limit = []
+        self._nvlink_info = []
 
     def isEmpty(self):
         return len(self._c_runtime) == 0
@@ -157,7 +166,9 @@ class ReductionRecord(object):
         compact_line format.
         """
         str_line = " | ".join(["%%%ds" % (15)] + ["%%%dg" % (15) for i in range(13)] +
-                              ["%%%d.%dg" % (15, 15) for i in range(3)]) + "\n"
+                              ["%%%d.%dg" % (15, 15) for i in range(3)] +
+                              ["%d" for i in range(2)] +
+                              ["%s"]) + "\n"
         values = (self._name,
                   self.python_time,
                   len(self._python_time),
@@ -168,7 +179,9 @@ class ReductionRecord(object):
                   self.mv_volume,
                   -2, -1,
                   self.vbw, self.mbw, self.mvbw, self.rvbw,
-                  self.start_time, self.end_time, self.iaca_flops)
+                  self.start_time, self.end_time, self.iaca_flops,
+                  self.teams, self.thread_limit,
+                  self.nvlink_info)
         return str_line % values
 
     def compact_line(self):
@@ -179,8 +192,12 @@ class ReductionRecord(object):
                   self.v_volume, self.m_volume, self.mv_volume,
                   self.vbw, self.mbw, self.mvbw, self.rvbw,
                   self.start_time, self.end_time,
-                  self.iaca_flops, self.cycles)
-        str_line = " | ".join(["%%%ds" % (15)] + ["%%%d.%dg" % (15, 15) for i in range(len(values) - 1)]) + "\n"
+                  self.iaca_flops, self.cycles,
+                  self.teams, self.thread_limit,
+                  self.nvlink_info)
+        str_line = " | ".join(["%%%ds" % (15)] +
+                              ["%%%d.%dg" % (15, 15) for i in range(len(values) - 4)] +
+                              ["%d", "%d", "%s"]) + "\n"
         return str_line % values
 
     def full_line(self):
@@ -193,8 +210,18 @@ class ReductionRecord(object):
                   self.vbw, self.mbw, self.mvbw, self.rvbw,
                   self.start_time, self.end_time,
                   self.rv_start_time, self.rv_end_time,
-                  self.iaca_flops, self.papi_flops, self.cycles)
-        str_line = " | ".join(["%%%ds" % (15)] + ["%%%d.%dg" % (15, 15) for i in range(len(values) - 1)]) + "\n"
+                  self.iaca_flops, self.papi_flops, self.cycles,
+                  self.teams, self.thread_limit,
+                  self.nvlink_info)
+        vals = []
+        for i in range(1, len(values) - 3):
+            if values[i] == 0 or (isinstance(values[i], int) and abs(values[i]) < 10):
+                vals += ["%%%d.%dg" % (1, 1)]
+            else:
+                vals += ["%%%d.%dg" % (15, 15)]
+        vals += ["%d", "%d", "%s"]
+        str_line = " | ".join(["%%%ds" % (15)] + vals) + "\n"
+        # str_line = " | ".join(["%%%ds" % (15)] + ["%%%d.%dg" % (15, 15) if values[i] != 0 else "%%%d.%dg" % (1, 1) for i in range(len(values) - 1)]) + "\n"
         return str_line % values
 
     def add_values(self, words):
@@ -211,6 +238,9 @@ class ReductionRecord(object):
         self.iaca_flops = float(words[32])
         self.papi_flops = float(words[34])
         self.cycles = float(words[36])
+        self.teams = int(words[38])
+        self.thread_limit = int(words[40])
+        self.nvlink_info = " ".join(words[42:])
 
     def plot_list(self, frequency):
         return [self.runtime,
@@ -281,6 +311,24 @@ class ReductionRecord(object):
         if not self._is_proc:
             return self._reduce("cycles", self._cycles)
         return self._reduce("cycles", self._cycles) / 1e9
+
+    @property
+    def teams(self):
+        if self._teams:
+            return self._teams[0]
+        return 0
+
+    @property
+    def thread_limit(self):
+        if self._thread_limit:
+            return self._thread_limit[0]
+        return 0
+
+    @property
+    def nvlink_info(self):
+        if self._nvlink_info:
+            return self._nvlink_info[0]
+        return "N/A"
 
     #################################################
     # The following methods add the values to lists #
@@ -354,6 +402,18 @@ class ReductionRecord(object):
     def cycles(self, value):
         self._cycles += [value]
 
+    @teams.setter
+    def teams(self, value):
+        self._teams += [value]
+
+    @thread_limit.setter
+    def thread_limit(self, value):
+        self._thread_limit += [value]
+
+    @nvlink_info.setter
+    def nvlink_info(self, value):
+        self._nvlink_info += [value]
+
     ###########################################################
     # The following values will be the ones used in the plots #
     ###########################################################
@@ -384,7 +444,7 @@ class ReductionRecord(object):
 
     @property
     def rvbw(self):
-        if len(self._rv_c_runtime) > 0:
+        if len(self._rv_c_runtime) > 0 and self.rv_runtime > 0:
             return self.mv_volume / self.rv_runtime
         return -1
 
@@ -395,3 +455,62 @@ class ReductionRecord(object):
     @property
     def papi_mflops(self):
         return self.papi_flops / self.runtime
+
+
+class GPUReductionRecord(ReductionRecord):
+    """
+    For OpenMP 4.0 on GPU, the number of teams and threads
+    used within the calculation differs so a reduction to find the
+    optimal number of teams and thread is required.
+
+    Find the minimum rentime and the teams and threads required.
+    """
+
+    def _min_index(self):
+        min_runtime = min(self._c_runtime)
+        min_index = self._c_runtime.index(min_runtime)
+        return min_index
+
+    def _reduce(self, attr, values):
+        """Return the measure corresponding to the fastest run."""
+        return values[self._min_index()]
+
+    @property
+    def runtime(self):
+        return self._reduce("runtime", self._c_runtime)
+
+    @property
+    def teams(self):
+        return self._reduce("teams", self._teams)
+
+    @property
+    def thread_limit(self):
+        return self._reduce("thread_limit", self._thread_limit)
+
+    @property
+    def nvlink_info(self):
+        return self._reduce("nvlink_info", self._nvlink_info)
+
+    @teams.setter
+    def teams(self, value):
+        self._teams += [value]
+
+    @thread_limit.setter
+    def thread_limit(self, value):
+        self._thread_limit += [value]
+
+    @nvlink_info.setter
+    def nvlink_info(self, value):
+        self._nvlink_info += [value]
+
+    def plot_list(self, frequency):
+        return [self.runtime,
+                self.rv_runtime,
+                self.v_volume, self.m_volume, self.mv_volume,
+                self.vbw, self.mbw, self.mvbw, self.rvbw,
+                self.iaca_flops, self.papi_flops,
+                self.iaca_mflops, self.papi_mflops, self.cycles * 1.0 / frequency,
+                self.c_runtime,
+                self.teams, self.thread_limit, self.nvlink_info]
+
+

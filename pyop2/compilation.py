@@ -217,7 +217,7 @@ class LinuxCompiler(Compiler):
         # For 4.6 we need to turn off more, so go to no-tree-vectorize
 
         # Maybe include '-ftree-slp-vectorize'
-        print "Using the GCC compiler."
+        print "Using GCC"
         opt_flags = ['-O3', '-ffast-math', '-fassociative-math']  # '-march=native'
         if configuration['debug']:
             opt_flags = ['-O0', '-g']
@@ -225,6 +225,7 @@ class LinuxCompiler(Compiler):
         cppargs = ['-std=c99', '-fPIC', '-Wall'] + opt_flags + cppargs
         ldargs = ['-shared'] + ldargs
         super(LinuxCompiler, self).__init__("mpicc", cppargs=cppargs, ldargs=ldargs)
+
 
 class LinuxClangCompiler(Compiler):
     """A compiler for building a shared library on linux systems.
@@ -234,15 +235,21 @@ class LinuxClangCompiler(Compiler):
     :arg ldargs: A list of arguments to pass to the linker (optional)."""
     def __init__(self, cppargs=[], ldargs=[]):
         # -fopenmp=libomp -O3 -omptargets=nvptx64sm_35-nvidia-linux
-        print "Using the CLANG/LLVM compiler."
         # '-ffast-math', '-fassociative-math'
-        opt_flags = ['-fopenmp=libomp', '-O3', '-omptargets=nvptx64sm_35-nvidia-linux', '-v']
+        # '-omptargets=nvptx64sm_35-nvidia-linux',
+        print "Using Clang"
+        # Vectorizer flags
+        # '-mllvm', '-debug-only=loop-vectorize', '-mllvm', '-pass-remarks=loop-vectorize',
+        opt_flags = ['-O3']
         if configuration['debug']:
             opt_flags = ['-O0', '-g']
 
-        cppargs =  opt_flags + cppargs
-        ldargs = ['-shared'] + ldargs
+        cppargs = opt_flags + cppargs + ["-I/localhd/gbercea/lomp/lomp/source/"]
+        ldargs = ['-shared'] + ldargs + \
+                 ["-L/localhd/gbercea/lomp/lomp/source/lib64"] + \
+                 ["-Wl,-rpath,/localhd/gbercea/lomp/lomp/source/lib64"]
         super(LinuxClangCompiler, self).__init__("mpicc", cppargs=cppargs, ldargs=ldargs)
+
 
 class LinuxIntelCompiler(Compiler):
     """The intel compiler for building a shared library on linux systems.
@@ -277,7 +284,6 @@ def load(src, extension, fn_name, cppargs=[], ldargs=[], argtypes=None, restype=
     :arg compiler: The name of the C compiler (intel, ``None`` for default)."""
     platform = sys.platform
     if platform.find('linux') == 0:
-        print "Compiler: ",compiler
         if compiler == 'intel':
             compiler = LinuxIntelCompiler(cppargs, ldargs)
         elif compiler == "clang":
@@ -290,6 +296,7 @@ def load(src, extension, fn_name, cppargs=[], ldargs=[], argtypes=None, restype=
         raise CompilationError("Don't know what compiler to use for platform '%s'" %
                                platform)
     dll, basename = compiler.get_so(src, extension)
+    configuration["basename"] = basename
 
     fn = getattr(dll, fn_name)
     fn.argtypes = argtypes

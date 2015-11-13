@@ -54,7 +54,7 @@ from backends import _make_object
 from mpi import MPI, _MPI, _check_comm, collective
 from profiling import timed_region, timed_function
 from version import __version__ as version
-from hpc_profiling import hpc_profiling, add_data_volume, add_c_time
+from hpc_profiling import hpc_profiling, add_data_volume, add_c_time, add_estimated_gflops, add_nvlink_register_info
 
 from coffee.base import Node
 from coffee.visitors import FindInstances, EstimateFlops
@@ -223,6 +223,32 @@ MAX = Access("MAX")
 """The kernel contributes to a reduction into a :class:`Global` using a ``max``
 operation. OP2 is responsible for reducing over the different kernel
 invocations."""
+
+class CompRegion(object):
+
+    """OP2 computation region type. When using MPI, this describes which part of the mesh
+    the computation will be carried on.
+
+    Use the predefined values: :const:`PYOP2_CORE`, :const:`PYOP2_OWNED`, :const:`PYOP2_EXEC`
+    """
+
+    _modes = ["PYOP2_CORE", "PYOP2_OWNED", "PYOP2_EXEC"]
+
+    @validate_in(('mode', _modes, ModeValueError))
+    def __init__(self, mode):
+        self._mode = mode
+
+    def __str__(self):
+        return "OP2 CompRegion: %s" % self._mode
+
+    def __repr__(self):
+        return "CompRegion(%r)" % self._mode
+
+PYOP2_CORE = CompRegion("PYOP2_CORE")
+
+PYOP2_OWNED = CompRegion("PYOP2_OWNED")
+
+PYOP2_EXEC = CompRegion("PYOP2_EXEC")
 
 # Data API
 
@@ -4123,6 +4149,14 @@ class ParLoop(LazyComputation):
         Return None if the child class should deal with this in another way."""
         return None
 
+    @property
+    @collective
+    def _jitmodule_halo(self):
+        """Return the :class:`JITModule` that encapsulates the compiled par_loop code.
+
+        Return None if the child class should deal with this in another way."""
+        return None
+
     @collective
     def compute(self):
         """Executes the kernel over all members of the iteration space."""
@@ -4132,6 +4166,7 @@ class ParLoop(LazyComputation):
         fun = self._jitmodule
         self._compute(iterset.core_part, fun, *arglist)
         self.halo_exchange_end()
+        fun = self._jitmodule_halo
         self._compute(iterset.owned_part, fun, *arglist)
         self.reduction_begin()
         if self._only_local:
@@ -4164,24 +4199,33 @@ class ParLoop(LazyComputation):
             arglist = self.prepare_arglist(iterset, *self.args)
             fun = self._jitmodule
             # t, other_measures = self._compute(self.it_space.iterset.core_part)
+            print "Execute core part"
             t, measures = self._compute(iterset.core_part, fun, *arglist)
             self.halo_exchange_end()
+            fun = self._jitmodule_halo
+            print "Execute owned part"
             self._compute(iterset.owned_part, fun, *arglist)
             self.reduction_begin()
             if self._only_local:
                 self.reverse_halo_exchange_begin()
                 self.reverse_halo_exchange_end()
             if self.needs_exec_halo:
+                print "Execute exec part"
                 self._compute(iterset.exec_part, fun, *arglist)
             self.reduction_end()
             self.update_arg_data_state()
             self.log_flops()
+        measures[6] = self.num_flops
         add_data_volume('base', '%s-%s' % (region_name, self.kernel._md5),
                         configuration['times'] * self._data_volume,
                         configuration['times'] * self._data_volume_mvbw,
                         configuration['times'] * self._data_volume_mbw,
                         measures)
         add_c_time('base', '%s-%s' % (region_name, self.kernel._md5), t)
+        add_nvlink_register_info('base', '%s-%s' % (region_name, self.kernel._md5),
+                                                    configuration["nvlink_info"],
+                                                    configuration["teams"],
+                                                    configuration["threads"])
 
     @collective
     @timed_function('ParLoop halo exchange begin')

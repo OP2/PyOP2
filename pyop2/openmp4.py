@@ -36,7 +36,7 @@
 import ctypes
 from numpy.ctypeslib import ndpointer
 
-from base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, PYOP2_CORE, PYOP2_EXEC, PYOP2_OWNED
+from base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS
 from exceptions import *
 import host
 from mpi import collective
@@ -44,35 +44,28 @@ from petsc_base import *
 from profiling import timed_region
 from host import Kernel, Arg  # noqa: needed by BackendSelector
 from utils import as_tuple, cached_property
+from optimizer import optimize_wrapper, optimize_kernel
 
+def _detect_openmp_flags():
+    p = Popen(['mpicc', '--version'], stdout=PIPE, shell=False)
+    _version, _ = p.communicate()
+    if _version.find('Free Software Foundation') != -1:
+        return '-fopenmp', '-lgomp'
+    elif _version.find('Intel Corporation') != -1:
+        return '-openmp', '-liomp5'
+    elif _version.find('clang') != -1:
+        return '-fopenmp=libomp', ''
+    else:
+        warning('Unknown mpicc version:\n%s' % _version)
+        return '', ''
 
 class JITModule(host.JITModule):
-    _system_headers = []
+    ompflag, omplib = _detect_openmp_flags()
+    _cppargs = [os.environ.get('OMP_CXX_FLAGS') or ompflag]
+    _libraries = [ompflag] + [os.environ.get('OMP_LIBS') or omplib]
+    _system_headers = ['#include <omp.h>']
 
     _wrapper = """
-void storeArray_double(double *a, int len, char* filename){
-  char path[80];
-  path[0] = \'\\0\';
-  strcat(path, \"/tmp/\");
-  strcat(path, filename);
-  strcat(path, \".bin\");
-  FILE* fp = fopen(path, \"wb\");
-  fwrite(a, sizeof(double), len, fp);
-  fclose(fp);
-}
-
-void storeArray_int(int *a, int len, char* filename){
-  char path[80];
-  path[0] = \'\\0\';
-  strcat(path, \"/tmp/\");
-  strcat(path, filename);
-  strcat(path, \".bin\");
-  FILE* fp = fopen(path, "wb");
-  //fwrite(&len, sizeof(int), 1, fp);
-  fwrite(a, sizeof(int), len, fp);
-  fclose(fp);
-}
-
 double %(wrapper_name)s(int start, int end,
                       %(ssinds_arg)s
                       %(wrapper_args)s
@@ -80,34 +73,34 @@ double %(wrapper_name)s(int start, int end,
                       %(off_args)s
                       %(layer_arg)s
                       %(other_args)s) {
-  %(papi_decl)s;
-  %(papi_init)s;
   %(user_code)s
+  %(timer_declare)s
+  %(timer_start)s
+  %(parallel_pragma_one)s
+  {
+  %(times_loop_start)s
   %(wrapper_decs)s;
   %(const_inits)s;
   %(map_decl)s
   %(vec_decs)s;
-  %(timer_declare)s
-  %(timer_start)s
-  %(times_loop_start)s
+  %(parallel_pragma_two)s
   for ( int n = start; n < end; n++ ) {
     int i = %(index_expr)s;
     %(vec_inits)s;
     %(map_init)s;
+    %(parallel_pragma_three)s
     %(extr_loop)s
     %(map_bcs_m)s;
-    %(iaca_start)s
     %(buffer_decl)s;
     %(buffer_gather)s
 
     %(kernel_name)s(%(kernel_args)s);
-    
-    %(print_contrib)s
+
     %(itset_loop_body)s
     %(map_bcs_p)s;
     %(apply_offset)s;
     %(extr_loop_close)s
-    %(iaca_end)s
+  }
   }
   %(times_loop_end)s
   %(timer_stop)s
@@ -147,6 +140,30 @@ double %(wrapper_name)s(int start, int end,
             argtypes.append(ndpointer(np.dtype('float64'), shape=(8,)))
 
         self._argtypes = argtypes
+
+    def generate_code(self):
+        # Most of the code to generate is the same as that for sequential
+        code_dict = super(JITModule, self).generate_code()
+        optimize_wrapper(self, code_dict)
+        return code_dict
+
+    def backend_flags(self, cppargs, more_args, ldargs):
+        # Most of the code to generate is the same as that for sequential
+        super(JITModule, self).backend_flags(cppargs, more_args, ldargs)
+        cppargs += ["-mcpu=pwr8", "-mtune=pwr8", "-fopenmp=libomp", "-O3", '-v']
+        # Include LOMP
+        # TODO: Replace hardcoded path with lomp path function in utils
+        cppargs += ["-I/localhd/gbercea/lomp/lomp/source/"]
+        ldargs += ["-L/localhd/gbercea/lomp/lomp/source/lib64"]
+        ldargs += ["-Wl,-rpath,/localhd/gbercea/lomp/lomp/source/lib64"]
+
+    @classmethod
+    def _cache_key(cls, kernel, itspace, *args, **kwargs):
+        key = super(JITModule, cls)._cache_key(kernel, itspace, *args, **kwargs)
+        halo = kwargs.get("halo", None)
+        if halo is not None:
+            key += ((halo,))
+        return key
 
 
 class ParLoop(host.ParLoop):
@@ -215,10 +232,7 @@ class ParLoop(host.ParLoop):
             time = fun(part.offset, part.offset + part.size, *arglist)
             if configuration['hpc_profiling']:
                 ms = arglist[-1]
-                measures = [m for m in ms]
-                # add the flops
-                # measures[6] = 
-                return time, measures
+                return time, [m for m in ms]
         return time, np.zeros(8)
 
 

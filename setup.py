@@ -141,20 +141,20 @@ ext_modules = [Extension('pyop2.plan', plan_sources,
                Extension('pyop2.computeind', computeind_sources,
                          include_dirs=numpy_includes)]
 
-try:
-    likwid_base = env['PYOP2_LIKWID_DIR']
-except KeyError:
-    print "PYOP2_LIKWID_DIR not set, using default /usr/local"
-    likwid_base = "/usr/local"
-from os.path import exists
-if exists(likwid_base + '/include/likwid.h'):
-    ext_modules.append(Extension('pyop2.likwid', likwid_sources,
-                                 include_dirs=['/usr/local/include'],
-                                 library_dirs=['/usr/local/lib'],
-                                 libraries=['likwid'],
-                                 runtime_library_dirs=['/usr/local/lib']))
-else:
-    print "Likwid installation not found at default location /usr/local/include/likwid.h nor at PYOP2_LIKWID_DIR=", env['PYOP2_LIKWID_DIR'], "/include/likwid.h"
+# try:
+#     likwid_base = env['PYOP2_LIKWID_DIR']
+# except KeyError:
+#     print "PYOP2_LIKWID_DIR not set, using default /usr/local"
+#     likwid_base = "/usr/local"
+# from os.path import exists
+# if exists(likwid_base + '/include/likwid.h'):
+#     ext_modules.append(Extension('pyop2.likwid', likwid_sources,
+#                                  include_dirs=['/usr/local/include'],
+#                                  library_dirs=['/usr/local/lib'],
+#                                  libraries=['likwid'],
+#                                  runtime_library_dirs=['/usr/local/lib']))
+# else:
+#     print "Likwid installation not found at default location /usr/local/include/likwid.h nor at PYOP2_LIKWID_DIR=", env['PYOP2_LIKWID_DIR'], "/include/likwid.h"
 
 setup(name='PyOP2',
       version=versioneer.get_version(),

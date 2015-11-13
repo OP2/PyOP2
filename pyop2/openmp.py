@@ -201,6 +201,7 @@ double %(wrapper_name)s(int boffset,
                       %(layer_arg)s
                       %(other_args)s) {
   %(user_code)s
+  %(timer_declare)s
   %(wrapper_decs)s;
   %(const_inits)s;
   %(timer_start)s
@@ -236,6 +237,7 @@ double %(wrapper_name)s(int boffset,
     }
     %(interm_globals_writeback)s;
   }
+  %(timer_stop)s
   %(timer_end)s
 }
 """
@@ -372,7 +374,7 @@ class ParLoop(device.ParLoop, host.ParLoop):
                     for i, value in enumerate(arglist[-1]):
                         measures[i] += arglist[-1][i]
                     print measures
-        return time, [ m for m in measures ]
+        return time, [m for m in measures]
 
     def _get_plan(self, part, part_size):
         if self._is_indirect:

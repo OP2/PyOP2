@@ -73,6 +73,15 @@ class Configuration(dict):
     DEFAULTS = {
         # Enable profiling of the wrapper functions.
         "hpc_profiling": ("PYOP2_HPC_PROFILING", bool, False),
+        # Enable debugging of the wrapper functions.
+        "hpc_debug": ("PYOP2_HPC_DEBUG", bool, False),
+        # Teams and threads for the OpenMP 4.0 backend
+        "teams": ("PYOP2_OMP4_TEAMS", int, 256),
+        "threads": ("PYOP2_OMP4_THREADS", int, 512),
+        "output_llvm": ("PYOP2_OUTPUT_LLVM", bool, False),
+        # File basename
+        "basename": ("PYOP2_CODE_BASENAME", str, "default_name"),
+        "nvlink_info": ("PYOP2_OMP4_NVLINK", str, "default"),
         # Turn on likwid. TODO: make it true when
         # either inner or outer likwid flags are true
         "likwid": ("PYOP2_LIKWID", bool, False),

@@ -99,6 +99,11 @@ class Timer(object):
         """Time value from the kernel wrapper."""
         self._record.papi_flops = papi_measures[0] / 1e6
 
+    def nvlink_info(self, nvlink_info, teams, threads):
+        self._record.nvlink_info = nvlink_info
+        self._record.teams = teams
+        self._record.thread_limit = threads
+
     def start(self):
         """Start the timer."""
         if self._name not in Timer._timers:
@@ -196,6 +201,10 @@ def add_data_volume(t, name, vol, vol_mvbw, vol_mbw, other_measures=np.zeros(8))
         Timer("%s-%s" % (t, name)).rand_start_end(other_measures)
 
 
+def add_nvlink_register_info(t, name, nvlink_info, teams, threads):
+    Timer("%s-%s" % (t, name)).nvlink_info(nvlink_info, teams, threads)
+
+
 def add_c_time(t, name, time):
     if not configuration['randomize']:
         Timer("%s-%s" % (t, name)).c_time(time)
@@ -206,6 +215,11 @@ def add_c_time(t, name, time):
 def add_papi_gflops(t, name, papi_measures):
     if not configuration['randomize']:
         Timer("%s-%s" % (t, name)).papi_gflops(papi_measures)
+
+
+def add_estimated_gflops(t, name, flops):
+    if not configuration['randomize']:
+        Timer("%s-%s" % (t, name)).papi_gflops([flops])
 
 
 def summary(filename=None):
