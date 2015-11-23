@@ -127,6 +127,9 @@ class PerformanceData(object):
             s += ('[%8s]' % 'all')+' '
         else:
             s += ('[%8d]' % p)+' '
+        if (len(data) == 0):
+            s += ' not called'
+            return s
         s += ('%10d' % len(ndata))+' '
         s += ('%10.3e' % np.amin(ndata))+' '
         s += ('%10.3e' % np.mean(ndata))+' '
