@@ -96,7 +96,7 @@ class PerformanceData(object):
     def header():
         """string with column header"""
         s = ''
-        s += ('%64s' % '')+' '
+        s += ('%24s' % '')+' '
         s += (' %8s ' % 'proc')+' '
         s += ('%10s' % 'calls')+' '
         s += ('%10s' % 'min')+' '
@@ -122,14 +122,11 @@ class PerformanceData(object):
         :arg p: processor (None for parallel min/max)
         """
         ndata = np.array(data)
-        s = ('%64s' % self._label)+' '
+        s = ('%24s' % self._label)+' '
         if (p==None):
             s += ('[%8s]' % 'all')+' '
         else:
             s += ('[%8d]' % p)+' '
-        if (len(data) == 0):
-            s += ' not called'
-            return s
         s += ('%10d' % len(ndata))+' '
         s += ('%10.3e' % np.amin(ndata))+' '
         s += ('%10.3e' % np.mean(ndata))+' '
@@ -146,13 +143,13 @@ class PerformanceData(object):
     @staticmethod
     def quantities_header():
         """Print out header for loop quantities"""
-        s = ('%64s' % '')+' '
+        s = ('%24s' % '')+' '
         s += (' %8s ' % 'proc')+' '
         s += ('%10s' % 'GFLOPs')+' '
         s += ('%32s' % 'perfect caching [GB]')+' '
         s += ('%32s' % 'pessimal caching [GB]')+' '
         s += ('%21s' % 'arithmetic intensity')+'\n'
-        s += ('%64s' % '')+' '
+        s += ('%24s' % '')+' '
         s += (' %8s ' % '')+' '
         s += ('%10s' % '')+' '
         for i in range(2):
@@ -175,7 +172,7 @@ class PerformanceData(object):
         :arg minimum: If p is None, print minimum value (maximum otherwise)
         """
         assert(self._allgathered)
-        s = ('%64s' % self._label)+' '
+        s = ('%24s' % self._label)+' '
         if (p==None):
             if (minimum):
                 s += ('[%8s]' % 'min')+' '
