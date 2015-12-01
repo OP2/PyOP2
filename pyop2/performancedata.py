@@ -32,11 +32,7 @@ class PerformanceData(object):
                        'bandwidth_pessimal_loads':1.E-9*pessimal_bytes.loads,
                        'bandwidth_pessimal_stores':1.E-9*pessimal_bytes.stores,
                        'bandwidth_pessimal':1.E-9*(pessimal_bytes.loads + \
-                                                   pessimal_bytes.stores),
-                       'intensity_perfect':flops/float(perfect_bytes.loads+ \
-                                                       perfect_bytes.stores),
-                       'intensity_pessimal':flops/float(pessimal_bytes.loads+ \
-                                                        pessimal_bytes.stores)}
+                                                       pessimal_bytes.stores)}
         self._props_global = {quantity:None for quantity in self._props.keys()}
         # Flag to check whether data has been gathered in paralled
         self._allgathered=False
@@ -86,7 +82,7 @@ class PerformanceData(object):
                 return self._stat_str(np.amax(self._data_global[quantity],0))
             else:
                 # ... but minimal FLOPs and BW to get a conservative estimate 
-                return self._stat_str(np.amin(self._data_global[quantity],0))
+                return self._stat_str(np.sum(self._data_global[quantity],0))
         else:
             # Return quantity on processor p
             return self._stat_str(self._data_global[quantity][p],p)
@@ -124,7 +120,7 @@ class PerformanceData(object):
         ndata = np.array(data)
         s = ('%64s' % self._label)+' '
         if (p==None):
-            s += ('[%8s]' % 'all')+' '
+            s += ('[%8s]' % 'total')+' '
         else:
             s += ('[%8d]' % p)+' '
         if (len(data) == 0):
@@ -163,7 +159,7 @@ class PerformanceData(object):
         s += ('%10s' % 'pessimal')
         return s
 
-    def quantities_str(self,p=None,minimum=True):
+    def quantities_str(self,p=None):
         """Print out quantities of loop
 
         * Label
@@ -172,15 +168,11 @@ class PerformanceData(object):
         * arithmetic intensity [perfect and pessimal caching]
 
         :arg p: Processor rank (None to print out min/max)
-        :arg minimum: If p is None, print minimum value (maximum otherwise)
         """
         assert(self._allgathered)
         s = ('%64s' % self._label)+' '
         if (p==None):
-            if (minimum):
-                s += ('[%8s]' % 'min')+' '
-            else:
-                s += ('[%8s]' % 'max')+' '
+            s += ('[%8s]' % 'total')+' '
         else:
             s += ('[%8d]' % p)+' '
 
@@ -191,15 +183,23 @@ class PerformanceData(object):
                          'bandwidth_perfect',
                          'bandwidth_pessimal_loads',
                          'bandwidth_pessimal_stores',
-                         'bandwidth_pessimal',
-                         'intensity_perfect',
-                         'intensity_pessimal'):
+                         'bandwidth_pessimal'):
             if (p==None):
-                if (minimum):
-                    tmp = np.amin(self._props_global[quantity])
-                else:
-                    tmp = np.amax(self._props_global[quantity])
+                # If no processor is specified, sum over all
+                tmp = np.sum(self._props_global[quantity])
             else:
                 tmp = self._props_global[quantity][p]
             s += ('%10.3e' % tmp)+' '
+        if (p==None):
+            intensity_perfect = np.sum(self._props_global['flops']) \
+                / (np.sum(self._props_global['bandwidth_perfect']))
+            intensity_pessimal = np.sum(self._props_global['flops']) \
+                / (np.sum(self._props_global['bandwidth_pessimal']))
+        else:
+            intensity_perfect = self._props_global['flops'][p] \
+                / self._props_global['bandwidth_perfect'][p]
+            intensity_pessimal = self._props_global['flops'][p] \
+                / self._props_global['bandwidth_pessimal'][p]
+        s += ('%10.3e' % intensity_perfect)+' '
+        s += ('%10.3e' % intensity_pessimal)+' '
         return s

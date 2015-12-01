@@ -133,11 +133,10 @@ def performance_summary():
             print >> f, ''
             print >> f, PerformanceData.quantities_header()
             for x in data.values():
-                print >> f, x.quantities_str(minimum=True)
-                print >> f, x.quantities_str(minimum=False)
+                print >> f, x.quantities_str()
             print >> f, ''
             print >> f, '  Times are obtained by taking the maximum value over all processors.'
-            print >> f, '  Lower bounds for floating point performance and bandwidth are obtained by taking the minimum over all processors.'
+            print >> f, '  Floating point performance and memory bandwidth are summed over all processors.'
             print >> f, '  min/avg/max and standard deviation are computed overall loop invocations; see final column for raw data'
             for property in ('timing','flops','bandwidth_perfect','bandwidth_pessimal'):
                 print >> f, ''
