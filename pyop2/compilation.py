@@ -228,7 +228,7 @@ class LinuxCompiler(Compiler):
         # problem by turning ivopts off.
         # Maybe include '-ftree-slp-vectorize'
         print "Using GCC"
-        opt_flags = ['-march=native', '-O3', '-fno-ivopts', '-ffast-math', '-fassociative-math']
+        opt_flags = ['-O3', '-fno-ivopts', '-ffast-math', '-fassociative-math']
         if configuration['debug']:
             opt_flags = ['-O0', '-g']
         cc = "mpicc"

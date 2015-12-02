@@ -55,7 +55,7 @@ from mpi import MPI, _MPI, _check_comm, collective
 from profiling import timed_region, timed_function
 from sparsity import build_sparsity
 from version import __version__ as version
-from hpc_profiling import hpc_profiling, add_data_volume, add_c_time, add_estimated_gflops, add_nvlink_register_info
+from hpc_profiling import hpc_profiling, add_data_volume, add_c_time, add_nvlink_register_info
 
 from coffee.base import Node
 from coffee.visitors import FindInstances, EstimateFlops
@@ -224,6 +224,7 @@ MAX = Access("MAX")
 """The kernel contributes to a reduction into a :class:`Global` using a ``max``
 operation. OP2 is responsible for reducing over the different kernel
 invocations."""
+
 
 class CompRegion(object):
 
@@ -4262,9 +4263,9 @@ class ParLoop(LazyComputation):
                         measures)
         add_c_time('base', '%s-%s' % (region_name, self.kernel._md5), t)
         add_nvlink_register_info('base', '%s-%s' % (region_name, self.kernel._md5),
-                                                    configuration["nvlink_info"],
-                                                    configuration["teams"],
-                                                    configuration["threads"])
+                                 configuration["nvlink_info"],
+                                 configuration["teams"],
+                                 configuration["threads"])
 
     @collective
     @timed_function('ParLoop halo exchange begin')
@@ -4440,6 +4441,7 @@ class ParLoop(LazyComputation):
         a certain part of an extruded mesh, for example on top cells, bottom cells or
         interior facets."""
         return self._iteration_region
+
 
 def build_itspace(args, iterset):
     """Creates an class:`IterationSpace` for the :class:`ParLoop` from the

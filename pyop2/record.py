@@ -512,5 +512,3 @@ class GPUReductionRecord(ReductionRecord):
                 self.iaca_mflops, self.papi_mflops, self.cycles * 1.0 / frequency,
                 self.c_runtime,
                 self.teams, self.thread_limit, self.nvlink_info]
-
-

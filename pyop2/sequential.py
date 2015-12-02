@@ -36,7 +36,7 @@
 import ctypes
 from numpy.ctypeslib import ndpointer
 
-from base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, PYOP2_CORE, PYOP2_EXEC, PYOP2_OWNED
+from base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS
 from exceptions import *
 import host
 from mpi import collective
@@ -100,7 +100,7 @@ double %(wrapper_name)s(int start, int end,
     %(buffer_gather)s
 
     %(kernel_name)s(%(kernel_args)s);
-    
+
     %(print_contrib)s
     %(itset_loop_body)s
     %(map_bcs_p)s;
@@ -210,7 +210,7 @@ class ParLoop(host.ParLoop):
                 ms = arglist[-1]
                 measures = [m for m in ms]
                 # add the flops
-                # measures[6] = 
+                # measures[6]
                 return time, measures
         return time, np.zeros(8)
 

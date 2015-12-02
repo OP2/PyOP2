@@ -50,6 +50,7 @@ import coffee.plan
 from coffee.plan import ASTKernel
 # from hpc_profiling import add_iaca_flops
 
+
 class Kernel(base.Kernel):
 
     def _ast_to_c(self, ast, opts={}):
@@ -124,14 +125,14 @@ class Arg(base.Arg):
         else:
             val = ', '.join(["%s *%s" % (self.ctype, self.c_arg_name(i))
                              for i in range(len(self.data))])
-            store_array = ["storeArray_%(type)s(%(name)s, %(size)s, \"%(filename)s\");" % \
+            store_array = ["storeArray_%(type)s(%(name)s, %(size)s, \"%(filename)s\");" %
                            {"type": self.ctype,
                             "name": self.c_arg_name(i),
                             "size": str(len(self.data[i].data) * self.data[i].cdim),
                             "filename": self.c_arg_name(i)} for i in range(len(self.data))]
             load_array = ["""
                           int len_%(name)s = %(size)s;
-                          %(type)s* %(name)s = loadArray_%(type)s(len_%(name)s, \"%(filename)s\");""" % \
+                          %(type)s* %(name)s = loadArray_%(type)s(len_%(name)s, \"%(filename)s\");""" %
                           {"type": self.ctype,
                            "name": self.c_arg_name(i),
                            "size": str(len(self.data[i].data) * self.data[i].cdim),
@@ -141,13 +142,13 @@ class Arg(base.Arg):
             for i, map in enumerate(as_tuple(self.map, Map)):
                 for j, m in enumerate(map):
                     val += ", int *%s" % self.c_map_name(i, j)
-                    store_array += ["storeArray_int(%(name)s, %(size)s, \"%(filename)s\");" % \
+                    store_array += ["storeArray_int(%(name)s, %(size)s, \"%(filename)s\");" %
                                     {"name": self.c_map_name(i, j),
                                      "size": m.arity,
                                      "filename": self.c_map_name(i, j)}]
                     load_array += ["""
                                    int len_%(name)s = %(size)s;
-                                   int* %(name)s = loadArray_int(len_%(name)s, \"%(filename)s\");""" % \
+                                   int* %(name)s = loadArray_int(len_%(name)s, \"%(filename)s\");""" %
                                    {"name": self.c_map_name(i, j),
                                     "size": m.arity,
                                     "filename": self.c_map_name(i, j)}]
@@ -688,13 +689,13 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                 continue
             for j, m in enumerate(map):
                 val.append("int *%s" % self.c_offset_name(i, j))
-                store_array += ["storeArray_int(%(name)s, %(size)s, \"%(filename)s\");" % \
+                store_array += ["storeArray_int(%(name)s, %(size)s, \"%(filename)s\");" %
                                 {"name": self.c_offset_name(i, j),
                                  "size": m.arity,
                                  "filename": self.c_offset_name(i, j)}]
                 load_array += ["""
                                int len_%(name)s = %(size)s;
-                               int %(name)s = loadArray_int(len_%(name)s, \"%(filename)s\");""" % \
+                               int %(name)s = loadArray_int(len_%(name)s, \"%(filename)s\");""" %
                                {"name": self.c_offset_name(i, j),
                                 "size": m.arity,
                                 "filename": self.c_offset_name(i, j)}]
@@ -1103,7 +1104,7 @@ class JITModule(base.JITModule):
             }
             printf("\\n");
             """
-    
+
     # Add flags required to compile with profiling and/or debugging
     def flags(self, cppargs, more_args, ldargs):
         more_args += ["-lrt"]
@@ -1130,8 +1131,8 @@ class JITModule(base.JITModule):
     def backend_flags(self, cppargs, more_args, ldargs):
         pass
 
-    #TODO: Add another function for debugging
-    #TODO: Move this function out of here
+    # TODO: Add another function for debugging
+    # TODO: Move this function out of here
     def debug(self, wrapper_code):
         pass
 
@@ -1171,7 +1172,7 @@ class JITModule(base.JITModule):
         # TODO: fix this to work on host architectures other than INTEL
         # if compiler:
         #     cppargs += [compiler[coffee.plan.isa['inst_set']]]
-        
+
         # Add profiling flags if required
         if configuration["hpc_profiling"]:
             self.flags(cppargs, more_args, ldargs)
@@ -1294,7 +1295,7 @@ def wrapper_snippets(itspace, args,
 
     _store_array = []
     _load_array = []
-    _call_decl = ["int N = %(size)s;" % {"size": str(self._itspace.core_size)}]
+    _call_decl = ["int N = %(size)s;" % {"size": str(itspace.core_size)}]
     # Start and end
     _call_args = ["0", "N"]
     _ssinds_arg = ""
@@ -1305,19 +1306,19 @@ def wrapper_snippets(itspace, args,
     if isinstance(itspace._iterset, Subset):
         _ssinds_arg = "int* ssinds,"
         _index_expr = "ssinds[n]"
-        _store_array += ["storeArray_int(ssinds, %(size)s, "");" % {"size": self._itspace._iterset.size}]
+        _store_array += ["storeArray_int(ssinds, %(size)s, "");" % {"size": itspace._iterset.size}]
         _load_array += ["TODO"]
         _call_args += ["TODO"]
 
     _wrapper_args = []
-    for arg in self._args:
+    for arg in args:
         wrapper_args, store_array, load_array, call_args = arg.c_wrapper_arg()
         _wrapper_args += [wrapper_args]
         _store_array += store_array
         _load_array += load_array
         _call_args += call_args
     _wrapper_args = ', '.join(_wrapper_args)
-    
+
     # Pass in the is_facet flag to mark the case when it's an interior horizontal facet in
     # an extruded mesh.
     _wrapper_decs = ';\n'.join([arg.c_wrapper_dec() for arg in args])
@@ -1346,9 +1347,9 @@ def wrapper_snippets(itspace, args,
 
     _vec_inits = ';\n'.join([arg.c_vec_init(is_top, is_facet=is_facet) for arg in args
                              if not arg._is_mat and arg._is_vec_map])
-    #_vec_inits = ';\n'.join([arg.c_vec_init(is_top, is_facet=is_facet) for arg in self._args
+    # _vec_inits = ';\n'.join([arg.c_vec_init(is_top, is_facet=is_facet) for arg in args
     #                         if not arg._is_mat and arg._is_vec_map])
-    
+
     indent = lambda t, i: ('\n' + '  ' * i).join(t.split('\n'))
 
     _map_decl = ""
@@ -1362,7 +1363,7 @@ def wrapper_snippets(itspace, args,
     _off_args = ""
     if itspace._extruded:
         _off_args = []
-        for arg in self._args:
+        for arg in args:
             if arg._uses_itspace or arg._is_vec_map:
                 off_args, store_array, load_array, call_args = arg.c_offset_init()
                 _off_args += [off_args]
@@ -1371,7 +1372,7 @@ def wrapper_snippets(itspace, args,
                 _call_args += call_args
         _off_args = ''.join(_off_args)
         _layer_arg = ", int start_layer, int end_layer, int top_layer"
-        _call_decl += ["int layers = %(size)s;" % {"size": str(self._itspace.layers - 1)}]
+        _call_decl += ["int layers = %(size)s;" % {"size": str(itspace.layers - 1)}]
         _call_decl += ["double* other_args = {0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0};"]
         _call_args += ["0", "layers", "other_args"]
         _map_decl += ';\n'.join([arg.c_map_decl(is_facet=is_facet)
@@ -1484,7 +1485,7 @@ def wrapper_snippets(itspace, args,
             'addtos': indent(_addtos, 2),
         }
 
-    region_name = configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name
+    # region_name = configuration['region_name'] if configuration['region_name'] is not "default" else kernel_name
     if configuration['likwid'] and configuration["likwid_inner"] and configuration["likwid_outer"]:
         raise RuntimeError("Not allowed to set both likwid_inner and likwid_outer config flags!")
     return {'kernel_name': kernel_name,
@@ -1512,9 +1513,10 @@ def wrapper_snippets(itspace, args,
             'buffer_decl': _buf_decl,
             'buffer_gather': _buf_gather,
             'kernel_args': _kernel_args,
-            'region_name': configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name,
+            'region_name': configuration['region_name'] if configuration['region_name'] is not "default" else kernel_name,
             'timer_start': "",
             'timer_end': "",
+            'timer_stop': "",
             'timer_declare': "",
             'other_args': "",
             'papi_decl': "",

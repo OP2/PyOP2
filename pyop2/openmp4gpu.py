@@ -44,7 +44,7 @@ import host
 from mpi import collective
 from petsc_base import *
 from profiling import timed_region
-from host import Kernel, Arg  # noqa: needed by BackendSelector
+from host import Kernel  # noqa: needed by BackendSelector
 from utils import as_tuple, cached_property
 from optimizer import optimize_wrapper, optimize_kernel
 from configuration import configuration
@@ -70,9 +70,9 @@ class Arg(host.Arg):
         if self._is_mat:
             call_args = ["TODO"]
         else:
-            call_args = ["""for(int i=0; i<%(size)s; i++) { printf("---> %%f\\n", %(name)s[i]); %(name)s[i] = 999; }""" % \
-                         { "name": self.c_arg_name(i),
-                           "size": str(len(self.data[i].data) * self.data[i].cdim)} \
+            call_args = ["""for(int i=0; i<%(size)s; i++) { printf("---> %%f\\n", %(name)s[i]); %(name)s[i] = 999; }""" %
+                         {"name": self.c_arg_name(i),
+                          "size": str(len(self.data[i].data) * self.data[i].cdim)}
                          for i in range(len(self.data))]
         return call_args
 
@@ -240,7 +240,7 @@ double %(wrapper_name)s(int start, int end,
         # if self._itspace._extruded:
         #     _read_args = ", ".join([_read_args] + [arg.c_offload_offset() for arg in self._args
         #                                            if arg._uses_itspace or arg._is_vec_map])
-        
+
         code_dict.update({'offload_one': _offload_one})
 
         # This is a good place to apply some application level optimizations
@@ -347,7 +347,7 @@ class ParLoop(host.ParLoop):
     def _jitmodule_halo(self):
         # Return the host-side OpenMP 4.0 version of the function.
         return omp4.JITModule(self.kernel, self.it_space, *self.args,
-                         direct=self.is_direct, iterate=self.iteration_region, halo=True)
+                              direct=self.is_direct, iterate=self.iteration_region, halo=True)
 
     @collective
     def _compute(self, part, fun, *arglist):

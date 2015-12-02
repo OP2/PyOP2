@@ -44,7 +44,8 @@ from petsc_base import *
 from profiling import timed_region
 from host import Kernel, Arg  # noqa: needed by BackendSelector
 from utils import as_tuple, cached_property
-from optimizer import optimize_wrapper, optimize_kernel
+from optimizer import optimize_wrapper
+
 
 def _detect_openmp_flags():
     p = Popen(['mpicc', '--version'], stdout=PIPE, shell=False)
@@ -58,6 +59,7 @@ def _detect_openmp_flags():
     else:
         warning('Unknown mpicc version:\n%s' % _version)
         return '', ''
+
 
 class JITModule(host.JITModule):
     ompflag, omplib = _detect_openmp_flags()
