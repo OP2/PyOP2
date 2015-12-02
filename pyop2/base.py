@@ -53,6 +53,7 @@ from utils import *
 from backends import _make_object
 from mpi import MPI, _MPI, _check_comm, collective
 from profiling import timed_region, timed_function
+from sparsity import build_sparsity
 from version import __version__ as version
 from hpc_profiling import hpc_profiling, add_data_volume, add_c_time, add_estimated_gflops, add_nvlink_register_info
 
@@ -2916,11 +2917,15 @@ class Map(object):
         self._cache = {}
         # Which indices in the extruded map should be masked out for
         # the application of strong boundary conditions
-        self._bottom_mask = np.zeros(len(offset)) if offset is not None else []
-        self._top_mask = np.zeros(len(offset)) if offset is not None else []
+        self._bottom_mask = {}
+        self._top_mask = {}
+
         if offset is not None and bt_masks is not None:
-            self._bottom_mask[bt_masks[0]] = -1
-            self._top_mask[bt_masks[1]] = -1
+            for name, mask in bt_masks.iteritems():
+                self._bottom_mask[name] = np.zeros(len(offset))
+                self._bottom_mask[name][mask[0]] = -1
+                self._top_mask[name] = np.zeros(len(offset))
+                self._top_mask[name][mask[1]] = -1
         Map._globalcount += 1
 
     @validate_type(('index', (int, IterationIndex), IndexTypeError))
@@ -3338,7 +3343,6 @@ class Sparsity(ObjectCached):
             self._d_nz = sum(s._d_nz for s in self)
             self._o_nz = sum(s._o_nz for s in self)
         else:
-            from sparsity import build_sparsity
             with timed_region("Build sparsity"):
                 build_sparsity(self, parallel=MPI.parallel, block=self._block_sparse)
             self._blocks = [[self]]
@@ -3562,6 +3566,34 @@ class Sparsity(ObjectCached):
         return False
 
 
+class _LazyMatOp(LazyComputation):
+    """A lazily evaluated operation on a :class:`Mat`
+
+    :arg mat: The :class:`Mat` this operation touches
+    :arg closure: a callable piece of code to run
+    :arg new_state: What is the assembly state of the matrix after running
+         the closure?
+    :kwarg read:  Does this operation have read semantics?
+    :kwarg write:  Does this operation have write semantics?
+    """
+
+    def __init__(self, mat, closure, new_state, read=False, write=False):
+        read = [mat] if read else []
+        write = [mat] if write else []
+        super(_LazyMatOp, self).__init__(reads=read, writes=write, incs=[])
+        self._closure = closure
+        self._mat = mat
+        self._new_state = new_state
+
+    def _run(self):
+        if self._mat.assembly_state is not Mat.ASSEMBLED and \
+           self._new_state is not Mat.ASSEMBLED and \
+           self._new_state is not self._mat.assembly_state:
+            self._mat._flush_assembly()
+        self._closure()
+        self._mat.assembly_state = self._new_state
+
+
 class Mat(SetAssociated):
     """OP2 matrix data. A ``Mat`` is defined on a sparsity pattern and holds a value
     for each element in the :class:`Sparsity`.
@@ -3585,6 +3617,10 @@ class Mat(SetAssociated):
        :meth:`assemble` to finalise the writes.
     """
 
+    ASSEMBLED = "ASSEMBLED"
+    INSERT_VALUES = "INSERT_VALUES"
+    ADD_VALUES = "ADD_VALUES"
+
     _globalcount = 0
     _modes = [WRITE, INC]
 
@@ -3594,6 +3630,7 @@ class Mat(SetAssociated):
         self._sparsity = sparsity
         self._datatype = np.dtype(dtype)
         self._name = name or "mat_%d" % Mat._globalcount
+        self.assembly_state = Mat.ASSEMBLED
         Mat._globalcount += 1
 
     @validate_in(('access', _modes, ModeValueError))
@@ -3606,24 +3643,14 @@ class Mat(SetAssociated):
         return _make_object('Arg', data=self, map=path_maps, access=access,
                             idx=path_idxs, flatten=flatten)
 
-    class _Assembly(LazyComputation):
-        """Finalise assembly of this matrix.
-
-        Called lazily after user calls :meth:`assemble`"""
-        def __init__(self, mat):
-            super(Mat._Assembly, self).__init__(reads=mat, writes=mat, incs=mat)
-            self._mat = mat
-
-        def _run(self):
-            self._mat._assemble()
-
     def assemble(self):
         """Finalise this :class:`Mat` ready for use.
 
         Call this /after/ executing all the par_loops that write to
         the matrix before you want to look at it.
         """
-        Mat._Assembly(self).enqueue()
+        _LazyMatOp(self, self._assemble, new_state=Mat.ASSEMBLED,
+                   read=True, write=True).enqueue()
 
     def _assemble(self):
         raise NotImplementedError(
@@ -3697,6 +3724,11 @@ class Mat(SetAssociated):
     def _is_vector_field(self):
         return not self._is_scalar_field
 
+    def _flush_assembly(self):
+        """Flush the in flight assembly operations (used when
+        switching between inserting and adding values."""
+        pass
+
     @property
     def values(self):
         """A numpy array of matrix values.
@@ -3762,7 +3794,11 @@ class Kernel(Cached):
     :param headers: list of system headers to include when compiling the kernel
         in the form ``#include <header.h>`` (optional, defaults to empty)
     :param user_code: code snippet to be executed once at the very start of
-        the generated kernel wrapper code (optional, defaults to empty)
+        the generated kernel wrapper code (optional, defaults to
+        empty)
+    :param cpp: Is the kernel actually C++ rather than C?  If yes,
+        then compile with the C++ compiler (kernel is wrapped in
+        extern C for linkage reasons).
 
     Consider the case of initialising a :class:`~pyop2.Dat` with seeded random
     values in the interval 0 to 1. The corresponding :class:`~pyop2.Kernel` is
@@ -3783,7 +3819,7 @@ class Kernel(Cached):
     @classmethod
     @validate_type(('name', str, NameTypeError))
     def _cache_key(cls, code, name, opts={}, include_dirs=[], headers=[],
-                   user_code=""):
+                   user_code="", cpp=False):
         # Both code and name are relevant since there might be multiple kernels
         # extracting different functions from the same code
         # Also include the PyOP2 version, since the Kernel class might change
@@ -3792,7 +3828,8 @@ class Kernel(Cached):
         if isinstance(code, Node):
             code = code.gencode()
         return md5(str(hash(code)) + name + str(opts) + str(include_dirs) +
-                   str(headers) + version + str(configuration['loop_fusion'])).hexdigest()
+                   str(headers) + version + str(configuration['loop_fusion']) +
+                   str(cpp)).hexdigest()
 
     def _ast_to_c(self, ast, opts={}):
         """Transform an Abstract Syntax Tree representing the kernel into a
@@ -3804,11 +3841,12 @@ class Kernel(Cached):
         return md5(str(hash(self._user_code)) + self._name).hexdigest()[:6]
 
     def __init__(self, code, name, opts={}, include_dirs=[], headers=[],
-                 user_code=""):
+                 user_code="", cpp=False):
         # Protect against re-initialization when retrieved from cache
         if self._initialized:
             return
         self._name = name or "kernel_%d" % Kernel._globalcount
+        self._cpp = cpp
         Kernel._globalcount += 1
         # Record used optimisations
         self._opts = opts
@@ -3889,7 +3927,7 @@ class JITModule(Cached):
                     idx = (arg.idx.__class__, arg.idx.index)
                 else:
                     idx = arg.idx
-                map_arity = arg.map.arity if arg.map else None
+                map_arity = arg.map and (tuplify(arg.map.offset) or arg.map.arity)
                 if arg._is_dat_view:
                     view_idx = arg.data.index
                 else:
@@ -3899,7 +3937,8 @@ class JITModule(Cached):
             elif arg._is_mat:
                 idxs = (arg.idx[0].__class__, arg.idx[0].index,
                         arg.idx[1].index)
-                map_arities = (arg.map[0].arity, arg.map[1].arity)
+                map_arities = (tuplify(arg.map[0].offset) or arg.map[0].arity,
+                               tuplify(arg.map[1].offset) or arg.map[1].arity)
                 # Implicit boundary conditions (extruded "top" or
                 # "bottom") affect generated code, and therefore need
                 # to be part of cache key
@@ -4061,7 +4100,7 @@ class ParLoop(LazyComputation):
                 if arg._is_dat and arg.access not in [INC, READ, WRITE]:
                     raise RuntimeError("Iteration over a LocalSet does not make sense for RW args")
 
-        self._it_space = self.build_itspace(iterset)
+        self._it_space = build_itspace(self.args, iterset)
         # VBW: Valuable BW
         vol = 0.0
         # MVBW: Maximal Valuable BW which counts the volume twice for INC and WRITE
@@ -4302,54 +4341,10 @@ class ParLoop(LazyComputation):
                 if arg.data._is_allocated:
                     for d in arg.data:
                         d._data.setflags(write=False)
-            if arg._is_mat:
-                arg.data._needs_assembly = True
-
-    def build_itspace(self, iterset):
-        """Checks that the iteration set of the :class:`ParLoop` matches the
-        iteration set of all its arguments. A :class:`MapValueError` is raised
-        if this condition is not met.
-
-        Also determines the size of the local iteration space and checks all
-        arguments using an :class:`IterationIndex` for consistency.
-
-        :return: class:`IterationSpace` for this :class:`ParLoop`"""
-
-        if isinstance(iterset, (LocalSet, Subset)):
-            _iterset = iterset.superset
-        else:
-            _iterset = iterset
-        block_shape = None
-        if configuration["type_check"]:
-            if isinstance(_iterset, MixedSet):
-                raise SetTypeError("Cannot iterate over MixedSets")
-            for i, arg in enumerate(self.args):
-                if arg._is_global:
-                    continue
-                if arg._is_direct:
-                    if arg.data.dataset.set != _iterset:
-                        raise MapValueError(
-                            "Iterset of direct arg %s doesn't match ParLoop iterset." % i)
-                    continue
-                for j, m in enumerate(arg._map):
-                    if isinstance(_iterset, ExtrudedSet):
-                        if m.iterset != _iterset and m.iterset not in _iterset:
-                            raise MapValueError(
-                                "Iterset of arg %s map %s doesn't match ParLoop iterset." % (i, j))
-                    elif m.iterset != _iterset and m.iterset not in _iterset:
-                        raise MapValueError(
-                            "Iterset of arg %s map %s doesn't match ParLoop iterset." % (i, j))
-                if arg._uses_itspace:
-                    _block_shape = arg._block_shape
-                    if block_shape and block_shape != _block_shape:
-                        raise IndexValueError("Mismatching iteration space size for argument %d" % i)
-                    block_shape = _block_shape
-        else:
-            for arg in self.args:
-                if arg._uses_itspace:
-                    block_shape = arg._block_shape
-                    break
-        return IterationSpace(iterset, block_shape)
+            if arg._is_mat and arg.access is not READ:
+                state = {WRITE: Mat.INSERT_VALUES,
+                         INC: Mat.ADD_VALUES}[arg.access]
+                arg.data.assembly_state = state
 
     @cached_property
     def dat_args(self):
@@ -4358,19 +4353,6 @@ class ParLoop(LazyComputation):
     @cached_property
     def global_reduction_args(self):
         return [arg for arg in self.args if arg._is_global_reduction]
-
-    @cached_property
-    def offset_args(self):
-        """The offset args that need to be added to the argument list."""
-        _args = []
-        for arg in self.args:
-            if arg._is_indirect or arg._is_mat:
-                maps = as_tuple(arg.map, Map)
-                for map in maps:
-                    for m in map:
-                        if m.iterset._extruded:
-                            _args.append(m.offset)
-        return _args
 
     @cached_property
     def layer_arg(self):
@@ -4458,6 +4440,55 @@ class ParLoop(LazyComputation):
         a certain part of an extruded mesh, for example on top cells, bottom cells or
         interior facets."""
         return self._iteration_region
+
+def build_itspace(args, iterset):
+    """Creates an class:`IterationSpace` for the :class:`ParLoop` from the
+    given iteration set.
+
+    Also checks that the iteration set of the :class:`ParLoop` matches the
+    iteration set of all its arguments. A :class:`MapValueError` is raised
+    if this condition is not met.
+
+    Also determines the size of the local iteration space and checks all
+    arguments using an :class:`IterationIndex` for consistency.
+
+    :return: class:`IterationSpace` for this :class:`ParLoop`"""
+
+    if isinstance(iterset, (LocalSet, Subset)):
+        _iterset = iterset.superset
+    else:
+        _iterset = iterset
+    block_shape = None
+    if configuration["type_check"]:
+        if isinstance(_iterset, MixedSet):
+            raise SetTypeError("Cannot iterate over MixedSets")
+        for i, arg in enumerate(args):
+            if arg._is_global:
+                continue
+            if arg._is_direct:
+                if arg.data.dataset.set != _iterset:
+                    raise MapValueError(
+                        "Iterset of direct arg %s doesn't match ParLoop iterset." % i)
+                continue
+            for j, m in enumerate(arg._map):
+                if isinstance(_iterset, ExtrudedSet):
+                    if m.iterset != _iterset and m.iterset not in _iterset:
+                        raise MapValueError(
+                            "Iterset of arg %s map %s doesn't match ParLoop iterset." % (i, j))
+                elif m.iterset != _iterset and m.iterset not in _iterset:
+                    raise MapValueError(
+                        "Iterset of arg %s map %s doesn't match ParLoop iterset." % (i, j))
+            if arg._uses_itspace:
+                _block_shape = arg._block_shape
+                if block_shape and block_shape != _block_shape:
+                    raise IndexValueError("Mismatching iteration space size for argument %d" % i)
+                block_shape = _block_shape
+    else:
+        for arg in args:
+            if arg._uses_itspace:
+                block_shape = arg._block_shape
+                break
+    return IterationSpace(iterset, block_shape)
 
 
 DEFAULT_SOLVER_PARAMETERS = {'ksp_type': 'cg',
