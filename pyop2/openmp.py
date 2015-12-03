@@ -269,6 +269,7 @@ double %(wrapper_name)s(int boffset,
         if iterset._extruded:
             argtypes.append(ctypes.c_int)
             argtypes.append(ctypes.c_int)
+            argtypes.append(ctypes.c_int)
 
         if configuration['hpc_profiling']:
             argtypes.append(ndpointer(np.dtype('float64'), shape=(8,)))
