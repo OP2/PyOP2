@@ -259,9 +259,11 @@ class LinuxClangCompiler(Compiler):
         if configuration['debug']:
             opt_flags = ['-O0', '-g']
         cc = "mpicc"
+        stdargs = ["-std=c99"]
         if cpp:
             cc = "mpicxx"
-        cppargs = opt_flags + cppargs + ["-I/localhd/gbercea/lomp/lomp/source/"]
+            stdargs = []
+        cppargs = stdargs + opt_flags + cppargs + ["-I/localhd/gbercea/lomp/lomp/source/"]
         ldargs = ['-shared'] + ldargs + \
                  ["-L/localhd/gbercea/lomp/lomp/source/lib64"] + \
                  ["-Wl,-rpath,/localhd/gbercea/lomp/lomp/source/lib64"]
