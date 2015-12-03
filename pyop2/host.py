@@ -128,14 +128,16 @@ class Arg(base.Arg):
             store_array = ["storeArray_%(type)s(%(name)s, %(size)s, \"%(filename)s\");" %
                            {"type": self.ctype,
                             "name": self.c_arg_name(i),
-                            "size": str(len(self.data[i].data) * self.data[i].cdim),
+                            "size": str((self.data[i].dataset.total_size if isinstance(self.data[i], Dat)
+                                         else len(self.data[i].data)) * self.data[i].cdim),
                             "filename": self.c_arg_name(i)} for i in range(len(self.data))]
             load_array = ["""
                           int len_%(name)s = %(size)s;
                           %(type)s* %(name)s = loadArray_%(type)s(len_%(name)s, \"%(filename)s\");""" %
                           {"type": self.ctype,
                            "name": self.c_arg_name(i),
-                           "size": str(len(self.data[i].data) * self.data[i].cdim),
+                           "size": str((self.data[i].dataset.total_size if isinstance(self.data[i], Dat)
+                                        else len(self.data[i].data)) * self.data[i].cdim),
                            "filename": self.c_arg_name(i)} for i in range(len(self.data))]
             call_args = [self.c_arg_name(i) for i in range(len(self.data))]
         if self._is_indirect or self._is_mat:
@@ -1349,7 +1351,6 @@ def wrapper_snippets(itspace, args,
                              if not arg._is_mat and arg._is_vec_map])
     # _vec_inits = ';\n'.join([arg.c_vec_init(is_top, is_facet=is_facet) for arg in args
     #                         if not arg._is_mat and arg._is_vec_map])
-
     indent = lambda t, i: ('\n' + '  ' * i).join(t.split('\n'))
 
     _map_decl = ""

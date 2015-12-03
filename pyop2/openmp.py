@@ -345,6 +345,10 @@ class ParLoop(device.ParLoop, host.ParLoop):
         return JITModule(self.kernel, self.it_space, *self.args,
                          direct=self.is_direct, iterate=self.iteration_region)
 
+    @cached_property
+    def _jitmodule_halo(self):
+        return self._jitmodule
+
     @collective
     @lineprof
     def _compute(self, part, fun, *arglist):

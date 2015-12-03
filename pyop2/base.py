@@ -4119,7 +4119,8 @@ class ParLoop(LazyComputation):
                     # Randomize the maps
                     randomize_map(arg.map, len(arg.map.values))
             if arg._is_mat:
-                volume = (arg.data.sparsity.onz + arg.data.sparsity.nz) * arg.dtype.itemsize
+                # volume = (arg.data._sparsity.onz + arg.data._sparsity.nz) * arg.dtype.itemsize
+                volume = arg.data.nbytes
                 vol += volume
                 mvbw_vol += (volume * (2 if arg.access in [INC, WRITE] else 1))
                 if self._is_layered:
