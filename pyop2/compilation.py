@@ -116,6 +116,7 @@ class Compiler(object):
                     os.makedirs(cachedir)
                 logfile = os.path.join(cachedir, "%s_p%d.log" % (basename, pid))
                 errfile = os.path.join(cachedir, "%s_p%d.err" % (basename, pid))
+                preprocfile = os.path.join(cachedir, "%s_p%d.pre" % (basename, pid))
                 with progress(INFO, 'Compiling wrapper'):
                     with file(cname, "w") as f:
                         f.write(src)
@@ -123,11 +124,18 @@ class Compiler(object):
                     if self._ld is None:
                         cc = [self._cc] + self._cppargs + \
                              ['-o', tmpname, cname] + self._ldargs
+                        cc_pre = [self._cc] + self._cppargs + \
+                             ['-E', '-o', preprocfile, cname] + self._ldargs
                         with file(logfile, "w") as log:
                             with file(errfile, "w") as err:
                                 log.write("Compilation command:\n")
                                 log.write(" ".join(cc))
                                 log.write("\n\n")
+                                if configuration["hpc_profiling"]:
+                                    cc_pre += [">", preprocfile]
+                                    cmd = " ".join(cc_pre)
+                                    os.system(cmd)
+                                    print preprocfile
                                 try:
                                     if configuration['no_fork_available']:
                                         cc += ["2>", errfile, ">", logfile]
