@@ -326,7 +326,7 @@ def load(src, extension, fn_name, cppargs=[], ldargs=[], argtypes=None, restype=
     fn = getattr(dll, fn_name)
     fn.argtypes = argtypes
     fn.restype = restype
-    return fn, basename
+    return fn
 
 
 def clear_cache(prompt=False):

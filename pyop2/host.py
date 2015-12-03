@@ -1224,14 +1224,14 @@ class JITModule(base.JITModule):
         # print code_to_compile
         if self._kernel._cpp:
             extension = "cpp"
-        self._fun, _ = compilation.load(code_to_compile,
-                                        extension,
-                                        self._wrapper_name,
-                                        cppargs=cppargs,
-                                        ldargs=ldargs,
-                                        argtypes=self._argtypes,
-                                        restype=ctypes.c_double,
-                                        compiler=compiler.get('name'))
+        self._fun = compilation.load(code_to_compile,
+                                     extension,
+                                     self._wrapper_name,
+                                     cppargs=cppargs,
+                                     ldargs=ldargs,
+                                     argtypes=self._argtypes,
+                                     restype=ctypes.c_double,
+                                     compiler=compiler.get('name'))
         # Blow away everything we don't need any more
         del self._args
         del self._kernel
