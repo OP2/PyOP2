@@ -114,7 +114,6 @@ double %(wrapper_name)s(int start, int end,
                       %(ssinds_arg)s
                       %(wrapper_args)s
                       %(const_args)s
-                      %(off_args)s
                       %(layer_arg)s
                       %(other_args)s) {
   %(user_code)s
@@ -155,7 +154,6 @@ double %(wrapper_name)s(int start, int end,
 
     def set_argtypes(self, iterset, *args):
         argtypes = [ctypes.c_int, ctypes.c_int]
-        offset_args = []
         if isinstance(iterset, Subset):
             argtypes.append(iterset._argtype)
         for arg in args:
@@ -171,15 +169,12 @@ double %(wrapper_name)s(int start, int end,
                 for map in maps:
                     for m in map:
                         argtypes.append(m._argtype)
-                        if m.iterset._extruded:
-                            offset_args.append(ctypes.c_void_p)
 
         for c in Const._definitions():
             argtypes.append(c._argtype)
 
-        argtypes.extend(offset_args)
-
         if iterset._extruded:
+            argtypes.append(ctypes.c_int)
             argtypes.append(ctypes.c_int)
             argtypes.append(ctypes.c_int)
 
@@ -244,6 +239,7 @@ double %(wrapper_name)s(int start, int end,
         code_dict.update({'offload_one': _offload_one})
 
         # This is a good place to apply some application level optimizations
+        print "Doing OPENMP 4.0 on GPU"
         optimize_wrapper(self, code_dict)
         return code_dict
 
@@ -255,15 +251,26 @@ double %(wrapper_name)s(int start, int end,
     def backend_flags(self, cppargs, more_args, ldargs):
         # Most of the code to generate is the same as that for sequential
         super(JITModule, self).backend_flags(cppargs, more_args, ldargs)
-        cppargs += ["-fopenmp=libomp", "-O3", "-omptargets=nvptx64sm_35-nvidia-linux", '-save-temps', '-v']
+        cppargs += ["-O3", '-omptargets=nvptx64sm_35-nvidia-linux']
         # Add custom number of teams and threads:
         cppargs += ["-DTEAMS=%(teams)s" % {'teams': configuration["teams"]}]
         cppargs += ["-DTHREADS=%(threads)s" % {'threads': configuration["threads"]}]
         # Include LOMP
         # TODO: Replace hardcoded path with lomp path function in utils
-        cppargs += ["-I/localhd/gbercea/lomp/lomp/source/"]
-        ldargs += ["-L/localhd/gbercea/lomp/lomp/source/lib64"]
-        ldargs += ["-Wl,-rpath,/localhd/gbercea/lomp/lomp/source/lib64"]
+        cppargs += ["-I" + os.environ.get('LIBOMP_LIB') or ""]
+        cppargs += ["-L/usr/local/cuda-7.0/lib64", "-lcuda", "-lcudart", "-lelf"]
+        # '-save-temps', '-v'
+        cppargs += ["-fopenmp=libomp", '-target', 'powerpc64le-ibm-linux-gnu']
+
+        ldargs += ["-L" + os.environ.get('LIBOMP_LIB') or ""]
+        ldargs += ["-Wl,-rpath," + os.environ.get('LIBOMP_LIB') or ""]
+        ldargs += ["-L/usr/local/cuda-7.0/lib64"]
+        ldargs += ["-Wl,-rpath,/usr/local/cuda-7.0/lib64"]
+        ldargs += ["-L/home/mgiles/gbercea/libomptarget/lib"]
+        ldargs += ["-Wl,-rpath,/home/mgiles/gbercea/libomptarget/lib"]
+        ldargs += ["-L/usr/lib/powerpc64le-linux-gnu/"]
+        ldargs += ["-Wl,-rpath,/usr/lib/powerpc64le-linux-gnu/"]
+        ldargs += ["-lcuda", "-lcudart", "-lelf", "-lomp", "-lomptarget"]
 
     @collective
     def compile(self, argtypes=None, restype=None):
@@ -293,7 +300,6 @@ class ParLoop(host.ParLoop):
 
     def prepare_arglist(self, iterset, *args):
         arglist = []
-        offset_args = []
         if isinstance(iterset, Subset):
             arglist.append(iterset._indices.ctypes.data)
 
@@ -309,13 +315,9 @@ class ParLoop(host.ParLoop):
                 for map in arg._map:
                     for m in map:
                         arglist.append(m._values.ctypes.data)
-                        if m.iterset._extruded:
-                            offset_args.append(m.offset.ctypes.data)
 
         for c in Const._definitions():
             arglist.append(c._data.ctypes.data)
-
-        arglist.extend(offset_args)
 
         if iterset._extruded:
             region = self.iteration_region
@@ -323,14 +325,18 @@ class ParLoop(host.ParLoop):
             if region is ON_BOTTOM:
                 arglist.append(0)
                 arglist.append(1)
+                arglist.append(iterset.layers - 1)
             elif region is ON_TOP:
                 arglist.append(iterset.layers - 2)
+                arglist.append(iterset.layers - 1)
                 arglist.append(iterset.layers - 1)
             elif region is ON_INTERIOR_FACETS:
                 arglist.append(0)
                 arglist.append(iterset.layers - 2)
+                arglist.append(iterset.layers - 2)
             else:
                 arglist.append(0)
+                arglist.append(iterset.layers - 1)
                 arglist.append(iterset.layers - 1)
 
         if configuration['hpc_profiling']:
@@ -354,11 +360,69 @@ class ParLoop(host.ParLoop):
         time = 0.0
         with timed_region("ParLoop kernel"):
             # time = fun(*self._jit_args, argtypes=self._argtypes, restype=ctypes.c_double)
+            print "Start Execution"
             time = fun(part.offset, part.offset + part.size, *arglist)
+            print "Finished execution."
             if configuration['hpc_profiling']:
                 ms = arglist[-1]
                 return time, [m for m in ms]
         return time, np.zeros(8)
+
+
+def generate_cell_wrapper(itspace, args, forward_args=(), kernel_name=None, wrapper_name=None):
+    """Generates wrapper for a single cell. No iteration loop, but cellwise data is extracted.
+    Cell is expected as an argument to the wrapper. For extruded, the numbering of the cells
+    is columnwise continuous, bottom to top.
+
+    :param itspace: :class:`IterationSpace` object. Can be built from
+                    iteration :class:`Set` using pyop2.base.build_itspace
+    :param args: :class:`Arg`s
+    :param forward_args: To forward unprocessed arguments to the kernel via the wrapper,
+                         give an iterable of strings describing their C types.
+    :param kernel_name: Kernel function name
+    :param wrapper_name: Wrapper function name
+
+    :return: string containing the C code for the single-cell wrapper
+    """
+
+    direct = all(a.map is None for a in args)
+    snippets = host.wrapper_snippets(itspace, args, kernel_name=kernel_name, wrapper_name=wrapper_name)
+
+    if itspace._extruded:
+        snippets['index_exprs'] = """int i = cell / nlayers;
+    int j = cell % nlayers;"""
+        snippets['nlayers_arg'] = ", int nlayers"
+        snippets['extr_pos_loop'] = "{" if direct else "for (int j_0 = 0; j_0 < j; ++j_0) {"
+    else:
+        snippets['index_exprs'] = "int i = cell;"
+        snippets['nlayers_arg'] = ""
+        snippets['extr_pos_loop'] = ""
+
+    snippets['wrapper_fargs'] = "".join("{1} farg{0}, ".format(i, arg) for i, arg in enumerate(forward_args))
+    snippets['kernel_fargs'] = "".join("farg{0}, ".format(i) for i in xrange(len(forward_args)))
+
+    template = """static inline void %(wrapper_name)s(%(wrapper_fargs)s%(wrapper_args)s%(const_args)s%(nlayers_arg)s, int cell)
+{
+    %(user_code)s
+    %(wrapper_decs)s;
+    %(const_inits)s;
+    %(map_decl)s
+    %(vec_decs)s;
+    %(index_exprs)s
+    %(vec_inits)s;
+    %(map_init)s;
+    %(extr_pos_loop)s
+        %(apply_offset)s;
+    %(extr_loop_close)s
+    %(map_bcs_m)s;
+    %(buffer_decl)s;
+    %(buffer_gather)s
+    %(kernel_name)s(%(kernel_fargs)s%(kernel_args)s);
+    %(itset_loop_body)s
+    %(map_bcs_p)s;
+}
+"""
+    return template % snippets
 
 
 def _setup():

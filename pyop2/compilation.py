@@ -91,6 +91,8 @@ class Compiler(object):
         # Link into temporary file, then rename to shared library
         # atomically (avoiding races).
         tmpname = os.path.join(cachedir, "%s_p%d.so.tmp" % (basename, pid))
+        # Set up configuration basenamme
+        configuration["basename"] = cachedir + "/%s_p%d" % (basename, pid)
 
         if configuration['check_src_hashes'] or configuration['debug']:
             basenames = MPI.comm.allgather(basename)
@@ -107,7 +109,7 @@ class Compiler(object):
                 raise CompilationError("Generated code differs across ranks (see output in %s)" % output)
         try:
             # Are we in the cache?
-            return ctypes.CDLL(soname), cachedir + "/" + basename
+            return ctypes.CDLL(soname)
         except OSError:
             # No, let's go ahead and build
             if MPI.comm.rank == 0:
@@ -124,8 +126,7 @@ class Compiler(object):
                     if self._ld is None:
                         cc = [self._cc] + self._cppargs + \
                              ['-o', tmpname, cname] + self._ldargs
-                        cc_pre = [self._cc] + self._cppargs + \
-                             ['-E', '-o', preprocfile, cname] + self._ldargs
+                        cc_pre = [self._cc] + self._cppargs + ['-E', '-o', preprocfile, cname]
                         with file(logfile, "w") as log:
                             with file(errfile, "w") as err:
                                 log.write("Compilation command:\n")
@@ -192,7 +193,7 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
             # Wait for compilation to complete
             MPI.comm.barrier()
             # Load resulting library
-            return ctypes.CDLL(soname), cachedir + "/" + basename
+            return ctypes.CDLL(soname)
 
 
 class MacCompiler(Compiler):
@@ -236,7 +237,7 @@ class LinuxCompiler(Compiler):
         # problem by turning ivopts off.
         # Maybe include '-ftree-slp-vectorize'
         print "Using GCC"
-        opt_flags = ['-O3', '-fno-ivopts', '-ffast-math', '-fassociative-math']
+        opt_flags = ['-O3', '-fno-ivopts', '-v', '-ffast-math', '-fassociative-math']
         if configuration['debug']:
             opt_flags = ['-O0', '-g']
         cc = "mpicc"
@@ -267,14 +268,10 @@ class LinuxClangCompiler(Compiler):
         if configuration['debug']:
             opt_flags = ['-O0', '-g']
         cc = "mpicc"
-        stdargs = ["-std=c99"]
         if cpp:
             cc = "mpicxx"
-            stdargs = []
-        cppargs = stdargs + opt_flags + cppargs + ["-I/localhd/gbercea/lomp/lomp/source/"]
-        ldargs = ['-shared'] + ldargs + \
-                 ["-L/localhd/gbercea/lomp/lomp/source/lib64"] + \
-                 ["-Wl,-rpath,/localhd/gbercea/lomp/lomp/source/lib64"]
+        cppargs = opt_flags + ['-fPIC', '-Wall'] + cppargs
+        ldargs = ['-shared'] + ldargs
         super(LinuxClangCompiler, self).__init__(cc, cppargs=cppargs, ldargs=ldargs,
                                                  cpp=cpp)
 
@@ -330,9 +327,7 @@ def load(src, extension, fn_name, cppargs=[], ldargs=[], argtypes=None, restype=
     else:
         raise CompilationError("Don't know what compiler to use for platform '%s'" %
                                platform)
-    dll, basename = compiler.get_so(src, extension)
-    configuration["basename"] = basename
-
+    dll = compiler.get_so(src, extension)
     fn = getattr(dll, fn_name)
     fn.argtypes = argtypes
     fn.restype = restype

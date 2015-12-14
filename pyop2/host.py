@@ -836,7 +836,7 @@ class JITModule(base.JITModule):
         if any(arg._is_soa for arg in self._args):
             kernel_code = """
             #define OP2_STRIDE(a, idx) a[idx]
-            #define _POSIX_C_SOURCE 199309L
+            //#define _POSIX_C_SOURCE 199309L
             %(timer)s
             %(header)s
             %(namespace)s
@@ -848,7 +848,7 @@ class JITModule(base.JITModule):
                    'timer': self.timer_function if configuration["hpc_profiling"] else ""}
         else:
             kernel_code = """
-            #define _POSIX_C_SOURCE 199309L
+            //#define _POSIX_C_SOURCE 199309L
             %(timer)s
             %(header)s
             %(namespace)s
@@ -871,7 +871,6 @@ class JITModule(base.JITModule):
 
         if configuration["iaca"]:
             profiling_headers += ["#include <iacaMarks.h>"]
-
         code_to_compile = """
         #include <petsc.h>
         #include <stdbool.h>
