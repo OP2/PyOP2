@@ -109,48 +109,7 @@ class JITModule(host.JITModule):
     _libraries = [ompflag] + [os.environ.get('OMP_LIBS') or omplib]
     _system_headers = ['#include <omp.h>']
 
-    _wrapper = """
-double %(wrapper_name)s(int start, int end,
-                      %(ssinds_arg)s
-                      %(wrapper_args)s
-                      %(const_args)s
-                      %(layer_arg)s
-                      %(other_args)s) {
-  %(user_code)s
-  %(timer_declare)s
-  %(offload_one)s
-  {
-      %(timer_start)s
-      %(times_loop_start)s
-      %(parallel_pragma_two)s
-      for ( int n = start; n < end; n++ ) {
-        %(wrapper_decs)s;
-        %(const_inits)s;
-        %(map_decl)s
-        %(vec_decs)s;
-        int i = %(index_expr)s;
-        %(vec_inits)s;
-        %(map_init)s;
-        %(parallel_pragma_three)s
-        %(extr_loop)s
-        %(map_bcs_m)s;
-        %(buffer_decl)s;
-        %(buffer_gather)s
-
-        // Kernel invocation
-        %(kernel_name)s(%(kernel_args)s);
-
-        %(itset_loop_body)s
-        %(map_bcs_p)s;
-        %(apply_offset)s;
-        %(extr_loop_close)s
-      }
-      %(times_loop_end)s
-      %(timer_stop)s
-  }
-  %(timer_end)s
-}
-"""
+    _wrapper = compose_openmp4gpu_wrapper(self)
 
     def set_argtypes(self, iterset, *args):
         argtypes = [ctypes.c_int, ctypes.c_int]

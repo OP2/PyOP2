@@ -198,3 +198,86 @@ def compose_wrapper(backend="sequential"):
     """
 
     return wrapper
+
+
+def compose_openmp4gpu_wrapper(jitmodule):
+    # if snapr_available():
+    #     return snapr.optimize_code(jitmodule)
+    wrapper = ""
+
+    if configuration["hpc_save_result"]:
+        wrapper += store_array % {"type": "int"}
+        wrapper += store_array % {"type": "double"}
+
+    wrapper += """
+    double %(wrapper_name)s(int start, int end,
+                      %(ssinds_arg)s
+                      %(wrapper_args)s
+                      %(const_args)s
+                      %(layer_arg)s"""
+
+    if configuration["hpc_profiling"]:
+        wrapper += """
+        %(other_args)s"""
+
+    wrapper += ") {"
+
+    wrapper += """
+        %(user_code)s
+        """
+    if configuration["hpc_profiling"]:
+        wrapper += """
+        %(timer_declare)s
+        %(timer_start)s
+        """
+    wrapper += """
+        %(parallel_pragma_one)s
+        {
+        """
+    if configuration["times"] > 1:
+        wrapper += """
+            %(times_loop_start)s
+        """
+
+    wrapper += """
+            %(wrapper_decs)s;
+            %(const_inits)s;
+            %(map_decl)s
+            %(vec_decs)s;
+            %(parallel_pragma_two)s
+            for ( int n = start; n < end; n++ ) {
+                int i = %(index_expr)s;
+                %(vec_inits)s;
+                %(map_init)s;
+                %(parallel_pragma_three)s
+                %(extr_loop)s
+                %(map_bcs_m)s;
+                %(buffer_decl)s;
+                %(buffer_gather)s
+
+                %(kernel_name)s(%(kernel_args)s);
+
+                %(itset_loop_body)s
+                %(map_bcs_p)s;
+                %(apply_offset)s;
+                %(extr_loop_close)s
+              }
+              }
+        """
+
+    if configuration["times"] > 1:
+        wrapper += """
+        %(times_loop_end)s
+        """
+
+    if configuration["hpc_profiling"]:
+        wrapper += """
+        %(timer_stop)s
+        %(timer_end)s
+        """
+
+    wrapper += """
+    }
+    """
+
+    return wrapper

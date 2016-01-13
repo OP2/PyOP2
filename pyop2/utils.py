@@ -392,3 +392,13 @@ def iaca_trigger(wrapper_code, jitmodule, region_name,
                           argtypes, restype, compiler)
     except ImportError:
         sys.exit("IACA analysis is not available.")
+
+
+def snapr_available():
+    # This routine initializes analysis using IACA (Intel Only)
+    try:
+        import snapr
+        snapr.nop()
+    except ImportError:
+        return False
+    return True
