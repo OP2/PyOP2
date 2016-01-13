@@ -48,6 +48,7 @@ from host import Kernel  # noqa: needed by BackendSelector
 from utils import as_tuple, cached_property
 from optimizer import optimize_wrapper, optimize_kernel
 from configuration import configuration
+from wrapper import compose_openmp4gpu_wrapper
 
 
 def _detect_openmp_flags():
