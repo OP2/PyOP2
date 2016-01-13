@@ -48,7 +48,6 @@ from utils import as_tuple
 
 import coffee.plan
 from coffee.plan import ASTKernel
-# from hpc_profiling import add_iaca_flops
 
 
 class Kernel(base.Kernel):
@@ -61,34 +60,6 @@ class Kernel(base.Kernel):
         ast_handler.plan_cpu(self._opts)
         self._applied_blas = ast_handler.blas
         return ast_handler.gencode()
-
-    # def _iaca_ast_to_c(self, ast, opts={}):
-    #     """Transform an Abstract Syntax Tree representing the kernel into a
-    #     string of code (C syntax) suitable to CPU execution which contains
-    #     IACA instrumentation around the main loops."""
-    #     if not isinstance(ast, Node):
-    #         print "Warning: Cannot add IACA instrumentation to non-AST kernels."
-    #         return None
-    #     iakify = 1
-    #     last = False
-    #     iaca_kernels = []
-    #     if not opts:
-    #         opts = {"simd_isa": 'sse',
-    #                 "O0": True,
-    #                 "compiler": 'gnu',
-    #                 "autotune": False}
-    #     while (not last):
-    #         iaca_ast, last, nest, loop_count = coffee.utils.insert_iaca(ast, iakify)
-    #         if not last:
-    #             iakify += 1
-    #             # ast_handler = ASTKernel(iaca_ast, self._include_dirs)
-    #             # ast_handler.plan_cpu(opts)
-    #             # self._applied_blas = ast_handler.blas
-    #             # self._applied_ap = ast_handler.ap
-    #             # iaca_kernels.append([ast_handler.gencode(), nest, loop_count])
-    #             # from IPython import embed; embed()
-    #             iaca_kernels.append([iaca_ast.gencode(), nest, loop_count])
-    #     return iaca_kernels
 
 
 class Arg(base.Arg):
@@ -836,7 +807,6 @@ class JITModule(base.JITModule):
         if any(arg._is_soa for arg in self._args):
             kernel_code = """
             #define OP2_STRIDE(a, idx) a[idx]
-            //#define _POSIX_C_SOURCE 199309L
             %(timer)s
             %(header)s
             %(namespace)s
@@ -848,7 +818,6 @@ class JITModule(base.JITModule):
                    'timer': self.timer_function if configuration["hpc_profiling"] else ""}
         else:
             kernel_code = """
-            //#define _POSIX_C_SOURCE 199309L
             %(timer)s
             %(header)s
             %(namespace)s
@@ -890,155 +859,6 @@ class JITModule(base.JITModule):
                'sys_headers': '\n'.join(self._kernel._headers + self._system_headers + profiling_headers)}
         return code_to_compile
 
-    def sum_nested_flop_values(self, iaca_kernels, val_pos):
-        # Compute the actual number of flops or cycles taking
-        # into consideration the nesting of blocks.
-        # val_pos should be either 4 or -2 for CYCLES and 5 or -1 for FLOPS
-        i_flops = 0
-        total_flops = 0
-        prev_nest = iaca_kernels[-1][1]
-        # indices       0     1        2             3              values start here -->| 4                                   5
-        # iaca code is [code, nest ID, loop counter, False/True unrolled / not unrolled, | cycles per block (IACA Throughput), flops per block]
-        for ind, ic in enumerate(reversed(iaca_kernels)):
-            if ic[1] == prev_nest:
-                i_flops += (ic[2] if ic[3] else 1) * ic[val_pos]
-                # print "same nest: ", i_flops
-            elif ic[1] < prev_nest:
-                iaca_block_flops = 0
-                for ic_prev in iaca_kernels[len(iaca_kernels) - ind:]:
-                    if prev_nest == ic_prev[1]:
-                        iaca_block_flops += ic_prev[val_pos]
-                    # else:
-                    #     break
-                curr_flops = (ic[2] if ic[3] else 1) * (i_flops + ic[val_pos] - iaca_block_flops)
-                if ic[6] == 1:
-                    i_flops = min(curr_flops, (ic[2] if ic[3] else 1) * ic[val_pos])
-                else:
-                    i_flops = curr_flops
-                # print "prev nest greater: ", i_flops
-            else:
-                # Not tested yet. Might never apply to FFC kernels.
-                total_flops += i_flops
-                i_flops = (ic[2] if ic[3] else 1) * ic[val_pos]
-                # print "prev nest smaller: ", i_flops
-            prev_nest = ic[1]
-        total_flops += i_flops
-        return total_flops
-
-    def sum_nested_cycle_values(self, iaca_kernels, val_pos):
-        # Compute the actual number of flops or cycles taking
-        # into consideration the nesting of blocks.
-        # val_pos should be either 4 or -2 for CYCLES and 5 or -1 for FLOPS
-        i_flops = 0
-        total_flops = 0
-        prev_nest = iaca_kernels[-1][1]
-        # indices       0     1        2             3              values start here -->| 4                                   5                6
-        # iaca code is [code, nest ID, loop counter, False/True unrolled / not unrolled, | cycles per block (IACA Throughput), flops per block, jumps]
-        for ind, ic in enumerate(reversed(iaca_kernels)):
-            # if current loop is on the same nest level as the previous one
-            if ic[1] == prev_nest:
-                # Add the cycles or flops and multiply by loop counter if the loop is not unrolled
-                i_flops += (ic[2] if ic[3] else 1) * ic[val_pos]
-                # print "same nest: ", i_flops
-            # if the current loop contains the previous one (has a lower nest number).
-            elif ic[1] < prev_nest:
-                # if there is only one jump instruction and the loop is not unrolled (i.e. inner loops unrolled but current not unrolled)
-                if ic[6] == 1 and ic[3]:
-                    # loop counter times the number of cycles
-                    i_flops = ic[2] * ic[val_pos]
-                    # print "greater nest 1: ", i_flops
-                else:
-                    # sum up the values for the static cycle counts for the loops contaied in the current loop
-                    # regardless of their unrolled/not unrolled status
-                    iaca_block_flops = 0
-                    for ic_prev in iaca_kernels[len(iaca_kernels) - ind:]:
-                        if prev_nest == ic_prev[1]:
-                            iaca_block_flops += ic_prev[val_pos]
-                        # else:
-                        #     break
-                    # if there are less cycles to be done in the current loop then return that count
-                    if iaca_block_flops > ic[val_pos]:
-                        i_flops = (ic[2] if ic[3] else 1) * ic[val_pos]
-                        # print "greater nest 2: ", i_flops
-                    else:
-                        # iflops contains the flop count for the inner loops, add to that the flops generated by the rest of the code
-                        # in the current loop
-                        i_flops = (ic[2] if ic[3] else 1) * (i_flops + ic[val_pos] - iaca_block_flops)
-                        # print "greater nest 3: ", i_flops
-            else:
-                # Not tested yet. Might never apply to FFC kernels.
-                total_flops += i_flops
-                i_flops = (ic[2] if ic[3] else 1) * ic[val_pos]
-                # print "smaller nest: ", i_flops
-            prev_nest = ic[1]
-        total_flops += i_flops
-        return total_flops
-
-    def build_loop_nest_reports(self, iaca_kernels, wrapper_code, iaca_path, compilation, extension, cppargs, ldargs, argtypes, restype, compiler):
-        from subprocess import call
-        iaca_sh = get_iaca_dir() + "/bin/iaca.sh"
-        iaca_flops = 0
-
-        # Compiler the iaca codes one by one.
-        for ind, iaca_code in enumerate(iaca_kernels):
-            # Each IACA code is composed of the code the nest and loop counter
-            # TODO: Add flag to prevent loop unrolling
-            iaca_fun, basename = compilation.load(iaca_code[0],
-                                                  extension,
-                                                  self._wrapper_name,
-                                                  cppargs=cppargs,
-                                                  ldargs=ldargs,
-                                                  argtypes=argtypes,
-                                                  restype=restype,
-                                                  compiler=compiler.get('name'))
-            # For each code, compile it and then call the iaca.sh on it
-            # Only call this in the single process case.
-            # TODO: call the command line if the file doesn't exist already.
-            # TODO: Sync processes after.
-            path_to_iaca_file = iaca_path + "." + str(ind)
-            if MPI.comm.rank == 0:
-                # Command line invocation of the IACA tool.
-                call(["sh", iaca_sh, "-64", "-arch", get_iaca_sys(), "-o", path_to_iaca_file, basename + ".so"])
-            MPI.comm.barrier()
-            # Once the file is generated then compute the number of flops and the number of cycles.
-            with open(path_to_iaca_file, "r+") as h:
-                lines = h.readlines()
-                # Mark the loop with True: not rolled, False: unrolled
-                for line in reversed(lines[:-1]):
-                    if not('mov' in line):
-                        iaca_kernels[ind].append("j" in line)
-                        break
-                # Get the throughput through the ports for this code region
-                if len(lines) >= 7:
-                    ports = lines[8].split()
-                    # Add the block cycles
-                    iaca_kernels[ind].append(float(ports[2]))
-                    iaca_flops = 0
-                    jumps = 0
-                    # TODO: Replace this loop with something more robust!!
-                    for line in lines[30:]:
-                        if "j" in line:
-                            jumps += 1
-                        if "vmulpd" in line or "vaddpd" in line or "vhaddpd" in line:
-                            iaca_flops += 4
-                        elif "vfmadd231pd" in line or "vfmsub231pd" in line or "vfmadd123pd" in line or "vfmsub123pd" in line or \
-                             "vfmadd132pd" in line or "vfmsub132pd" in line or "vfmadd213pd" in line or "vfmsub213pd" in line or \
-                             "vfmadd312pd" in line or "vfmsub312pd" in line or "vfmadd321pd" in line or "vfmsub321pd" in line:
-                            iaca_flops += 4
-                        elif "vaddsd" in line or "vsubsd" in line or "vmulsd" in line:
-                            iaca_flops += 1
-                        elif "vfmsub231sd" in line or "vfmadd231sd" in line or "vfmsub123sd" in line or "vfmadd123sd" in line or \
-                             "vfmsub132sd" in line or "vfmadd132sd" in line or "vfmsub213sd" in line or "vfmadd213sd" in line or \
-                             "vfmsub312sd" in line or "vfmadd312sd" in line or "vfmsub321sd" in line or "vfmadd321sd" in line:
-                            iaca_flops += 2
-                    iaca_kernels[ind].append(iaca_flops)
-                    iaca_kernels[ind].append(jumps)
-                else:
-                    iaca_kernels[ind].append(0.0)
-                    iaca_kernels[ind].append(0)
-                    iaca_kernels[ind].append(0)
-        return iaca_kernels
-
     def hpc_profile(self, wrapper_code):
         wrapper_code["timer_declare"] = """double s1, s2;\n"""
         wrapper_code["timer_start"] = """s1=stamp();\n"""
@@ -1054,8 +874,7 @@ class JITModule(base.JITModule):
             other_measures[5] = s2/1e9;
             return (s2 - s1)/1e9;
             """
-
-        if configuration["papi_flops"]:
+        else:
             wrapper_code["papi_decl"] = """
             float real_time, proc_time, mflops;
             long long flpops;
@@ -1087,17 +906,14 @@ class JITModule(base.JITModule):
             return (s2 - s1)/1e9;
             """
 
-        if configuration["iaca"]:
-            wrapper_code["iaca_start"] = "IACA_START"
-            wrapper_code["iaca_end"] = "IACA_END"
-
         if configuration["times"] > 1:
             wrapper_code["times_loop_start"] = "for(int times=0; times<%(times)s; times++){\n" % {'times': str(configuration['times'])}
             wrapper_code["times_loop_end"] = "}"
 
-    def hpc_debugging(wrapper_code):
+    def hpc_debug(wrapper_code):
         # TODO: identify which arg it is and print the addtional info
         # TODO: send size as argument
+        # Print contributions
         if any(arg._uses_itspace and arg.access in [WRITE, INC] and not arg._is_mat for arg in self._args):
             wrapper_code["print_contrib"] = """
             for(int ii=0; ii<6; ii++){
@@ -1121,13 +937,6 @@ class JITModule(base.JITModule):
             ldargs += ["-Wl,-rpath,%s" % get_papi_dir()]
             ldargs += ["-L%s/libpfm4/lib" % get_papi_dir()]
             ldargs += ["-Wl,-rpath,%s/libpfm4/lib" % get_papi_dir()]
-        if configuration["iaca"]:
-            more_args.append("-liacaArchData%(sys)s" % {'sys': get_iaca_sys()})
-            more_args.append("-liacaXED2%(sys)s" % {'sys': get_iaca_sys()})
-            more_args.append("-liacaLogic%(sys)s" % {'sys': get_iaca_sys()})
-            cppargs += ["-I%s/include" % get_iaca_dir()]
-            ldargs += ["-L%s/lib" % get_iaca_dir()]
-            ldargs += ["-Wl,-rpath,%s/lib" % get_iaca_dir()]
 
     def backend_flags(self, cppargs, more_args, ldargs):
         pass
@@ -1144,16 +953,9 @@ class JITModule(base.JITModule):
             raise RuntimeError("JITModule has no args associated with it, should never happen")
 
         wrapper_code = self.generate_code()
-        # Add any profiling information now
-        if configuration["hpc_profiling"]:
-            self.hpc_profile(wrapper_code)
-        # Add any debugging information now
-        if configuration["hpc_debug"]:
-            self.hpc_debug(wrapper_code)
+
         # Assemble the code to compile: wrapper + kernel
         code_to_compile = self.get_c_code(self._kernel._code, wrapper_code)
-        if configuration["iaca"]:
-            original_code_to_compile = self.get_c_code(self._kernel._old_ast, wrapper_code)
 
         self._dump_generated_code(code_to_compile)
         if configuration["debug"]:
@@ -1191,36 +993,22 @@ class JITModule(base.JITModule):
             if blas['name'] == 'eigen':
                 extension = "cpp"
 
-        # If the IACA flag is on we can use it to generate
-        # a version of the code with instrumentation around the kernel
-        # in the non-extruded case and around the loop over the column
-        # in the extruded case.
-        # This will give us the number of cycles spent in the most
-        # intensive part of a parallel loop.
-        if configuration['iaca'] and self._is_indirect:
-            path_to_iaca_file = get_iaca_output_file()
-            if path_to_iaca_file != "":
-                region_name = configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name
-                iaca_kernels = [[original_code_to_compile, 0, 1]] + self._kernel._iaca_ast_to_c(self._kernel._old_ast)
-                iaca_cycle_kernels = [[code_to_compile, 0, 1]] + self._kernel._iaca_ast_to_c(self._kernel._ast, self._kernel._opts)
-                wrapper_code['iaca_start'] = ""
-                wrapper_code['iaca_end'] = ""
-                for ind in range(1, len(iaca_kernels)):
-                    iaca_kernels[ind][0] = self.get_c_code(iaca_kernels[ind][0], wrapper_code)
-                for ind in range(1, len(iaca_cycle_kernels)):
-                    iaca_cycle_kernels[ind][0] = self.get_c_code(iaca_cycle_kernels[ind][0], wrapper_code)
-                iaca_path = path_to_iaca_file + region_name + "_" + self._kernel._md5 + ".txt"
-                self.build_loop_nest_reports(iaca_kernels, wrapper_code, iaca_path, compilation, extension, cppargs, ldargs, argtypes, restype, compiler)
-                iaca_path = path_to_iaca_file + "cycle_" + region_name + "_" + self._kernel._md5 + ".txt"
-                self.build_loop_nest_reports(iaca_cycle_kernels, wrapper_code, iaca_path, compilation, extension, cppargs, ldargs, argtypes, restype, compiler)
-                self._flops_per_cell = self.sum_nested_flop_values(iaca_kernels, 5)
-                self._cycles_per_cell = self.sum_nested_cycle_values(iaca_cycle_kernels, 4)
-            # Now create a new .so file without the IACA instrumentation
-            # The IACA instrumented code will not run anyway!
-            code_to_compile = code_to_compile.replace("IACA_START", "")
-            code_to_compile = code_to_compile.replace("IACA_END", "")
+        # If IACA flag is on, delegate the analysis to SNAPR
+        if configuration["iaca"] and self._is_indirect:
+            # Call IACA functionality if
+            # - SNAPR is available
+            # - Loop is indirect
+            iaca_trigger(wrapper_code, self,
+                         configuration['region_name'] if configuration['region_name'] is not "default" else self._kernel.name,
+                         compilation,
+                         extension,
+                         cppargs,
+                         ldargs,
+                         argtypes,
+                         restype,
+                         compiler)
+
         # Generate runnable code without IACA instrumentation
-        # print code_to_compile
         if self._kernel._cpp:
             extension = "cpp"
         self._fun = compilation.load(code_to_compile,
@@ -1245,6 +1033,17 @@ class JITModule(base.JITModule):
                                     wrapper_name=self._wrapper_name,
                                     iteration_region=self._iteration_region,
                                     applied_blas=self._kernel._applied_blas)
+
+        # Additional changes to the snippets.
+
+        # Add any profiling information
+        if configuration["hpc_profiling"]:
+            self.hpc_profile(snippets)
+
+        # Add any debugging information
+        if configuration["hpc_debug"]:
+            self.hpc_debug(snippets)
+
         return snippets
 
 
@@ -1486,8 +1285,8 @@ def wrapper_snippets(itspace, args,
         }
 
     # region_name = configuration['region_name'] if configuration['region_name'] is not "default" else kernel_name
-    if configuration['likwid'] and configuration["likwid_inner"] and configuration["likwid_outer"]:
-        raise RuntimeError("Not allowed to set both likwid_inner and likwid_outer config flags!")
+    # if configuration['likwid'] and configuration["likwid_inner"] and configuration["likwid_outer"]:
+    #     raise RuntimeError("Not allowed to set both likwid_inner and likwid_outer config flags!")
     return {'kernel_name': kernel_name,
             'wrapper_name': wrapper_name,
             'ssinds_arg': _ssinds_arg,

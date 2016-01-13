@@ -75,6 +75,8 @@ class Configuration(dict):
         "hpc_profiling": ("PYOP2_HPC_PROFILING", bool, False),
         # Enable debugging of the wrapper functions.
         "hpc_debug": ("PYOP2_HPC_DEBUG", bool, False),
+        # Enable optimization
+        "hpc_optimize": ("PYOP2_HPC_OPTIMIZE", bool, False),
         # Teams and threads for the OpenMP 4.0 backend
         "teams": ("PYOP2_OMP4_TEAMS", int, 256),
         "threads": ("PYOP2_OMP4_THREADS", int, 512),
