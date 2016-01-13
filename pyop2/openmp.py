@@ -50,6 +50,7 @@ import plan as _plan
 from petsc_base import *
 from profiling import lineprof
 from utils import *
+from wrapper import compose_wrapper
 
 # hard coded value to max openmp threads
 _max_threads = 32
@@ -138,110 +139,7 @@ class JITModule(host.JITModule):
     _libraries = [ompflag] + [os.environ.get('OMP_LIBS') or omplib]
     _system_headers = ['#include <omp.h>']
 
-#     _wrapper = """
-# double %(wrapper_name)s(int boffset,
-#                       int nblocks,
-#                       int *blkmap,
-#                       int *offset,
-#                       int *nelems,
-#                       %(ssinds_arg)s
-#                       %(wrapper_args)s
-#                       %(const_args)s
-#                       %(off_args)s
-#                       %(layer_arg)s
-#                       %(other_args)s) {
-#   %(user_code)s
-#   %(wrapper_decs)s;
-#   %(const_inits)s;
-#   %(timer_start)s
-#   #pragma omp parallel shared(boffset, nblocks, nelems, blkmap)
-#   {
-#     %(map_decl)s
-#     int tid = omp_get_thread_num();
-#     %(interm_globals_decl)s;
-#     %(interm_globals_init)s;
-#     %(vec_decs)s;
-
-#     #pragma omp for schedule(static)
-#     for ( int __b = boffset; __b < boffset + nblocks; __b++ )
-#     {
-#       int bid = blkmap[__b];
-#       int nelem = nelems[bid];
-#       int efirst = offset[bid];
-#       for (int n = efirst; n < efirst+ nelem; n++ )
-#       {
-#         int i = %(index_expr)s;
-#         %(vec_inits)s;
-#         %(map_init)s;
-#         %(extr_loop)s
-#         %(map_bcs_m)s;
-#         %(buffer_decl)s;
-#         %(buffer_gather)s
-#         %(kernel_name)s(%(kernel_args)s);
-#         %(itset_loop_body)s;
-#         %(map_bcs_p)s;
-#         %(apply_offset)s;
-#         %(extr_loop_close)s
-#       }
-#     }
-#     %(interm_globals_writeback)s;
-#   }
-#   %(timer_end)s
-# }
-# """
-
-    _wrapper = """
-double %(wrapper_name)s(int boffset,
-                      int nblocks,
-                      int *blkmap,
-                      int *offset,
-                      int *nelems,
-                      %(ssinds_arg)s
-                      %(wrapper_args)s
-                      %(const_args)s
-                      %(layer_arg)s
-                      %(other_args)s) {
-  %(user_code)s
-  %(timer_declare)s
-  %(wrapper_decs)s;
-  %(const_inits)s;
-  %(timer_start)s
-  #pragma omp parallel shared(boffset, nblocks, nelems, blkmap)
-  {
-    %(map_decl)s
-    int tid = omp_get_thread_num();
-    %(interm_globals_decl)s;
-    %(interm_globals_init)s;
-    %(vec_decs)s;
-
-    #pragma omp for schedule(static)
-    for ( int __b = boffset; __b < boffset + nblocks; __b++ )
-    {
-      int bid = blkmap[__b];
-      int nelem = nelems[bid];
-      int efirst = offset[bid];
-      for (int n = efirst; n < efirst+ nelem; n++ )
-      {
-        int i = %(index_expr)s;
-        %(vec_inits)s;
-        %(map_init)s;
-        %(extr_loop)s
-        %(map_bcs_m)s;
-        %(buffer_decl)s;
-        %(buffer_gather)s
-        %(kernel_name)s(%(kernel_args)s);
-        %(itset_loop_body)s;
-        %(map_bcs_p)s;
-        %(apply_offset)s;
-        %(extr_loop_close)s
-      }
-    }
-    %(interm_globals_writeback)s;
-  }
-  %(timer_stop)s
-  %(timer_end)s
-}
-"""
+    _wrapper = compose_wrapper("openmp")
 
     def set_argtypes(self, iterset, *args):
         """Set the ctypes argument types for the JITModule.

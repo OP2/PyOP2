@@ -77,6 +77,10 @@ class Configuration(dict):
         "hpc_debug": ("PYOP2_HPC_DEBUG", bool, False),
         # Enable optimization
         "hpc_optimize": ("PYOP2_HPC_OPTIMIZE", bool, False),
+        # Enable saving the result
+        "hpc_save_result": ("PYOP2_HPC_SAVE_RESULT", bool, False),
+        # Enable checking the result, compare it with the saved result
+        "hpc_check_result": ("PYOP2_HPC_CHECK_RESULT", bool, False),
         # Teams and threads for the OpenMP 4.0 backend
         "teams": ("PYOP2_OMP4_TEAMS", int, 256),
         "threads": ("PYOP2_OMP4_THREADS", int, 512),

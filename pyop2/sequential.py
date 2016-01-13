@@ -44,75 +44,13 @@ from petsc_base import *
 from profiling import timed_region
 from host import Kernel, Arg  # noqa: needed by BackendSelector
 from utils import as_tuple, cached_property
+from wrapper import compose_wrapper
 
 
 class JITModule(host.JITModule):
     _system_headers = []
 
-    _wrapper = """
-void storeArray_double(double *a, int len, char* filename){
-  char path[80];
-  path[0] = \'\\0\';
-  strcat(path, \"/tmp/\");
-  strcat(path, filename);
-  strcat(path, \".bin\");
-  FILE* fp = fopen(path, \"wb\");
-  fwrite(a, sizeof(double), len, fp);
-  fclose(fp);
-}
-
-void storeArray_int(int *a, int len, char* filename){
-  char path[80];
-  path[0] = \'\\0\';
-  strcat(path, \"/tmp/\");
-  strcat(path, filename);
-  strcat(path, \".bin\");
-  FILE* fp = fopen(path, "wb");
-  //fwrite(&len, sizeof(int), 1, fp);
-  fwrite(a, sizeof(int), len, fp);
-  fclose(fp);
-}
-
-double %(wrapper_name)s(int start, int end,
-                      %(ssinds_arg)s
-                      %(wrapper_args)s
-                      %(const_args)s
-                      %(layer_arg)s
-                      %(other_args)s) {
-  %(papi_decl)s;
-  %(papi_init)s;
-  %(user_code)s
-  %(wrapper_decs)s;
-  %(const_inits)s;
-  %(map_decl)s
-  %(vec_decs)s;
-  %(timer_declare)s
-  %(timer_start)s
-  %(times_loop_start)s
-  for ( int n = start; n < end; n++ ) {
-    int i = %(index_expr)s;
-    %(vec_inits)s;
-    %(map_init)s;
-    %(extr_loop)s
-    %(map_bcs_m)s;
-    %(iaca_start)s
-    %(buffer_decl)s;
-    %(buffer_gather)s
-
-    %(kernel_name)s(%(kernel_args)s);
-
-    %(print_contrib)s
-    %(itset_loop_body)s
-    %(map_bcs_p)s;
-    %(apply_offset)s;
-    %(extr_loop_close)s
-    %(iaca_end)s
-  }
-  %(times_loop_end)s
-  %(timer_stop)s
-  %(timer_end)s
-}
-"""
+    _wrapper = compose_wrapper("sequential")
 
     def set_argtypes(self, iterset, *args):
         argtypes = [ctypes.c_int, ctypes.c_int]

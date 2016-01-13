@@ -139,18 +139,15 @@ double %(wrapper_name)s(int start, int end,
         self._argtypes = argtypes
 
     def generate_code(self):
-        # Most of the code to generate is the same as that for sequential
         code_dict = super(JITModule, self).generate_code()
         print "Doing OPENMP 4.0 on HOST"
         optimize_wrapper(self, code_dict, host=True)
         return code_dict
 
     def backend_flags(self, cppargs, more_args, ldargs):
-        # Most of the code to generate is the same as that for sequential
         super(JITModule, self).backend_flags(cppargs, more_args, ldargs)
         cppargs += ["-mcpu=pwr8", "-mtune=pwr8", "-fopenmp=libomp", "-O3", '-v']
         # Include LIBOMP
-        # TODO: Replace hardcoded path with lomp path function in utils
         cppargs += ["-I" + os.environ.get('LIBOMP_LIB') or ""]
         ldargs += ["-L" + os.environ.get('LIBOMP_LIB') or ""]
         ldargs += ["-Wl,-rpath," + os.environ.get('LIBOMP_LIB') or ""]

@@ -249,8 +249,7 @@ double %(wrapper_name)s(int start, int end,
         return super(JITModule, self).get_c_code(kernel_code, wrapper_code)
 
     def backend_flags(self, cppargs, more_args, ldargs):
-        # Most of the code to generate is the same as that for sequential
-        super(JITModule, self).backend_flags(cppargs, more_args, ldargs)
+        # super(JITModule, self).backend_flags(cppargs, more_args, ldargs)
         cppargs += ["-O3", '-omptargets=nvptx64sm_35-nvidia-linux']
         # Add custom number of teams and threads:
         cppargs += ["-DTEAMS=%(teams)s" % {'teams': configuration["teams"]}]
@@ -266,8 +265,8 @@ double %(wrapper_name)s(int start, int end,
         ldargs += ["-Wl,-rpath," + os.environ.get('LIBOMP_LIB') or ""]
         ldargs += ["-L/usr/local/cuda-7.0/lib64"]
         ldargs += ["-Wl,-rpath,/usr/local/cuda-7.0/lib64"]
-        ldargs += ["-L/home/mgiles/gbercea/libomptarget/lib"]
-        ldargs += ["-Wl,-rpath,/home/mgiles/gbercea/libomptarget/lib"]
+        ldargs += ["-L" + os.environ.get('LIBOMP_LIB')]
+        ldargs += ["-Wl,-rpath," + os.environ.get('LIBOMP_LIB')]
         ldargs += ["-L/usr/lib/powerpc64le-linux-gnu/"]
         ldargs += ["-Wl,-rpath,/usr/lib/powerpc64le-linux-gnu/"]
         ldargs += ["-lcuda", "-lcudart", "-lelf", "-lomp", "-lomptarget", "-v"]

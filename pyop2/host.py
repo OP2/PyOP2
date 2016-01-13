@@ -938,12 +938,8 @@ class JITModule(base.JITModule):
             ldargs += ["-L%s/libpfm4/lib" % get_papi_dir()]
             ldargs += ["-Wl,-rpath,%s/libpfm4/lib" % get_papi_dir()]
 
+    # Placeholder for backend specific flags setter
     def backend_flags(self, cppargs, more_args, ldargs):
-        pass
-
-    # TODO: Add another function for debugging
-    # TODO: Move this function out of here
-    def debug(self, wrapper_code):
         pass
 
     @collective
@@ -1312,26 +1308,5 @@ def wrapper_snippets(itspace, args,
             'buffer_decl': _buf_decl,
             'buffer_gather': _buf_gather,
             'kernel_args': _kernel_args,
-            'region_name': configuration['region_name'] if configuration['region_name'] is not "default" else kernel_name,
-            'timer_start': "",
-            'timer_end': "",
-            'timer_stop': "",
-            'timer_declare': "",
-            'other_args': "",
-            'papi_decl': "",
-            'papi_init': "",
-            'papi_start': "",
-            'papi_end': "",
-            'papi_print': "",
-            'iaca_start': "",
-            'iaca_end': "",
-            'times_loop_start': "",
-            'times_loop_end': "",
-            'parallel_pragma_one': "",
-            'parallel_pragma_two': "",
-            'parallel_pragma_three': "",
-            'offload_one': "",
-            'print_contrib': "",
-            'store_array': _store_array,
             'itset_loop_body': '\n'.join([itset_loop_body(i, j, shape, offsets, is_facet=(iteration_region == ON_INTERIOR_FACETS))
                                           for i, j, shape, offsets in itspace])}
