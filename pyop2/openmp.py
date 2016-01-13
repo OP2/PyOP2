@@ -64,6 +64,8 @@ def _detect_openmp_flags():
         return '-fopenmp', '-lgomp'
     elif _version.find('Intel Corporation') != -1:
         return '-openmp', '-liomp5'
+    elif _version.find('clang') != -1:
+        return '-fopenmp=libomp', '-lomp'
     else:
         warning('Unknown mpicc version:\n%s' % _version)
         return '', ''
@@ -294,6 +296,16 @@ double %(wrapper_name)s(int boffset,
                           'reduction_finalisations': _reduction_finalisations})
         return code_dict
 
+    def backend_flags(self, cppargs, more_args, ldargs):
+
+        super(JITModule, self).backend_flags(cppargs, more_args, ldargs)
+
+        # Include LIBOMP explicitely if the backend compiler is clang
+        if configuration['compiler'] == 'clang':
+            cppargs += ["-I" + os.environ.get('LIBOMP_LIB') or ""]
+            ldargs += ["-L" + os.environ.get('LIBOMP_LIB') or ""]
+            ldargs += ["-Wl,-rpath," + os.environ.get('LIBOMP_LIB') or ""]
+
 
 class ParLoop(device.ParLoop, host.ParLoop):
 
@@ -371,7 +383,6 @@ class ParLoop(device.ParLoop, host.ParLoop):
                 if configuration['hpc_profiling']:
                     for i, value in enumerate(arglist[-1]):
                         measures[i] += arglist[-1][i]
-                    print measures
         return time, [m for m in measures]
 
     def _get_plan(self, part, part_size):

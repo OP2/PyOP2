@@ -340,7 +340,7 @@ class TestPlanCache:
     Plan Object Cache Tests.
     """
     # No plan for sequential backend
-    skip_backends = ['sequential']
+    skip_backends = ['sequential', 'openmp4', 'openmp4gpu']
     cache = plan.Plan._cache
     cache_hit = plan.Plan._cache_hit
 

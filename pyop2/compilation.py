@@ -32,6 +32,7 @@
 # OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import os
+import shutil
 from mpi import MPI, collective
 import subprocess
 import sys
@@ -92,7 +93,7 @@ class Compiler(object):
         # atomically (avoiding races).
         tmpname = os.path.join(cachedir, "%s_p%d.so.tmp" % (basename, pid))
         # Set up configuration basenamme
-        configuration["basename"] = cachedir + "/%s_p%d" % (basename, pid)
+        configuration["basename"] = cachedir + "/%s" % (basename)
 
         if configuration['check_src_hashes'] or configuration['debug']:
             basenames = MPI.comm.allgather(basename)
@@ -118,7 +119,8 @@ class Compiler(object):
                     os.makedirs(cachedir)
                 logfile = os.path.join(cachedir, "%s_p%d.log" % (basename, pid))
                 errfile = os.path.join(cachedir, "%s_p%d.err" % (basename, pid))
-                preprocfile = os.path.join(cachedir, "%s_p%d.pre" % (basename, pid))
+                nverrfile = os.path.join(cachedir, "%s.err" % (basename))
+                preprocfile = os.path.join(cachedir, "%s.pre" % (basename))
                 with progress(INFO, 'Compiling wrapper'):
                     with file(cname, "w") as f:
                         f.write(src)
@@ -190,6 +192,7 @@ Compile log in %s
 Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
                     # Atomically ensure soname exists
                     os.rename(tmpname, soname)
+                    shutil.copy(errfile, nverrfile)
             # Wait for compilation to complete
             MPI.comm.barrier()
             # Load resulting library

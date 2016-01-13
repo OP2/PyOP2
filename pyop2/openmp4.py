@@ -55,7 +55,7 @@ def _detect_openmp_flags():
     elif _version.find('Intel Corporation') != -1:
         return '-openmp', '-liomp5'
     elif _version.find('clang') != -1:
-        return '-fopenmp=libomp', ''
+        return '-fopenmp=libomp', '-lomp'
     else:
         warning('Unknown mpicc version:\n%s' % _version)
         return '', ''

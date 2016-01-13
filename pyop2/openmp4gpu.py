@@ -239,7 +239,7 @@ double %(wrapper_name)s(int start, int end,
         code_dict.update({'offload_one': _offload_one})
 
         # This is a good place to apply some application level optimizations
-        print "Doing OPENMP 4.0 on GPU"
+        print "Running OPENMP 4.0 on GPU"
         optimize_wrapper(self, code_dict)
         return code_dict
 
@@ -270,7 +270,7 @@ double %(wrapper_name)s(int start, int end,
         ldargs += ["-Wl,-rpath,/home/mgiles/gbercea/libomptarget/lib"]
         ldargs += ["-L/usr/lib/powerpc64le-linux-gnu/"]
         ldargs += ["-Wl,-rpath,/usr/lib/powerpc64le-linux-gnu/"]
-        ldargs += ["-lcuda", "-lcudart", "-lelf", "-lomp", "-lomptarget"]
+        ldargs += ["-lcuda", "-lcudart", "-lelf", "-lomp", "-lomptarget", "-v"]
 
     @collective
     def compile(self, argtypes=None, restype=None):
