@@ -67,47 +67,7 @@ class JITModule(host.JITModule):
     _libraries = [ompflag] + [os.environ.get('OMP_LIBS') or omplib]
     _system_headers = ['#include <omp.h>']
 
-    _wrapper = """
-double %(wrapper_name)s(int start, int end,
-                      %(ssinds_arg)s
-                      %(wrapper_args)s
-                      %(const_args)s
-                      %(layer_arg)s
-                      %(other_args)s) {
-  %(user_code)s
-  %(timer_declare)s
-  %(timer_start)s
-  %(parallel_pragma_one)s
-  {
-  %(times_loop_start)s
-  %(wrapper_decs)s;
-  %(const_inits)s;
-  %(map_decl)s
-  %(vec_decs)s;
-  %(parallel_pragma_two)s
-  for ( int n = start; n < end; n++ ) {
-    int i = %(index_expr)s;
-    %(vec_inits)s;
-    %(map_init)s;
-    %(parallel_pragma_three)s
-    %(extr_loop)s
-    %(map_bcs_m)s;
-    %(buffer_decl)s;
-    %(buffer_gather)s
-
-    %(kernel_name)s(%(kernel_args)s);
-
-    %(itset_loop_body)s
-    %(map_bcs_p)s;
-    %(apply_offset)s;
-    %(extr_loop_close)s
-  }
-  }
-  %(times_loop_end)s
-  %(timer_stop)s
-  %(timer_end)s
-}
-"""
+    _wrapper = compose_openmp4_wrapper()
 
     def set_argtypes(self, iterset, *args):
         argtypes = [ctypes.c_int, ctypes.c_int]
@@ -140,7 +100,13 @@ double %(wrapper_name)s(int start, int end,
 
     def generate_code(self):
         code_dict = super(JITModule, self).generate_code()
-        print "Doing OPENMP 4.0 on HOST"
+        print "=> Running OPENMP 4.0 on HOST"
+
+        # Init pragma placeholders
+        code_dict.update({'parallel_pragma_one': ""})
+        code_dict.update({'parallel_pragma_two': ""})
+        code_dict.update({'parallel_pragma_three': ""})
+
         optimize_wrapper(self, code_dict, host=True)
         return code_dict
 

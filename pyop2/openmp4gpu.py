@@ -110,7 +110,7 @@ class JITModule(host.JITModule):
     _libraries = [ompflag] + [os.environ.get('OMP_LIBS') or omplib]
     _system_headers = ['#include <omp.h>']
 
-    _wrapper = compose_openmp4gpu_wrapper()
+    _wrapper = compose_openmp4_wrapper()
 
     def set_argtypes(self, iterset, *args):
         argtypes = [ctypes.c_int, ctypes.c_int]
@@ -195,12 +195,14 @@ class JITModule(host.JITModule):
         #                                            if arg._uses_itspace or arg._is_vec_map])
 
         code_dict.update({'offload_one': _offload_one})
+
+        # Init pragma placeholders
         code_dict.update({'parallel_pragma_one': ""})
         code_dict.update({'parallel_pragma_two': ""})
         code_dict.update({'parallel_pragma_three': ""})
 
         # This is a good place to apply some application level optimizations
-        print "Running OPENMP 4.0 on GPU"
+        print "=> Running OPENMP 4.0 on GPU"
         optimize_wrapper(self, code_dict)
         return code_dict
 

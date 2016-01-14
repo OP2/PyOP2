@@ -200,7 +200,7 @@ def compose_wrapper(backend="sequential"):
     return wrapper
 
 
-def compose_openmp4gpu_wrapper():
+def compose_openmp4_wrapper():
     # if snapr_available():
     #     return snapr.optimize_code(jitmodule)
     wrapper = ""
