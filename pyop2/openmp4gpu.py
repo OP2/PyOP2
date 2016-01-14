@@ -110,7 +110,7 @@ class JITModule(host.JITModule):
     _libraries = [ompflag] + [os.environ.get('OMP_LIBS') or omplib]
     _system_headers = ['#include <omp.h>']
 
-    _wrapper = compose_openmp4gpu_wrapper(self)
+    _wrapper = compose_openmp4gpu_wrapper()
 
     def set_argtypes(self, iterset, *args):
         argtypes = [ctypes.c_int, ctypes.c_int]
@@ -121,8 +121,6 @@ class JITModule(host.JITModule):
                 argtypes.append(arg.data._argtype)
             else:
                 for d in arg.data:
-                    # from IPython import embed; embed()
-                    # argtypes.append(d._argtype)
                     argtypes.append(d.data.ctypes.data_as(ctypes.c_void_p))
             if arg._is_indirect or arg._is_mat:
                 maps = as_tuple(arg.map, Map)
