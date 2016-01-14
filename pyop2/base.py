@@ -4241,10 +4241,12 @@ class ParLoop(LazyComputation):
             fun = self._jitmodule
             # t, other_measures = self._compute(self.it_space.iterset.core_part)
             print "Execute core part"
+            configuration['region_name'] = region_name + "_core"
             t, measures = self._compute(iterset.core_part, fun, *arglist)
             self.halo_exchange_end()
             fun = self._jitmodule_halo
             print "Execute owned part"
+            configuration['region_name'] = region_name + "_owned"
             self._compute(iterset.owned_part, fun, *arglist)
             self.reduction_begin()
             if self._only_local:
@@ -4252,10 +4254,12 @@ class ParLoop(LazyComputation):
                 self.reverse_halo_exchange_end()
             if self.needs_exec_halo:
                 print "Execute exec part"
+                configuration['region_name'] = region_name + "_exec"
                 self._compute(iterset.exec_part, fun, *arglist)
             self.reduction_end()
             self.update_arg_data_state()
             self.log_flops()
+            configuration['region_name'] = region_name
         measures[6] = self.num_flops
         add_data_volume('base', '%s-%s' % (region_name, self.kernel._md5),
                         configuration['times'] * self._data_volume,
