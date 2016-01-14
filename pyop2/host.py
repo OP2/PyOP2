@@ -1011,7 +1011,8 @@ class JITModule(base.JITModule):
             extension = "cpp"
 
         # Optimize generated code
-        code_to_compile = get_optimized_source_code(self, code_to_compile)
+        if configuration["hpc_optimize"]:
+            code_to_compile = get_optimized_source_code(self, code_to_compile)
 
         self._fun = compilation.load(code_to_compile,
                                      extension,
