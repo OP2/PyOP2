@@ -394,6 +394,17 @@ def iaca_trigger(wrapper_code, jitmodule, region_name,
         sys.exit("IACA analysis is not available.")
 
 
+def get_optimized_source_code(jitmodule, code):
+    # This routine initializes analysis using IACA (Intel Only)
+    try:
+        import snapr.optimizer as optimizer
+        # Return optimized code
+        return optimizer.get_optimized_source_code(jitmodule, code)
+    except ImportError:
+        # Return code unoptimized
+        return code
+
+
 def snapr_available():
     # This routine initializes analysis using IACA (Intel Only)
     try:
