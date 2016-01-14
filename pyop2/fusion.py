@@ -255,6 +255,9 @@ for (int n = %(tile_start)s; n < %(tile_end)s; n++) {
 %(interm_globals_writeback)s;
 """
 
+    def _get_wrapper(self):
+        return self._wrapper
+
     @classmethod
     def _cache_key(cls, kernel, it_space, *args, **kwargs):
         key = (hash(kwargs['executor']),)

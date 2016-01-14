@@ -139,7 +139,10 @@ class JITModule(host.JITModule):
     _libraries = [ompflag] + [os.environ.get('OMP_LIBS') or omplib]
     _system_headers = ['#include <omp.h>']
 
-    _wrapper = compose_wrapper("openmp")
+    # _wrapper = compose_wrapper("openmp")
+
+    def _get_wrapper(self):
+        return compose_wrapper("openmp")
 
     def set_argtypes(self, iterset, *args):
         """Set the ctypes argument types for the JITModule.

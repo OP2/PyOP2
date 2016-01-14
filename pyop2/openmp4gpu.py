@@ -110,7 +110,10 @@ class JITModule(host.JITModule):
     _libraries = [ompflag] + [os.environ.get('OMP_LIBS') or omplib]
     _system_headers = ['#include <omp.h>']
 
-    _wrapper = compose_openmp4_wrapper()
+    # _wrapper = compose_openmp4_wrapper()
+
+    def _get_wrapper(self):
+        return compose_openmp4_wrapper()
 
     def set_argtypes(self, iterset, *args):
         argtypes = [ctypes.c_int, ctypes.c_int]

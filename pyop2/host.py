@@ -773,6 +773,9 @@ class JITModule(base.JITModule):
     def _is_indirect(self):
         return not self._is_direct
 
+    def _get_wrapper(self):
+        pass
+
     def get_c_code(self, kernel_code, wrapper_code):
         strip = lambda code: '\n'.join([l for l in code.splitlines()
                                         if l.strip() and l.strip() != ';'])
@@ -826,7 +829,7 @@ class JITModule(base.JITModule):
                    'namespace': blas_namespace,
                    'header': headers,
                    'timer': self.timer_function if configuration["hpc_profiling"] else ""}
-        code_to_compile = strip(dedent(self._wrapper) % wrapper_code)
+        code_to_compile = strip(dedent(self._get_wrapper()) % wrapper_code)
 
         _const_decs = '\n'.join([const._format_declaration()
                                 for const in Const._definitions()]) + '\n'
@@ -1007,6 +1010,10 @@ class JITModule(base.JITModule):
         # Generate runnable code without IACA instrumentation
         if self._kernel._cpp:
             extension = "cpp"
+
+        # Optimze generated code
+        # code_to_compile = optimize_source_code(self, code_to_compile)
+
         self._fun = compilation.load(code_to_compile,
                                      extension,
                                      self._wrapper_name,

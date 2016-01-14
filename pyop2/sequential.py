@@ -50,7 +50,10 @@ from wrapper import compose_wrapper
 class JITModule(host.JITModule):
     _system_headers = []
 
-    _wrapper = compose_wrapper("sequential")
+    # _wrapper = compose_wrapper("sequential")
+
+    def _get_wrapper(self):
+        return compose_wrapper("sequential")
 
     def set_argtypes(self, iterset, *args):
         argtypes = [ctypes.c_int, ctypes.c_int]
