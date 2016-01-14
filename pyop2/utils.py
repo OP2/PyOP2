@@ -397,9 +397,9 @@ def iaca_trigger(wrapper_code, jitmodule, region_name,
 def get_optimized_source_code(jitmodule, code):
     # This routine initializes analysis using IACA (Intel Only)
     try:
-        import snapr.optimizer as optimizer
+        import optimizer as opt
         # Return optimized code
-        return optimizer.get_optimized_source_code(jitmodule, code)
+        return opt.get_optimized_source_code(jitmodule, code)
     except ImportError:
         # Return code unoptimized
         return code
