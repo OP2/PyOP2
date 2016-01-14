@@ -102,7 +102,7 @@ class Configuration(dict):
         # Measure the time around the kernel only
         "only_kernel": ("PYOP2_ONLY_KERNEL", bool, False),
         # For a given code region only report the indirect loops
-        "only_indirect_loops": ("PYOP2_ONLY_INDIRECT_LOOPS", bool, False),
+        "only_indirect_loops": ("PYOP2_ONLY_INDIRECT_LOOPS", bool, True),
         # For a given code region only report the indirect loops
         "papi_flops": ("PYOP2_PAPI_FLOPS", bool, False),
         # For extruded meshes: horizontally DG dofs per column

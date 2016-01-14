@@ -50,8 +50,6 @@ from wrapper import compose_wrapper
 class JITModule(host.JITModule):
     _system_headers = []
 
-    # _wrapper = compose_wrapper("sequential")
-
     def _get_wrapper(self):
         return compose_wrapper("sequential")
 

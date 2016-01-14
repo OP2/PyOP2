@@ -1007,12 +1007,11 @@ class JITModule(base.JITModule):
                          restype,
                          compiler)
 
-        # Generate runnable code without IACA instrumentation
         if self._kernel._cpp:
             extension = "cpp"
 
         # Optimze generated code
-        # code_to_compile = optimize_source_code(self, code_to_compile)
+        code_to_compile = optimize_source_code(self, code_to_compile)
 
         self._fun = compilation.load(code_to_compile,
                                      extension,
