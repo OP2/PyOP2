@@ -102,6 +102,8 @@ class JITModule(host.JITModule):
     def generate_code(self):
         code_dict = super(JITModule, self).generate_code()
         print "=> Running OPENMP 4.0 on HOST"
+        # Offloading is not required
+        code_dict.update({'offload_one': ""})
 
         # Init pragma placeholders
         code_dict.update({'parallel_pragma_one': ""})

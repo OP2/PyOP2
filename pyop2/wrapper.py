@@ -231,6 +231,7 @@ def compose_openmp4_wrapper():
         %(timer_start)s
         """
     wrapper += """
+        %(offload_one)s
         %(parallel_pragma_one)s
         {
         """
