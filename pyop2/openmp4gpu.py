@@ -195,6 +195,9 @@ class JITModule(host.JITModule):
         #                                            if arg._uses_itspace or arg._is_vec_map])
 
         code_dict.update({'offload_one': _offload_one})
+        code_dict.update({'parallel_pragma_one': ""})
+        code_dict.update({'parallel_pragma_two': ""})
+        code_dict.update({'parallel_pragma_three': ""})
 
         # This is a good place to apply some application level optimizations
         print "Running OPENMP 4.0 on GPU"
