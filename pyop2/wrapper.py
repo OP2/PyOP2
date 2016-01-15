@@ -205,10 +205,6 @@ def compose_openmp4_wrapper():
     #     return snapr.optimize_code(jitmodule)
     wrapper = ""
 
-    if configuration["hpc_save_result"]:
-        wrapper += store_array % {"type": "int"}
-        wrapper += store_array % {"type": "double"}
-
     wrapper += """
     double %(wrapper_name)s(int start, int end,
                       %(ssinds_arg)s
