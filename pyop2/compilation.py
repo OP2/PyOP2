@@ -86,7 +86,7 @@ class Compiler(object):
         library."""
 
         cachedir = configuration['cache_dir']
-        basename = _get_basename(self, src)
+        basename = self._get_basename(src)
 
         # Set up configuration basenamme
         configuration["basename"] = cachedir + "/%s" % (basename)
