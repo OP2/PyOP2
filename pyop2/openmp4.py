@@ -194,6 +194,10 @@ class ParLoop(host.ParLoop):
         with timed_region("ParLoop kernel"):
             # time = fun(*self._jit_args, argtypes=self._argtypes, restype=ctypes.c_double)
             time = fun(part.offset, part.offset + part.size, *arglist)
+            if configuration['hpc_check_result']:
+                for arg in self.args:
+                    if arg.access in [WRITE, INC]:
+                        check_result(arg)
             if configuration['hpc_profiling']:
                 ms = arglist[-1]
                 return time, [m for m in ms]

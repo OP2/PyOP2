@@ -53,9 +53,9 @@ void storeArray_%(type)s(%(type)s *a, int len, char* filename){
 def compose_wrapper(backend="sequential"):
     wrapper = ""
 
-    if configuration["hpc_save_result"]:
-        wrapper += store_array % {"type": "int"}
-        wrapper += store_array % {"type": "double"}
+    # if configuration["hpc_save_result"]:
+    #     wrapper += store_array % {"type": "int"}
+    #     wrapper += store_array % {"type": "double"}
 
     if backend == "sequential":
         wrapper += """
@@ -274,6 +274,15 @@ def compose_openmp4_wrapper():
     if configuration["hpc_profiling"]:
         wrapper += """
         %(timer_stop)s
+        """
+
+    # if configuration["hpc_save_result"]:
+    #     wrapper += """
+    #     %(store_array)s
+    #     """
+
+    if configuration["hpc_profiling"]:
+        wrapper += """
         %(timer_end)s
         """
 

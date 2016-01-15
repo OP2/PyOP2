@@ -326,6 +326,10 @@ class ParLoop(host.ParLoop):
             print "Start Execution"
             time = fun(part.offset, part.offset + part.size, *arglist)
             print "Finished execution."
+            if configuration['hpc_check_result']:
+                for arg in self.args:
+                    if arg.access in [WRITE, INC]:
+                        check_result(arg)
             if configuration['hpc_profiling']:
                 ms = arglist[-1]
                 return time, [m for m in ms]

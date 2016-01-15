@@ -1047,6 +1047,10 @@ class JITModule(base.JITModule):
         if configuration["hpc_debug"]:
             self.hpc_debug(snippets)
 
+        # # Add any debugging information
+        # if configuration["hpc_save_result"]:
+        #     snippets = 
+
         return snippets
 
 
@@ -1109,6 +1113,7 @@ def wrapper_snippets(itspace, args,
     if isinstance(itspace._iterset, Subset):
         _ssinds_arg = "int* ssinds,"
         _index_expr = "ssinds[n]"
+        # TODO: Implement array saving for this case.
         _store_array += ["storeArray_int(ssinds, %(size)s, "");" % {"size": itspace._iterset.size}]
         _load_array += ["TODO"]
         _call_args += ["TODO"]

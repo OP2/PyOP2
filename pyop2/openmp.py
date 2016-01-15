@@ -282,6 +282,10 @@ class ParLoop(device.ParLoop, host.ParLoop):
                 if configuration['hpc_profiling']:
                     for i, value in enumerate(arglist[-1]):
                         measures[i] += arglist[-1][i]
+            if configuration['hpc_check_result']:
+                for arg in self.args:
+                    if arg.access in [WRITE, INC]:
+                        check_result(arg)
         return time, [m for m in measures]
 
     def _get_plan(self, part, part_size):
