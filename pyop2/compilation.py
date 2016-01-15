@@ -90,23 +90,21 @@ class Compiler(object):
 
         # Set up configuration basenamme
         configuration["basename"] = cachedir + "/%s" % (basename)
-        # Get manually optimized generated code if any
-        if configuration["hpc_optimize"]:
-            src = source_code(src)
-            basename = self._get_basename(src)
-            configuration["basename"] = cachedir + "/%s" % (basename)
 
         pid = os.getpid()
         cname = os.path.join(cachedir, "%s_p%d.%s" % (basename, pid, extension))
+
+        # Get manually optimized generated code if any
+        if configuration["hpc_optimize"]:
+            src, cname = source_code(src, cname)
+            basename = self._get_basename(src)
+            configuration["basename"] = cachedir + "/%s" % (basename)
+
         oname = os.path.join(cachedir, "%s_p%d.o" % (basename, pid))
         soname = os.path.join(cachedir, "%s.so" % basename)
         # Link into temporary file, then rename to shared library
         # atomically (avoiding races).
         tmpname = os.path.join(cachedir, "%s_p%d.so.tmp" % (basename, pid))
-
-        # Get manually optimized generated code if any
-        if configuration["hpc_optimize"]:
-            src = source_code(src)
 
         if configuration['check_src_hashes'] or configuration['debug']:
             basenames = MPI.comm.allgather(basename)
@@ -135,8 +133,9 @@ class Compiler(object):
                 nverrfile = os.path.join(cachedir, "%s.err" % (basename))
                 preprocfile = os.path.join(cachedir, "%s.pre" % (basename))
                 with progress(INFO, 'Compiling wrapper'):
-                    with file(cname, "w") as f:
-                        f.write(src)
+                    if not configuration["hpc_optimize"]:
+                        with file(cname, "w") as f:
+                            f.write(src)
                     # Compiler also links
                     if self._ld is None:
                         cc = [self._cc] + self._cppargs + \

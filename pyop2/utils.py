@@ -394,7 +394,7 @@ def iaca_trigger(wrapper_code, jitmodule, region_name,
         sys.exit("IACA analysis is not available.")
 
 
-def source_code(code):
+def source_code(code, cname):
     # This routine initializes analysis using IACA (Intel Only)
     try:
         from active_cache import snapr_source_code
@@ -403,7 +403,7 @@ def source_code(code):
     except ImportError:
         # Return code unoptimized
         print "PyOP2 Warning: the manually optimized code cannot be fetched. SNAPR has not been found."
-        return code
+        return code, cname
 
 
 def save_result(arg):
