@@ -428,18 +428,20 @@ def optimize_kernel(jitmodule, code):
     # This routine initializes analysis using IACA (Intel Only)
     try:
         from optimizer import snapr_optimize_kernel
-        snapr_optimize_kernel(jitmodule, code)
+        return snapr_optimize_kernel(jitmodule, code)
     except ImportError:
         print "PyOP2 Warning: kernel cannot be optimized. SNAPR has not been found."
+    return code
 
 
 def optimize_wrapper(jitmodule, code, host=False):
     # This routine initializes analysis using IACA (Intel Only)
     try:
         from optimizer import snapr_optimize_wrapper
-        snapr_optimize_wrapper(jitmodule, code, host)
+        return snapr_optimize_wrapper(jitmodule, code, host)
     except ImportError:
         print "PyOP2 Warning: wrapper cannot be optimized. SNAPR has not been found."
+    return code
 
 
 def snapr_available():
