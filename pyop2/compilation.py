@@ -41,6 +41,7 @@ from hashlib import md5
 from configuration import configuration
 from logger import progress, INFO
 from exceptions import CompilationError
+from utils import source_code
 
 
 class Compiler(object):
