@@ -93,7 +93,7 @@ class Compiler(object):
         # Get manually optimized generated code if any
         if configuration["hpc_optimize"]:
             src = source_code(src)
-            basename = _get_basename(self, src)
+            basename = self._get_basename(src)
             configuration["basename"] = cachedir + "/%s" % (basename)
 
         pid = os.getpid()
