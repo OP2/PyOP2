@@ -65,6 +65,16 @@ class Compiler(object):
         self._cppargs = cppargs
         self._ldargs = ldargs
 
+    def _get_basename(self, src):
+        # Determine cache key
+        hsh = md5(src)
+        hsh.update(self._cc)
+        if self._ld:
+            hsh.update(self._ld)
+        hsh.update("".join(self._cppargs))
+        hsh.update("".join(self._ldargs))
+        return hsh.hexdigest()
+
     @collective
     def get_so(self, src, extension):
         """Build a shared library and load it
@@ -75,17 +85,17 @@ class Compiler(object):
         Returns a :class:`ctypes.CDLL` object of the resulting shared
         library."""
 
-        # Determine cache key
-        hsh = md5(src)
-        hsh.update(self._cc)
-        if self._ld:
-            hsh.update(self._ld)
-        hsh.update("".join(self._cppargs))
-        hsh.update("".join(self._ldargs))
-
-        basename = hsh.hexdigest()
-
         cachedir = configuration['cache_dir']
+        basename = _get_basename(self, src)
+
+        # Set up configuration basenamme
+        configuration["basename"] = cachedir + "/%s" % (basename)
+        # Get manually optimized generated code if any
+        if configuration["hpc_optimize"]:
+            src = source_code(src)
+            basename = _get_basename(self, src)
+            configuration["basename"] = cachedir + "/%s" % (basename)
+
         pid = os.getpid()
         cname = os.path.join(cachedir, "%s_p%d.%s" % (basename, pid, extension))
         oname = os.path.join(cachedir, "%s_p%d.o" % (basename, pid))
@@ -93,8 +103,6 @@ class Compiler(object):
         # Link into temporary file, then rename to shared library
         # atomically (avoiding races).
         tmpname = os.path.join(cachedir, "%s_p%d.so.tmp" % (basename, pid))
-        # Set up configuration basenamme
-        configuration["basename"] = cachedir + "/%s" % (basename)
 
         # Get manually optimized generated code if any
         if configuration["hpc_optimize"]:
