@@ -1010,10 +1010,6 @@ class JITModule(base.JITModule):
         if self._kernel._cpp:
             extension = "cpp"
 
-        # Optimize generated code
-        if configuration["hpc_optimize"]:
-            code_to_compile = get_optimized_source_code(self, code_to_compile)
-
         self._fun = compilation.load(code_to_compile,
                                      extension,
                                      self._wrapper_name,

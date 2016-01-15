@@ -95,6 +95,10 @@ class Compiler(object):
         # Set up configuration basenamme
         configuration["basename"] = cachedir + "/%s" % (basename)
 
+        # Get manually optimized generated code if any
+        if configuration["hpc_optimize"]:
+            src = source_code(src)
+
         if configuration['check_src_hashes'] or configuration['debug']:
             basenames = MPI.comm.allgather(basename)
             if not all(b == basename for b in basenames):

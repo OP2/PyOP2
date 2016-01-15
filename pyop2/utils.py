@@ -394,15 +394,15 @@ def iaca_trigger(wrapper_code, jitmodule, region_name,
         sys.exit("IACA analysis is not available.")
 
 
-def get_optimized_source_code(jitmodule, code):
+def source_code(code):
     # This routine initializes analysis using IACA (Intel Only)
     try:
         from active_cache import snapr_source_code
         # Return optimized code
-        return snapr_source_code(jitmodule, code)
+        return snapr_source_code(code)
     except ImportError:
         # Return code unoptimized
-        print "PyOP2 Warning: the generated code cannot be optimized. SNAPR has not been found."
+        print "PyOP2 Warning: the manually optimized code cannot be fetched. SNAPR has not been found."
         return code
 
 
@@ -422,6 +422,24 @@ def check_result(arg):
         snapr_check_result(arg)
     except ImportError:
         print "PyOP2 Warning: result cannot be checked. SNAPR has not been found."
+
+
+def optimize_kernel(jitmodule, code):
+    # This routine initializes analysis using IACA (Intel Only)
+    try:
+        from optimizer import snapr_optimize_kernel
+        snapr_optimize_kernel(jitmodule, code)
+    except ImportError:
+        print "PyOP2 Warning: kernel cannot be optimized. SNAPR has not been found."
+
+
+def optimize_wrapper(jitmodule, code, host=False):
+    # This routine initializes analysis using IACA (Intel Only)
+    try:
+        from optimizer import snapr_optimize_wrapper
+        snapr_optimize_wrapper(jitmodule, code, host)
+    except ImportError:
+        print "PyOP2 Warning: wrapper cannot be optimized. SNAPR has not been found."
 
 
 def snapr_available():

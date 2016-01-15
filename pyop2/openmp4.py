@@ -44,7 +44,6 @@ from petsc_base import *
 from profiling import timed_region
 from host import Kernel, Arg  # noqa: needed by BackendSelector
 from utils import as_tuple, cached_property
-from optimizer import optimize_wrapper
 from wrapper import compose_openmp4_wrapper
 
 
