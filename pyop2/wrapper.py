@@ -276,11 +276,6 @@ def compose_openmp4_wrapper():
         %(timer_stop)s
         """
 
-    # if configuration["hpc_save_result"]:
-    #     wrapper += """
-    #     %(store_array)s
-    #     """
-
     if configuration["hpc_profiling"]:
         wrapper += """
         %(timer_end)s
