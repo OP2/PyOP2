@@ -145,7 +145,9 @@ class ParLoop(host.ParLoop):
         time = 0.0
         with timed_region("ParLoop kernel"):
             # time = fun(*self._jit_args, argtypes=self._argtypes, restype=ctypes.c_double)
+            print "Start Sequential Execution"
             time = fun(part.offset, part.offset + part.size, *arglist)
+            print "Finish Sequential Execution"
             if configuration['hpc_save_result']:
                 # from IPython import embed; embed()
                 for arg in self.args:

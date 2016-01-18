@@ -4238,27 +4238,37 @@ class ParLoop(LazyComputation):
             self.halo_exchange_begin()
             iterset = self.iterset
             arglist = self.prepare_arglist(iterset, *self.args)
-            configuration['region_name'] = region_name + "_core"
-            fun = self._jitmodule
-            # t, other_measures = self._compute(self.it_space.iterset.core_part)
-            print "Execute core part"
-            t, measures = self._compute(iterset.core_part, fun, *arglist)
-            self.halo_exchange_end()
-            configuration['region_name'] = region_name + "_halo"
-            fun = self._jitmodule_halo
-            print "Execute owned part"
-            self._compute(iterset.owned_part, fun, *arglist)
-            self.reduction_begin()
-            if self._only_local:
-                self.reverse_halo_exchange_begin()
-                self.reverse_halo_exchange_end()
-            if self.needs_exec_halo:
-                print "Execute exec part"
-                self._compute(iterset.exec_part, fun, *arglist)
-            self.reduction_end()
-            self.update_arg_data_state()
+
+            # Set the name of the region before creating the function
+            with configure("region_name", region_name + "_core"):
+                #configuration['region_name'] = region_name + "_core"
+                fun = self._jitmodule
+                # t, other_measures = self._compute(self.it_space.iterset.core_part)
+                print "Execute core part"
+                t, measures = self._compute(iterset.core_part, fun, *arglist)
+                self.halo_exchange_end()
+
+            # Set the name of the region before creating the function
+            with configure("region_name", region_name + "_halo"):
+                #configuration['region_name'] = region_name + "_halo"
+                fun = self._jitmodule_halo
+
+                # Disable checking and saving results for halos
+                with configure("hpc_save_result", False):
+                    with configure("hpc_check_result", False):
+                        print "Execute owned part"
+                        self._compute(iterset.owned_part, fun, *arglist)
+                        self.reduction_begin()
+                        if self._only_local:
+                            self.reverse_halo_exchange_begin()
+                            self.reverse_halo_exchange_end()
+                        if self.needs_exec_halo:
+                            print "Execute exec part"
+                            self._compute(iterset.exec_part, fun, *arglist)
+                        self.reduction_end()
+                        self.update_arg_data_state()
             self.log_flops()
-            configuration['region_name'] = region_name
+            # configuration['region_name'] = region_name
         measures[6] = self.num_flops
         add_data_volume('base', '%s-%s' % (region_name, self.kernel._md5),
                         configuration['times'] * self._data_volume,
