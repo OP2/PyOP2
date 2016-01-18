@@ -45,6 +45,7 @@ import types
 from hashlib import md5
 
 from configuration import configuration
+from configuration import configure
 from caching import Cached, ObjectCached
 from versioning import Versioned, modifies, modifies_argn, CopyOnWrite, \
     shallow_copy, zeroes
