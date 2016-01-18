@@ -322,9 +322,9 @@ class ParLoop(host.ParLoop):
         time = 0.0
         with timed_region("ParLoop kernel"):
             # time = fun(*self._jit_args, argtypes=self._argtypes, restype=ctypes.c_double)
-            print "Start Execution"
+            print " => Start OMP4GPU Execution"
             time = fun(part.offset, part.offset + part.size, *arglist)
-            print "Finished execution."
+            print " => Finished OMP4GPU Execution."
             if configuration['hpc_check_result']:
                 for arg in self.args:
                     if arg.access in [WRITE, INC]:

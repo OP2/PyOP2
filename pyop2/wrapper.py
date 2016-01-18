@@ -237,13 +237,16 @@ def compose_openmp4_wrapper():
         """
 
     wrapper += """
-            %(wrapper_decs)s;
-            %(const_inits)s;
-            %(map_decl)s
-            %(vec_decs)s;
             %(parallel_pragma_two)s
             for ( int n = start; n < end; n++ ) {
                 int i = %(index_expr)s;
+
+                //inits must happen here in the offloaded region
+                %(wrapper_decs)s;
+                %(const_inits)s;
+                %(map_decl)s
+                %(vec_decs)s;
+
                 %(vec_inits)s;
                 %(map_init)s;
                 %(parallel_pragma_three)s
