@@ -154,7 +154,7 @@ class Arg(base.Arg):
         return val
 
     def c_ind_data(self, idx, i, j=0, is_top=False, offset=None):
-        if configuration["hpc_code_gen"] == 2:
+        if configuration["hpc_code_gen"] == 2 and self._is_vec_map:
             return "%(name)s[(xtr_%(map_name)s[%(idx)s]%(top)s%(off_mul)s%(off_add)s)* %(dim)s%(off)s]" % \
                 {'name': self.c_arg_name(i),
                  'map_name': self.c_map_name(i, 0),
@@ -176,6 +176,13 @@ class Arg(base.Arg):
              'off_add': ' + %d' % offset if not is_top and offset is not None else ''}
 
     def c_ind_data_xtr(self, idx, i, j=0):
+        if configuration["hpc_code_gen"] == 2:
+            return "%(name)s[(xtr_%(map_name)s[%(idx)s])*%(dim)s%(off)s]" % \
+                {'name': self.c_arg_name(i),
+                 'map_name': self.c_map_name(i, 0),
+                 'idx': idx,
+                 'dim': 1 if self._flatten else str(self.data[i].cdim),
+                 'off': ' + %d' % j if j else ''}
         return "%(name)s + (xtr_%(map_name)s[%(idx)s])*%(dim)s%(off)s" % \
             {'name': self.c_arg_name(i),
              'map_name': self.c_map_name(i, 0),
@@ -1178,8 +1185,10 @@ def wrapper_snippets(itspace, args,
     _layer_arg = ""
     _off_args = ""
     if configuration["hpc_code_gen"] == 2:
-        _map_decl += ';\n'.join([arg.c_map_decl(is_facet=is_facet) for arg in args if not arg._is_global])
-        _map_init += ';\n'.join([arg.c_map_init(is_top=is_top, is_facet=is_facet) for arg in args if not arg._is_global])
+        # _map_decl += ';\n'.join([arg.c_map_decl(is_facet=is_facet) for arg in args if not arg._is_global])
+        # _map_init += ';\n'.join([arg.c_map_init(is_top=is_top, is_facet=is_facet) for arg in args if not arg._is_global])
+        _map_decl += ';\n'.join([arg.c_map_decl(is_facet=is_facet) for arg in args if arg._is_vec_map])
+        _map_init += ';\n'.join([arg.c_map_init(is_top=is_top, is_facet=is_facet) for arg in args if arg._is_vec_map])
     if itspace._extruded:
         _off_args = []
         for arg in args:
@@ -1202,7 +1211,7 @@ def wrapper_snippets(itspace, args,
         _map_bcs_m += ';\n'.join([arg.c_map_bcs("-", is_facet) for arg in args if arg._is_mat])
         _map_bcs_p += ';\n'.join([arg.c_map_bcs("+", is_facet) for arg in args if arg._is_mat])
         if configuration["hpc_code_gen"] == 2:
-            _apply_offset += ';\n'.join([arg.c_add_offset_map(is_facet=is_facet) for arg in args if not arg._is_global])
+            _apply_offset += ';\n'.join([arg.c_add_offset_map(is_facet=is_facet) for arg in args if arg._is_vec_map])
         else:
             _apply_offset += ';\n'.join([arg.c_add_offset_map(is_facet=is_facet)
                                          for arg in args if arg._uses_itspace])
