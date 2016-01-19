@@ -4242,7 +4242,7 @@ class ParLoop(LazyComputation):
 
             # Set the name of the region before creating the function
             with configure("region_name", region_name + "_core"):
-                #configuration['region_name'] = region_name + "_core"
+                # configuration['region_name'] = region_name + "_core"
                 fun = self._jitmodule
                 # t, other_measures = self._compute(self.it_space.iterset.core_part)
                 print "Execute core part"
@@ -4251,7 +4251,7 @@ class ParLoop(LazyComputation):
 
             # Set the name of the region before creating the function
             with configure("region_name", region_name + "_halo"):
-                #configuration['region_name'] = region_name + "_halo"
+                # configuration['region_name'] = region_name + "_halo"
                 fun = self._jitmodule_halo
 
                 # Disable checking and saving results for halos

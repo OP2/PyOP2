@@ -208,7 +208,7 @@ class JITModule(host.JITModule):
 
     def get_c_code(self, kernel_code, wrapper_code):
         # This is a good place to apply some application level optimizations
-        kernel_code = optimize_kernel(self, kernel_code)
+        # kernel_code = optimize_kernel(self, kernel_code)
         return super(JITModule, self).get_c_code(kernel_code, wrapper_code)
 
     def backend_flags(self, cppargs, more_args, ldargs):

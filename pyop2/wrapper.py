@@ -139,9 +139,24 @@ def compose_wrapper(backend="sequential"):
 
     wrapper += """
         int i = %(index_expr)s;
+    """
+
+    if configuration["hpc_code_gen"] == 1:
+        wrapper += """
         %(vec_inits)s;
+        """
+
+    wrapper += """
         %(map_init)s;
         %(extr_loop)s
+        """
+
+    if configuration["hpc_code_gen"] == 2:
+        wrapper += """
+        %(vec_inits)s;
+        """
+
+    wrapper += """
         %(map_bcs_m)s;
         """
 
@@ -246,11 +261,23 @@ def compose_openmp4_wrapper():
                 %(const_inits)s;
                 %(map_decl)s
                 %(vec_decs)s;
-
+    """
+    if configuration["hpc_code_gen"] == 1:
+        wrapper += """
                 %(vec_inits)s;
+        """
+
+    wrapper += """
                 %(map_init)s;
                 %(parallel_pragma_three)s
                 %(extr_loop)s
+    """
+    if configuration["hpc_code_gen"] == 2:
+        wrapper += """
+                %(vec_inits)s;
+        """
+
+    wrapper += """
                 %(map_bcs_m)s;
                 %(buffer_decl)s;
                 %(buffer_gather)s

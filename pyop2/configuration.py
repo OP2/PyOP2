@@ -77,6 +77,8 @@ class Configuration(dict):
         "hpc_debug": ("PYOP2_HPC_DEBUG", bool, False),
         # Enable optimization
         "hpc_optimize": ("PYOP2_HPC_OPTIMIZE", bool, False),
+        # Enable a specific type of code gen
+        "hpc_code_gen": ("PYOP2_HPC_CODE_GEN", int, 1),
         # Enable saving the result
         "hpc_save_result": ("PYOP2_HPC_SAVE_RESULT", bool, False),
         # Enable checking the result, compare it with the saved result
