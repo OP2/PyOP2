@@ -38,7 +38,7 @@ from numpy.testing import assert_allclose
 
 from pyop2 import op2
 from pyop2.computeind import compute_ind_extr
-from pyop2.configuration import configuration
+from pyop2.configuration import configuration, configure
 
 from coffee.base import *
 
@@ -362,10 +362,11 @@ void comp_vol(double A[1], double *x[], double *y[])
     A[0]+=0.5*abs*0.1 * y[0][0];
 }""", "comp_vol")
 
-        op2.par_loop(mass, elements,
-                     g(op2.INC),
-                     dat_coords(op2.READ, coords_map),
-                     dat_field(op2.READ, field_map))
+        with configure("hpc_code_gen", 1):
+            op2.par_loop(mass, elements,
+                         g(op2.INC),
+                         dat_coords(op2.READ, coords_map),
+                         dat_field(op2.READ, field_map))
 
         assert int(g.data[0]) == int((layers - 1) * 0.1 * (nelems / 2))
 
@@ -384,8 +385,9 @@ void comp_vol(double A[1], double *x[], double *y[])
     def test_write_data_field(self, backend, elements, dat_coords, dat_field, coords_map, field_map, dat_f):
         kernel_wo = "void kernel_wo(double* x[]) { x[0][0] = 42.0; }\n"
 
-        op2.par_loop(op2.Kernel(kernel_wo, "kernel_wo"),
-                     elements, dat_f(op2.WRITE, field_map))
+        with configure("hpc_code_gen", 1):
+            op2.par_loop(op2.Kernel(kernel_wo, "kernel_wo"),
+                         elements, dat_f(op2.WRITE, field_map))
 
         assert all(map(lambda x: x == 42, dat_f.data))
 
@@ -398,8 +400,9 @@ void comp_vol(double A[1], double *x[], double *y[])
                                                                x[4][0] = 42.0; x[4][1] = 42.0;
                                                                x[5][0] = 42.0; x[5][1] = 42.0;
                                                             }\n"""
-        op2.par_loop(op2.Kernel(kernel_wo_c, "kernel_wo_c"),
-                     elements, dat_c(op2.WRITE, coords_map))
+        with configure("hpc_code_gen", 1):
+            op2.par_loop(op2.Kernel(kernel_wo_c, "kernel_wo_c"),
+                         elements, dat_c(op2.WRITE, coords_map))
 
         assert all(map(lambda x: x[0] == 42 and x[1] == 42, dat_c.data))
 
@@ -413,9 +416,10 @@ void comp_vol(double A[1], double *x[], double *y[])
                                                                }
                                                                y[0][0] = sum;
                                                             }\n"""
-        op2.par_loop(op2.Kernel(kernel_wtf, "kernel_wtf"), elements,
-                     dat_coords(op2.READ, coords_map),
-                     dat_f(op2.WRITE, field_map))
+        with configure("hpc_code_gen", 1):
+            op2.par_loop(op2.Kernel(kernel_wtf, "kernel_wtf"), elements,
+                         dat_coords(op2.READ, coords_map),
+                         dat_f(op2.WRITE, field_map))
         assert all(dat_f.data >= 0)
 
     def test_indirect_coords_inc(self, backend, elements, dat_coords,
@@ -429,9 +433,10 @@ void comp_vol(double A[1], double *x[], double *y[])
                                                                  }
                                                                }
                                                             }\n"""
-        op2.par_loop(op2.Kernel(kernel_inc, "kernel_inc"), elements,
-                     dat_coords(op2.READ, coords_map),
-                     dat_c(op2.INC, coords_map))
+        with configure("hpc_code_gen", 1):
+            op2.par_loop(op2.Kernel(kernel_inc, "kernel_inc"), elements,
+                         dat_coords(op2.READ, coords_map),
+                         dat_c(op2.INC, coords_map))
 
         assert sum(sum(dat_c.data)) == nums[0] * layers * 2
 
@@ -484,15 +489,17 @@ void comp_vol(double A[1], double *x[], double *y[])
         layer_xtr = op2.Map(
             iterset, xtr_nodes, 1, vertex_to_xtr_coords, "v2xtr_layer", v2xtr_layer_offset)
 
-        op2.par_loop(extrusion_kernel, iterset,
-                     coords_xtr(op2.INC, map_xtr, flatten=True),
-                     coords(op2.READ, map_2d, flatten=True),
-                     layer(op2.READ, layer_xtr))
+        with configure("hpc_code_gen", 1):
+            op2.par_loop(extrusion_kernel, iterset,
+                         coords_xtr(op2.INC, map_xtr, flatten=True),
+                         coords(op2.READ, map_2d, flatten=True),
+                         layer(op2.READ, layer_xtr))
 
         # Assemble the main matrix.
-        op2.par_loop(vol_comp, xtr_elements,
-                     xtr_mat(op2.INC, (xtr_elem_node[op2.i[0]], xtr_elem_node[op2.i[1]])),
-                     coords_xtr(op2.READ, xtr_elem_node))
+        with configure("hpc_code_gen", 1):
+            op2.par_loop(vol_comp, xtr_elements,
+                         xtr_mat(op2.INC, (xtr_elem_node[op2.i[0]], xtr_elem_node[op2.i[1]])),
+                         coords_xtr(op2.READ, xtr_elem_node))
 
         eps = 1.e-5
         xtr_mat.assemble()
@@ -502,17 +509,19 @@ void comp_vol(double A[1], double *x[], double *y[])
         xtr_f_vals = numpy.array([1] * NUM_NODES * layers, dtype=numpy.int32)
         xtr_f = op2.Dat(d_lnodes_xtr, xtr_f_vals, numpy.int32, "xtr_f")
 
-        op2.par_loop(vol_comp_rhs, xtr_elements,
-                     xtr_b(op2.INC, xtr_elem_node[op2.i[0]], flatten=True),
-                     coords_xtr(op2.READ, xtr_elem_node, flatten=True),
-                     xtr_f(op2.READ, xtr_elem_node))
+        with configure("hpc_code_gen", 1):
+            op2.par_loop(vol_comp_rhs, xtr_elements,
+                         xtr_b(op2.INC, xtr_elem_node[op2.i[0]], flatten=True),
+                         coords_xtr(op2.READ, xtr_elem_node, flatten=True),
+                         xtr_f(op2.READ, xtr_elem_node))
 
         assert_allclose(sum(xtr_b.data), 6.0, eps)
 
         x_vals = numpy.zeros(NUM_NODES * layers, dtype=valuetype)
         xtr_x = op2.Dat(d_lnodes_xtr, x_vals, valuetype, "xtr_x")
 
-        op2.solve(xtr_mat, xtr_x, xtr_b)
+        with configure("hpc_code_gen", 1):
+            op2.solve(xtr_mat, xtr_x, xtr_b)
 
         assert_allclose(sum(xtr_x.data), 7.3333333, eps)
 

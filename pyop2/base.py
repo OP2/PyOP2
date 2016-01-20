@@ -1985,7 +1985,12 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
             except ValueError:
                 return
 
-        self._cow_parloop._run()
+        print "------------->>>>> BETTER NOT BE IN HERE"
+        with configure("hpc_save_result", False):
+            with configure("hpc_check_result", False):
+                with configure("hpc_code_gen", 1):
+                    with configure("hpc_optimize", False):
+                        self._cow_parloop._run()
 
     @collective
     def _cow_shallow_copy(self):

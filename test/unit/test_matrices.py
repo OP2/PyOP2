@@ -37,6 +37,7 @@ from numpy.testing import assert_allclose
 
 from pyop2 import op2
 from pyop2.exceptions import MapValueError, ModeValueError
+from pyop2.configuration import configure
 
 from coffee.base import *
 
@@ -193,10 +194,11 @@ def mass():
                                 c_q0[i_g][1][1] + -1 * c_q0[i_g][0][1] * c_q0[i_g][1][0]);\n"), assembly], open_scope=True)
     assembly = c_for("i_r_0", 3, c_for("i_r_1", 3, assembly))
 
-    kernel_code = FunDecl("void", "mass",
-                          [Decl("double", Symbol("localTensor", (3, 3))),
-                           Decl("double*", c_sym("c0[2]"))],
-                          Block([init, assembly], open_scope=False))
+    with configure("hpc_code_gen", 1):
+        kernel_code = FunDecl("void", "mass",
+                              [Decl("double", Symbol("localTensor", (3, 3))),
+                               Decl("double*", c_sym("c0[2]"))],
+                              Block([init, assembly], open_scope=False))
 
     return op2.Kernel(kernel_code, "mass")
 
@@ -676,9 +678,10 @@ class TestMatrices:
                           elem_node, expected_matrix):
         """Assemble a simple finite-element matrix and check the result."""
         mat.zero()
-        op2.par_loop(mass, elements,
-                     mat(op2.INC, (elem_node[op2.i[0]], elem_node[op2.i[1]])),
-                     coords(op2.READ, elem_node))
+        with configure("hpc_code_gen", 1):
+            op2.par_loop(mass, elements,
+                         mat(op2.INC, (elem_node[op2.i[0]], elem_node[op2.i[1]])),
+                         coords(op2.READ, elem_node))
         mat.assemble()
         eps = 1.e-5
         assert_allclose(mat.values, expected_matrix, eps)
@@ -687,10 +690,11 @@ class TestMatrices:
                           elem_node, expected_rhs):
         """Assemble a simple finite-element right-hand side and check result."""
         b.zero()
-        op2.par_loop(rhs, elements,
-                     b(op2.INC, elem_node),
-                     coords(op2.READ, elem_node),
-                     f(op2.READ, elem_node))
+        with configure("hpc_code_gen", 1):
+            op2.par_loop(rhs, elements,
+                         b(op2.INC, elem_node),
+                         coords(op2.READ, elem_node),
+                         f(op2.READ, elem_node))
 
         eps = 1.e-12
         assert_allclose(b.data, expected_rhs, eps)
@@ -698,7 +702,8 @@ class TestMatrices:
     def test_solve(self, backend, mat, b, x, f):
         """Solve a linear system where the solution is equal to the right-hand
         side and check the result."""
-        mat.assemble()
+        with configure("hpc_code_gen", 1):
+            mat.assemble()
         op2.solve(mat, x, b)
         eps = 1.e-8
         assert_allclose(x.data, f.data, eps)
@@ -722,9 +727,10 @@ class TestMatrices:
         mat.assemble()
         # Check we have ones in the matrix
         assert mat.values.sum() == 3 * 3 * elements.size
-        op2.par_loop(kernel_set, elements,
-                     mat(op2.WRITE, (elem_node[op2.i[0]], elem_node[op2.i[1]])),
-                     g(op2.READ))
+        with configure("hpc_code_gen", 1):
+            op2.par_loop(kernel_set, elements,
+                         mat(op2.WRITE, (elem_node[op2.i[0]], elem_node[op2.i[1]])),
+                         g(op2.READ))
         mat.assemble()
         assert mat.values.sum() == (3 * 3 - 2) * elements.size
         mat.zero()
@@ -738,20 +744,22 @@ class TestMatrices:
     def test_assemble_ffc(self, backend, mass_ffc, mat, coords, elements,
                           elem_node, expected_matrix):
         """Test that the FFC mass assembly assembles the correct values."""
-        op2.par_loop(mass_ffc, elements,
-                     mat(op2.INC, (elem_node[op2.i[0]], elem_node[op2.i[1]])),
-                     coords(op2.READ, elem_node))
-        mat.assemble()
+        with configure("hpc_code_gen", 1):
+            op2.par_loop(mass_ffc, elements,
+                         mat(op2.INC, (elem_node[op2.i[0]], elem_node[op2.i[1]])),
+                         coords(op2.READ, elem_node))
+            mat.assemble()
         eps = 1.e-5
         assert_allclose(mat.values, expected_matrix, eps)
 
     def test_rhs_ffc(self, backend, rhs_ffc, elements, b, coords, f,
                      elem_node, expected_rhs):
         """Test that the FFC rhs assembly assembles the correct values."""
-        op2.par_loop(rhs_ffc, elements,
-                     b(op2.INC, elem_node),
-                     coords(op2.READ, elem_node),
-                     f(op2.READ, elem_node))
+        with configure("hpc_code_gen", 1):
+            op2.par_loop(rhs_ffc, elements,
+                         b(op2.INC, elem_node),
+                         coords(op2.READ, elem_node),
+                         f(op2.READ, elem_node))
 
         eps = 1.e-6
         assert_allclose(b.data, expected_rhs, eps)
@@ -764,10 +772,11 @@ class TestMatrices:
         # Zero the RHS first
         op2.par_loop(zero_dat, nodes,
                      b(op2.WRITE))
-        op2.par_loop(rhs_ffc_itspace, elements,
-                     b(op2.INC, elem_node[op2.i[0]]),
-                     coords(op2.READ, elem_node),
-                     f(op2.READ, elem_node))
+        with configure("hpc_code_gen", 1):
+            op2.par_loop(rhs_ffc_itspace, elements,
+                         b(op2.INC, elem_node[op2.i[0]]),
+                         coords(op2.READ, elem_node),
+                         f(op2.READ, elem_node))
         eps = 1.e-6
         assert_allclose(b.data, expected_rhs, eps)
 
@@ -917,11 +926,12 @@ class TestMixedMatrices:
                          Block([code], open_scope=False))
 
         addone = op2.Kernel(addone, "addone_mat")
-        op2.par_loop(addone, mmap.iterset,
-                     mat(op2.INC, (mmap[op2.i[0]], mmap[op2.i[1]])),
-                     mdat(op2.READ, mmap))
-        mat.assemble()
-        mat._force_evaluation()
+        with configure("hpc_code_gen", 1):
+            op2.par_loop(addone, mmap.iterset,
+                         mat(op2.INC, (mmap[op2.i[0]], mmap[op2.i[1]])),
+                         mdat(op2.READ, mmap))
+            mat.assemble()
+            mat._force_evaluation()
         return mat
 
     @pytest.fixture
@@ -932,9 +942,10 @@ class TestMixedMatrices:
                                Decl("double**", c_sym("d"))],
                               c_for("i", 3, Incr(Symbol("v", ("i")), FlatBlock("d[i][0]"))))
         addone = op2.Kernel(kernel_code, "addone_rhs")
-        op2.par_loop(addone, mmap.iterset,
-                     dat(op2.INC, mmap[op2.i[0]]),
-                     mdat(op2.READ, mmap))
+        with configure("hpc_code_gen", 1):
+            op2.par_loop(addone, mmap.iterset,
+                         dat(op2.INC, mmap[op2.i[0]]),
+                         mdat(op2.READ, mmap))
         return dat
 
     @pytest.mark.xfail(reason="Assembling directly into mixed mats unsupported")

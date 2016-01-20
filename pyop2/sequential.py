@@ -149,13 +149,12 @@ class ParLoop(host.ParLoop):
             time = fun(part.offset, part.offset + part.size, *arglist)
             print " => Finish Sequential Execution"
             if configuration['hpc_save_result']:
-                # from IPython import embed; embed()
                 for arg in self.args:
-                    if arg.access in [WRITE, INC]:
+                    if arg.access in [WRITE, INC] and not arg._is_mat:
                         save_result(arg)
             if configuration['hpc_check_result']:
                 for arg in self.args:
-                    if arg.access in [WRITE, INC]:
+                    if arg.access in [WRITE, INC] and not arg._is_mat:
                         check_result(arg)
             if configuration['hpc_profiling']:
                 ms = arglist[-1]

@@ -153,17 +153,22 @@ class Arg(base.Arg):
                                                      'iname': self.c_arg_name(0, 0)}
         return val
 
-    def c_ind_data(self, idx, i, j=0, is_top=False, offset=None):
+    def c_ind_data(self, idx, i, j=0, is_top=False, offset=None, style=configuration["hpc_code_gen"]):
         if configuration["hpc_code_gen"] == 2 and self._is_vec_map:
-            return "%(name)s[(xtr_%(map_name)s[%(idx)s]%(top)s%(off_mul)s%(off_add)s)* %(dim)s%(off)s]" % \
+            value = "xtr_%(map_name)s[%(idx)s]* %(dim)s%(off)s" % \
+                    {'map_name': self.c_map_name(i, 0),
+                     'idx': idx,
+                     'dim': self.data[i].cdim,
+                     'off': ' + %d' % j if j else ''}
+            if style == 1:
+                # Variant in which we postpone the dereferenciation.
+                # Used when scatter_vec needs this reference.
+                return "%(name)s + %(value)s" % \
+                    {'name': self.c_arg_name(i),
+                     'value': value}
+            return "%(name)s[%(value)s]" % \
                 {'name': self.c_arg_name(i),
-                 'map_name': self.c_map_name(i, 0),
-                 'idx': idx,
-                 'top': ' + start_layer' if is_top else '',
-                 'dim': self.data[i].cdim,
-                 'off': ' + %d' % j if j else '',
-                 'off_mul': ' * %d' % offset if is_top and offset is not None else '',
-                 'off_add': ' + %d' % offset if not is_top and offset is not None else ''}
+                 'value': value}
         return "%(name)s + (%(map_name)s[i * %(arity)s + %(idx)s]%(top)s%(off_mul)s%(off_add)s)* %(dim)s%(off)s" % \
             {'name': self.c_arg_name(i),
              'map_name': self.c_map_name(i, 0),
@@ -175,14 +180,23 @@ class Arg(base.Arg):
              'off_mul': ' * %d' % offset if is_top and offset is not None else '',
              'off_add': ' + %d' % offset if not is_top and offset is not None else ''}
 
-    def c_ind_data_xtr(self, idx, i, j=0):
+    def c_ind_data_xtr(self, idx, i, j=0, style=configuration["hpc_code_gen"]):
         if configuration["hpc_code_gen"] == 2:
-            return "%(name)s[(xtr_%(map_name)s[%(idx)s])*%(dim)s%(off)s]" % \
-                {'name': self.c_arg_name(i),
-                 'map_name': self.c_map_name(i, 0),
+            value = "(xtr_%(map_name)s[%(idx)s])*%(dim)s%(off)s" % \
+                {'map_name': self.c_map_name(i, 0),
                  'idx': idx,
                  'dim': 1 if self._flatten else str(self.data[i].cdim),
                  'off': ' + %d' % j if j else ''}
+            if style == 1:
+                # Variant in which we postpone the dereferenciation.
+                # Used when scatter_vec needs this reference.
+                return "%(name)s + %(value)s" % \
+                    {'name': self.c_arg_name(i),
+                     'value': value}
+            # Otherwise use the actual value
+            return "%(name)s[%(value)s]" % \
+                {'name': self.c_arg_name(i),
+                 'value': value}
         return "%(name)s + (xtr_%(map_name)s[%(idx)s])*%(dim)s%(off)s" % \
             {'name': self.c_arg_name(i),
              'map_name': self.c_map_name(i, 0),
@@ -199,7 +213,7 @@ class Arg(base.Arg):
     def c_local_tensor_name(self, i, j):
         return self.c_kernel_arg_name(i, j)
 
-    def c_kernel_arg(self, count, i=0, j=0, shape=(0,), layers=1):
+    def c_kernel_arg(self, count, i=0, j=0, shape=(0,), layers=1, style=configuration["hpc_code_gen"]):
         if self._is_dat_view and not self._is_direct:
             raise NotImplementedError("Indirect DatView not implemented")
         if self._uses_itspace:
@@ -215,7 +229,7 @@ class Arg(base.Arg):
                     raise RuntimeError("Don't know how to pass kernel arg %s" % self)
             else:
                 if self.data is not None and self.data.dataset._extruded:
-                    return self.c_ind_data_xtr("i_%d" % self.idx.index, i)
+                    return self.c_ind_data_xtr("i_%d" % self.idx.index, i, style=style)
                 elif self._flatten:
                     return "%(name)s + %(map_name)s[i * %(arity)s + i_0 %% %(arity)d] * %(dim)s + (i_0 / %(arity)d)" % \
                         {'name': self.c_arg_name(),
@@ -223,11 +237,11 @@ class Arg(base.Arg):
                          'arity': self.map.arity,
                          'dim': self.data[i].cdim}
                 else:
-                    return self.c_ind_data("i_%d" % self.idx.index, i)
+                    return self.c_ind_data("i_%d" % self.idx.index, i, style=style)
         elif self._is_indirect:
             if self._is_vec_map:
                 return self.c_vec_name()
-            return self.c_ind_data(self.idx, i)
+            return self.c_ind_data(self.idx, i, style=style)
         elif self._is_global_reduction:
             return self.c_global_reduction_name(count)
         elif isinstance(self.data, Global):
@@ -245,10 +259,15 @@ class Arg(base.Arg):
         is_top_init = is_top
         val = []
         vec_idx = 0
+        # When flattening the arg, the xtr_...[*]
+        # needs to be flattened only within a dimension.
+        # When the dimension changes, the map_idx needs to be reset.
+        map_idx = 0
         for i, (m, d) in enumerate(zip(self.map, self.data)):
             is_top = is_top_init and m.iterset._extruded
             if self._flatten:
                 for k in range(d.cdim):
+                    map_idx = 0
                     for idx in range(m.arity):
                         val.append("%(vec_name)s[%(idx)s] = %(data)s" %
                                    {'vec_name': self.c_vec_name(),
@@ -256,6 +275,7 @@ class Arg(base.Arg):
                                     'data': self.c_ind_data(idx, i, k, is_top=is_top,
                                                             offset=m.offset[idx] if is_top else None)})
                         vec_idx += 1
+                        map_idx += 1
                     # In the case of interior horizontal facets the map for the
                     # vertical does not exist so it has to be dynamically
                     # created by adding the offset to the map of the current
@@ -263,13 +283,26 @@ class Arg(base.Arg):
                     # the bottom layer of cells and the wrapper will make sure
                     # to stage in the data for the entire map spanning the facet.
                     if is_facet:
-                        for idx in range(m.arity):
-                            val.append("%(vec_name)s[%(idx)s] = %(data)s" %
-                                       {'vec_name': self.c_vec_name(),
-                                        'idx': vec_idx,
-                                        'data': self.c_ind_data(idx, i, k, is_top=is_top,
-                                                                offset=m.offset[idx])})
-                            vec_idx += 1
+                        # In the case of the simplified code gen, we have 
+                        # to pass the vec_idx value becuase now the maps have
+                        # already been flattened when the xtr_...[*] was populated.
+                        if configuration["hpc_code_gen"] == 2:
+                            for idx in range(m.arity):
+                                val.append("%(vec_name)s[%(idx)s] = %(data)s" %
+                                           {'vec_name': self.c_vec_name(),
+                                            'idx': vec_idx,
+                                            'data': self.c_ind_data(map_idx, i, k, is_top=is_top,
+                                                                    offset=m.offset[idx])})
+                                vec_idx += 1
+                                map_idx += 1
+                        else:
+                            for idx in range(m.arity):
+                                val.append("%(vec_name)s[%(idx)s] = %(data)s" %
+                                           {'vec_name': self.c_vec_name(),
+                                            'idx': vec_idx,
+                                            'data': self.c_ind_data(idx, i, k, is_top=is_top,
+                                                                    offset=m.offset[idx])})
+                                vec_idx += 1
             else:
                 for idx in range(m.arity):
                     val.append("%(vec_name)s[%(idx)s] = %(data)s" %
@@ -279,13 +312,23 @@ class Arg(base.Arg):
                                                         offset=m.offset[idx] if is_top else None)})
                     vec_idx += 1
                 if is_facet:
-                    for idx in range(m.arity):
-                        val.append("%(vec_name)s[%(idx)s] = %(data)s" %
-                                   {'vec_name': self.c_vec_name(),
-                                    'idx': vec_idx,
-                                    'data': self.c_ind_data(idx, i, is_top=is_top,
-                                                            offset=m.offset[idx])})
-                        vec_idx += 1
+                    if configuration["hpc_code_gen"] == 2:
+                        for idx in range(m.arity):
+                            val.append("%(vec_name)s[%(idx)s] = %(data)s" %
+                                       {'vec_name': self.c_vec_name(),
+                                        'idx': vec_idx,
+                                        'data': self.c_ind_data(vec_idx, i, is_top=is_top,
+                                                                offset=m.offset[idx])})
+                            vec_idx += 1
+                    else:
+                        for idx in range(m.arity):
+                            val.append("%(vec_name)s[%(idx)s] = %(data)s" %
+                                       {'vec_name': self.c_vec_name(),
+                                        'idx': vec_idx,
+                                        'data': self.c_ind_data(idx, i, is_top=is_top,
+                                                                offset=m.offset[idx])})
+                            vec_idx += 1
+
         return ";\n".join(val)
 
     def c_addto(self, i, j, buf_name, tmp_name, tmp_decl,
@@ -512,13 +555,47 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
         for i, (map, dset) in enumerate(zip(as_tuple(self.map, Map), dsets)):
             for j, (m, d) in enumerate(zip(map, dset)):
                 dim = m.arity
-                # TODO: I think that this is not needed even for scheme 1. Need to check that
-                if self._is_dat and self._flatten and configuration["hpc_code_gen"] == 1:
+                if self._is_dat and self._flatten:
                     dim *= d.cdim
                 if is_facet:
                     dim *= 2
                 val.append("int xtr_%(name)s[%(dim)s];" %
                            {'name': self.c_map_name(i, j), 'dim': dim})
+        return '\n'.join(val)+'\n'
+
+    def c_map_decl_s2(self, is_facet=False):
+        val = []
+        for i, (m, d) in enumerate(zip(self.map, self.data)):
+            dim = m.arity
+            # if self._is_dat and self._flatten:
+            #     dim *= d.cdim
+            if is_facet:
+                dim *= 2
+            val.append("int xtr_%(name)s[%(dim)s];" %
+                       {'name': self.c_map_name(i, 0), 'dim': dim})
+        return '\n'.join(val)+'\n'
+
+    def c_map_init_s2(self, is_top=False, is_facet=False):
+        is_top_init = is_top
+        val = []
+        for i, (m, d) in enumerate(zip(self.map, self.data)):
+            is_top = is_top_init and m.iterset._extruded
+            map_idx = 0
+            for idx in range(m.arity):
+                val.append("xtr_%(name)s[%(ind)s] = *(%(name)s + i * %(dim)s + %(ind)s)%(off_top)s;" %
+                           {'name': self.c_map_name(i, 0),
+                            'dim': m.arity,
+                            'ind': idx,
+                            'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else ''})
+            if is_facet:
+                for idx in range(m.arity):
+                    val.append("xtr_%(name)s[%(ind)s] = *(%(name)s + i * %(dim)s + %(ind_zero)s)%(off_top)s%(off)s;" %
+                               {'name': self.c_map_name(i, 0),
+                                'dim': m.arity,
+                                'ind': m.arity + idx,
+                                'ind_zero': idx,
+                                'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else '',
+                                'off': ' + ' + str(m.offset[idx])})
         return '\n'.join(val)+'\n'
 
     def c_map_init(self, is_top=False, is_facet=False):
@@ -531,7 +608,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
             for j, (m, d) in enumerate(zip(map, dset)):
                 for idx in range(m.arity):
                     # TODO: The flattened version might not be needed. Check that.
-                    if self._is_dat and self._flatten and d.cdim > 1 and configuration["hpc_code_gen"] == 1:
+                    if self._is_dat and self._flatten and d.cdim > 1:
                         for k in range(d.cdim):
                             val.append("xtr_%(name)s[%(ind_flat)s] = %(dat_dim)s * (*(%(name)s + i * %(dim)s + %(ind)s)%(off_top)s)%(offset)s;" %
                                        {'name': self.c_map_name(i, j),
@@ -549,7 +626,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                                     'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else ''})
                 if is_facet:
                     for idx in range(m.arity):
-                        if self._is_dat and self._flatten and d.cdim > 1 and configuration["hpc_code_gen"] == 1:
+                        if self._is_dat and self._flatten and d.cdim > 1:
                             for k in range(d.cdim):
                                 val.append("xtr_%(name)s[%(ind_flat)s] = %(dat_dim)s * (*(%(name)s + i * %(dim)s + %(ind)s)%(off)s)%(offset)s;" %
                                            {'name': self.c_map_name(i, j),
@@ -643,7 +720,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                 continue
             for j, (m, d) in enumerate(zip(map, dset)):
                 for idx in range(m.arity):
-                    if self._is_dat and self._flatten and d.cdim > 1 and configuration["hpc_code_gen"] == 1:
+                    if self._is_dat and self._flatten and d.cdim > 1:
                         for k in range(d.cdim):
                             val.append("xtr_%(name)s[%(ind_flat)s] += %(off)d * %(dim)s;" %
                                        {'name': self.c_map_name(i, j),
@@ -657,7 +734,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                                     'ind': idx})
                 if is_facet:
                     for idx in range(m.arity):
-                        if self._is_dat and self._flatten and d.cdim > 1 and not configuration["hpc_code_gen"] == 1:
+                        if self._is_dat and self._flatten and d.cdim > 1:
                             for k in range(d.cdim):
                                 val.append("xtr_%(name)s[%(ind_flat)s] += %(off)d * %(dim)s;" %
                                            {'name': self.c_map_name(i, j),
@@ -669,6 +746,47 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                                        {'name': self.c_map_name(i, j),
                                         'off': m.offset[idx],
                                         'ind': m.arity + idx})
+        return '\n'.join(val)+'\n'
+
+    # def c_add_offset_map_s2(self, is_facet=False):
+    #     if not self.map.iterset._extruded:
+    #         return ""
+    #     val = []
+    #     for i, (m, d) in enumerate(zip(self.map, self.data)):
+    #         for idx in range(m.arity):
+    #             val.append("xtr_%(name)s[%(ind)s] += %(off)d;" %
+    #                        {'name': self.c_map_name(i, 0),
+    #                         'off': m.offset[idx],
+    #                         'ind': idx})
+    #         if is_facet:
+    #             for idx in range(m.arity):
+    #                 val.append("xtr_%(name)s[%(ind)s] += %(off)d;" %
+    #                            {'name': self.c_map_name(i, 0),
+    #                             'off': m.offset[idx],
+    #                             'ind': m.arity + idx})
+    #     return '\n'.join(val)+'\n'
+
+    def c_add_offset_s2(self, is_facet=False):
+        if not self.map.iterset._extruded:
+            return ""
+        val = []
+        vec_idx = 0
+        for i, (m, d) in enumerate(zip(self.map, self.data)):
+            for idx in range(m.arity):
+                val.append("xtr_%(name)s[%(j)d] += %(offset)d;" %
+                           {'name': self.c_map_name(i, 0),
+                            'j': vec_idx,
+                            'offset': m.offset[idx],
+                            'dim': d.cdim})
+                vec_idx += 1
+            if is_facet:
+                for idx in range(m.arity):
+                    val.append("xtr_%(name)s[%(j)d] += %(offset)d;" %
+                               {'name': self.c_map_name(i, 0),
+                                'j': vec_idx,
+                                'offset': m.offset[idx],
+                                'dim': d.cdim})
+                    vec_idx += 1
         return '\n'.join(val)+'\n'
 
     def c_offset_init(self):
@@ -716,6 +834,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
 
     def c_buffer_gather(self, size, idx, buf_name):
         dim = 1 if self._flatten else self.data.cdim
+        # from IPython import embed; embed()
         return ";\n".join(["%(name)s[i_0*%(dim)d%(ofs)s] = *(%(ind)s%(ofs)s);\n" %
                            {"name": buf_name,
                             "dim": dim,
@@ -724,8 +843,10 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
 
     def c_buffer_scatter_vec(self, count, i, j, mxofs, buf_name):
         dim = 1 if self._flatten else self.data.split[i].cdim
+        # Style = 1 means that we always want a reference even when the
+        # simplified code generation is used.
         return ";\n".join(["*(%(ind)s%(nfofs)s) %(op)s %(name)s[i_0*%(dim)d%(nfofs)s%(mxofs)s]" %
-                           {"ind": self.c_kernel_arg(count, i, j),
+                           {"ind": self.c_kernel_arg(count, i, j, style=1),
                             "op": "=" if self.access == WRITE else "+=",
                             "name": buf_name,
                             "dim": dim,
@@ -937,7 +1058,7 @@ class JITModule(base.JITModule):
             wrapper_code["times_loop_start"] = "for(int times=0; times<%(times)s; times++){\n" % {'times': str(configuration['times'])}
             wrapper_code["times_loop_end"] = "}"
 
-    def hpc_debug(wrapper_code):
+    def hpc_debug(self, wrapper_code):
         # TODO: identify which arg it is and print the addtional info
         # TODO: send size as argument
         # Print contributions
@@ -948,6 +1069,8 @@ class JITModule(base.JITModule):
             }
             printf("\\n");
             """
+        else:
+            wrapper_code["print_contrib"] = ""
 
     # Add flags required to compile with profiling and/or debugging
     def flags(self, cppargs, more_args, ldargs):
@@ -1187,8 +1310,11 @@ def wrapper_snippets(itspace, args,
     if configuration["hpc_code_gen"] == 2:
         # _map_decl += ';\n'.join([arg.c_map_decl(is_facet=is_facet) for arg in args if not arg._is_global])
         # _map_init += ';\n'.join([arg.c_map_init(is_top=is_top, is_facet=is_facet) for arg in args if not arg._is_global])
-        _map_decl += ';\n'.join([arg.c_map_decl(is_facet=is_facet) for arg in args if arg._is_vec_map])
-        _map_init += ';\n'.join([arg.c_map_init(is_top=is_top, is_facet=is_facet) for arg in args if arg._is_vec_map])
+        # _map_decl += ';\n'.join([arg.c_map_decl(is_facet=is_facet) for arg in args if arg._is_vec_map or arg._is_mat])
+        # _map_init += ';\n'.join([arg.c_map_init(is_top=is_top, is_facet=is_facet) for arg in args if arg._is_vec_map or arg._is_mat])
+        # _map_decl += ';\n'.join([arg.c_map_decl(is_facet=is_facet) for arg in args if arg._uses_itspace or arg._is_vec_map])
+        _map_decl += ';\n'.join([arg.c_map_decl_s2(is_facet=is_facet) for arg in args if arg._is_vec_map])
+        _map_init += ';\n'.join([arg.c_map_init_s2(is_top=is_top, is_facet=is_facet) for arg in args if arg._is_vec_map])
     if itspace._extruded:
         _off_args = []
         for arg in args:
@@ -1203,20 +1329,32 @@ def wrapper_snippets(itspace, args,
         _call_decl += ["int layers = %(size)s;" % {"size": str(itspace.layers - 1)}]
         _call_decl += ["double* other_args = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};"]
         _call_args += ["0", "layers", "other_args"]
-        if configuration["hpc_code_gen"] == 1:
-            _map_decl += ';\n'.join([arg.c_map_decl(is_facet=is_facet)
-                                     for arg in args if arg._uses_itspace])
-            _map_init += ';\n'.join([arg.c_map_init(is_top=is_top, is_facet=is_facet)
-                                     for arg in args if arg._uses_itspace])
+        # if configuration["hpc_code_gen"] == 1:
+        _map_decl += ';\n'.join([arg.c_map_decl(is_facet=is_facet)
+                                 for arg in args if arg._uses_itspace])
+        _map_init += ';\n'.join([arg.c_map_init(is_top=is_top, is_facet=is_facet)
+                                 for arg in args if arg._uses_itspace])
         _map_bcs_m += ';\n'.join([arg.c_map_bcs("-", is_facet) for arg in args if arg._is_mat])
         _map_bcs_p += ';\n'.join([arg.c_map_bcs("+", is_facet) for arg in args if arg._is_mat])
+        _apply_offset += ';\n'.join([arg.c_add_offset_map(is_facet=is_facet)
+                                     for arg in args if arg._uses_itspace])
         if configuration["hpc_code_gen"] == 2:
-            _apply_offset += ';\n'.join([arg.c_add_offset_map(is_facet=is_facet) for arg in args if arg._is_vec_map])
+            _apply_offset += ';\n'.join([arg.c_add_offset_s2(is_facet=is_facet)
+                                         for arg in args if arg._is_vec_map])
         else:
-            _apply_offset += ';\n'.join([arg.c_add_offset_map(is_facet=is_facet)
-                                         for arg in args if arg._uses_itspace])
             _apply_offset += ';\n'.join([arg.c_add_offset(is_facet=is_facet)
                                          for arg in args if arg._is_vec_map])
+        # if configuration["hpc_code_gen"] == 2:
+        #     # _apply_offset += ';\n'.join([arg.c_add_offset_map(is_facet=is_facet) for arg in args if arg._is_vec_map or arg._is_mat])
+        #     _apply_offset += ';\n'.join([arg.c_add_offset_map_s2(is_facet=is_facet)
+        #                                  for arg in args if arg._is_vec_map])
+        # else:
+        #     # _apply_offset += ';\n'.join([arg.c_add_offset_map(is_facet=is_facet)
+        #     #                              for arg in args if arg._uses_itspace])
+        #     _apply_offset += ';\n'.join([arg.c_add_offset(is_facet=is_facet)
+        #                                  for arg in args if arg._is_vec_map])
+        # _apply_offset += ';\n'.join([arg.c_add_offset_map(is_facet=is_facet)
+        #                                  for arg in args if arg._uses_itspace])
         _extr_loop = '\n' + extrusion_loop()
         _extr_loop_close = '}\n'
 

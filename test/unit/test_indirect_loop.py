@@ -37,6 +37,7 @@ import random
 
 from pyop2 import op2
 from pyop2.exceptions import MapValueError, IndexValueError
+from pyop2.configuration import configure
 
 from coffee.base import *
 
@@ -252,9 +253,11 @@ class TestMixedIndirectLoop:
         kernel_inc = """void kernel_inc(double **d, double *x) {
           d[0][0] += x[0]; d[1][0] += x[0];
         }"""
-        op2.par_loop(op2.Kernel(kernel_inc, "kernel_inc"), iterset,
-                     mdat(op2.INC, mmap),
-                     d(op2.READ))
+
+        with configure("hpc_code_gen", 1):
+            op2.par_loop(op2.Kernel(kernel_inc, "kernel_inc"), iterset,
+                         mdat(op2.INC, mmap),
+                         d(op2.READ))
         assert all(mdat[0].data == 1.0) and mdat[1].data == 4096.0
 
     def test_mixed_non_mixed_dat_itspace(self, backend, mdat, mmap, iterset):

@@ -36,6 +36,7 @@ import numpy
 import random
 from pyop2 import plan
 from pyop2 import op2
+from pyop2.configuration import configuration
 
 from coffee.base import *
 
@@ -726,7 +727,16 @@ void kernel_swap(unsigned int* x[2])
   x[0][1] = t;
 }
 """
-
+        if configuration["hpc_code_gen"] == 2:
+            kernel_swap = """
+void kernel_swap(unsigned int x[2])
+{
+  unsigned int t;
+  t = x[0];
+  x[0] = x[1];
+  x[1] = t;
+}
+"""
         op2.par_loop(op2.Kernel(kernel_swap, "kernel_swap"),
                      iterset,
                      x2(op2.RW, iter2ind2))
