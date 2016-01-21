@@ -146,6 +146,7 @@ class ParLoop(host.ParLoop):
         with timed_region("ParLoop kernel"):
             # time = fun(*self._jit_args, argtypes=self._argtypes, restype=ctypes.c_double)
             print " => Start Sequential Execution"
+            # print self._jitmodule._code_to_compile
             time = fun(part.offset, part.offset + part.size, *arglist)
             print " => Finish Sequential Execution"
             if configuration['hpc_save_result']:

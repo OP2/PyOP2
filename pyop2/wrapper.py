@@ -167,6 +167,13 @@ def compose_wrapper(backend="sequential"):
     wrapper += """
         %(buffer_decl)s;
         %(buffer_gather)s
+    """
+    if configuration["hpc_debug"]:
+        wrapper += """
+        %(print_arg_vecs)s
+        """
+
+    wrapper += """
 
         %(kernel_name)s(%(kernel_args)s);
     """

@@ -1985,7 +1985,6 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
             except ValueError:
                 return
 
-        print "------------->>>>> BETTER NOT BE IN HERE"
         with configure("hpc_save_result", False):
             with configure("hpc_check_result", False):
                 with configure("hpc_code_gen", 1):

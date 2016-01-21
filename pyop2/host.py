@@ -775,7 +775,8 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
             for idx in range(m.arity):
                 val.append("xtr_%(name)s[%(j)d] += %(offset)d;" %
                            {'name': self.c_map_name(i, 0),
-                            'j': vec_idx,
+                            'j': idx,
+                            # 'j': vec_idx
                             'offset': m.offset[idx],
                             'dim': d.cdim})
                 vec_idx += 1
@@ -896,6 +897,7 @@ class JITModule(base.JITModule):
         self.set_argtypes(itspace.iterset, *args)
         self._flops_per_cell = 0
         self._cycles_per_cell = 0
+        self._code_to_compile = ""
         self.compile()
 
     @collective
@@ -1061,10 +1063,29 @@ class JITModule(base.JITModule):
     def hpc_debug(self, wrapper_code):
         # TODO: identify which arg it is and print the addtional info
         # TODO: send size as argument
+        print_arg_vecs = ""
+        for arg in self._args:
+            if arg._is_vec_map:
+                # TODO: This is not taking into consideration the facet
+                # For facets not all values will be printed (only half will vbe printed)
+                cdim = arg.data.cdim if arg._flatten else 1
+                print_arg_vecs += """
+                printf("%(name)s : ");
+                for(int ii=0; ii<%(size)s; ii++){
+                    printf(" %%f ", %(star)s(%(name)s[ii]));
+                }
+                printf("\\n");
+                """ % {"name": arg.c_vec_name(),
+                       "size": arg.map.arity,
+                       'star': "" if configuration["hpc_code_gen"] == 2 else "*"}
+
+
+        wrapper_code["print_arg_vecs"] = print_arg_vecs
+
         # Print contributions
         if any(arg._uses_itspace and arg.access in [WRITE, INC] and not arg._is_mat for arg in self._args):
             wrapper_code["print_contrib"] = """
-            for(int ii=0; ii<6; ii++){
+            for(int ii=0; ii<3; ii++){
                 printf(" %f ", buffer_arg0_0[ii]);
             }
             printf("\\n");
@@ -1157,6 +1178,7 @@ class JITModule(base.JITModule):
         if self._kernel._cpp:
             extension = "cpp"
 
+        self._code_to_compile = code_to_compile
         self._fun = compilation.load(code_to_compile,
                                      extension,
                                      self._wrapper_name,
