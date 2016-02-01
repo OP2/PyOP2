@@ -2907,7 +2907,8 @@ class Map(object):
 
     @validate_type(('iterset', Set, SetTypeError), ('toset', Set, SetTypeError),
                    ('arity', int, ArityTypeError), ('name', str, NameTypeError))
-    def __init__(self, iterset, toset, arity, values=None, name=None, offset=None, parent=None, bt_masks=None):
+    def __init__(self, iterset, toset, arity, values=None, name=None, offset=None, parent=None,
+                 bt_masks=None, local_distribution=None, transposed_offsets=None):
         self._iterset = iterset
         self._toset = toset
         self._arity = arity
@@ -2925,6 +2926,8 @@ class Map(object):
         # the application of strong boundary conditions
         self._bottom_mask = {}
         self._top_mask = {}
+        self._local_distribution = local_distribution
+        self._transposed_offsets = transposed_offsets
 
         if offset is not None and bt_masks is not None:
             for name, mask in bt_masks.iteritems():
@@ -3049,6 +3052,21 @@ class Map(object):
     def bottom_mask(self):
         """The bottom layer mask to be applied on a mesh cell."""
         return self._bottom_mask
+
+    @cached_property
+    def local_distribution(self):
+        """Distribution of mapped values on the cell."""
+        return self._dof_distribution
+
+    @cached_property
+    def transposed_offsets(self):
+        """The map has been transposed."""
+        return self._transposed_offsets
+
+    def location_sets(self):
+        """Split the local values based on the cell entities they are attached to."""
+        loc = get_dof_sets(self._local_distribution)
+        return loc
 
     def __str__(self):
         return "OP2 Map: %s from (%s) to (%s) with arity %s" \

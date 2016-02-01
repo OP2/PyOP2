@@ -104,6 +104,15 @@ def compose_wrapper(backend="sequential"):
     if configuration["hpc_profiling"]:
         wrapper += """
         %(timer_declare)s
+        """
+
+    if configuration["hpc_code_gen"] == 3:
+        wrapper +="""
+        %(transpose_arg)s
+        """
+
+    if configuration["hpc_profiling"]:
+        wrapper += """
         %(timer_start)s
         """
 
@@ -139,6 +148,7 @@ def compose_wrapper(backend="sequential"):
 
     wrapper += """
         int i = %(index_expr)s;
+        int layers = %(layer_comp)s;
     """
 
     if configuration["hpc_code_gen"] == 1:
@@ -151,7 +161,7 @@ def compose_wrapper(backend="sequential"):
         %(extr_loop)s
         """
 
-    if configuration["hpc_code_gen"] == 2:
+    if configuration["hpc_code_gen"] in [2, 3]:
         wrapper += """
         %(vec_inits)s;
         """
@@ -246,13 +256,24 @@ def compose_openmp4_wrapper():
     if configuration["hpc_profiling"]:
         wrapper += """
         %(timer_declare)s
+        """
+
+    if configuration["hpc_code_gen"] == 3:
+        wrapper +="""
+        %(transpose_arg)s
+        """
+
+    if configuration["hpc_profiling"]:
+        wrapper += """
         %(timer_start)s
         """
+
     wrapper += """
         %(offload_one)s
         %(parallel_pragma_one)s
         {
         """
+
     if configuration["times"] > 1:
         wrapper += """
             %(times_loop_start)s
@@ -262,6 +283,7 @@ def compose_openmp4_wrapper():
             %(parallel_pragma_two)s
             for ( int n = start; n < end; n++ ) {
                 int i = %(index_expr)s;
+                int layers = %(layer_comp)s;
 
                 //inits must happen here in the offloaded region
                 %(wrapper_decs)s;
@@ -279,7 +301,7 @@ def compose_openmp4_wrapper():
                 %(parallel_pragma_three)s
                 %(extr_loop)s
     """
-    if configuration["hpc_code_gen"] == 2:
+    if configuration["hpc_code_gen"] in [2, 3]:
         wrapper += """
                 %(vec_inits)s;
         """

@@ -452,3 +452,21 @@ def snapr_available():
     except ImportError:
         return False
     return True
+
+def get_dof_sets(local_distribution):
+    # This routine initializes analysis using IACA (Intel Only)
+    try:
+        from transpose import snapr_dof_sets
+        return snapr_dof_sets(local_distribution)
+    except ImportError:
+        print "PyOP2 Warning: Cannot fetch dof sets. SNAPR has not been found."
+        return [], [], [], []
+
+def transpose(old_map, local_distribution, layers, offset):
+    # This routine initializes analysis using IACA (Intel Only)
+    try:
+        from transpose import snapr_transpose
+        return snapr_transpose(old_map, local_distribution, layers, offset)
+    except ImportError:
+        print "PyOP2 Warning: Cannot fetch map for transposed data. SNAPR has not been found."
+        return old_map
