@@ -163,7 +163,7 @@ class Arg(base.Arg):
             value = "xtr_%(map_name)s[%(idx)s]%(dim)s%(off)s%(layers)s%(layer_it_var)s" % \
                     {'map_name': self.c_map_name(i, 0),
                      'idx': idx,
-                     'dim': "* %d" % self.data[i].cdim if configuration["hpc_code_gen"] == 2 else "",
+                     'dim': "* %d" % self.data[i].cdim if not apply_scheme_3 else "",
                      'off': ' + %d' % j if j else '',
                      'layers': (" * (layers + 1)" if not idx in extruded else " * layers") if j and apply_scheme_3 else '',
                      'layer_it_var': " + j_0" if apply_scheme_3 else ""}
@@ -273,10 +273,11 @@ class Arg(base.Arg):
         map_idx = 0
         for i, (m, d) in enumerate(zip(self.map, self.data)):
             is_top = is_top_init and m.iterset._extruded
+            # TODO: Fix the passing down of the information for Scheme 3.
             reps = None
             xtrs = None
             if m.iterset._extruded:
-                reps, xtrs, _, _ = m.location_sets()
+                reps, xtrs = m.transposed_location_sets
             if self._flatten:
                 for k in range(d.cdim):
                     map_idx = 0
@@ -622,49 +623,55 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
         for i, (m, d) in enumerate(zip(self.map, self.data)):
             is_top = is_top_init and m.iterset._extruded
             map_idx = 0
-            reps = []
-            xtrs = []
-            if m.iterset._extruded:
-                reps, xtrs, _, _ = m.location_sets()
+            reps, xtrs = m.transposed_location_sets
             for idx in range(m.arity):
-                # reps and xtrs have been populated and they contain one of the
-                if not (reps or xtrs):
-                    # Same as scheme 2
-                    val.append("xtr_%(name)s[%(ind)s] = *(%(name)s + i * %(dim)s + %(ind)s)%(off_top)s;" %
+                # TODO: For now we only support extruded. Add non-extruded later.
+                if not m.iterset._extruded or not m.transposable():
+                    # Default to scheme 2
+                    # TODO: This is where the non-extruded case goes.
+                    val.append("xtr_%(name)s[%(ind)s] = (*(%(name)s + i * %(dim)s + %(ind)s)%(off_top)s);" %
                            {'name': self.c_map_name(i, 0),
                             'dim': m.arity,
                             'ind': idx,
-                            'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else ''})
+                            'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else '',
+                            'cdim': " * %d" % self.data[i].cdim})
                 elif idx in reps or idx in xtrs:
                     # Scheme 3
-                    val.append("xtr_%(name)s[%(ind)s] = (*(%(name)s + i * %(dim)s + %(ind)s) %(transposed)s %(off_top)s)%(cdim)s;" %
+                    # We eliminate the IDs which are not in either of the sets, they have to be skipped.
+                    # printf(\"XTR: %%d (old map: %%d, start: %%d, end: %%d) \\n\", xtr_%(name)s[%(ind)s], %(name)s[i * %(dim)s + %(ind)s], start, end);
+                    val.append("xtr_%(name)s[%(ind)s] = (*(%(name)s + i * %(dim)s + %(ind)s) %(transposed)s)%(cdim)s;" %
                                {'name': self.c_map_name(i, 0),
                                 'dim': m.arity,
                                 'ind': idx,
                                 'transposed': "+ transposed_offset_%s[%d]" % (self.c_arg_name(i), idx),
-                                'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else '',
+                                'off_top': ' + start_layer ' if is_top else '',
                                 'cdim': " * %d" % self.data[i].cdim})
                     if idx in reps:
-                        val.append("xtr_%(name)s[%(ind_zero)s] = (*(%(name)s + i * %(dim)s + %(ind)s) %(transposed)s %(off_top)s)%(cdim)s + 1;" %
+                        # The repeated values increase the size of the column by one.
+                        # TODO: Take the value from the previous computed value.
+                        val.append("xtr_%(name)s[%(ind_zero)s] = xtr_%(name)s[%(ind)s] + 1;" %
                                    {'name': self.c_map_name(i, 0),
-                                    'dim': m.arity,
                                     'ind_zero': idx + 1,
-                                    'ind': idx,
-                                    'transposed': "+ transposed_offset_%s[%d]" % (self.c_arg_name(i), idx),
-                                    'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else '',
-                                    'cdim': " * %d" % self.data[i].cdim})
+                                    'ind': idx})
             if is_facet:
                 # Same as scheme 2 TODO: Make it like SCHEME 3!
                 for idx in range(m.arity):
-                    val.append("xtr_%(name)s[%(ind)s] = (*(%(name)s + i * %(dim)s + %(ind_zero)s %(transposed)s) %(transposed)s %(off_top)s%(off)s))%(cdim)s;" %
+                    if not m.iterset._extruded or not m.transposable():
+                        # Scheme 2
+                        val.append("xtr_%(name)s[%(ind)s] = *(%(name)s + i * %(dim)s + %(ind_zero)s)%(off_top)s%(off)s;" %
                                {'name': self.c_map_name(i, 0),
                                 'dim': m.arity,
                                 'ind': m.arity + idx,
                                 'ind_zero': idx,
-                                'transposed': "+ transposed_offset_%s[%d]" % (self.c_arg_name(i), idx),
                                 'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else '',
-                                'off': ' + ' + str(m.offset[idx]),
-                                'cdim': " * %d" % self.data[i].cdim})
+                                'off': ' + ' + str(m.offset[idx])})
+                    else:
+                        # Scheme 3
+                        # Offset is always 1
+                        val.append("xtr_%(name)s[%(ind)s] = xtr_%(name)s[%(ind_zero)s] + 1; // int facet" %
+                                   {'name': self.c_map_name(i, 0),
+                                    'ind': m.arity + idx,
+                                    'ind_zero': idx})
         return '\n'.join(val)+'\n'
 
     def c_map_init(self, is_top=False, is_facet=False):
@@ -823,6 +830,11 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
         val = []
         vec_idx = 0
         for i, (m, d) in enumerate(zip(self.map, self.data)):
+            # If the map can be tranposed and the code gen is of the
+            # correct type, then it HAS been transposed and the
+            # offset shouldn't be added in this case.
+            if configuration["hpc_code_gen"] == 3 and m.transposable():
+                continue
             for idx in range(m.arity):
                 val.append("xtr_%(name)s[%(j)d] += %(offset)d;" %
                            {'name': self.c_map_name(i, 0),
@@ -908,12 +920,16 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
     def _c_list_to_str(self, list):
         return "{" + ", ".join([str(r) for r in list]) + "};"
 
-    def c_transpose_dat(self):
+    def c_transpose_dat(self, is_subset=False):
         # Transpose the arg to enable coalesced accesses.
         val = []
         # Call the transposing arg function.
         for i, (m, d) in enumerate(zip(self.map, self.data)):
-            reps, xtrs, reps_stride, xtrs_stride = m.location_sets()
+            if m.offset is None or m.transposed_offsets is None:
+                return ""
+            if not m.transposable():
+                return ""
+            reps, xtrs = m.transposed_location_sets
             # 1. Create the declaration of the temporary argument.
             # 2. Create a code block for the calculation to avoid
             #    declaring variables twice.
@@ -924,10 +940,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
             # array, and the dof ID is multiplied with cdim, we also subtract
             # (cdim - 1) from it to make sure that the value is written
             # next to the value.
-            correction = np.zeros(m.arity)
-            for r in reps:
-                correction[r] = 1
-                correction[r + 1] = -1
+            correction = m.transposed_correction
 
             # Perform the transposition for every dat in the arg
             val.append("""
@@ -940,7 +953,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
         rearrange_arg(start, end,
                       %(arg_name)s, %(arg_map_name)s,
                       transposed_offset_%(arg_name)s, original_offset, correction, %(map_arity)s,
-                      end_layer - start_layer, %(cdim)s,
+                      %(layers)s, %(cdim)s, %(ssind)s
                       %(arg_name)s_tmp);
     }
     """ % {'arg_name': self.c_arg_name(i),
@@ -950,6 +963,8 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
            'correction': self._c_list_to_str(correction),
            'map_arity': m.arity,
            'cdim': self.data[i].cdim,
+           'layers': self.data[i].dataset.layers - 1,
+           'ssind': "ssinds," if is_subset else "",
            'arg_map_name': self.c_map_name(i, 0)})
 
         return '\n'.join(val)
@@ -1021,7 +1036,7 @@ class JITModule(base.JITModule):
     def get_c_code(self, kernel_code, wrapper_code):
         # Optimize kernel and then add the rest of the components
         # of the C code.
-        kernel_code = optimize_kernel(self, kernel_code)
+        kernel_code = optimize_kernel(self, kernel_code, wrapper_code["index_expr"] == "ssinds[n]")
 
         strip = lambda code: '\n'.join([l for l in code.splitlines()
                                         if l.strip() and l.strip() != ';'])
@@ -1163,7 +1178,7 @@ class JITModule(base.JITModule):
         # TODO: identify which arg it is and print the addtional info
         # TODO: send size as argument
         print_arg_vecs = ""
-        for arg in self._args:
+        for i, arg in enumerate(self._args):
             if arg._is_vec_map:
                 # TODO: This is not taking into consideration the facet
                 # For facets not all values will be printed (only half will vbe printed)
@@ -1176,7 +1191,8 @@ class JITModule(base.JITModule):
                 printf("\\n");
                 """ % {"name": arg.c_vec_name(),
                        "size": arg.map.arity,
-                       'star': "" if configuration["hpc_code_gen"] in [2, 3] else "*"}
+                       "map_name": arg.c_map_name(i, 0),
+                       "star": "" if configuration["hpc_code_gen"] in [2, 3] else "*"}
 
 
         wrapper_code["print_arg_vecs"] = print_arg_vecs
@@ -1278,7 +1294,6 @@ class JITModule(base.JITModule):
             extension = "cpp"
 
         self._code_to_compile = code_to_compile
-        print code_to_compile
         self._fun = compilation.load(code_to_compile,
                                      extension,
                                      self._wrapper_name,
@@ -1430,7 +1445,6 @@ def wrapper_snippets(itspace, args,
     _off_args = ""
     _transpose_arg = ""
     _layer_comp = "0"
-
     if configuration["hpc_code_gen"] in [2, 3]:
         _map_decl += ';\n'.join([arg.c_map_decl_s2(is_facet=is_facet) for arg in args if arg._is_vec_map])
 
@@ -1467,7 +1481,7 @@ def wrapper_snippets(itspace, args,
 
         # For the arguments transposed in code generation scheme 3 there is no offset addition.
         # This takes place when c_vec_init is called.
-        if configuration["hpc_code_gen"] == 2:
+        if configuration["hpc_code_gen"] in [2, 3]:
             _apply_offset += ';\n'.join([arg.c_add_offset_s2(is_facet=is_facet)
                                          for arg in args if arg._is_vec_map])
         elif configuration["hpc_code_gen"] == 1:
@@ -1476,8 +1490,9 @@ def wrapper_snippets(itspace, args,
         _extr_loop = '\n' + extrusion_loop()
         _extr_loop_close = '}\n'
         if configuration["hpc_code_gen"] == 3:
-            _layer_comp = "end_layer - start_layer"
-            _transpose_arg = ';\n'.join([arg.c_transpose_dat() for arg in args if arg._is_vec_map])
+            _layer_comp = " %d " % (itspace.layers - 1)
+            _transpose_arg = ';\n'.join([arg.c_transpose_dat(is_subset=isinstance(itspace._iterset, Subset))
+                                         for arg in args if arg._is_transposable])
 
     _store_array = ";\n".join(_store_array) + ";\n"
     _load_array = ";\n".join(_load_array) + ";\n"

@@ -470,6 +470,12 @@ class Arg(object):
         return self._is_indirect and self._access is INC
 
     @cached_property
+    def _is_transposable(self):
+        # Currently matrices cannot be transposed.
+        # TODO: add the ability to transpose the map of matrices.
+        return self._is_vec_map and self._is_indirect and not self._is_mat
+
+    @cached_property
     def _uses_itspace(self):
         return self._is_mat or isinstance(self.idx, IterationIndex)
 
@@ -2908,7 +2914,7 @@ class Map(object):
     @validate_type(('iterset', Set, SetTypeError), ('toset', Set, SetTypeError),
                    ('arity', int, ArityTypeError), ('name', str, NameTypeError))
     def __init__(self, iterset, toset, arity, values=None, name=None, offset=None, parent=None,
-                 bt_masks=None, local_distribution=None, transposed_offsets=None):
+                 bt_masks=None, transposed_offsets=None, correction=None, reps=None, xtrs=None):
         self._iterset = iterset
         self._toset = toset
         self._arity = arity
@@ -2926,8 +2932,10 @@ class Map(object):
         # the application of strong boundary conditions
         self._bottom_mask = {}
         self._top_mask = {}
-        self._local_distribution = local_distribution
         self._transposed_offsets = transposed_offsets
+        self._correction = correction
+        self._reps = reps
+        self._xtrs = xtrs
 
         if offset is not None and bt_masks is not None:
             for name, mask in bt_masks.iteritems():
@@ -3054,19 +3062,23 @@ class Map(object):
         return self._bottom_mask
 
     @cached_property
-    def local_distribution(self):
-        """Distribution of mapped values on the cell."""
-        return self._dof_distribution
-
-    @cached_property
     def transposed_offsets(self):
         """The map has been transposed."""
         return self._transposed_offsets
 
-    def location_sets(self):
+    @cached_property
+    def transposed_correction(self):
+        """The map has been transposed."""
+        return self._correction
+
+    @cached_property
+    def transposed_location_sets(self):
         """Split the local values based on the cell entities they are attached to."""
-        loc = get_dof_sets(self._local_distribution)
-        return loc
+        return self._reps, self._xtrs
+
+    def transposable(self):
+        """Return True if the location of the data pointed to by the map is available."""
+        return not (self._reps is None or self._xtrs is None)
 
     def __str__(self):
         return "OP2 Map: %s from (%s) to (%s) with arity %s" \
@@ -3990,6 +4002,15 @@ class JITModule(Cached):
         if configuration['times'] is not None:
             key += ((configuration['times'],))
 
+        # This is needed since we use the total size of the dat
+        # as a constant in the wrapper code.
+        # This needs to be replaced with a parallel algorithm in the
+        # OpenMP4GPU backend.
+        if configuration['hpc_code_gen'] == 3:
+            for arg in args:
+                if arg._is_dat:
+                    key += ((len(arg.data.data),))
+
         # The currently defined Consts need to be part of the cache key, since
         # these need to be uploaded to the device before launching the kernel
         for c in Const._definitions():
@@ -4267,7 +4288,7 @@ class ParLoop(LazyComputation):
                 # configuration['region_name'] = region_name + "_core"
                 fun = self._jitmodule
                 # t, other_measures = self._compute(self.it_space.iterset.core_part)
-                print "Execute core part"
+                print "===> Execute core part <==="
                 t, measures = self._compute(iterset.core_part, fun, *arglist)
                 self.halo_exchange_end()
 
@@ -4279,14 +4300,14 @@ class ParLoop(LazyComputation):
                 # Disable checking and saving results for halos
                 with configure("hpc_save_result", False):
                     with configure("hpc_check_result", False):
-                        print "Execute owned part"
+                        print "===> Execute owned part <==="
                         self._compute(iterset.owned_part, fun, *arglist)
                         self.reduction_begin()
                         if self._only_local:
                             self.reverse_halo_exchange_begin()
                             self.reverse_halo_exchange_end()
                         if self.needs_exec_halo:
-                            print "Execute exec part"
+                            print "===> Execute exec part <==="
                             self._compute(iterset.exec_part, fun, *arglist)
                         self.reduction_end()
                         self.update_arg_data_state()

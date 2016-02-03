@@ -424,11 +424,11 @@ def check_result(arg):
         print "PyOP2 Warning: result cannot be checked. SNAPR has not been found."
 
 
-def optimize_kernel(jitmodule, code):
+def optimize_kernel(jitmodule, code, has_ssind):
     # This routine initializes analysis using IACA (Intel Only)
     try:
         from optimizer import snapr_optimize_kernel
-        return snapr_optimize_kernel(jitmodule, code)
+        return snapr_optimize_kernel(jitmodule, code, has_ssind)
     except ImportError:
         print "PyOP2 Warning: kernel cannot be optimized. SNAPR has not been found."
     return code
@@ -453,15 +453,6 @@ def snapr_available():
         return False
     return True
 
-def get_dof_sets(local_distribution):
-    # This routine initializes analysis using IACA (Intel Only)
-    try:
-        from transpose import snapr_dof_sets
-        return snapr_dof_sets(local_distribution)
-    except ImportError:
-        print "PyOP2 Warning: Cannot fetch dof sets. SNAPR has not been found."
-        return [], [], [], []
-
 def transpose(old_map, local_distribution, layers, offset):
     # This routine initializes analysis using IACA (Intel Only)
     try:
@@ -469,4 +460,4 @@ def transpose(old_map, local_distribution, layers, offset):
         return snapr_transpose(old_map, local_distribution, layers, offset)
     except ImportError:
         print "PyOP2 Warning: Cannot fetch map for transposed data. SNAPR has not been found."
-        return old_map
+        return [], [], [], []
