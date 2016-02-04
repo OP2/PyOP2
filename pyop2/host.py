@@ -889,6 +889,17 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
         if not init:
             init_expr = ""
 
+        if self.writeback_needed():
+            facet_mult = 2 if is_facet else 1
+            cdim = self.data.cdim if self._flatten else 1
+            size = self.map.arity * cdim * facet_mult
+            return "%(typ)s %(name)s%(dim)s%(align)s%(init)s" % \
+                {"typ": buf_type,
+                 "name": buf_name,
+                 "dim": "[%d]" % size,
+                 "align": " " + align,
+                 "init": init_expr}
+
         return "%(typ)s %(name)s%(dim)s%(align)s%(init)s" % \
             {"typ": buf_type,
              "name": buf_name,
@@ -968,6 +979,66 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
            'arg_map_name': self.c_map_name(i, 0)})
 
         return '\n'.join(val)
+
+    def writeback_needed(self):
+        # An explicit writeback is required when using schemes 2 or up
+        # since they do not pass staged pointers but staged values to the
+        # kernel so the kernel cannot change the value in place.
+        # A separate write back is required.
+        return configuration["hpc_code_gen"] in [2, 3] and self.access in [WRITE] and \
+               not self._uses_itspace and self._is_indirect
+
+    def c_result_writeback(self, buf_name, is_top, is_facet=False):
+        is_top_init = is_top
+        val = []
+        vec_idx = 0
+        # When flattening the arg, the xtr_...[*]
+        # needs to be flattened only within a dimension.
+        # When the dimension changes, the map_idx needs to be reset.
+        map_idx = 0
+        for i, (m, d) in enumerate(zip(self.map, self.data)):
+            is_top = is_top_init and m.iterset._extruded
+            if not self._flatten:
+                raise RuntimeError("Error in writeback code generation. This argument is supposed to be flattened.")
+            # TODO: Fix the passing down of the information for Scheme 3.
+            reps = None
+            xtrs = None
+            if m.iterset._extruded:
+                reps, xtrs = m.transposed_location_sets
+            for k in range(d.cdim):
+                map_idx = 0
+                for idx in range(m.arity):
+                    val.append("%(data)s = %(buf_name)s[%(idx)s]" %
+                               {'vec_name': self.c_arg_name(),
+                                'buf_name': buf_name,
+                                'idx': vec_idx,
+                                'data': self.c_ind_data(idx, i, k, is_top=is_top,
+                                                        offset=m.offset[idx] if is_top else None,
+                                                        repeated=reps, extruded=xtrs)})
+                    vec_idx += 1
+                    map_idx += 1
+                # In the case of interior horizontal facets the map for the
+                # vertical does not exist so it has to be dynamically
+                # created by adding the offset to the map of the current
+                # cell. In this way the only map required is the one for
+                # the bottom layer of cells and the wrapper will make sure
+                # to stage in the data for the entire map spanning the facet.
+                if is_facet:
+                    # In the case of the simplified code gen, we have
+                    # to pass the vec_idx value becuase now the maps have
+                    # already been flattened when the xtr_...[*] was populated.
+                    for idx in range(m.arity):
+                        val.append("%(data)s = %(buf_name)s[%(idx)s]" %
+                                   {'vec_name': self.c_arg_name(),
+                                    'idx': vec_idx,
+                                    'buf_name': buf_name,
+                                    'data': self.c_ind_data(map_idx, i, k, is_top=is_top,
+                                                            offset=m.offset[idx],
+                                                            repeated=reps, extruded=xtrs)})
+                        vec_idx += 1
+                        map_idx += 1
+        return ";\n".join(val) + ";"
+
 
     # TODO: remove after writing to dats is transposed.
     def c_free_transpose_dat(self, is_subset=False):
@@ -1309,6 +1380,7 @@ class JITModule(base.JITModule):
             extension = "cpp"
 
         self._code_to_compile = code_to_compile
+        print code_to_compile
         self._fun = compilation.load(code_to_compile,
                                      extension,
                                      self._wrapper_name,
@@ -1444,8 +1516,16 @@ def wrapper_snippets(itspace, args,
          for count, arg in enumerate(args)
          if arg._is_global_reduction])
 
-    _vec_inits = ';\n'.join([arg.c_vec_init(is_top, is_facet=is_facet) for arg in args
-                             if not arg._is_mat and arg._is_vec_map])
+    _vec_inits = ""
+    for arg in args:
+        # When passing the kernel values instead of pointers, the staged
+        # vector can only be used for op2.READ and op2.INC accessed args.
+        # For op2.WRITE args the computed values need to be buffered and
+        # then written back after the kernel application.
+        print not arg._is_mat and arg._is_vec_map and not (configuration["hpc_code_gen"] in [2, 3] and arg.access in [WRITE])
+        if not arg._is_mat and arg._is_vec_map and \
+           not (configuration["hpc_code_gen"] in [2, 3] and arg.access in [WRITE]):
+            _vec_inits += ';\n' + ';\n'.join([arg.c_vec_init(is_top, is_facet=is_facet)])
 
     indent = lambda t, i: ('\n' + '  ' * i).join(t.split('\n'))
 
@@ -1521,9 +1601,12 @@ def wrapper_snippets(itspace, args,
     # - X is written or incremented, then BUFFER is initialized to 0
     # - X is read, then BUFFER gathers data expected by X
     _buf_name, _buf_decl, _buf_gather, _tmp_decl, _tmp_name = {}, {}, {}, {}, {}
+    _add_writeback = ""
     for count, arg in enumerate(args):
-        if not arg._uses_itspace:
-            continue
+        # When working with values directly (Schemes 2&3) we have to write back
+        # the result to args which may not use itspace. (extruded coordinate calculation)
+        if not arg.writeback_needed() and not arg._uses_itspace:
+                continue
         _buf_name[arg] = "buffer_%s" % arg.c_arg_name(count)
         _tmp_name[arg] = "tmp_%s" % _buf_name[arg]
         _buf_size = list(itspace._extents)
@@ -1548,7 +1631,10 @@ def wrapper_snippets(itspace, args,
             _buf_gather[arg] = arg.c_buffer_gather(_buf_size, count, _buf_name[arg])
             _itspace_loop_close = '\n'.join('  ' * n + '}' for n in range(len(_loop_size) - 1, -1, -1))
             _buf_gather[arg] = "\n".join([_itspace_loops, _buf_gather[arg], _itspace_loop_close])
-    _kernel_args = ', '.join([arg.c_kernel_arg(count) if not arg._uses_itspace else _buf_name[arg]
+        elif arg.writeback_needed():
+            print "WRITEBACK NEEDED: a custom writeback is required for this code generation scheme!"
+            _add_writeback = arg.c_result_writeback(_buf_name[arg], is_top, is_facet=is_facet)
+    _kernel_args = ', '.join([arg.c_kernel_arg(count) if not arg.writeback_needed() and not arg._uses_itspace else _buf_name[arg]
                               for count, arg in enumerate(args)])
     _buf_gather = ";\n".join(_buf_gather.values())
     _buf_decl = ";\n".join(_buf_decl.values())
@@ -1637,5 +1723,6 @@ def wrapper_snippets(itspace, args,
             'transpose_arg': _transpose_arg,
             'free_transposed_arg': _free_transpose_arg,
             'layer_comp': _layer_comp,
+            'add_writeback': _add_writeback,
             'itset_loop_body': '\n'.join([itset_loop_body(i, j, shape, offsets, is_facet=(iteration_region == ON_INTERIOR_FACETS))
                                           for i, j, shape, offsets in itspace])}

@@ -195,6 +195,7 @@ def compose_wrapper(backend="sequential"):
 
     wrapper += """
         %(itset_loop_body)s
+        %(add_writeback)s
         %(map_bcs_p)s;
         %(apply_offset)s;
         %(extr_loop_close)s
@@ -314,6 +315,7 @@ def compose_openmp4_wrapper():
                 %(kernel_name)s(%(kernel_args)s);
 
                 %(itset_loop_body)s
+                %(add_writeback)s
                 %(map_bcs_p)s;
                 %(apply_offset)s;
                 %(extr_loop_close)s
