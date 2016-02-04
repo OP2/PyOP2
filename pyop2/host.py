@@ -945,7 +945,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
             # Perform the transposition for every dat in the arg
             val.append("""
     const int %(arg_name)s_size = %(arg_size)s;
-    double %(arg_name)s_tmp[%(arg_name)s_size];
+    double* %(arg_name)s_tmp = (double *)malloc(%(arg_size)s * sizeof(double));
     int transposed_offset_%(arg_name)s[%(map_arity)s] = %(transposed_offset)s;
     {
         int original_offset[%(map_arity)s] = %(original_offset)s;
@@ -967,6 +967,21 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
            'ssind': "ssinds," if is_subset else "",
            'arg_map_name': self.c_map_name(i, 0)})
 
+        return '\n'.join(val)
+
+    # TODO: remove after writing to dats is transposed.
+    def c_free_transpose_dat(self, is_subset=False):
+        # Transpose the arg to enable coalesced accesses.
+        val = []
+        # Call the transposing arg function.
+        for i, (m, d) in enumerate(zip(self.map, self.data)):
+            if m.offset is None or m.transposed_offsets is None:
+                return ""
+            if not m.transposable():
+                return ""
+            val.append("""
+                free(%(arg_name)s_tmp);
+                """ % {'arg_name': self.c_arg_name(i)})
         return '\n'.join(val)
 
 
@@ -1126,7 +1141,7 @@ class JITModule(base.JITModule):
     def hpc_profile(self, wrapper_code):
         wrapper_code["timer_declare"] = """double s1, s2;\n"""
         wrapper_code["timer_start"] = """s1=stamp();\n"""
-        wrapper_code["timer_stop"] = """s2=stamp();\n"""
+        wrapper_code["timer_stop"] = "s2=stamp();\n" + wrapper_code["free_transposed_arg"]
         wrapper_code["other_args"] = ", double other_measures[6]"
         if not configuration['papi_flops']:
             wrapper_code["timer_end"] = """
@@ -1444,6 +1459,7 @@ def wrapper_snippets(itspace, args,
     _layer_arg = ""
     _off_args = ""
     _transpose_arg = ""
+    _free_transpose_arg = ""
     _layer_comp = "0"
     if configuration["hpc_code_gen"] in [2, 3]:
         _map_decl += ';\n'.join([arg.c_map_decl_s2(is_facet=is_facet) for arg in args if arg._is_vec_map])
@@ -1493,6 +1509,8 @@ def wrapper_snippets(itspace, args,
             _layer_comp = " %d " % (itspace.layers - 1)
             _transpose_arg = ';\n'.join([arg.c_transpose_dat(is_subset=isinstance(itspace._iterset, Subset))
                                          for arg in args if arg._is_transposable])
+            _free_transpose_arg = ';\n'.join([arg.c_free_transpose_dat(is_subset=isinstance(itspace._iterset, Subset))
+                                              for arg in args if arg._is_transposable])
 
     _store_array = ";\n".join(_store_array) + ";\n"
     _load_array = ";\n".join(_load_array) + ";\n"
@@ -1617,6 +1635,7 @@ def wrapper_snippets(itspace, args,
             'buffer_gather': _buf_gather,
             'kernel_args': _kernel_args,
             'transpose_arg': _transpose_arg,
+            'free_transposed_arg': _free_transpose_arg,
             'layer_comp': _layer_comp,
             'itset_loop_body': '\n'.join([itset_loop_body(i, j, shape, offsets, is_facet=(iteration_region == ON_INTERIOR_FACETS))
                                           for i, j, shape, offsets in itspace])}
