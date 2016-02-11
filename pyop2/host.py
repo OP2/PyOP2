@@ -101,10 +101,17 @@ class Arg(base.Arg):
     def c_vec_dec(self, is_facet=False):
         facet_mult = 2 if is_facet else 1
         cdim = self.data.cdim if self._flatten else 1
-        return "%(type)s *%(vec_name)s[%(arity)s];\n" % \
-            {'type': self.ctype,
-             'vec_name': self.c_vec_name(),
-             'arity': self.map.arity * cdim * facet_mult}
+        # HACK: flatten everything != coordinates
+        if configuration.get('flatten') and self.data.name != 'Coordinates'  and not hasattr(self, 'hackflatten'):
+            return "%(type)s %(vec_name)s[%(arity)s];\n" % \
+                {'type': self.ctype,
+                 'vec_name': self.c_vec_name(),
+                 'arity': self.map.arity * cdim * facet_mult}
+        else:
+            return "%(type)s *%(vec_name)s[%(arity)s];\n" % \
+                {'type': self.ctype,
+                 'vec_name': self.c_vec_name(),
+                 'arity': self.map.arity * cdim * facet_mult}
 
     def c_wrapper_dec(self):
         val = ""
@@ -122,17 +129,30 @@ class Arg(base.Arg):
                                                      'iname': self.c_arg_name(0, 0)}
         return val
 
-    def c_ind_data(self, idx, i, j=0, is_top=False, offset=None):
-        return "%(name)s + (%(map_name)s[i * %(arity)s + %(idx)s]%(top)s%(off_mul)s%(off_add)s)* %(dim)s%(off)s" % \
-            {'name': self.c_arg_name(i),
-             'map_name': self.c_map_name(i, 0),
-             'arity': self.map.split[i].arity,
-             'idx': idx,
-             'top': ' + start_layer' if is_top else '',
-             'dim': self.data[i].cdim,
-             'off': ' + %d' % j if j else '',
-             'off_mul': ' * %d' % offset if is_top and offset is not None else '',
-             'off_add': ' + %d' % offset if not is_top and offset is not None else ''}
+    def c_ind_data(self, idx, i, j=0, is_top=False, offset=None, flatten=True):
+        # HACK: flatten everything != coordinates
+        if flatten and configuration.get('flatten') and self.data.name != 'Coordinates' and not hasattr(self, 'hackflatten'):
+            return "%(name)s[(%(map_name)s[i * %(arity)s + %(idx)s]%(top)s%(off_mul)s%(off_add)s)* %(dim)s%(off)s]" % \
+                {'name': self.c_arg_name(i),
+                 'map_name': self.c_map_name(i, 0),
+                 'arity': self.map.split[i].arity,
+                 'idx': idx,
+                 'top': ' + start_layer' if is_top else '',
+                 'dim': self.data[i].cdim,
+                 'off': ' + %d' % j if j else '',
+                 'off_mul': ' * %d' % offset if is_top and offset is not None else '',
+                 'off_add': ' + %d' % offset if not is_top and offset is not None else ''}
+        else:
+            return "%(name)s + (%(map_name)s[i * %(arity)s + %(idx)s]%(top)s%(off_mul)s%(off_add)s)* %(dim)s%(off)s" % \
+                {'name': self.c_arg_name(i),
+                 'map_name': self.c_map_name(i, 0),
+                 'arity': self.map.split[i].arity,
+                 'idx': idx,
+                 'top': ' + start_layer' if is_top else '',
+                 'dim': self.data[i].cdim,
+                 'off': ' + %d' % j if j else '',
+                 'off_mul': ' * %d' % offset if is_top and offset is not None else '',
+                 'off_add': ' + %d' % offset if not is_top and offset is not None else ''}
 
     def c_ind_data_xtr(self, idx, i, j=0):
         return "%(name)s + (xtr_%(map_name)s[%(idx)s])*%(dim)s%(off)s" % \
@@ -175,11 +195,11 @@ class Arg(base.Arg):
                          'arity': self.map.arity,
                          'dim': self.data[i].cdim}
                 else:
-                    return self.c_ind_data("i_%d" % self.idx.index, i)
+                    return self.c_ind_data("i_%d" % self.idx.index, i, flatten=False)
         elif self._is_indirect:
             if self._is_vec_map:
                 return self.c_vec_name()
-            return self.c_ind_data(self.idx, i)
+            return self.c_ind_data(self.idx, i, flatten=False)
         elif self._is_global_reduction:
             return self.c_global_reduction_name(count)
         elif isinstance(self.data, Global):

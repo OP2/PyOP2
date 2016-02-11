@@ -52,6 +52,7 @@ from profiling import timed_region
 from logger import warning, info as log_info
 from mpi import MPI, collective
 from utils import flatten, strip, as_tuple
+from configuration import configuration
 
 import coffee
 from coffee import base as ast
@@ -113,6 +114,8 @@ class Arg(sequential.Arg):
             _arg.position = arg.position
             _arg.indirect_position = arg.indirect_position
             _arg._c_local_maps = c_local_maps
+            if hasattr(arg, 'hackflatten'):
+                _arg.hackflatten = True
             return _arg
 
         try:
@@ -156,17 +159,29 @@ class Arg(sequential.Arg):
             raise RuntimeError("Cannot bind arguments having mismatching types")
         return "%s* %s = %s" % (self.ctype, self.c_arg_name(), arg.c_arg_name())
 
-    def c_ind_data(self, idx, i, j=0, is_top=False, layers=1, offset=None):
-        return "%(name)s + (%(map_name)s[n * %(arity)s + %(idx)s]%(top)s%(off_mul)s%(off_add)s)* %(dim)s%(off)s" % \
-            {'name': self.c_arg_name(i),
-             'map_name': self.c_map_name(i, 0),
-             'arity': self.map.split[i].arity,
-             'idx': idx,
-             'top': ' + start_layer' if is_top else '',
-             'dim': self.data[i].cdim,
-             'off': ' + %d' % j if j else '',
-             'off_mul': ' * %d' % offset if is_top and offset is not None else '',
-             'off_add': ' + %d' % offset if not is_top and offset is not None else ''}
+    def c_ind_data(self, idx, i, j=0, is_top=False, layers=1, offset=None, flatten=True):
+        if flatten and configuration.get('flatten') and self.data.name != 'Coordinates' and not hasattr(self, 'hackflatten'):
+            return "%(name)s[(%(map_name)s[n * %(arity)s + %(idx)s]%(top)s%(off_mul)s%(off_add)s)* %(dim)s%(off)s]" % \
+                {'name': self.c_arg_name(i),
+                 'map_name': self.c_map_name(i, 0),
+                 'arity': self.map.split[i].arity,
+                 'idx': idx,
+                 'top': ' + start_layer' if is_top else '',
+                 'dim': self.data[i].cdim,
+                 'off': ' + %d' % j if j else '',
+                 'off_mul': ' * %d' % offset if is_top and offset is not None else '',
+                 'off_add': ' + %d' % offset if not is_top and offset is not None else ''}
+        else:
+            return "%(name)s + (%(map_name)s[n * %(arity)s + %(idx)s]%(top)s%(off_mul)s%(off_add)s)* %(dim)s%(off)s" % \
+                {'name': self.c_arg_name(i),
+                 'map_name': self.c_map_name(i, 0),
+                 'arity': self.map.split[i].arity,
+                 'idx': idx,
+                 'top': ' + start_layer' if is_top else '',
+                 'dim': self.data[i].cdim,
+                 'off': ' + %d' % j if j else '',
+                 'off_mul': ' * %d' % offset if is_top and offset is not None else '',
+                 'off_add': ' + %d' % offset if not is_top and offset is not None else ''}
 
     def c_map_name(self, i, j):
         return self._c_local_maps[i][j]
@@ -684,6 +699,8 @@ class FusionSchedule(Schedule):
             args = Arg.filter_args([loop.args for loop in loops]).values()
             # Create any ParLoop additional arguments
             extra_args = [Dat(*d)(*a) for d, a in extra_args] if extra_args else []
+            if extra_args:
+                extra_args[0].hackflatten = True
             args += extra_args
             # Remove now incorrect cached properties:
             for a in args:
@@ -1144,7 +1161,7 @@ class Inspector(Cached):
             fusion_name = '%s_%s' % (base_fundecl.name, fuse_fundecl.name)
             fusion_args = base_fundecl.args + fuse_fundecl.args
             fusion_fundecl = ast.FunDecl(base_fundecl.ret, fusion_name,
-                                         fusion_args, body)
+                                         dcopy(fusion_args), body)
 
             # 1B) Filter out duplicate arguments, and append extra arguments to
             # the function declaration
