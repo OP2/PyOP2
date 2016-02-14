@@ -86,6 +86,8 @@ class Configuration(dict):
         # Enable checking the result, compare it with the saved result
         "hpc_save_order": ("PYOP2_HPC_ORDER", int, 0),
         "hpc_check_order": ("PYOP2_HPC_ORDER", int, 0),
+        # Enable active transposing for switching between layouts.
+        "hpc_active_transposing": ("PYOP2_HPC_ACTIVE_TRANSP", bool, False),
         # Teams and threads for the OpenMP 4.0 backend
         "teams": ("PYOP2_OMP4_TEAMS", int, 256),
         "threads": ("PYOP2_OMP4_THREADS", int, 512),

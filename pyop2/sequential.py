@@ -36,7 +36,7 @@
 import ctypes
 from numpy.ctypeslib import ndpointer
 
-from base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, WRITE, INC
+from base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, WRITE, INC, READ
 from exceptions import *
 import host
 from mpi import collective
@@ -151,8 +151,12 @@ class ParLoop(host.ParLoop):
             print " => Finish Sequential Execution"
             if configuration['hpc_save_result']:
                 for arg in self.args:
-                    if arg.access in [WRITE, INC] and not arg._is_mat:
-                        save_result(arg)
+                    if arg.access in [WRITE, INC]:
+                        if not arg._is_mat:
+                            save_result(arg)
+                        else:
+                            pass
+
             if configuration['hpc_check_result']:
                 for arg in self.args:
                     if arg.access in [WRITE, INC] and not arg._is_mat:

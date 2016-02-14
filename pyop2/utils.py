@@ -460,4 +460,4 @@ def transpose(old_map, local_distribution, layers, offset):
         return snapr_transpose(old_map, local_distribution, layers, offset)
     except ImportError:
         print "PyOP2 Warning: Cannot fetch map for transposed data. SNAPR has not been found."
-        return [], [], [], []
+        return old_map, [], [], [], []

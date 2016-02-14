@@ -171,10 +171,10 @@ class Arg(base.Arg):
                 # Variant in which we postpone the dereferenciation.
                 # Used when scatter_vec needs this reference.
                 return "%(name)s + %(value)s" % \
-                    {'name': self.c_arg_name(i) + ("_tmp" if apply_scheme_3 else ""),
+                    {'name': self.c_arg_name(i), # + ("_tmp" if apply_scheme_3 and configuration["hpc_active_transposing"] else ""),
                      'value': value}
             return "%(name)s[%(value)s]" % \
-                {'name': self.c_arg_name(i) + ("_tmp" if apply_scheme_3 else ""),
+                {'name': self.c_arg_name(i), # + ("_tmp" if apply_scheme_3 and configuration["hpc_active_transposing"] else ""),
                  'value': value}
         return "%(name)s + (%(map_name)s[i * %(arity)s + %(idx)s]%(top)s%(off_mul)s%(off_add)s)* %(dim)s%(off)s" % \
             {'name': self.c_arg_name(i),
@@ -188,13 +188,22 @@ class Arg(base.Arg):
              'off_add': ' + %d' % offset if not is_top and offset is not None else ''}
 
     def c_ind_data_xtr(self, idx, i, j=0,
-                       style=configuration["hpc_code_gen"]):
+                       style=configuration["hpc_code_gen"],
+                       stride=None):
         if configuration["hpc_code_gen"] in [2, 3]:
-            value = "(xtr_%(map_name)s[%(idx)s])*%(dim)s%(off)s" % \
+            # The writeback should always be to transposed data
+            value = "(xtr_%(map_name)s[%(idx)s])%(dim)s%(off)s" % \
                 {'map_name': self.c_map_name(i, 0),
                  'idx': idx,
-                 'dim': 1 if self._flatten else str(self.data[i].cdim),
+                 'dim': ("* 1" if self._flatten else "*" + str(self.data[i].cdim)),
                  'off': ' + %d' % j if j else ''}
+            if configuration["hpc_code_gen"] == 3:
+                value = "xtr_%(map_name)s[%(idx)s%(dimension_idx)s]%(layer)s%(off)s" % \
+                    {'map_name': self.c_map_name(i, 0),
+                     'idx': idx,
+                     'off': ' + %d' % j if j else '',
+                     'dimension_idx': " + " + str(stride) if stride else "",
+                     'layer': " + j_0"}
             if style == 1:
                 # Variant in which we postpone the dereferenciation.
                 # Used when scatter_vec needs this reference.
@@ -221,7 +230,8 @@ class Arg(base.Arg):
     def c_local_tensor_name(self, i, j):
         return self.c_kernel_arg_name(i, j)
 
-    def c_kernel_arg(self, count, i=0, j=0, shape=(0,), layers=1, style=configuration["hpc_code_gen"]):
+    def c_kernel_arg(self, count, i=0, j=0, shape=(0,), layers=1, style=configuration["hpc_code_gen"],
+                     stride=None):
         if self._is_dat_view and not self._is_direct:
             raise NotImplementedError("Indirect DatView not implemented")
         if self._uses_itspace:
@@ -237,7 +247,7 @@ class Arg(base.Arg):
                     raise RuntimeError("Don't know how to pass kernel arg %s" % self)
             else:
                 if self.data is not None and self.data.dataset._extruded:
-                    return self.c_ind_data_xtr("i_%d" % self.idx.index, i, style=style)
+                    return self.c_ind_data_xtr("i_%d" % self.idx.index, i, style=style, stride=stride)
                 elif self._flatten:
                     return "%(name)s + %(map_name)s[i * %(arity)s + i_0 %% %(arity)d] * %(dim)s + (i_0 / %(arity)d)" % \
                         {'name': self.c_arg_name(),
@@ -574,7 +584,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
         for i, (map, dset) in enumerate(zip(as_tuple(self.map, Map), dsets)):
             for j, (m, d) in enumerate(zip(map, dset)):
                 dim = m.arity
-                if self._is_dat and self._flatten:
+                if self._is_dat and (self._flatten or configuration["hpc_code_gen"] == 3):
                     dim *= d.cdim
                 if is_facet:
                     dim *= 2
@@ -621,57 +631,132 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
         is_top_init = is_top
         val = []
         for i, (m, d) in enumerate(zip(self.map, self.data)):
-            is_top = is_top_init and m.iterset._extruded
-            map_idx = 0
-            reps, xtrs = m.transposed_location_sets
-            for idx in range(m.arity):
-                # TODO: For now we only support extruded. Add non-extruded later.
-                if not m.iterset._extruded or not m.transposable():
-                    # Default to scheme 2
-                    # TODO: This is where the non-extruded case goes.
-                    val.append("xtr_%(name)s[%(ind)s] = (*(%(name)s + i * %(dim)s + %(ind)s)%(off_top)s);" %
-                           {'name': self.c_map_name(i, 0),
-                            'dim': m.arity,
-                            'ind': idx,
-                            'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else '',
-                            'cdim': " * %d" % self.data[i].cdim})
-                elif idx in reps or idx in xtrs:
-                    # Scheme 3
-                    # We eliminate the IDs which are not in either of the sets, they have to be skipped.
-                    # printf(\"XTR: %%d (old map: %%d, start: %%d, end: %%d) \\n\", xtr_%(name)s[%(ind)s], %(name)s[i * %(dim)s + %(ind)s], start, end);
-                    val.append("xtr_%(name)s[%(ind)s] = (*(%(name)s + i * %(dim)s + %(ind)s) %(transposed)s)%(cdim)s;" %
+                is_top = is_top_init and m.iterset._extruded
+                map_idx = 0
+                reps, xtrs = m.transposed_location_sets
+                for idx in range(m.arity):
+                    # TODO: For now we only support extruded. Add non-extruded later.
+                    if not m.iterset._extruded or not m.transposable():
+                        # Default to scheme 2
+                        # TODO: This is where the non-extruded case goes.
+                        val.append("xtr_%(name)s[%(ind)s] = %(name)s[i * %(dim)s + %(ind)s]%(off_top)s;" %
                                {'name': self.c_map_name(i, 0),
                                 'dim': m.arity,
                                 'ind': idx,
-                                'transposed': "+ transposed_offset_%s[%d]" % (self.c_arg_name(i), idx),
-                                'off_top': ' + start_layer ' if is_top else '',
-                                'cdim': " * %d" % self.data[i].cdim})
-                    if idx in reps:
-                        # The repeated values increase the size of the column by one.
-                        # TODO: Take the value from the previous computed value.
-                        val.append("xtr_%(name)s[%(ind_zero)s] = xtr_%(name)s[%(ind)s] + 1;" %
-                                   {'name': self.c_map_name(i, 0),
-                                    'ind_zero': idx + 1,
-                                    'ind': idx})
-            if is_facet:
-                # Same as scheme 2 TODO: Make it like SCHEME 3!
-                for idx in range(m.arity):
-                    if not m.iterset._extruded or not m.transposable():
-                        # Scheme 2
-                        val.append("xtr_%(name)s[%(ind)s] = *(%(name)s + i * %(dim)s + %(ind_zero)s)%(off_top)s%(off)s;" %
-                               {'name': self.c_map_name(i, 0),
-                                'dim': m.arity,
-                                'ind': m.arity + idx,
-                                'ind_zero': idx,
                                 'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else '',
-                                'off': ' + ' + str(m.offset[idx])})
-                    else:
+                                'cdim': " * %d" % self.data[i].cdim})
+                    elif idx in reps or idx in xtrs:
                         # Scheme 3
-                        # Offset is always 1
-                        val.append("xtr_%(name)s[%(ind)s] = xtr_%(name)s[%(ind_zero)s] + 1; // int facet" %
+                        # We eliminate the IDs which are not in either of the sets, they have to be skipped.
+                        # printf(\"XTR: %%d (old map: %%d, start: %%d, end: %%d) \\n\", xtr_%(name)s[%(ind)s], %(name)s[i * %(dim)s + %(ind)s], start, end);
+                        # 'transposed': "+ transposed_offset_%s[%d]" % (self.c_arg_name(i), idx) if configuration["hpc_active_transposing"] else "",
+                        # val.append("xtr_%(name)s[%(ind)s] = (*(%(name)s + i * %(dim)s + %(ind)s) %(transposed)s)%(cdim)s;" %
+                        val.append("xtr_%(name)s[%(ind)s] = %(name)s[i * %(dim)s + %(ind)s]%(cdim)s;" %
                                    {'name': self.c_map_name(i, 0),
+                                    'dim': m.arity,
+                                    'ind': idx,
+                                    'off_top': ' + start_layer ' if is_top else '',
+                                    'cdim': " * %d" % self.data[i].cdim})
+                        if idx in reps:
+                            # The repeated values increase the size of the column by one.
+                            # TODO: Take the value from the previous computed value.
+                            val.append("xtr_%(name)s[%(ind_zero)s] = xtr_%(name)s[%(ind)s] + 1;" %
+                                       {'name': self.c_map_name(i, 0),
+                                        'ind_zero': idx + 1,
+                                        'ind': idx})
+                if is_facet:
+                    # Same as scheme 2 TODO: Make it like SCHEME 3!
+                    for idx in range(m.arity):
+                        if not m.iterset._extruded or not m.transposable():
+                            # Scheme 2
+                            val.append("xtr_%(name)s[%(ind)s] = %(name)s[i * %(dim)s + %(ind_zero)s]%(off_top)s%(off)s;" %
+                                   {'name': self.c_map_name(i, 0),
+                                    'dim': m.arity,
                                     'ind': m.arity + idx,
-                                    'ind_zero': idx})
+                                    'ind_zero': idx,
+                                    'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else '',
+                                    'off': ' + ' + str(m.offset[idx])})
+                        else:
+                            # Scheme 3
+                            # Offset is always 1
+                            val.append("xtr_%(name)s[%(ind)s] = xtr_%(name)s[%(ind_zero)s] + 1; // int facet" %
+                                       {'name': self.c_map_name(i, 0),
+                                        'ind': m.arity + idx,
+                                        'ind_zero': idx})
+        return '\n'.join(val)+'\n'
+
+
+    def c_map_init_s3_itset(self, is_top=False, is_facet=False):
+        is_top_init = is_top
+        if self._is_mat:
+            dsets = self.data.sparsity.dsets
+        else:
+            dsets = (self.data.dataset,)
+        val = []
+        for i, (map, dset) in enumerate(zip(as_tuple(self.map, Map), dsets)):
+            for j, (m, d) in enumerate(zip(map, dset)):
+                is_top = is_top_init and m.iterset._extruded
+                map_idx = 0
+                reps, xtrs = m.transposed_location_sets
+                # TODO: For now we only support extruded. Add non-extruded later.
+                if not m.iterset._extruded or not m.transposable():
+                    for idx in range(m.arity):
+                        # Default to scheme 2
+                        # TODO: This is where the non-extruded case goes.
+                        val.append("xtr_%(name)s[%(ind)s] = %(name)s[i * %(dim)s + %(ind)s]%(off_top)s;" %
+                               {'name': self.c_map_name(i, j),
+                                'dim': m.arity,
+                                'ind': idx,
+                                'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else '',
+                                'cdim': " * %d" % d.cdim})
+                else:
+                    for k in range(d.cdim):
+                        for idx in range(m.arity):
+                            if idx in reps or idx in xtrs:
+                                # Scheme 3
+                                # We eliminate the IDs which are not in either of the sets, they have to be skipped.
+                                # printf(\"XTR: %%d (old map: %%d, start: %%d, end: %%d) \\n\", xtr_%(name)s[%(ind)s], %(name)s[i * %(dim)s + %(ind)s], start, end);
+                                # 'transposed': "+ transposed_offset_%s[%d]" % (self.c_arg_name(i), idx) if configuration["hpc_active_transposing"] else "",
+                                # val.append("xtr_%(name)s[%(ind)s] = (*(%(name)s + i * %(dim)s + %(ind)s) %(transposed)s)%(cdim)s;" %
+                                layers_str = " (layers + 1)" if idx in reps else " layers"
+                                val.append("xtr_%(name)s[%(map_ind)s] = %(name)s[i * %(dim)s + %(ind)s]%(cdim)s%(layers)s;" %
+                                           {'name': self.c_map_name(i, j),
+                                            'dim': m.arity,
+                                            'ind': idx,
+                                            'map_ind': map_idx,
+                                            'off_top': ' + start_layer ' if is_top else '',
+                                            'layers': (" + " + str(k) + "*" + layers_str) if k > 0 else "",
+                                            'cdim': " * %d" % d.cdim})
+                                map_idx += 1
+                                if idx in reps:
+                                    # The repeated values increase the size of the column by one.
+                                    # TODO: Take the value from the previous computed value.
+                                    val.append("xtr_%(name)s[%(map_ind)s] = xtr_%(name)s[%(ind)s] + 1;" %
+                                               {'name': self.c_map_name(i, j),
+                                                'map_ind': map_idx,
+                                                'ind_zero': idx + 1,
+                                                'ind': map_idx - 1})
+                                    map_idx += 1
+                if is_facet:
+                    # Same as scheme 2 TODO: Make it like SCHEME 3!
+                    if not m.iterset._extruded or not m.transposable():
+                        for idx in range(m.arity):
+                            # Scheme 2
+                            val.append("xtr_%(name)s[%(ind)s] = %(name)s[i * %(dim)s + %(ind_zero)s]%(off_top)s%(off)s;" %
+                                   {'name': self.c_map_name(i, j),
+                                    'dim': m.arity,
+                                    'ind': m.arity + idx,
+                                    'ind_zero': idx,
+                                    'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else '',
+                                    'off': ' + ' + str(m.offset[idx])})
+                    else:
+                        for idx in range(m.arity):
+                            # Scheme 3
+                            # Offset is always 1
+                            val.append("xtr_%(name)s[%(ind)s] = xtr_%(name)s[%(ind_zero)s] + 1; // int facet" %
+                                       {'name': self.c_map_name(i, j),
+                                        'ind': m.arity + idx,
+                                        'ind_zero': idx})
         return '\n'.join(val)+'\n'
 
     def c_map_init(self, is_top=False, is_facet=False):
@@ -795,7 +880,10 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
             if not map.iterset._extruded:
                 continue
             for j, (m, d) in enumerate(zip(map, dset)):
+                apply_scheme_3 = configuration["hpc_code_gen"] == 3 and m.transposed
                 for idx in range(m.arity):
+                    if not self._is_mat and apply_scheme_3:
+                        continue
                     if self._is_dat and self._flatten and d.cdim > 1:
                         for k in range(d.cdim):
                             val.append("xtr_%(name)s[%(ind_flat)s] += %(off)d * %(dim)s;" %
@@ -806,11 +894,15 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                     else:
                         val.append("xtr_%(name)s[%(ind)s] += %(off)d;" %
                                    {'name': self.c_map_name(i, j),
-                                    'off': m.offset[idx],
+                                    'off': m.offset[idx] if not apply_scheme_3 else 1,
                                     'ind': idx})
                 if is_facet:
                     for idx in range(m.arity):
+                        if not self._is_mat and apply_scheme_3:
+                            continue
                         if self._is_dat and self._flatten and d.cdim > 1:
+                            if apply_scheme_3:
+                                continue
                             for k in range(d.cdim):
                                 val.append("xtr_%(name)s[%(ind_flat)s] += %(off)d * %(dim)s;" %
                                            {'name': self.c_map_name(i, j),
@@ -820,7 +912,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                         else:
                             val.append("xtr_%(name)s[%(ind)s] += %(off)d;" %
                                        {'name': self.c_map_name(i, j),
-                                        'off': m.offset[idx],
+                                        'off': m.offset[idx] if not apply_scheme_3 else 1,
                                         'ind': m.arity + idx})
         return '\n'.join(val)+'\n'
 
@@ -915,16 +1007,19 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                             "ind": self.c_kernel_arg(idx),
                             "ofs": " + %s" % j if j else ""} for j in range(dim)])
 
-    def c_buffer_scatter_vec(self, count, i, j, mxofs, buf_name):
+    def c_buffer_scatter_vec(self, count, i, j, mxofs, buf_name, loop_size):
         dim = 1 if self._flatten else self.data.split[i].cdim
+        if isinstance(loop_size, list):
+            loop_size = loop_size[0]
         # Style = 1 means that we always want a reference even when the
         # simplified code generation is used.
-        return ";\n".join(["*(%(ind)s%(nfofs)s) %(op)s %(name)s[i_0*%(dim)d%(nfofs)s%(mxofs)s]" %
-                           {"ind": self.c_kernel_arg(count, i, j, style=1),
+        return ";\n".join(["*(%(ind)s%(nfofs_one)s) %(op)s %(name)s[i_0*%(dim)d%(nfofs_two)s%(mxofs)s]" %
+                           {"ind": self.c_kernel_arg(count, i, j, style=1, stride=loop_size * o),
                             "op": "=" if self.access == WRITE else "+=",
                             "name": buf_name,
                             "dim": dim,
-                            "nfofs": " + %d" % o if o else "",
+                            "nfofs_one": (" + %d" % o if o else "") if not configuration["hpc_code_gen"] == 3 else "",
+                            "nfofs_two": " + %d" % o if o else "",
                             "mxofs": " + %d" % (mxofs[0] * dim) if mxofs else ""}
                            for o in range(dim)])
 
@@ -952,21 +1047,36 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
             # (cdim - 1) from it to make sure that the value is written
             # next to the value.
             correction = m.transposed_correction
-
+            data_type = self.data[i].dtype
+            if data_type == "int32":
+                data_type = "int"
+            elif data_type == "float64":
+                data_type = "double"
+            else:
+                raise RuntimeError("The data type is not recognized: %s \n" % (data_type))
             # Perform the transposition for every dat in the arg
             val.append("""
+
+    // Nasty code which should be eliminated from here at the earliest opportunity
     const int %(arg_name)s_size = %(arg_size)s;
-    double* %(arg_name)s_tmp = (double *)malloc(%(arg_size)s * sizeof(double));
+    %(type)s* %(arg_name)s_tmp = (%(type)s *)malloc(%(arg_size)s * sizeof(%(type)s));
     int transposed_offset_%(arg_name)s[%(map_arity)s] = %(transposed_offset)s;
     {
         int original_offset[%(map_arity)s] = %(original_offset)s;
         int correction[%(map_arity)s] = %(correction)s
-        rearrange_arg(start, end,
+        rearrange_arg_%(type)s(start, end,
                       %(arg_name)s, %(arg_map_name)s,
                       transposed_offset_%(arg_name)s, original_offset, correction, %(map_arity)s,
                       %(layers)s, %(cdim)s, %(ssind)s
                       %(arg_name)s_tmp);
     }
+    if (start < end)
+        for(int i=0; i<%(arg_name)s_size; i++){
+            %(arg_name)s[i] = %(arg_name)s_tmp[i];
+            //printf(" %%d  --> %%f \\n", i, %(arg_name)s[i]);
+        }
+    free(%(arg_name)s_tmp);
+
     """ % {'arg_name': self.c_arg_name(i),
            'arg_size': str(len(self.data[i].data) * self.data[i].cdim),
            'transposed_offset': self._c_list_to_str(m.transposed_offsets),
@@ -976,8 +1086,8 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
            'cdim': self.data[i].cdim,
            'layers': self.data[i].dataset.layers - 1,
            'ssind': "ssinds," if is_subset else "",
+           'type': data_type,
            'arg_map_name': self.c_map_name(i, 0)})
-
         return '\n'.join(val)
 
     def writeback_needed(self):
@@ -1212,7 +1322,7 @@ class JITModule(base.JITModule):
     def hpc_profile(self, wrapper_code):
         wrapper_code["timer_declare"] = """double s1, s2;\n"""
         wrapper_code["timer_start"] = """s1=stamp();\n"""
-        wrapper_code["timer_stop"] = "s2=stamp();\n" + wrapper_code["free_transposed_arg"]
+        wrapper_code["timer_stop"] = "s2=stamp();\n"
         wrapper_code["other_args"] = ", double other_measures[6]"
         if not configuration['papi_flops']:
             wrapper_code["timer_end"] = """
@@ -1264,6 +1374,7 @@ class JITModule(base.JITModule):
         # TODO: identify which arg it is and print the addtional info
         # TODO: send size as argument
         print_arg_vecs = ""
+        print_contribs = ""
         for i, arg in enumerate(self._args):
             if arg._is_vec_map:
                 # TODO: This is not taking into consideration the facet
@@ -1276,23 +1387,24 @@ class JITModule(base.JITModule):
                 }
                 printf("\\n");
                 """ % {"name": arg.c_vec_name(),
-                       "size": arg.map.arity,
+                       "size": arg.map.arity * (arg.data.cdim if arg._flatten else 1),
                        "map_name": arg.c_map_name(i, 0),
                        "star": "" if configuration["hpc_code_gen"] in [2, 3] else "*"}
 
-
+            # Print contributions
+            if arg._uses_itspace and arg.access in [WRITE, INC] and not arg._is_mat:
+                print_contribs += """
+                printf("OUTPUT \\n");
+                for(int ii=0; ii<%(size)s; ii++){
+                    printf(" %%f ", buffer_%(name)s[ii]);
+                }
+                printf("\\n");
+                """ % {"name": arg.c_arg_name(),
+                       "size": arg.map.arity * (arg.data.cdim if arg._flatten else 1)}
+            # else:
+            #     wrapper_code["print_contrib"] = ""
+        wrapper_code["print_contrib"] = print_contribs
         wrapper_code["print_arg_vecs"] = print_arg_vecs
-
-        # Print contributions
-        if any(arg._uses_itspace and arg.access in [WRITE, INC] and not arg._is_mat for arg in self._args):
-            wrapper_code["print_contrib"] = """
-            for(int ii=0; ii<3; ii++){
-                printf(" %f ", buffer_arg0_0[ii]);
-            }
-            printf("\\n");
-            """
-        else:
-            wrapper_code["print_contrib"] = ""
 
     # Add flags required to compile with profiling and/or debugging
     def flags(self, cppargs, more_args, ldargs):
@@ -1380,7 +1492,7 @@ class JITModule(base.JITModule):
             extension = "cpp"
 
         self._code_to_compile = code_to_compile
-        print code_to_compile
+        # print code_to_compile
         self._fun = compilation.load(code_to_compile,
                                      extension,
                                      self._wrapper_name,
@@ -1522,7 +1634,6 @@ def wrapper_snippets(itspace, args,
         # vector can only be used for op2.READ and op2.INC accessed args.
         # For op2.WRITE args the computed values need to be buffered and
         # then written back after the kernel application.
-        print not arg._is_mat and arg._is_vec_map and not (configuration["hpc_code_gen"] in [2, 3] and arg.access in [WRITE])
         if not arg._is_mat and arg._is_vec_map and \
            not (configuration["hpc_code_gen"] in [2, 3] and arg.access in [WRITE]):
             _vec_inits += ';\n' + ';\n'.join([arg.c_vec_init(is_top, is_facet=is_facet)])
@@ -1539,11 +1650,11 @@ def wrapper_snippets(itspace, args,
     _layer_arg = ""
     _off_args = ""
     _transpose_arg = ""
-    _free_transpose_arg = ""
+    # _free_transpose_arg = ""
     _layer_comp = "0"
+
     if configuration["hpc_code_gen"] in [2, 3]:
         _map_decl += ';\n'.join([arg.c_map_decl_s2(is_facet=is_facet) for arg in args if arg._is_vec_map])
-
     if configuration["hpc_code_gen"] == 2:
         _map_init += ';\n'.join([arg.c_map_init_s2(is_top=is_top, is_facet=is_facet) for arg in args if arg._is_vec_map])
     if configuration["hpc_code_gen"] == 3:
@@ -1565,8 +1676,21 @@ def wrapper_snippets(itspace, args,
         _call_args += ["0", "layers", "other_args"]
         _map_decl += ';\n'.join([arg.c_map_decl(is_facet=is_facet)
                                  for arg in args if arg._uses_itspace])
-        _map_init += ';\n'.join([arg.c_map_init(is_top=is_top, is_facet=is_facet)
-                                 for arg in args if arg._uses_itspace])
+
+        # Generate the code for initializing the maps.
+        _map_decl_vals = []
+        for arg in args:
+            if arg._uses_itspace:
+                # if configuration["hpc_code_gen"] == 3 and not arg._is_mat:
+                #     _map_decl_vals += [arg.c_map_init_s3(is_top=is_top, is_facet=is_facet)]
+                # else:
+                #     _map_decl_vals += [arg.c_map_init(is_top=is_top, is_facet=is_facet)]
+                if configuration["hpc_code_gen"] == 3 and not arg._is_mat:
+                    _map_decl_vals += [arg.c_map_init_s3_itset(is_top=is_top, is_facet=is_facet)]
+                else:
+                    _map_decl_vals += [arg.c_map_init(is_top=is_top, is_facet=is_facet)]
+        _map_init += ';\n'.join(_map_decl_vals)
+
         _map_bcs_m += ';\n'.join([arg.c_map_bcs("-", is_facet) for arg in args if arg._is_mat])
         _map_bcs_p += ';\n'.join([arg.c_map_bcs("+", is_facet) for arg in args if arg._is_mat])
 
@@ -1587,10 +1711,11 @@ def wrapper_snippets(itspace, args,
         _extr_loop_close = '}\n'
         if configuration["hpc_code_gen"] == 3:
             _layer_comp = " %d " % (itspace.layers - 1)
+            # if configuration["hpc_active_transposing"]:
             _transpose_arg = ';\n'.join([arg.c_transpose_dat(is_subset=isinstance(itspace._iterset, Subset))
-                                         for arg in args if arg._is_transposable])
-            _free_transpose_arg = ';\n'.join([arg.c_free_transpose_dat(is_subset=isinstance(itspace._iterset, Subset))
-                                              for arg in args if arg._is_transposable])
+                                         for arg in args if arg._is_transposable and arg.data_needs_transposing])
+            # _free_transpose_arg = ';\n'.join([arg.c_free_transpose_dat(is_subset=isinstance(itspace._iterset, Subset))
+            #                                   for arg in args if arg._is_transposable and arg.data_needs_transposing])
 
     _store_array = ";\n".join(_store_array) + ";\n"
     _load_array = ";\n".join(_load_array) + ";\n"
@@ -1602,6 +1727,7 @@ def wrapper_snippets(itspace, args,
     # - X is read, then BUFFER gathers data expected by X
     _buf_name, _buf_decl, _buf_gather, _tmp_decl, _tmp_name = {}, {}, {}, {}, {}
     _add_writeback = ""
+    _loop_size = None
     for count, arg in enumerate(args):
         # When working with values directly (Schemes 2&3) we have to write back
         # the result to args which may not use itspace. (extruded coordinate calculation)
@@ -1623,6 +1749,9 @@ def wrapper_snippets(itspace, args,
         else:
             if applied_blas:
                 _buf_size = [reduce(lambda x, y: x*y, _buf_size)]
+        if configuration["hpc_code_gen"] == 3 and isinstance(_loop_size, list) and len(_loop_size) > 1:
+            # TODO: allow more iteration loop sizes
+            sys.exit("The argument should have only one local iteration loop.")   
         _buf_decl[arg] = arg.c_buffer_decl(_buf_size, count, _buf_name[arg], is_facet=is_facet)
         _tmp_decl[arg] = arg.c_buffer_decl(_buf_size, count, _tmp_name[arg], is_facet=is_facet,
                                            init=False)
@@ -1639,7 +1768,7 @@ def wrapper_snippets(itspace, args,
     _buf_gather = ";\n".join(_buf_gather.values())
     _buf_decl = ";\n".join(_buf_decl.values())
 
-    def itset_loop_body(i, j, shape, offsets, is_facet=False):
+    def itset_loop_body(i, j, shape, offsets, is_facet=False, loop_size=None):
         nloops = len(shape)
         mult = 1
         if is_facet:
@@ -1652,7 +1781,7 @@ def wrapper_snippets(itspace, args,
             if arg._is_mat and arg._is_mixed:
                 raise NotImplementedError
             elif not arg._is_mat:
-                _buf_scatter[arg] = arg.c_buffer_scatter_vec(count, i, j, offsets, _buf_name[arg])
+                _buf_scatter[arg] = arg.c_buffer_scatter_vec(count, i, j, offsets, _buf_name[arg], loop_size)
         _buf_decl_scatter = ";\n".join(_buf_decl_scatter.values())
         _buf_scatter = ";\n".join(_buf_scatter.values())
         _itspace_loop_close = '\n'.join('  ' * n + '}' for n in range(nloops - 1, -1, -1))
@@ -1721,8 +1850,9 @@ def wrapper_snippets(itspace, args,
             'buffer_gather': _buf_gather,
             'kernel_args': _kernel_args,
             'transpose_arg': _transpose_arg,
-            'free_transposed_arg': _free_transpose_arg,
             'layer_comp': _layer_comp,
             'add_writeback': _add_writeback,
-            'itset_loop_body': '\n'.join([itset_loop_body(i, j, shape, offsets, is_facet=(iteration_region == ON_INTERIOR_FACETS))
+            'itset_loop_body': '\n'.join([itset_loop_body(i, j, shape, offsets,
+                                                          is_facet=(iteration_region == ON_INTERIOR_FACETS),
+                                                          loop_size=_loop_size)
                                           for i, j, shape, offsets in itspace])}

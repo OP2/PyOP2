@@ -292,6 +292,7 @@ class Arg(object):
         self._access = access
         self._flatten = flatten
         self._in_flight = False  # some kind of comms in flight for this arg
+        self._data_needs_transposing = False
 
         # Check arguments for consistency
         if configuration["type_check"] and not (self._is_global or map is None):
@@ -473,11 +474,21 @@ class Arg(object):
     def _is_transposable(self):
         # Currently matrices cannot be transposed.
         # TODO: add the ability to transpose the map of matrices.
-        return self._is_vec_map and self._is_indirect and not self._is_mat
+        if self._is_vec_map and self._is_indirect and not self._is_mat and not self._flatten:
+            sys.exit("This argument is not flattened and it should be!")
+        return self._is_vec_map and self._is_indirect and not self._is_mat and self._flatten
 
     @cached_property
     def _uses_itspace(self):
         return self._is_mat or isinstance(self.idx, IterationIndex)
+
+    @property
+    def data_needs_transposing(self):
+        return self._data_needs_transposing
+
+    @data_needs_transposing.setter
+    def data_needs_transposing(self, val):
+        self._data_needs_transposing = val
 
     @collective
     def halo_exchange_begin(self, update_inc=False):
@@ -1725,6 +1736,8 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
         else:
             self._id = uid
         self._name = name or "dat_%d" % self._id
+        self._transposed = False
+
         halo = dataset.halo
         if halo is not None:
             self._send_reqs = {}
@@ -1777,6 +1790,16 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
     def _argtype(self):
         """Ctypes argtype for this :class:`Dat`"""
         return ctypes.c_voidp
+
+    @property
+    def transposed(self):
+        """Check if :class:`Dat` transposed."""
+        return self._transposed
+
+    @transposed.setter
+    def transposed(self, value):
+        """Set :class:`Dat` transposition status."""
+        self._transposed = value
 
     @property
     @modifies
@@ -2914,7 +2937,8 @@ class Map(object):
     @validate_type(('iterset', Set, SetTypeError), ('toset', Set, SetTypeError),
                    ('arity', int, ArityTypeError), ('name', str, NameTypeError))
     def __init__(self, iterset, toset, arity, values=None, name=None, offset=None, parent=None,
-                 bt_masks=None, transposed_offsets=None, correction=None, reps=None, xtrs=None):
+                 bt_masks=None, transposed_offsets=None, correction=None, reps=None, xtrs=None,
+                 transposed=False):
         self._iterset = iterset
         self._toset = toset
         self._arity = arity
@@ -2936,6 +2960,7 @@ class Map(object):
         self._correction = correction
         self._reps = reps
         self._xtrs = xtrs
+        self._transposed = transposed
 
         if offset is not None and bt_masks is not None:
             for name, mask in bt_masks.iteritems():
@@ -3075,6 +3100,11 @@ class Map(object):
     def transposed_location_sets(self):
         """Split the local values based on the cell entities they are attached to."""
         return self._reps, self._xtrs
+
+    @cached_property
+    def transposed(self):
+        """Return True if the location of the data pointed to by the map is available."""
+        return self._transposed
 
     def transposable(self):
         """Return True if the location of the data pointed to by the map is available."""
@@ -3360,6 +3390,24 @@ class Sparsity(ObjectCached):
 
         self._name = name or "sparsity_%d" % Sparsity._globalcount
         Sparsity._globalcount += 1
+
+        # Check that all maps are either transposed or not.
+        # Currently we don't support a mix of maps that are transposed and one that are not
+        # in the same sparsity.
+        transposed_state = False
+        if isinstance(self._rmaps[0], MixedMap):
+            transposed_state = self._rmaps[0]._maps[0].transposed
+        else:
+            transposed_state = self._rmaps[0].transposed
+
+        for m in self._rmaps:
+            if isinstance(m, MixedMap):
+                for mixed_map in m:
+                    if not (mixed_map.transposed == transposed_state):
+                        raise RuntimeError("Not supported: A mix of transposed and untransposed maps used in sparsity.")
+            else:
+                if not (m.transposed == transposed_state):
+                        raise RuntimeError("Not supported: A mix of transposed and untransposed maps used in sparsity.")
 
         # If the Sparsity is defined on MixedDataSets, we need to build each
         # block separately
@@ -4194,12 +4242,45 @@ class ParLoop(LazyComputation):
             self._kernel._attached_info = True
 
     def _run(self):
+        if configuration["hpc_code_gen"] == 3:
+            for i, arg in enumerate(self.args):
+                # If we are generating code using Scheme 3 make sure to have
+                # all data in the same layout.
+                # Arguments which are READ have to have the data transposed if
+                # they use a transposed map.
+                if arg.access in [READ] and arg._is_indirect and \
+                   arg.map.transposed and not arg.data.transposed: # and not arg.data_needs_transposing:
+                        # Mark the argument to be tranposed in the generated code.
+                        print "Data transposing required for arg: %d" % (i)
+                        arg.data_needs_transposing = True
+
+        print self._jitmodule._code_to_compile
+        # from IPython import embed; embed()
         import pyparloop
+        ret = None
         if isinstance(self._kernel, pyparloop.Kernel) or not configuration["hpc_profiling"]:
-            return self.compute()
-        if self.is_direct and configuration["only_indirect_loops"]:
-            return self.compute()
-        return self.hpc_profiled_compute()
+            ret =  self.compute()
+        elif self.is_direct and configuration["only_indirect_loops"]:
+            ret = self.compute()
+        else:
+            ret = self.hpc_profiled_compute()
+        # from IPython import embed; embed()
+
+        if configuration["hpc_code_gen"] == 3:
+            # If we are generating code using Scheme 3, set the data which
+            # was written or incremented by the loop as transposed.
+            for i, arg in enumerate(self.args):
+                if arg.data_needs_transposing:
+                    arg.data_needs_transposing = False
+                    arg.data.transposed = True
+                    print "Mark dat as transposed."
+                if arg.access in [INC, WRITE] and arg._is_indirect and arg.map.transposed:
+                    # if arg.data.data_needs_transposing:
+                    #     sys.exit("The dat corresponding to arg %d has been transposed twice." % (i))
+                    print "Mark dat as transposed since it's been written by a transposed MAP."
+                    arg.data_needs_transposing = False
+                    arg.data.transposed = True
+        return ret
 
     def prepare_arglist(self, iterset, *args):
         """Prepare the argument list for calling generated code.
@@ -4249,15 +4330,18 @@ class ParLoop(LazyComputation):
         iterset = self.iterset
         arglist = self.prepare_arglist(iterset, *self.args)
         fun = self._jitmodule
+        print " ===> Execute core part <=== (Non-profiled)"
         self._compute(iterset.core_part, fun, *arglist)
         self.halo_exchange_end()
         fun = self._jitmodule_halo
+        print " ===> Execute owned part  <=== (Non-profiled)"
         self._compute(iterset.owned_part, fun, *arglist)
         self.reduction_begin()
         if self._only_local:
             self.reverse_halo_exchange_begin()
             self.reverse_halo_exchange_end()
         if self.needs_exec_halo:
+            print "===> Execute exec part <=== (Non-profiled)"
             self._compute(iterset.exec_part, fun, *arglist)
         self.reduction_end()
         self.update_arg_data_state()
@@ -4289,6 +4373,7 @@ class ParLoop(LazyComputation):
                 fun = self._jitmodule
                 # t, other_measures = self._compute(self.it_space.iterset.core_part)
                 print "===> Execute core part <==="
+                print self._jitmodule._code_to_compile
                 t, measures = self._compute(iterset.core_part, fun, *arglist)
                 self.halo_exchange_end()
 
@@ -4476,7 +4561,6 @@ class ParLoop(LazyComputation):
             if freq == 0:
                 u_args.append(arg1)
         return u_args
-
     @property
     def coords_exist(self):
         c_exist = False
