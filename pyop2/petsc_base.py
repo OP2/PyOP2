@@ -51,6 +51,7 @@ from profiling import timed_region
 import mpi
 from mpi import collective
 import sparsity
+from configuration import configuration
 
 
 if petsc4py_version < '3.4':
@@ -87,12 +88,20 @@ class DataSet(base.DataSet):
         if hasattr(self, '_lgmap'):
             return self._lgmap
         lgmap = PETSc.LGMap()
+        apply_transpose = self._set._extruded and configuration["hpc_code_gen"] == 3
         if MPI.comm.size == 1:
-            lgmap.create(indices=np.arange(self.size, dtype=PETSc.IntType),
-                         bsize=self.cdim)
+            if apply_transpose:
+                lgmap.create(indices=np.arange(self.size * self.cdim, dtype=PETSc.IntType),
+                             bsize=1)
+            else:
+                lgmap.create(indices=np.arange(self.size, dtype=PETSc.IntType),
+                             bsize=self.cdim)
         else:
-            lgmap.create(indices=self.halo.global_to_petsc_numbering,
-                         bsize=self.cdim)
+            if apply_transpose:
+                sys.exit("Not yet tested!")
+            else:
+                lgmap.create(indices=self.halo.global_to_petsc_numbering,
+                             bsize=self.cdim)
         self._lgmap = lgmap
         return lgmap
 
@@ -565,19 +574,33 @@ class Mat(base.Mat, CopyOnWrite):
         rdim, cdim = self.dims[0][0]
 
         if rdim == cdim and rdim > 1:
-            # Size is total number of rows and columns, but the
-            # /sparsity/ is the block sparsity.
-            block_sparse = True
-            create = mat.createBAIJ
+            if configuration["hpc_code_gen"] == 3 and self._sparsity._transposed_state:
+                block_sparse = False
+                create = mat.createAIJ
+                create(size=((self.nrows, None),
+                             (self.ncols, None)),
+                       nnz=(self.sparsity.nnz, self.sparsity.onnz),
+                       bsize=(1, 1))
+                # mat.setLGMap(rmap=row_lg, cmap=col_lg)
+            else:
+                # Size is total number of rows and columns, but the
+                # /sparsity/ is the block sparsity.
+                block_sparse = True
+                create = mat.createBAIJ
+                create(size=((self.nrows, None),
+                             (self.ncols, None)),
+                       nnz=(self.sparsity.nnz, self.sparsity.onnz),
+                       bsize=(rdim, cdim))
+                # mat.setLGMap(rmap=row_lg, cmap=col_lg)
         else:
             # Size is total number of rows and columns, sparsity is
             # the /dof/ sparsity.
             block_sparse = False
             create = mat.createAIJ
-        create(size=((self.nrows, None),
-                     (self.ncols, None)),
-               nnz=(self.sparsity.nnz, self.sparsity.onnz),
-               bsize=(rdim, cdim))
+            create(size=((self.nrows, None),
+                         (self.ncols, None)),
+                   nnz=(self.sparsity.nnz, self.sparsity.onnz),
+                   bsize=(rdim, cdim))
         mat.setLGMap(rmap=row_lg, cmap=col_lg)
         # Do not stash entries destined for other processors, just drop them
         # (we take care of those in the halo)

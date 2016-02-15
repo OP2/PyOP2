@@ -175,6 +175,7 @@ cdef inline void add_entries_extruded(rset, rmap, cset, cmap,
             raise RuntimeError("Unhandled iteration region %s", region)
 
         #print "NEW_REGION: ", start, end, layers, not rmap.transposed
+        # print "Transposed = ", rmap.transposed
         if not rmap.transposed:
             for e in range(nent):
                 for i in range(rarity):
@@ -182,9 +183,13 @@ cdef inline void add_entries_extruded(rset, rmap, cset, cmap,
                     if tmp_row >= nrows:
                         continue
                     tmp_row += row_offset
+                    # print tmp_row, "nrows: ", nrows, "row_offset: ", row_offset
                     for j in range(rdim):
+                        # print "Dimension: ", j
                         for rrep in range(reps):
                             row = tmp_row + j + rdim*rrep*roffset[i]
+
+                            # print "row: ", row
                             # Loop over layers
                             for layer in range(start, end):
                                 for k in range(carity):
@@ -193,11 +198,70 @@ cdef inline void add_entries_extruded(rset, rmap, cset, cmap,
                                             col = cdim * (cmap_vals[e, k] +
                                                           (layer + crep) * coffset[k]) + l
                                             if col < ncols:
+                                                # print " ==> row = ", row, " col = ", col
                                                 diag[row].insert(col)
                                             else:
                                                 odiag[row].insert(col)
                                 row += rdim * roffset[i]
         else:
+            # # Loop over elements
+            # for e in range(nent):
+            #     # Loop over each value in the row map
+            #     for i in range(rarity):
+            #         if rcorrection[i] > -1:
+            #             # should be layers or layers + 1 where layers is the number of cell layers.
+            #             # Assumption: layers - 1 is the number of cell layers. TODO: verify this
+            #             r_new_layer = layers - 1 + rcorrection[i]
+            #             # The ID of the first actual value of the contiguous data chunk
+            #             tmp_row = rdim * rmap_vals[e, i]
+            #         else:
+            #             r_new_layer = layers
+            #             tmp_row = rdim * rmap_vals[e, i - 1] + 1
+            #         # print r_new_layer, tmp_row, "nrows: ", nrows, "row_offset: ", row_offset
+            #         if tmp_row >= nrows:
+            #             continue
+            #         tmp_row += row_offset
+            #         # Dimension loop
+            #         # For each individual dimension
+            #         for j in range(rdim):
+            #             #print "Dimension: ", j
+            #             for rrep in range(reps):
+            #                 # Q: Add the dim * offset one more time if we are on a double map?
+            #                 # R: The interior facets we consider are the horizontal facets which
+            #                 # have a map that is computed on demand.
+            #                 # The second half of the map will be actually one offset application higher
+            #                 # up the column.
+
+            #                 # Row now contains the ID of the first value on the start layer
+            #                 row = tmp_row + j * r_new_layer + start
+            #                 if row >= nrows:
+            #                     continue
+            #                 row += rrep
+            #                 #print "   => ", "row: ", row
+
+            #                 # Loop over layers
+            #                 for layer in range(start, end):
+            #                     for k in range(carity):
+            #                         if ccorrection[k] > -1:
+            #                             c_new_layer = layers - 1 + ccorrection[k]
+            #                             col_map_val = cdim * cmap_vals[e, k]
+            #                             #print "      =+> ", "c_new_layer: ", c_new_layer, "col_map_val: ", col_map_val, "k: ", k
+            #                         else:
+            #                             c_new_layer = layers
+            #                             col_map_val = cdim * cmap_vals[e, k - 1] + 1
+            #                             #print "      =-> ", "c_new_layer: ", c_new_layer, "col_map_val: ", col_map_val, "k: ", k
+
+            #                         for l in range(cdim):
+            #                             for crep in range(reps):
+            #                                 col = col_map_val + l * c_new_layer + layer + crep
+            #                                 # print "         => ", "col: ", col, "ncols: ", ncols, " | ", col_map_val, " + ",l," * ",c_new_layer," + ",layer,"+",crep
+            #                                 if col < ncols:
+            #                                     diag[row].insert(col)
+            #                                 else:
+            #                                     odiag[row].insert(col)
+            #                     # Going up the column
+            #                     row += 1
+
             # Loop over elements
             for e in range(nent):
                 # Loop over each value in the row map
@@ -218,7 +282,7 @@ cdef inline void add_entries_extruded(rset, rmap, cset, cmap,
                     # Dimension loop
                     # For each individual dimension
                     for j in range(rdim):
-                        #print "Dimension: ", j
+                        # print "Dimension: ", j
                         for rrep in range(reps):
                             # Q: Add the dim * offset one more time if we are on a double map?
                             # R: The interior facets we consider are the horizontal facets which
@@ -231,7 +295,7 @@ cdef inline void add_entries_extruded(rset, rmap, cset, cmap,
                             if row >= nrows:
                                 continue
                             row += rrep
-                            #print "   => ", "row: ", row
+                            # print "row: ", row
 
                             # Loop over layers
                             for layer in range(start, end):
@@ -250,6 +314,7 @@ cdef inline void add_entries_extruded(rset, rmap, cset, cmap,
                                             col = col_map_val + l * c_new_layer + layer + crep
                                             # print "         => ", "col: ", col, "ncols: ", ncols, " | ", col_map_val, " + ",l," * ",c_new_layer," + ",layer,"+",crep
                                             if col < ncols:
+                                                # print " ==> row = ", row, " col = ", col
                                                 diag[row].insert(col)
                                             else:
                                                 odiag[row].insert(col)
@@ -286,6 +351,8 @@ def build_sparsity(object sparsity, bint parallel, bool block=True):
 
     if not (parallel or len(rset) > 1 or len(cset) > 1):
         make_rowptr = True
+
+    print "Should block = ", should_block
 
     if should_block:
         nrows = sum(s.size for s in rset)
@@ -432,6 +499,7 @@ def fill_with_zeros(PETSc.Mat mat not None, dims, maps, set_diag=True):
         PetscInt *cvals
         PetscInt *roffset
         PetscInt *coffset
+        PetscInt[::1] rcorrection, ccorrection
 
     rdim, cdim = dims
     # Always allocate space for diagonal
@@ -456,6 +524,10 @@ def fill_with_zeros(PETSc.Mat mat not None, dims, maps, set_diag=True):
         rarity = pair[0].arity
         carity = pair[1].arity
 
+        if pair[0].transposed:
+            rcorrection = pair[0].transposed_correction
+            ccorrection = pair[1].transposed_correction
+
         if not extruded:
             # The non-extruded case is easy, we just walk over the
             # rmap and cmap entries and set a block of values.
@@ -471,11 +543,18 @@ def fill_with_zeros(PETSc.Mat mat not None, dims, maps, set_diag=True):
             # iteration region, but it doesn't hurt to make them all
             # bigger, since we can special case less code below.
             PetscCalloc1(4*rarity*carity*rdim*cdim, &values)
-            # Row values (generally only rarity of these)
-            PetscMalloc1(2 * rarity, &rvals)
-            # Col values (generally only rarity of these)
-            PetscMalloc1(2 * carity, &cvals)
-            # Offsets (for walking up the column)
+
+            if pair[0].transposed:
+                # Row values (generally only rarity of these)
+                PetscMalloc1(2 * rarity * rdim, &rvals)
+                # Col values (generally only rarity of these)
+                PetscMalloc1(2 * carity * cdim, &cvals)
+            else:
+                # Row values (generally only rarity of these)
+                PetscMalloc1(2 * rarity, &rvals)
+                # Col values (generally only rarity of these)
+                PetscMalloc1(2 * carity, &cvals)
+                # Offsets (for walking up the column)
             PetscMalloc1(rarity, &roffset)
             PetscMalloc1(carity, &coffset)
             # Walk over the iteration regions on this map.
@@ -520,22 +599,54 @@ def fill_with_zeros(PETSc.Mat mat not None, dims, maps, set_diag=True):
                     # rvals[i] = rmap[set_entry, i] + layer_start * roffset[i]
                     #
                     # But this means less special casing.
-                    for i in range(tmp_rarity):
-                        rvals[i] = rmap[set_entry, i % rarity] + \
-                                   (layer_start + i / rarity) * roffset[i % rarity]
-                    # Ditto
-                    for i in range(tmp_carity):
-                        cvals[i] = cmap[set_entry, i % carity] + \
-                                   (layer_start + i / carity) * coffset[i % carity]
-                    for layer in range(layer_start, layer_end):
-                        MatSetValuesBlockedLocal(mat.mat, tmp_rarity, rvals,
-                                                 tmp_carity, cvals,
-                                                 values, PETSC_INSERT_VALUES)
-                        # Move to the next layer
+                    if pair[0].transposed:
                         for i in range(tmp_rarity):
-                            rvals[i] += roffset[i % rarity]
+                            for j in range(rdim):
+                                if rcorrection[i % rarity] > -1:
+                                    rvals[i * rdim + j] = rdim * rmap[set_entry, i % rarity] + \
+                                                          j * (layers - 1 + rcorrection[i % rarity]) + \
+                                                          layer_start + i / rarity
+                                else:
+                                    rvals[i * rdim + j] = rdim * rmap[set_entry, i % rarity - 1] + 1 + \
+                                                          j * layers + \
+                                                          layer_start + i / rarity
+                        # Ditto
                         for i in range(tmp_carity):
-                            cvals[i] += coffset[i % carity]
+                            for j in range(cdim):
+                                if ccorrection[i % carity] > -1:
+                                    cvals[i * cdim + j] = cdim * cmap[set_entry, i % carity] + \
+                                                          j * (layers - 1 + ccorrection[i % carity]) + \
+                                                          layer_start + i / carity
+                                else:
+                                    cvals[i * cdim + j] = cdim * cmap[set_entry, i % carity - 1] + 1 + \
+                                                          j * layers + \
+                                                          layer_start + i / carity
+                    else:
+                        for i in range(tmp_rarity):
+                            rvals[i] = rmap[set_entry, i % rarity] + \
+                                       (layer_start + i / rarity) * roffset[i % rarity]
+                        # Ditto
+                        for i in range(tmp_carity):
+                            cvals[i] = cmap[set_entry, i % carity] + \
+                                       (layer_start + i / carity) * coffset[i % carity]
+                    for layer in range(layer_start, layer_end):
+                        if pair[0].transposed:
+                            MatSetValuesBlockedLocal(mat.mat, tmp_rarity * rdim, rvals,
+                                                     tmp_carity * cdim, cvals,
+                                                     values, PETSC_INSERT_VALUES)
+                            for i in range(tmp_rarity * rdim):
+                                rvals[i] += 1
+                            for i in range(tmp_carity * cdim):
+                                cvals[i] += 1
+                        else:
+                            MatSetValuesBlockedLocal(mat.mat, tmp_rarity, rvals,
+                                                     tmp_carity, cvals,
+                                                     values, PETSC_INSERT_VALUES)
+                            # Move to the next layer
+                            for i in range(tmp_rarity):
+                                rvals[i] += roffset[i % rarity]
+                            for i in range(tmp_carity):
+                                cvals[i] += coffset[i % carity]
             PetscFree(rvals)
             PetscFree(cvals)
             PetscFree(roffset)

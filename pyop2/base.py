@@ -1736,7 +1736,8 @@ class Dat(SetAssociated, _EmptyDataMixin, CopyOnWrite):
         else:
             self._id = uid
         self._name = name or "dat_%d" % self._id
-        self._transposed = False
+        self._transposed = configuration["hpc_code_gen"] == 3 and type(dataset) is ExtrudedSet
+        #self._transposed = False
 
         halo = dataset.halo
         if halo is not None:
@@ -3394,19 +3395,19 @@ class Sparsity(ObjectCached):
         # Check that all maps are either transposed or not.
         # Currently we don't support a mix of maps that are transposed and one that are not
         # in the same sparsity.
-        transposed_state = False
+        self._transposed_state = False
         if isinstance(self._rmaps[0], MixedMap):
-            transposed_state = self._rmaps[0]._maps[0].transposed
+            self._transposed_state = self._rmaps[0]._maps[0].transposed
         else:
-            transposed_state = self._rmaps[0].transposed
+            self._transposed_state = self._rmaps[0].transposed
 
         for m in self._rmaps:
             if isinstance(m, MixedMap):
                 for mixed_map in m:
-                    if not (mixed_map.transposed == transposed_state):
+                    if not (mixed_map.transposed == self._transposed_state):
                         raise RuntimeError("Not supported: A mix of transposed and untransposed maps used in sparsity.")
             else:
-                if not (m.transposed == transposed_state):
+                if not (m.transposed == self._transposed_state):
                         raise RuntimeError("Not supported: A mix of transposed and untransposed maps used in sparsity.")
 
         # If the Sparsity is defined on MixedDataSets, we need to build each
@@ -3428,7 +3429,10 @@ class Sparsity(ObjectCached):
             self._o_nz = sum(s._o_nz for s in self)
         else:
             with timed_region("Build sparsity"):
-                build_sparsity(self, parallel=MPI.parallel, block=self._block_sparse)
+                if configuration["hpc_code_gen"] == 3 and self._transposed_state:
+                    build_sparsity(self, parallel=MPI.parallel, block=False)
+                else:
+                    build_sparsity(self, parallel=MPI.parallel, block=self._block_sparse)
             self._blocks = [[self]]
             self._nested = False
         self._initialized = True
@@ -4248,8 +4252,14 @@ class ParLoop(LazyComputation):
                 # all data in the same layout.
                 # Arguments which are READ have to have the data transposed if
                 # they use a transposed map.
-                if arg.access in [READ] and arg._is_indirect and \
-                   arg.map.transposed and not arg.data.transposed: # and not arg.data_needs_transposing:
+                if arg.access in [READ] and arg._is_indirect:
+                    if isinstance(arg.map, MixedMap):
+                        for j, m in enumerate(arg.map):
+                            if m.transposed and not arg.data[j].transposed: # and not arg.data_needs_transposing:
+                                # Mark the argument to be tranposed in the generated code.
+                                print "Data transposing required for arg: %d map %d" % (i, j)
+                                m.data_needs_transposing = True
+                    elif arg.map.transposed and not arg.data.transposed: # and not arg.data_needs_transposing:
                         # Mark the argument to be tranposed in the generated code.
                         print "Data transposing required for arg: %d" % (i)
                         arg.data_needs_transposing = True
@@ -4274,12 +4284,19 @@ class ParLoop(LazyComputation):
                     arg.data_needs_transposing = False
                     arg.data.transposed = True
                     print "Mark dat as transposed."
-                if arg.access in [INC, WRITE] and arg._is_indirect and arg.map.transposed:
-                    # if arg.data.data_needs_transposing:
-                    #     sys.exit("The dat corresponding to arg %d has been transposed twice." % (i))
-                    print "Mark dat as transposed since it's been written by a transposed MAP."
-                    arg.data_needs_transposing = False
-                    arg.data.transposed = True
+                if arg.access in [INC, WRITE] and arg._is_indirect:
+                    if isinstance(arg.map, MixedMap):
+                        for j, m in enumerate(arg.map):
+                            if m.transposed:
+                                print "Mark dat as transposed since it's been written by a transposed MAP."
+                                arg.data_needs_transposing = False
+                                arg.data.transposed = True
+                    elif arg.map.transposed:
+                        # if arg.data.data_needs_transposing:
+                        #     sys.exit("The dat corresponding to arg %d has been transposed twice." % (i))
+                        print "Mark dat as transposed since it's been written by a transposed MAP."
+                        arg.data_needs_transposing = False
+                        arg.data.transposed = True
         return ret
 
     def prepare_arglist(self, iterset, *args):
