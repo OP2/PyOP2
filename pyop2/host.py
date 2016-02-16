@@ -156,17 +156,32 @@ class Arg(base.Arg):
     def c_ind_data(self, idx, i, j=0, is_top=False, offset=None,
                    style=configuration["hpc_code_gen"],
                    repeated=[], extruded=[]):
+        ind_map = None
         if configuration["hpc_code_gen"] in [2, 3] and self._is_vec_map:
             # Only apply the scheme 3 when the flag is set and
             # the mesh is extruded (repeated and extruded set are not None)
+
+            # Find the correct map
+            for map_i, m in enumerate(self.map):
+                if map_i == i:
+                    ind_map = m
+
+            # Flag for the application of Scheme 3
             apply_scheme_3 = configuration["hpc_code_gen"] == 3 and not repeated is None and not extruded is None
-            value = "xtr_%(map_name)s[%(idx)s]%(dim)s%(off)s%(layers)s%(layer_it_var)s" % \
+            # apply_scheme_3 = configuration["hpc_code_gen"] == 3 and is_extruded
+
+            # Flag for offset application in Scheme 2
+            apply_offset_2 = configuration["hpc_code_gen"] == 2 and not ind_map is None and ind_map.iterset._extruded
+
+            # Populate value
+            value = "(xtr_%(map_name)s[%(idx)s]%(layer_advance)s)%(dim)s%(off)s%(layers)s%(layer_it_var)s" % \
                     {'map_name': self.c_map_name(i, 0),
                      'idx': idx,
                      'dim': "* %d" % self.data[i].cdim if not apply_scheme_3 else "",
                      'off': ' + %d' % j if j else '',
                      'layers': (" * (layers + 1)" if not idx in extruded else " * layers") if j and apply_scheme_3 else '',
-                     'layer_it_var': " + j_0" if apply_scheme_3 else ""}
+                     'layer_it_var': " + j_0" if apply_scheme_3 else "",
+                     'layer_advance': " + j_0 * %d" % (ind_map.offset[idx % ind_map.arity]) if apply_offset_2 else ""}
             if style == 1:
                 # Variant in which we postpone the dereferenciation.
                 # Used when scatter_vec needs this reference.
@@ -381,11 +396,6 @@ class Arg(base.Arg):
         rdim = rbs * nrows
         addto_name = buf_name
         addto = 'MatSetValuesLocal'
-        ret += ["""
-                for (int j=0; j<%(nrows)d; j++){
-                    printf(" %%d ", xtr_arg0_0_map0_0[j]);
-                }
-                printf("\\n");""" % {'nrows': nrows}]
         if self.data._is_vector_field:
             addto = 'MatSetValuesBlockedLocal'
             if self._flatten:
@@ -563,70 +573,6 @@ class Arg(base.Arg):
                         'tmp_name': tmp_name}]
                 addto_name = tmp_name
 
-        # rmap, cmap = maps
-        # rdim, cdim = self.data.dims[i][j]
-        # if rmap.vector_index is not None or cmap.vector_index is not None:
-        #     rows_str = "rowmap"
-        #     cols_str = "colmap"
-        #     addto = "MatSetValuesLocal"
-        #     fdict = {'nrows': nrows,
-        #              'ncols': ncols,
-        #              'rdim': rdim,
-        #              'cdim': cdim,
-        #              'rowmap': self.c_map_name(0, i),
-        #              'colmap': self.c_map_name(1, j),
-        #              'drop_full_row': 0 if rmap.vector_index is not None else 1,
-        #              'drop_full_col': 0 if cmap.vector_index is not None else 1}
-        #     # Horrible hack alert
-        #     # To apply BCs to a component of a Dat with cdim > 1
-        #     # we encode which components to apply things to in the
-        #     # high bits of the map value
-        #     # The value that comes in is:
-        #     # -(row + 1 + sum_i 2 ** (30 - i))
-        #     # where i are the components to zero
-        #     #
-        #     # So, the actual row (if it's negative) is:
-        #     # (~input) & ~0x70000000
-        #     # And we can determine which components to zero by
-        #     # inspecting the high bits (1 << 30 - i)
-        #     ret.append("""
-        #     PetscInt rowmap[%(nrows)d*%(rdim)d];
-        #     PetscInt colmap[%(ncols)d*%(cdim)d];
-        #     int discard, tmp, block_row, block_col;
-        #     for ( int j = 0; j < %(nrows)d; j++ ) {
-        #         block_row = %(rowmap)s[i*%(nrows)d + j];
-        #         discard = 0;
-        #         if ( block_row < 0 ) {
-        #             tmp = -(block_row + 1);
-        #             discard = 1;
-        #             block_row = tmp & ~0x70000000;
-        #         }
-        #         for ( int k = 0; k < %(rdim)d; k++ ) {
-        #             if ( discard && (%(drop_full_row)d || ((tmp & (1 << (30 - k))) != 0)) ) {
-        #                 rowmap[j*%(rdim)d + k] = -1;
-        #             } else {
-        #                 rowmap[j*%(rdim)d + k] = (block_row)*%(rdim)d + k;
-        #             }
-        #         }
-        #     }
-        #     for ( int j = 0; j < %(ncols)d; j++ ) {
-        #         discard = 0;
-        #         block_col = %(colmap)s[i*%(ncols)d + j];
-        #         if ( block_col < 0 ) {
-        #             tmp = -(block_col + 1);
-        #             discard = 1;
-        #             block_col = tmp & ~0x70000000;
-        #         }
-        #         for ( int k = 0; k < %(cdim)d; k++ ) {
-        #             if ( discard && (%(drop_full_col)d || ((tmp & (1 << (30 - k))) != 0)) ) {
-        #                 colmap[j*%(rdim)d + k] = -1;
-        #             } else {
-        #                 colmap[j*%(cdim)d + k] = (block_col)*%(cdim)d + k;
-        #             }
-        #         }
-        #     }
-        #     """ % fdict)
-
         ret.append("""%(addto)s(%(mat)s, %(nrows)s, %(rows)s,
                                          %(ncols)s, %(cols)s,
                                          (const PetscScalar *)%(vals)s,
@@ -760,19 +706,17 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
             is_top = is_top_init and m.iterset._extruded
             map_idx = 0
             for idx in range(m.arity):
-                val.append("xtr_%(name)s[%(ind)s] = *(%(name)s + i * %(dim)s + %(ind)s)%(off_top)s;" %
+                val.append("xtr_%(name)s[%(ind)s] = %(name)s[i * %(dim)s + %(ind)s];" %
                            {'name': self.c_map_name(i, 0),
                             'dim': m.arity,
-                            'ind': idx,
-                            'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else ''})
+                            'ind': idx})
             if is_facet:
                 for idx in range(m.arity):
-                    val.append("xtr_%(name)s[%(ind)s] = *(%(name)s + i * %(dim)s + %(ind_zero)s)%(off_top)s%(off)s;" %
+                    val.append("xtr_%(name)s[%(ind)s] = %(name)s[i * %(dim)s + %(ind_zero)s]%(off)s;" %
                                {'name': self.c_map_name(i, 0),
                                 'dim': m.arity,
                                 'ind': m.arity + idx,
                                 'ind_zero': idx,
-                                'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else '',
                                 'off': ' + ' + str(m.offset[idx])})
         return '\n'.join(val)+'\n'
 
@@ -1167,35 +1111,6 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                                        {'name': self.c_map_name(i, j),
                                         'off': 1,
                                         'ind_flat': m.arity * (k + d.cdim) + idx})
-        return '\n'.join(val)+'\n'
-
-    def c_add_offset_s2(self, is_facet=False):
-        if not self.map.iterset._extruded:
-            return ""
-        val = []
-        vec_idx = 0
-        for i, (m, d) in enumerate(zip(self.map, self.data)):
-            # If the map can be tranposed and the code gen is of the
-            # correct type, then it HAS been transposed and the
-            # offset shouldn't be added in this case.
-            if configuration["hpc_code_gen"] == 3 and m.transposable():
-                continue
-            for idx in range(m.arity):
-                val.append("xtr_%(name)s[%(j)d] += %(offset)d;" %
-                           {'name': self.c_map_name(i, 0),
-                            'j': idx,
-                            # 'j': vec_idx
-                            'offset': m.offset[idx],
-                            'dim': d.cdim})
-                vec_idx += 1
-            if is_facet:
-                for idx in range(m.arity):
-                    val.append("xtr_%(name)s[%(j)d] += %(offset)d;" %
-                               {'name': self.c_map_name(i, 0),
-                                'j': vec_idx,
-                                'offset': m.offset[idx],
-                                'dim': d.cdim})
-                    vec_idx += 1
         return '\n'.join(val)+'\n'
 
     def c_offset_init(self):
@@ -1965,10 +1880,10 @@ def wrapper_snippets(itspace, args,
 
         # For the arguments transposed in code generation scheme 3 there is no offset addition.
         # This takes place when c_vec_init is called.
-        if configuration["hpc_code_gen"] in [2, 3]:
-            _apply_offset += ';\n'.join([arg.c_add_offset_s2(is_facet=is_facet)
-                                         for arg in args if arg._is_vec_map])
-        elif configuration["hpc_code_gen"] == 1:
+        # if configuration["hpc_code_gen"] in [2, 3]:
+        #     _apply_offset += ';\n'.join([arg.c_add_offset_s2(is_facet=is_facet)
+        #                                  for arg in args if arg._is_vec_map])
+        if configuration["hpc_code_gen"] == 1:
             _apply_offset += ';\n'.join([arg.c_add_offset(is_facet=is_facet)
                                          for arg in args if arg._is_vec_map])
         _extr_loop = '\n' + extrusion_loop()
