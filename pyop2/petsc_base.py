@@ -98,7 +98,7 @@ class DataSet(base.DataSet):
                              bsize=self.cdim)
         else:
             if apply_transpose:
-                sys.exit("Not yet tested!")
+                raise NotImplementedError
             else:
                 lgmap.create(indices=self.halo.global_to_petsc_numbering,
                              bsize=self.cdim)

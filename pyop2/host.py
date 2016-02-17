@@ -804,6 +804,16 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                                 'ind': idx,
                                 'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else '',
                                 'cdim': " * %d" % d.cdim})
+                        if is_facet:
+                            for idx in range(m.arity):
+                                # Scheme 2
+                                val.append("xtr_%(name)s[%(ind)s] = %(name)s[i * %(dim)s + %(ind_zero)s]%(off_top)s%(off)s;" %
+                                       {'name': self.c_map_name(i, j),
+                                        'dim': m.arity,
+                                        'ind': m.arity + idx,
+                                        'ind_zero': idx,
+                                        'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else '',
+                                        'off': ' + ' + str(m.offset[idx])})
                 else:
                     for k in range(d.cdim):
                         for idx in range(m.arity):
@@ -832,27 +842,14 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                                                 'ind_zero': idx + 1,
                                                 'ind': map_idx - 1})
                                     map_idx += 1
-                if is_facet:
-                    # Same as scheme 2 TODO: Make it like SCHEME 3!
-                    if not m.iterset._extruded or not m.transposable():
-                        for idx in range(m.arity):
-                            # Scheme 2
-                            val.append("xtr_%(name)s[%(ind)s] = %(name)s[i * %(dim)s + %(ind_zero)s]%(off_top)s%(off)s;" %
-                                   {'name': self.c_map_name(i, j),
-                                    'dim': m.arity,
-                                    'ind': m.arity + idx,
-                                    'ind_zero': idx,
-                                    'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else '',
-                                    'off': ' + ' + str(m.offset[idx])})
-                    else:
-                        for k in range(d.cdim):
+                        if is_facet:
                             for idx in range(m.arity):
                                 # Scheme 3
                                 # Offset is always 1
-                                val.append("xtr_%(name)s[%(ind)s] = xtr_%(name)s[%(ind_zero)s] + 1; // int facet" %
+                                val.append("xtr_%(name)s[%(ind)s] = xtr_%(name)s[%(ind_zero)s] + 1; // int facet itset" %
                                            {'name': self.c_map_name(i, j),
                                             'ind': map_idx,
-                                            'ind_zero': k * m.arity + idx})
+                                            'ind_zero': map_idx - m.arity}) # k * m.arity + idx
                                 map_idx += 1
         return '\n'.join(val)+'\n'
 
@@ -1632,7 +1629,7 @@ class JITModule(base.JITModule):
             wrapper_code["times_loop_start"] = "for(int times=0; times<%(times)s; times++){\n" % {'times': str(configuration['times'])}
             wrapper_code["times_loop_end"] = "}"
 
-    def hpc_debug(self, wrapper_code):
+    def hpc_debug(self, wrapper_code, iteration_region=ALL):
         # TODO: identify which arg it is and print the addtional info
         # TODO: send size as argument
         print_arg_vecs = ""
@@ -1641,7 +1638,9 @@ class JITModule(base.JITModule):
             if arg._is_vec_map:
                 # TODO: This is not taking into consideration the facet
                 # For facets not all values will be printed (only half will vbe printed)
-                cdim = arg.data.cdim if arg._flatten else 1
+                cdim = arg.data.cdim if arg._flatten or configuration["hpc_code_gen"] == 3 else 1
+                if iteration_region == ON_INTERIOR_FACETS:
+                    cdim *= 2
                 print_arg_vecs += """
                 printf("%(name)s : ");
                 for(int ii=0; ii<%(size)s; ii++){
@@ -1649,12 +1648,15 @@ class JITModule(base.JITModule):
                 }
                 printf("\\n");
                 """ % {"name": arg.c_vec_name(),
-                       "size": arg.map.arity * (arg.data.cdim if arg._flatten else 1),
+                       "size": arg.map.arity * cdim,
                        "map_name": arg.c_map_name(i, 0),
                        "star": "" if configuration["hpc_code_gen"] in [2, 3] else "*"}
 
             # Print contributions
             if arg._uses_itspace and arg.access in [WRITE, INC] and not arg._is_mat:
+                cdim = arg.data.cdim if arg._flatten or configuration["hpc_code_gen"] == 3 else 1
+                if iteration_region == ON_INTERIOR_FACETS:
+                    cdim *= 2
                 print_contribs += """
                 printf("OUTPUT \\n");
                 for(int ii=0; ii<%(size)s; ii++){
@@ -1662,7 +1664,7 @@ class JITModule(base.JITModule):
                 }
                 printf("\\n");
                 """ % {"name": arg.c_arg_name(),
-                       "size": arg.map.arity * (arg.data.cdim if arg._flatten else 1)}
+                       "size": arg.map.arity * cdim}
             # else:
             #     wrapper_code["print_contrib"] = ""
         wrapper_code["print_contrib"] = print_contribs
@@ -1786,7 +1788,7 @@ class JITModule(base.JITModule):
 
         # Add any debugging information
         if configuration["hpc_debug"]:
-            self.hpc_debug(snippets)
+            self.hpc_debug(snippets, iteration_region=self._iteration_region)
 
         return snippets
 

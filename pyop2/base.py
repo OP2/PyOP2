@@ -4265,7 +4265,6 @@ class ParLoop(LazyComputation):
                         arg.data_needs_transposing = True
 
         print self._jitmodule._code_to_compile
-        # from IPython import embed; embed()
         import pyparloop
         ret = None
         if isinstance(self._kernel, pyparloop.Kernel) or not configuration["hpc_profiling"]:
@@ -4274,7 +4273,6 @@ class ParLoop(LazyComputation):
             ret = self.compute()
         else:
             ret = self.hpc_profiled_compute()
-        # from IPython import embed; embed()
 
         if configuration["hpc_code_gen"] == 3:
             # If we are generating code using Scheme 3, set the data which
