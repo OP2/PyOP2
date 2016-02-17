@@ -1221,7 +1221,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                     for k in range(d.cdim):
                         # "ind": self.c_kernel_arg(count, i, j, style=1, stride=loop_size),
                         val.append("*(%(ind)s) %(op)s %(name)s[%(vec_idx)s]" %
-                                   {"ind": self.c_ind_data_xtr(str(vec_idx), i, style=1, stride=loop_size * k,
+                                   {"ind": self.c_ind_data_xtr(str(vec_idx), i, style=1,
                                                                layer_advance=" + j_0 * %d * %d" % (m.offset[idx], d.cdim)),
                                     "op": "=" if self.access == WRITE else "+=",
                                     "name": buf_name,
@@ -1241,7 +1241,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                     for idx in range(m.arity):
                         for k in range(d.cdim):
                             val.append("*(%(ind)s) %(op)s %(name)s[%(vec_idx)s]; //facet" %
-                                       {"ind": self.c_ind_data_xtr(str(vec_idx), i, style=1, stride=loop_size * k,
+                                       {"ind": self.c_ind_data_xtr(str(vec_idx), i, style=1,
                                                                layer_advance=" + j_0 * %d * %d" % (m.offset[idx], d.cdim)),
                                         "op": "=" if self.access == WRITE else "+=",
                                         "name": buf_name,
@@ -1281,91 +1281,6 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                                         "name": buf_name,
                                         "vec_idx": vec_idx})
                             vec_idx += 1
-        return ";\n".join(val) + ";"
-
-    def c_buffer_scatter_vec_unroll_s3(self, count, i, j, offset, buf_name, loop_size, is_facet=False):
-        # In this case the map is always flat.
-        if isinstance(loop_size, list):
-            loop_size = loop_size[0]
-
-        val = []
-        vec_idx = 0
-        # When flattening the arg, the xtr_...[*]
-        # needs to be flattened only within a dimension.
-        # When the dimension changes, the map_idx needs to be reset.
-        for i, (m, d) in enumerate(zip(self.map, self.data)):
-            # TODO: Fix the passing down of the information for Scheme 3.
-            reps = None
-            xtrs = None
-            if m.iterset._extruded:
-                reps, xtrs = m.transposed_location_sets
-
-            # if self._flatten:
-            map_idx = 0
-            for idx in range(m.arity):
-                for k in range(d.cdim):
-                    # "ind": self.c_kernel_arg(count, i, j, style=1, stride=loop_size),
-                    val.append("*(%(ind)s) %(op)s %(name)s[%(vec_idx)s]; // flattened" %
-                               {"ind": self.c_ind_data_xtr(str(idx), i, style=1, stride=loop_size * k,
-                                                           layer_advance=" + j_0 * %d * %d" % (m.offset[idx], d.cdim)),
-                                "op": "=" if self.access == WRITE else "+=",
-                                "name": buf_name,
-                                "vec_idx": vec_idx})
-                    vec_idx += 1
-                    map_idx += 1
-            # In the case of interior horizontal facets the map for the
-            # vertical does not exist so it has to be dynamically
-            # created by adding the offset to the map of the current
-            # cell. In this way the only map required is the one for
-            # the bottom layer of cells and the wrapper will make sure
-            # to stage in the data for the entire map spanning the facet.
-            if is_facet:
-                # In the case of the simplified code gen, we have
-                # to pass the vec_idx value becuase now the maps have
-                # already been flattened when the xtr_...[*] was populated.
-                for idx in range(m.arity):
-                    for k in range(d.cdim):
-                        val.append("*(%(ind)s) %(op)s %(name)s[%(vec_idx)s]; //facet" %
-                                   {"ind": self.c_ind_data_xtr(str(idx), i, style=1, stride=loop_size * k,
-                                                           layer_advance=" + j_0 * %d * %d" % (m.offset[idx], d.cdim)),
-                                    "op": "=" if self.access == WRITE else "+=",
-                                    "name": buf_name,
-                                    "vec_idx": vec_idx})
-                        vec_idx += 1
-            # else:
-            #     map_idx = 0
-            #     for k in range(d.cdim):
-            #         for idx in range(m.arity):
-            #             # "ind": self.c_kernel_arg(count, i, j, style=1, stride=loop_size),
-            #             val.append("*(%(ind)s) %(op)s %(name)s[%(vec_idx)s]" %
-            #                        {"ind": self.c_ind_data_xtr(str(idx), i, style=1,
-            #                                                    layer_advance=" + j_0 * %d" % (m.offset[idx]),
-            #                                                    cdim_offset=k),
-            #                         "op": "=" if self.access == WRITE else "+=",
-            #                         "name": buf_name,
-            #                         "vec_idx": vec_idx})
-            #             vec_idx += 1
-            #             map_idx += 1
-            #     # In the case of interior horizontal facets the map for the
-            #     # vertical does not exist so it has to be dynamically
-            #     # created by adding the offset to the map of the current
-            #     # cell. In this way the only map required is the one for
-            #     # the bottom layer of cells and the wrapper will make sure
-            #     # to stage in the data for the entire map spanning the facet.
-            #     if is_facet:
-            #         # In the case of the simplified code gen, we have
-            #         # to pass the vec_idx value becuase now the maps have
-            #         # already been flattened when the xtr_...[*] was populated.
-            #         for k in range(d.cdim):
-            #             for idx in range(m.arity):
-            #                 val.append("*(%(ind)s) %(op)s %(name)s[%(vec_idx)s]; //facet" %
-            #                            {"ind": self.c_ind_data_xtr(str(idx + m.arity), i, style=1,
-            #                                                    layer_advance=" + j_0 * %d" % (m.offset[idx]),
-            #                                                    cdim_offset=k),
-            #                             "op": "=" if self.access == WRITE else "+=",
-            #                             "name": buf_name,
-            #                             "vec_idx": vec_idx})
-            #                 vec_idx += 1
         return ";\n".join(val) + ";"
 
     def _c_list_to_str(self, list):
@@ -2136,7 +2051,7 @@ def wrapper_snippets(itspace, args,
             mult = 2
         _itspace_loops = '\n'.join(['  ' * n + itspace_loop(n, e*mult) for n, e in enumerate(shape)])
 
-        if configuration["hpc_code_gen"] in [2, 3] and itspace._extruded:
+        if configuration["hpc_code_gen"] == 2 and itspace._extruded:
             _itspace_loops = ""
 
         _buf_decl_scatter, _buf_scatter = {}, {}
@@ -2151,15 +2066,13 @@ def wrapper_snippets(itspace, args,
                 # This will cause race conditions across the vertical direction.
                 if configuration["hpc_code_gen"] == 2 and itspace._extruded:
                     _buf_scatter[arg] = arg.c_buffer_scatter_vec_unroll(count, i, j, offsets, _buf_name[arg], loop_size, is_facet=is_facet)
-                elif configuration["hpc_code_gen"] == 3 and itspace._extruded:
-                    _buf_scatter[arg] = arg.c_buffer_scatter_vec_unroll_s3(count, i, j, offsets, _buf_name[arg], loop_size, is_facet=is_facet)
                 else:
                     _buf_scatter[arg] = arg.c_buffer_scatter_vec(count, i, j, offsets, _buf_name[arg], loop_size)
         _buf_decl_scatter = ";\n".join(_buf_decl_scatter.values())
         _buf_scatter = ";\n".join(_buf_scatter.values())
         _itspace_loop_close = '\n'.join('  ' * n + '}' for n in range(nloops - 1, -1, -1))
 
-        if configuration["hpc_code_gen"] in [2, 3] and itspace._extruded:
+        if configuration["hpc_code_gen"] == 2 and itspace._extruded:
             _itspace_loop_close = ""
 
         if itspace._extruded:
