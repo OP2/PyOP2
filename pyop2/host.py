@@ -186,10 +186,10 @@ class Arg(base.Arg):
                 # Variant in which we postpone the dereferenciation.
                 # Used when scatter_vec needs this reference.
                 return "%(name)s + %(value)s" % \
-                    {'name': self.c_arg_name(i), # + ("_tmp" if apply_scheme_3 and configuration["hpc_active_transposing"] else ""),
+                    {'name': self.c_arg_name(i),
                      'value': value}
             return "%(name)s[%(value)s]" % \
-                {'name': self.c_arg_name(i), # + ("_tmp" if apply_scheme_3 and configuration["hpc_active_transposing"] else ""),
+                {'name': self.c_arg_name(i),
                  'value': value}
         return "%(name)s + (%(map_name)s[i * %(arity)s + %(idx)s]%(top)s%(off_mul)s%(off_add)s)* %(dim)s%(off)s" % \
             {'name': self.c_arg_name(i),
@@ -204,14 +204,16 @@ class Arg(base.Arg):
 
     def c_ind_data_xtr(self, idx, i, j=0,
                        style=configuration["hpc_code_gen"],
-                       stride=None):
+                       stride=None, layer_advance=None, cdim_offset=None):
         if configuration["hpc_code_gen"] in [2, 3]:
             # The writeback should always be to transposed data
-            value = "(xtr_%(map_name)s[%(idx)s])%(dim)s%(off)s" % \
+            value = "(xtr_%(map_name)s[%(idx)s]%(layer_advance)s)%(dim)s%(off)s%(cdim_offset)s" % \
                 {'map_name': self.c_map_name(i, 0),
                  'idx': idx,
                  'dim': ("* 1" if self._flatten else "*" + str(self.data[i].cdim)),
-                 'off': ' + %d' % j if j else ''}
+                 'off': ' + %d' % j if j else '',
+                 'cdim_offset': " + %d" % (cdim_offset) if cdim_offset else "",
+                 'layer_advance': layer_advance if layer_advance else ""}
             if configuration["hpc_code_gen"] == 3:
                 value = "xtr_%(map_name)s[%(idx)s%(dimension_idx)s]%(layer)s%(off)s" % \
                     {'map_name': self.c_map_name(i, 0),
@@ -843,13 +845,15 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                                     'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else '',
                                     'off': ' + ' + str(m.offset[idx])})
                     else:
-                        for idx in range(m.arity):
-                            # Scheme 3
-                            # Offset is always 1
-                            val.append("xtr_%(name)s[%(ind)s] = xtr_%(name)s[%(ind_zero)s] + 1; // int facet" %
-                                       {'name': self.c_map_name(i, j),
-                                        'ind': m.arity + idx,
-                                        'ind_zero': idx})
+                        for k in range(d.cdim):
+                            for idx in range(m.arity):
+                                # Scheme 3
+                                # Offset is always 1
+                                val.append("xtr_%(name)s[%(ind)s] = xtr_%(name)s[%(ind_zero)s] + 1; // int facet" %
+                                           {'name': self.c_map_name(i, j),
+                                            'ind': map_idx,
+                                            'ind_zero': k * m.arity + idx})
+                                map_idx += 1
         return '\n'.join(val)+'\n'
 
     def c_map_init_s3_itset_mat(self, is_top=False, is_facet=False):
@@ -917,13 +921,15 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                                     'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else '',
                                     'off': ' + ' + str(m.offset[idx])})
                     else:
-                        for idx in range(m.arity):
-                            # Scheme 3
-                            # Offset is always 1
-                            val.append("xtr_%(name)s[%(ind)s] = xtr_%(name)s[%(ind_zero)s] + 1; // int facet" %
-                                       {'name': self.c_map_name(i, j),
-                                        'ind': m.arity + idx,
-                                        'ind_zero': idx})
+                        for k in range(d.cdim):
+                            for idx in range(m.arity):
+                                # Scheme 3
+                                # Offset is always 1
+                                val.append("xtr_%(name)s[%(ind)s] = xtr_%(name)s[%(ind_zero)s] + 1; // int facet on mat" %
+                                           {'name': self.c_map_name(i, j),
+                                            'ind': map_idx,
+                                            'ind_zero': k * m.arity + idx})
+                                map_idx += 1
         return '\n'.join(val)+'\n'
 
     def c_map_init(self, is_top=False, is_facet=False):
@@ -932,6 +938,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
         else:
             dsets = (self.data.dataset,)
         val = []
+        apply_start_layer = configuration["hpc_code_gen"] == 1 or (configuration["hpc_code_gen"] == 2 and self._is_mat)
         for i, (map, dset) in enumerate(zip(as_tuple(self.map, Map), dsets)):
             for j, (m, d) in enumerate(zip(map, dset)):
                 for idx in range(m.arity):
@@ -945,13 +952,13 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                                         'dat_dim': d.cdim,
                                         'ind_flat': (2 if is_facet else 1) * m.arity * k + idx,
                                         'offset': ' + '+ str(k) if k > 0 else '',
-                                        'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else ''})
+                                        'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top and apply_start_layer else ''})
                     else:
                         val.append("xtr_%(name)s[%(ind)s] = *(%(name)s + i * %(dim)s + %(ind)s)%(off_top)s;" %
                                    {'name': self.c_map_name(i, j),
                                     'dim': m.arity,
                                     'ind': idx,
-                                    'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top else ''})
+                                    'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top and apply_start_layer else ''})
                 if is_facet:
                     for idx in range(m.arity):
                         if self._is_dat and self._flatten and d.cdim > 1:
@@ -962,7 +969,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                                             'ind': idx,
                                             'dat_dim': d.cdim,
                                             'ind_flat': m.arity * (k * 2 + 1) + idx,
-                                            'offset': ' + '+str(k) if k > 0 else '',
+                                            'offset': ' + ' + str(k) if k > 0 else '',
                                             'off': ' + ' + str(m.offset[idx])})
                         else:
                             val.append("xtr_%(name)s[%(ind)s] = *(%(name)s + i * %(dim)s + %(ind_zero)s)%(off_top)s%(off)s;" %
@@ -970,7 +977,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                                         'dim': m.arity,
                                         'ind': idx + m.arity,
                                         'ind_zero': idx,
-                                        'off_top': ' + start_layer' if is_top else '',
+                                        'off_top': ' + start_layer * '+str(m.offset[idx]) if is_top and apply_start_layer else '',
                                         'off': ' + ' + str(m.offset[idx])})
         return '\n'.join(val)+'\n'
 
@@ -1181,6 +1188,7 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
             loop_size = loop_size[0]
         # Style = 1 means that we always want a reference even when the
         # simplified code generation is used.
+
         return ";\n".join(["*(%(ind)s%(nfofs_one)s) %(op)s %(name)s[i_0*%(dim)d%(nfofs_two)s%(mxofs)s]" %
                            {"ind": self.c_kernel_arg(count, i, j, style=1, stride=loop_size * o),
                             "op": "=" if self.access == WRITE else "+=",
@@ -1190,6 +1198,90 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                             "nfofs_two": " + %d" % o if o else "",
                             "mxofs": " + %d" % (mxofs[0] * dim) if mxofs else ""}
                            for o in range(dim)])
+
+    def c_buffer_scatter_vec_unroll(self, count, i, j, offset, buf_name, loop_size, is_facet=False):
+        if isinstance(loop_size, list):
+            loop_size = loop_size[0]
+
+        val = []
+        vec_idx = 0
+        # When flattening the arg, the xtr_...[*]
+        # needs to be flattened only within a dimension.
+        # When the dimension changes, the map_idx needs to be reset.
+        for i, (m, d) in enumerate(zip(self.map, self.data)):
+            # TODO: Fix the passing down of the information for Scheme 3.
+            reps = None
+            xtrs = None
+            if m.iterset._extruded:
+                reps, xtrs = m.transposed_location_sets
+
+            if self._flatten:
+                map_idx = 0
+                for idx in range(m.arity):
+                    for k in range(d.cdim):
+                        # "ind": self.c_kernel_arg(count, i, j, style=1, stride=loop_size),
+                        val.append("*(%(ind)s) %(op)s %(name)s[%(vec_idx)s]" %
+                                   {"ind": self.c_ind_data_xtr(str(vec_idx), i, style=1, stride=loop_size * k,
+                                                               layer_advance=" + j_0 * %d * %d" % (m.offset[idx], d.cdim)),
+                                    "op": "=" if self.access == WRITE else "+=",
+                                    "name": buf_name,
+                                    "vec_idx": vec_idx})
+                        vec_idx += 1
+                        map_idx += 1
+                # In the case of interior horizontal facets the map for the
+                # vertical does not exist so it has to be dynamically
+                # created by adding the offset to the map of the current
+                # cell. In this way the only map required is the one for
+                # the bottom layer of cells and the wrapper will make sure
+                # to stage in the data for the entire map spanning the facet.
+                if is_facet:
+                    # In the case of the simplified code gen, we have
+                    # to pass the vec_idx value becuase now the maps have
+                    # already been flattened when the xtr_...[*] was populated.
+                    for idx in range(m.arity):
+                        for k in range(d.cdim):
+                            val.append("*(%(ind)s) %(op)s %(name)s[%(vec_idx)s]; //facet" %
+                                       {"ind": self.c_ind_data_xtr(str(vec_idx), i, style=1, stride=loop_size * k,
+                                                               layer_advance=" + j_0 * %d * %d" % (m.offset[idx], d.cdim)),
+                                        "op": "=" if self.access == WRITE else "+=",
+                                        "name": buf_name,
+                                        "vec_idx": vec_idx})
+                            vec_idx += 1
+            else:
+                map_idx = 0
+                for idx in range(m.arity):
+                    for k in range(d.cdim):
+                        # "ind": self.c_kernel_arg(count, i, j, style=1, stride=loop_size),
+                        val.append("*(%(ind)s) %(op)s %(name)s[%(vec_idx)s]" %
+                                   {"ind": self.c_ind_data_xtr(str(idx), i, style=1, stride=loop_size * k,
+                                                               layer_advance=" + j_0 * %d" % (m.offset[idx]),
+                                                               cdim_offset=k),
+                                    "op": "=" if self.access == WRITE else "+=",
+                                    "name": buf_name,
+                                    "vec_idx": vec_idx})
+                        vec_idx += 1
+                        map_idx += 1
+                # In the case of interior horizontal facets the map for the
+                # vertical does not exist so it has to be dynamically
+                # created by adding the offset to the map of the current
+                # cell. In this way the only map required is the one for
+                # the bottom layer of cells and the wrapper will make sure
+                # to stage in the data for the entire map spanning the facet.
+                if is_facet:
+                    # In the case of the simplified code gen, we have
+                    # to pass the vec_idx value becuase now the maps have
+                    # already been flattened when the xtr_...[*] was populated.
+                    for idx in range(m.arity):
+                        for k in range(d.cdim):
+                            val.append("*(%(ind)s) %(op)s %(name)s[%(vec_idx)s]; //facet" %
+                                       {"ind": self.c_ind_data_xtr(str(idx + m.arity), i, style=1, stride=loop_size * k,
+                                                               layer_advance=" + j_0 * %d" % (m.offset[idx]),
+                                                               cdim_offset=k),
+                                        "op": "=" if self.access == WRITE else "+=",
+                                        "name": buf_name,
+                                        "vec_idx": vec_idx})
+                            vec_idx += 1
+        return ";\n".join(val) + ";"
 
     def _c_list_to_str(self, list):
         return "{" + ", ".join([str(r) for r in list]) + "};"
@@ -1286,10 +1378,11 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
             for k in range(d.cdim):
                 map_idx = 0
                 for idx in range(m.arity):
-                    val.append("%(data)s = %(buf_name)s[%(idx)s]" %
+                    val.append("%(data)s %(op)s %(buf_name)s[%(idx)s]" %
                                {'vec_name': self.c_arg_name(),
                                 'buf_name': buf_name,
                                 'idx': vec_idx,
+                                'op': "=" if self.access in [WRITE] else "+=",
                                 'data': self.c_ind_data(idx, i, k, is_top=is_top,
                                                         offset=m.offset[idx] if is_top else None,
                                                         repeated=reps, extruded=xtrs)})
@@ -1306,10 +1399,11 @@ for ( int i = 0; i < %(dim)s; i++ ) %(combine)s;
                     # to pass the vec_idx value becuase now the maps have
                     # already been flattened when the xtr_...[*] was populated.
                     for idx in range(m.arity):
-                        val.append("%(data)s = %(buf_name)s[%(idx)s]" %
+                        val.append("%(data)s %(op)s %(buf_name)s[%(idx)s]" %
                                    {'vec_name': self.c_arg_name(),
                                     'idx': vec_idx,
                                     'buf_name': buf_name,
+                                    'op': "=" if self.access in [WRITE] else "+=",
                                     'data': self.c_ind_data(map_idx, i, k, is_top=is_top,
                                                             offset=m.offset[idx],
                                                             repeated=reps, extruded=xtrs)})
@@ -1873,7 +1967,10 @@ def wrapper_snippets(itspace, args,
         # it_space args since we have not transposed them yet.
         if configuration["hpc_code_gen"] == 3:
             _apply_offset += ';\n'.join([arg.c_add_offset_map_s3(is_facet=is_facet)
-                                         for arg in args if arg._uses_itspace])
+                                         for arg in args if arg._uses_itspace and arg._is_mat])
+        elif configuration["hpc_code_gen"] == 2:
+            _apply_offset += ';\n'.join([arg.c_add_offset_map(is_facet=is_facet)
+                                         for arg in args if arg._uses_itspace and arg._is_mat])
         else:
             _apply_offset += ';\n'.join([arg.c_add_offset_map(is_facet=is_facet)
                                          for arg in args if arg._uses_itspace])
@@ -1911,7 +2008,7 @@ def wrapper_snippets(itspace, args,
         # When working with values directly (Schemes 2&3) we have to write back
         # the result to args which may not use itspace. (extruded coordinate calculation)
         if not arg.writeback_needed() and not arg._uses_itspace:
-                continue
+            continue
         _buf_name[arg] = "buffer_%s" % arg.c_arg_name(count)
         _tmp_name[arg] = "tmp_%s" % _buf_name[arg]
         _buf_size = list(itspace._extents)
@@ -1941,7 +2038,7 @@ def wrapper_snippets(itspace, args,
             _buf_gather[arg] = "\n".join([_itspace_loops, _buf_gather[arg], _itspace_loop_close])
         elif arg.writeback_needed():
             print "WRITEBACK NEEDED: a custom writeback is required for this code generation scheme!"
-            _add_writeback = arg.c_result_writeback(_buf_name[arg], is_top, is_facet=is_facet)
+            _add_writeback += arg.c_result_writeback(_buf_name[arg], is_top, is_facet=is_facet)
     _kernel_args = ', '.join([arg.c_kernel_arg(count) if not arg.writeback_needed() and not arg._uses_itspace else _buf_name[arg]
                               for count, arg in enumerate(args)])
     _buf_gather = ";\n".join(_buf_gather.values())
@@ -1953,6 +2050,10 @@ def wrapper_snippets(itspace, args,
         if is_facet:
             mult = 2
         _itspace_loops = '\n'.join(['  ' * n + itspace_loop(n, e*mult) for n, e in enumerate(shape)])
+
+        if configuration["hpc_code_gen"] in [2, 3] and itspace._extruded:
+            _itspace_loops = ""
+
         _buf_decl_scatter, _buf_scatter = {}, {}
         for count, arg in enumerate(args):
             if not (arg._uses_itspace and arg.access in [WRITE, INC]):
@@ -1960,10 +2061,20 @@ def wrapper_snippets(itspace, args,
             if arg._is_mat and arg._is_mixed:
                 raise NotImplementedError
             elif not arg._is_mat:
-                _buf_scatter[arg] = arg.c_buffer_scatter_vec(count, i, j, offsets, _buf_name[arg], loop_size)
+                if configuration["hpc_code_gen"] in [2, 3] and itspace._extruded:
+                    # Custom writeback for new code generation schemes.
+                    # In the new code generation we have to avoid adding the offset to the extruded map.
+                    # This will cause race conditions across the vertical direction.
+                    _buf_scatter[arg] = arg.c_buffer_scatter_vec_unroll(count, i, j, offsets, _buf_name[arg], loop_size, is_facet=is_facet)
+                else:
+                    _buf_scatter[arg] = arg.c_buffer_scatter_vec(count, i, j, offsets, _buf_name[arg], loop_size)
         _buf_decl_scatter = ";\n".join(_buf_decl_scatter.values())
         _buf_scatter = ";\n".join(_buf_scatter.values())
         _itspace_loop_close = '\n'.join('  ' * n + '}' for n in range(nloops - 1, -1, -1))
+
+        if configuration["hpc_code_gen"] in [2, 3] and itspace._extruded:
+            _itspace_loop_close = ""
+
         if itspace._extruded:
             if configuration["hpc_code_gen"] == 3:
                 _addtos_extruded = ';\n'.join([arg.c_addto_s3(i, j, _buf_name[arg],
