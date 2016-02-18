@@ -4264,7 +4264,8 @@ class ParLoop(LazyComputation):
                         print "Data transposing required for arg: %d" % (i)
                         arg.data_needs_transposing = True
 
-        print self._jitmodule._code_to_compile
+        if configuration["hpc_gen_code_output"]:
+            print self._jitmodule._code_to_compile
         import pyparloop
         ret = None
         if isinstance(self._kernel, pyparloop.Kernel) or not configuration["hpc_profiling"]:
