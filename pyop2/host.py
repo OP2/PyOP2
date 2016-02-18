@@ -1756,7 +1756,6 @@ class JITModule(base.JITModule):
             extension = "cpp"
 
         self._code_to_compile = code_to_compile
-        # print code_to_compile
         self._fun = compilation.load(code_to_compile,
                                      extension,
                                      self._wrapper_name,

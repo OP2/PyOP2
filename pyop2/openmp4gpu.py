@@ -308,6 +308,9 @@ class ParLoop(host.ParLoop):
 
     @cached_property
     def _jitmodule(self):
+        if configuration["hpc_offload"]:
+            return JITModule(self.kernel, self.it_space, *self.args,
+                             direct=self.is_direct, iterate=self.iteration_region)
         return JITModule(self.kernel, self.it_space, *self.args,
                          direct=self.is_direct, iterate=self.iteration_region)
 
