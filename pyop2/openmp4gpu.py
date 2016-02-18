@@ -311,8 +311,8 @@ class ParLoop(host.ParLoop):
         if configuration["hpc_offload"]:
             return JITModule(self.kernel, self.it_space, *self.args,
                              direct=self.is_direct, iterate=self.iteration_region)
-        return JITModule(self.kernel, self.it_space, *self.args,
-                         direct=self.is_direct, iterate=self.iteration_region)
+        return omp4.JITModule(self.kernel, self.it_space, *self.args,
+                              direct=self.is_direct, iterate=self.iteration_region)
 
     @cached_property
     def _jitmodule_halo(self):
