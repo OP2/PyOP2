@@ -87,7 +87,6 @@ class Configuration(dict):
         "hpc_save_order": ("PYOP2_HPC_ORDER", int, 0),
         "hpc_check_order": ("PYOP2_HPC_ORDER", int, 0),
         "hpc_gen_code_output": ("PYOP2_HPC_GEN_CODE_OUTPUT", bool, True),
-        "hpc_offload": ("PYOP2_HPC_OFFLOAD", bool, True),
         # Enable active transposing for switching between layouts.
         "hpc_active_transposing": ("PYOP2_HPC_ACTIVE_TRANSP", bool, False),
         # Teams and threads for the OpenMP 4.0 backend
