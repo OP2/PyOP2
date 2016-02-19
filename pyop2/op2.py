@@ -286,13 +286,6 @@ def par_loop(kernel, iterset, *args, **kwargs):
     return backends._BackendSelector._backend.par_loop(kernel, iterset, *args, **kwargs)
 
 
-@modifies_arguments
-@collective
-def seq_loop(kernel, iterset, *args, **kwargs):
-    """Similar to a ``par_loop`` but bound to the sequential backend."""
-    return pyop2.sequential.par_loop(kernel, iterset, *args, **kwargs)
-
-
 @collective
 @validate_type(('A', base.Mat, MatTypeError),
                ('x', base.Dat, DatTypeError),

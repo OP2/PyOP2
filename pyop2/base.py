@@ -4269,7 +4269,7 @@ class ParLoop(LazyComputation):
         import pyparloop
         ret = None
         if isinstance(self._kernel, pyparloop.Kernel) or not configuration["hpc_profiling"]:
-            ret =  self.compute()
+            ret = self.compute()
         elif self.is_direct and configuration["only_indirect_loops"]:
             ret = self.compute()
         else:

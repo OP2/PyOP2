@@ -293,6 +293,7 @@ def compose_openmp4_wrapper():
     """
     if configuration["hpc_code_gen"] == 1:
         wrapper += """
+                %(vec_decs)s;
                 %(vec_inits)s;
         """
 
@@ -300,10 +301,11 @@ def compose_openmp4_wrapper():
                 %(map_init)s;
                 %(parallel_pragma_three)s
                 %(extr_loop)s
-                %(vec_decs)s;
     """
+
     if configuration["hpc_code_gen"] in [2, 3]:
         wrapper += """
+                %(vec_decs)s;
                 %(vec_inits)s;
         """
 
