@@ -1597,6 +1597,8 @@ def loop_chain(name, **kwargs):
         * split_mode (default=0): split the loop chain every /split_mode/ occurrences
             of the special object ``LoopChainTag`` in the trace, thus creating a
             specific inspector for each slice.
+        * explicit (default=None): a tuple (a, b) indicating that only the subchain
+            [a, b] should be inspected. Takes precedence over /split_mode/
         * log (default=False): output inspector and loop chain info to a file
     """
     assert name != lazy_trace_name, "Loop chain name must differ from %s" % lazy_trace_name
@@ -1604,6 +1606,7 @@ def loop_chain(name, **kwargs):
     num_unroll = kwargs.setdefault('num_unroll', 1)
     tile_size = kwargs.setdefault('tile_size', 1)
     split_mode = kwargs.pop('split_mode', 0)
+    explicit = kwargs.pop('explicit', None)
 
     # Get a snapshot of the trace before new par loops are added within this
     # context manager
@@ -1652,6 +1655,13 @@ def loop_chain(name, **kwargs):
                          for loop in extracted_trace]
             trace[bottom:] = list(flatten(new_trace))
             _trace.evaluate_all()
+    elif explicit:
+        lb, ub = explicit
+        pre = extracted_trace[:lb]
+        inspected = fuse(name, extracted_trace[lb:ub+1], **kwargs)
+        post = extracted_trace[ub+1:]
+        trace[bottom:] = pre + inspected + post
+        _trace.evaluate_all()
     elif split_mode > 0:
         # 2) ... Tile over subsets of loops in the loop chain. The subsets have
         # been identified by the user through /sub_loop_chain/ or /loop_chain_tag/
