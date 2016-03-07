@@ -7,9 +7,13 @@ delivers performance-portability across a range of platforms:
 """
 
 # CX1 hack
+import sys
 try:
-    import sys
     sys.path.remove('/apps/python/2.7.3/lib/python2.7/site-packages/petsc4py-3.5-py2.7-linux-x86_64.egg')
+except:
+    pass
+try:
+    sys.path.remove('/apps/python/2.7.3/lib/python2.7/site-packages/mpi4py-1.3.1-py2.7-linux-x86_64.egg')
 except:
     pass
 
