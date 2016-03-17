@@ -3290,6 +3290,7 @@ class Sparsity(ObjectCached):
             # This will cause a trivial memory accounting error (although not a leak).
             self._d_nz = 0
             self._o_nz = 0
+            self._dims = (((1, 1),),)
         else:
             # All rmaps and cmaps have the same data set - just use the first.
             self._nrows = self._rmaps[0].toset.size
@@ -3329,6 +3330,7 @@ class Sparsity(ObjectCached):
             # Where the sparsity maps either from or to a Global, we
             # don't really have any sparsity structure.
             self._blocks = [[self]]
+            self._nested = False
         else:
             with timed_region("CreateSparsity"):
                 build_sparsity(self, parallel=MPI.parallel, block=self._block_sparse)
@@ -3631,8 +3633,8 @@ class Mat(SetAssociated):
     @validate_in(('access', _modes, ModeValueError))
     def __call__(self, access, path, flatten=False):
         path = as_tuple(path, _MapArg, 2)
-        path_maps = [arg.map for arg in path]
-        path_idxs = [arg.idx for arg in path]
+        path_maps = [arg and arg.map for arg in path]
+        path_idxs = [arg and arg.idx for arg in path]
         if configuration["type_check"] and tuple(path_maps) not in self.sparsity:
             raise MapValueError("Path maps not in sparsity maps")
         return _make_object('Arg', data=self, map=path_maps, access=access,
