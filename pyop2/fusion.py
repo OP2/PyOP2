@@ -882,7 +882,8 @@ class Inspector(Cached):
         key = (name,)
         if name != lazy_trace_name:
             # Special case: the Inspector comes from a user-defined /loop_chain/
-            key += (options['mode'], options['tile_size'], options['use_glb_maps'])
+            key += (options['mode'], options['tile_size'],
+                    options['use_glb_maps'], options['coloring'])
             key += (loop_chain[0].kernel.cache_key,)
             return key
         # Inspector extracted from lazy evaluation trace
@@ -1355,6 +1356,7 @@ class Inspector(Cached):
 
         tile_size = self._options.get('tile_size', 1)
         extra_halo = self._options.get('extra_halo', False)
+        coloring = self._options.get('coloring', 'default')
         log = self._options.get('log', False)
 
         # The SLOPE inspector, which needs be populated with sets, maps,
@@ -1426,6 +1428,9 @@ class Inspector(Cached):
         # Set a tile partitioning strategy
         inspector.set_part_mode('chunk')
 
+        # Set a tile coloring strategy
+        inspector.set_coloring(coloring)
+
         # Generate the C code
         src = inspector.generate_code()
 
@@ -1454,7 +1459,7 @@ class Inspector(Cached):
             if not os.path.exists(os.path.dirname(filename)):
                 os.makedirs(os.path.dirname(filename))
             with open(filename, 'w') as f:
-                f.write('iteration set - memory footprint (KB) - number of Megaflops\n')
+                f.write('iteration set - memory footprint (KB) - megaflops\n')
                 f.write('-------------------------------------------------------\n')
                 tot_mem_footprint, tot_flops = {}, 0
                 for loop in self._loop_chain:
@@ -1544,7 +1549,8 @@ def fuse(name, loop_chain, **kwargs):
         'mode': kwargs.get('mode', 'hard'),
         'use_glb_maps': kwargs.get('use_glb_maps', False),
         'tile_size': kwargs.get('tile_size', 1),
-        'extra_halo': kwargs.get('extra_halo', False)
+        'extra_halo': kwargs.get('extra_halo', False),
+        'coloring': kwargs.get('coloring', 'default')
     }
     inspector = Inspector(name, loop_chain, **options)
     if inspector._initialized:
@@ -1637,6 +1643,12 @@ def loop_chain(name, **kwargs):
         * split_mode (default=0): split the loop chain every /split_mode/ occurrences
             of the special object ``LoopChainTag`` in the trace, thus creating a
             specific inspector for each slice.
+        * coloring (default='default'): set a coloring scheme for tiling. The ``default``
+            coloring should be used because it ensures correctness by construction,
+            based on the execution mode (sequential, openmp, mpi, mixed). So this
+            should be changed only if totally confident with what is going on.
+            Possible values are default, rand, omp; these are documented in detail
+            in the documentation of the SLOPE library.
         * explicit (default=None): a tuple (a, b) indicating that only the subchain
             [a, b] should be inspected. Takes precedence over /split_mode/
         * log (default=False): output inspector and loop chain info to a file
@@ -1648,6 +1660,7 @@ def loop_chain(name, **kwargs):
     num_unroll = kwargs.setdefault('num_unroll', 1)
     tile_size = kwargs.setdefault('tile_size', 1)
     kwargs.setdefault('use_glb_maps', False)
+    kwargs.setdefault('coloring', 'default')
     split_mode = kwargs.pop('split_mode', 0)
     explicit = kwargs.pop('explicit', None)
 
