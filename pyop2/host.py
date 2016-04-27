@@ -55,7 +55,6 @@ class Kernel(base.Kernel):
     def _ast_to_c(self, ast, opts={}):
         """Transform an Abstract Syntax Tree representing the kernel into a
         string of code (C syntax) suitable to CPU execution."""
-        self._original_ast = dcopy(ast)
         ast_handler = ASTKernel(ast, self._include_dirs)
         ast_handler.plan_cpu(self._opts)
         self._applied_blas = ast_handler.blas
@@ -713,17 +712,19 @@ class JITModule(base.JITModule):
             return
         self._kernel = kernel
         self._fun = None
+        self._code_dict = None
         self._itspace = itspace
         self._args = args
         self._direct = kwargs.get('direct', False)
         self._iteration_region = kwargs.get('iterate', ALL)
-        self._initialized = True
         # Copy the class variables, so we don't overwrite them
         self._cppargs = dcopy(type(self)._cppargs)
         self._libraries = dcopy(type(self)._libraries)
         self._system_headers = dcopy(type(self)._system_headers)
         self.set_argtypes(itspace.iterset, *args)
-        self.compile()
+        if not kwargs.get('delay', False):
+            self.compile()
+            self._initialized = True
 
     @collective
     def __call__(self, *args):
@@ -835,13 +836,14 @@ class JITModule(base.JITModule):
         return self._fun
 
     def generate_code(self):
-        snippets = wrapper_snippets(self._itspace, self._args,
-                                    kernel_name=self._kernel._name,
-                                    user_code=self._kernel._user_code,
-                                    wrapper_name=self._wrapper_name,
-                                    iteration_region=self._iteration_region,
-                                    applied_blas=self._kernel._applied_blas)
-        return snippets
+        if not self._code_dict:
+            self._code_dict = wrapper_snippets(self._itspace, self._args,
+                                               kernel_name=self._kernel._name,
+                                               user_code=self._kernel._user_code,
+                                               wrapper_name=self._wrapper_name,
+                                               iteration_region=self._iteration_region,
+                                               applied_blas=self._kernel._applied_blas)
+        return self._code_dict
 
 
 def wrapper_snippets(itspace, args,

@@ -31,48 +31,73 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
 # OF THE POSSIBILITY OF SUCH DAMAGE.
 
-"""OP2 backend for fusion and tiling of ``ParLoops``."""
+"""OP2 backend for fusion and tiling of parloops."""
 
 from contextlib import contextmanager
+from decorator import decorator
 from collections import OrderedDict
 from copy import deepcopy as dcopy, copy as scopy
+from itertools import groupby
 import os
+import sys
 
 from base import *
 import base
 import compilation
+import sequential
 import host
 from backends import _make_object
 from caching import Cached
-from profiling import lineprof, timed_region, profile
+from profiling import timed_region
 from logger import warning, info as log_info
-from mpi import collective
-from configuration import configuration
+from mpi import MPI, collective
 from utils import flatten, strip, as_tuple
 
 import coffee
 from coffee import base as ast
-from coffee.utils import ast_make_alias
+from coffee.utils import ast_make_alias, ItSpace
 from coffee.visitors import FindInstances, SymbolReferences
 
+
 try:
+    """Is SLOPE accessible ?"""
+    sys.path.append(os.path.join(os.environ['SLOPE_DIR'], 'python'))
     import slope_python as slope
-except ImportError:
+    os.environ['SLOPE_METIS']
+
+    # Set the SLOPE backend
+    backend = os.environ.get('SLOPE_BACKEND')
+    if backend not in ['SEQUENTIAL', 'OMP']:
+        backend = 'SEQUENTIAL'
+    if MPI.parallel:
+        if backend == 'SEQUENTIAL':
+            backend = 'ONLY_MPI'
+        if backend == 'OMP':
+            backend = 'OMP_MPI'
+    slope.set_exec_mode(backend)
+    log_info("SLOPE backend set to %s" % backend)
+except:
+    warning("Couldn't locate SLOPE, no tiling possible. Check SLOPE_{DIR,METIS} env vars")
     slope = None
 
 
-class Arg(host.Arg):
+lazy_trace_name = 'lazy_trace'
+"""The default name for sequences of par loops extracted from the trace produced
+by lazy evaluation."""
+
+
+class Arg(sequential.Arg):
 
     @staticmethod
-    def specialize(args, gtl_map, loop_id):
-        """Given ``args``, instances of some :class:`fusion.Arg` superclass,
-        create and return specialized :class:`fusion.Arg` objects.
+    def specialize(args, gtl_map, loop_id, use_glb_maps):
+        """Given an iterator of :class:`sequential.Arg` objects return an iterator
+        of :class:`fusion.Arg` objects.
 
-        :param args: either a single :class:`host.Arg` object or an iterator
-                     (accepted: list, tuple) of :class:`host.Arg` objects.
-        :gtl_map: a dict associating global maps' names to local maps' c_names.
-        :param loop_id: indicates the position of the args` loop in the loop
-                        chain
+        :arg args: either a single :class:`sequential.Arg` object or an iterator
+             (accepted: list, tuple) of :class:`sequential.Arg` objects.
+        :arg gtl_map: a dict associating global map names to local map names.
+        :arg loop_id: the position of the loop using ``args`` in the loop chain
+        :arg use_glb_maps: shold global or local maps be used when generating code?
         """
 
         def convert(arg, gtl_map, loop_id):
@@ -85,10 +110,11 @@ class Arg(host.Arg):
                     c_local_maps[i][j] = gtl_map["%s%d_%d" % (m.name, i, j)]
             # Instantiate and initialize new, specialized Arg
             _arg = Arg(arg.data, arg.map, arg.idx, arg.access, arg._flatten)
-            _arg._loop_position = loop_id
+            _arg.loop_position = loop_id
             _arg.position = arg.position
             _arg.indirect_position = arg.indirect_position
             _arg._c_local_maps = c_local_maps
+            _arg._use_glb_maps = use_glb_maps
             return _arg
 
         try:
@@ -98,105 +124,182 @@ class Arg(host.Arg):
 
     @staticmethod
     def filter_args(loop_args):
-        """Given a sequence of tuples of ``Args``, where each tuple comes from a
-        different loop, create a sequence of ``Args`` where there are no duplicates
-        and access modes are properly set (for example, an ``Arg`` whose ``Dat``
-        appears in two different tuples with access mode ``WRITE`` and ``READ``,
-        respectively, will have access mode ``RW`` in the returned sequence of
-        ``Args``."""
+        """Given an iterator of :class:`Arg` tuples, each tuple representing the
+        args in a loop of the chain, create a 'flattened' iterator of ``Args``
+        in which: 1) there are no duplicates; 2) access modes are 'adjusted'
+        if the same :class:`Dat` is accessed through multiple ``Args``.
+
+        For example, if a ``Dat`` appears twice with access modes ``WRITE`` and
+        ``READ``, a single ``Arg`` with access mode ``RW`` will be present in the
+        returned iterator."""
         filtered_args = OrderedDict()
         for args in loop_args:
             for a in args:
-                filtered_args[a.data] = filtered_args.get(a.data, a)
-                if a.access != filtered_args[a.data].access:
-                    if READ in [a.access, filtered_args[a.data].access]:
+                fa = filtered_args.setdefault((a.data, a.map), a)
+                if a.access != fa.access:
+                    if READ in [a.access, fa.access]:
                         # If a READ and some sort of write (MIN, MAX, RW, WRITE,
                         # INC), then the access mode becomes RW
-                        filtered_args[a.data]._access = RW
-                    elif WRITE in [a.access, filtered_args[a.data].access]:
+                        fa.access = RW
+                    elif WRITE in [a.access, fa.access]:
                         # Can't be a READ, so just stick to WRITE regardless of what
                         # the other access mode is
-                        filtered_args[a.data]._access = WRITE
+                        fa.access = WRITE
                     else:
                         # Neither READ nor WRITE, so access modes are some
                         # combinations of RW, INC, MIN, MAX. For simplicity,
                         # just make it RW.
-                        filtered_args[a.data]._access = RW
+                        fa.access = RW
         return filtered_args
 
-    def c_arg_bindto(self, arg):
-        """Assign c_pointer of this Arg to ``arg``."""
-        if self.ctype != arg.ctype:
-            raise RuntimeError("Cannot bind arguments having mismatching types")
-        return "%s* %s = %s" % (self.ctype, self.c_arg_name(), arg.c_arg_name())
+    @property
+    def c_arg_bindto(self):
+        """Assign this Arg's c_pointer to ``arg``."""
+        return "%s* %s = %s" % (self.ctype, self.c_arg_name(), self.ref_arg.c_arg_name())
+
+    def c_ind_data(self, idx, i, j=0, is_top=False, layers=1, offset=None):
+        if self._use_glb_maps:
+            return super(Arg, self).c_ind_data(idx, i, j, is_top, offset, flatten)
+        return "%(name)s + (%(map_name)s[n * %(arity)s + %(idx)s]%(top)s%(off_mul)s%(off_add)s)* %(dim)s%(off)s" % \
+            {'name': self.c_arg_name(i),
+             'map_name': self.c_map_name(i, 0),
+             'arity': self.map.split[i].arity,
+             'idx': idx,
+             'top': ' + start_layer' if is_top else '',
+             'dim': self.data[i].cdim,
+             'off': ' + %d' % j if j else '',
+             'off_mul': ' * %d' % offset if is_top and offset is not None else '',
+             'off_add': ' + %d' % offset if not is_top and offset is not None else ''}
 
     def c_map_name(self, i, j):
-        return self._c_local_maps[i][j]
+        if self._use_glb_maps:
+            return self.ref_arg.c_map_name(i, j)
+        else:
+            return self._c_local_maps[i][j]
+
+    def c_global_reduction_name(self, count=None):
+        return "%(name)s_l%(count)d[0]" % {
+            'name': self.c_arg_name(),
+            'count': count}
 
     @property
     def name(self):
         """The generated argument name."""
-        return "arg_exec_loop%d_%d" % (self._loop_position, self._position)
+        return "arg_exec_loop%d_%d" % (self.loop_position, self.position)
 
 
-class Kernel(host.Kernel, tuple):
+class Kernel(sequential.Kernel, tuple):
 
-    """A :class:`fusion.Kernel` object represents an ordered sequence of kernels.
-    The sequence can either be the result of the concatenation of the kernels
-    bodies, or a list of separate kernels (i.e., different C functions).
-    """
+    """A :class:`fusion.Kernel` represents a sequence of kernels.
+
+    The sequence can be:
+
+        * the result of the concatenation of kernel bodies (so a single C function
+            is present)
+        * a list of separate kernels (multiple C functions, which have to be
+            suitably called within the wrapper function)."""
 
     @classmethod
     def _cache_key(cls, kernels, fused_ast=None, loop_chain_index=None):
-        keys = "".join([super(Kernel, cls)._cache_key(k._code or k._ast.gencode(),
-                                                      k._name, k._opts, k._include_dirs,
-                                                      k._headers, k._user_code)
-                        for k in kernels])
+        keys = "".join([super(Kernel, cls)._cache_key(
+            k._original_ast.gencode() if k._original_ast else k._code,
+            k._name, k._opts, k._include_dirs, k._headers, k._user_code) for k in kernels])
         return str(loop_chain_index) + keys
 
     def _ast_to_c(self, asts, opts):
-        """Fuse Abstract Syntax Trees of a collection of kernels and transform
-        them into a string of C code."""
+        """Produce a string of C code from an abstract syntax tree representation
+        of the kernel."""
         if not isinstance(asts, (ast.FunDecl, ast.Root)):
             asts = ast.Root(asts)
         self._ast = asts
-        self._original_ast = dcopy(asts)
+        self._original_ast = dcopy(self._ast)
         return super(Kernel, self)._ast_to_c(self._ast, opts)
+
+    def _multiple_ast_to_c(self, kernels):
+        """Glue together different ASTs (or strings) such that: ::
+
+            * clashes due to identical function names are avoided;
+            * duplicate functions (same name, same body) are avoided.
+        """
+        code = ""
+        identifier = lambda k: k.cache_key[1:]
+        unsorted_kernels = sorted(kernels, key=identifier)
+        for i, (_, kernel_group) in enumerate(groupby(unsorted_kernels, identifier)):
+            duplicates = list(kernel_group)
+            main = duplicates[0]
+            if main._original_ast:
+                main_ast = dcopy(main._original_ast)
+                finder = FindInstances((ast.FunDecl, ast.FunCall))
+                found = finder.visit(main_ast, ret=FindInstances.default_retval())
+                for fundecl in found[ast.FunDecl]:
+                    new_name = "%s_%d" % (fundecl.name, i)
+                    # Need to change the name of any inner functions too
+                    for funcall in found[ast.FunCall]:
+                        if fundecl.name == funcall.funcall.symbol:
+                            funcall.funcall.symbol = new_name
+                    fundecl.name = new_name
+                function_name = "%s_%d" % (main._name, i)
+                code += host.Kernel._ast_to_c(main, main_ast, main._opts)
+            else:
+                # AST not available so can't change the name, hopefully there
+                # will not be compile time clashes.
+                function_name = main._name
+                code += main._code
+            # Finally track the function name within this /fusion.Kernel/
+            for k in duplicates:
+                try:
+                    k._function_names[self.cache_key] = function_name
+                except AttributeError:
+                    k._function_names = {
+                        k.cache_key: k.name,
+                        self.cache_key: function_name
+                    }
+            code += "\n"
+        return code
 
     def __init__(self, kernels, fused_ast=None, loop_chain_index=None):
         """Initialize a :class:`fusion.Kernel` object.
 
-        :param kernels: an iterator of some :class:`Kernel` objects. The objects
-                        can be of class `fusion.Kernel` or of any superclass.
-        :param fused_ast: the Abstract Syntax Tree of the fused kernel. If not
-                          provided, kernels are simply concatenated.
-        :param loop_chain_index: index (i.e., position) of the kernel in a loop
-                                 chain. This can be used to identify the same
-                                 kernel appearing multiple times in a loop chain.
+        :arg kernels: an iterator of some :class:`Kernel` objects. The objects
+            can be of class `fusion.Kernel` or of any superclass.
+        :arg fused_ast: the abstract syntax tree of the fused kernel. If not
+            provided, objects in ``kernels`` are considered "isolated C functions".
+        :arg loop_chain_index: index (i.e., position) of the kernel in a loop chain.
+            Meaningful only if ``fused_ast`` is specified.
         """
         # Protect against re-initialization when retrieved from cache
         if self._initialized:
             return
-
-        asts = fused_ast
-        if not asts:
-            # If kernels' need be concatenated, discard duplicates
-            kernels = dict(zip([k.cache_key[1:] for k in kernels], kernels)).values()
-            asts = [k._ast for k in kernels]
-        kernels = as_tuple(kernels, (Kernel, host.Kernel, base.Kernel))
-
         Kernel._globalcount += 1
-        self._kernels = kernels
+
+        # We need to distinguish between the kernel name and the function name(s).
+        # Since /fusion.Kernel/ are, in general, collections of functions, the same
+        # function (which is itself associated a Kernel) can appear in different
+        # /fusion.Kernel/ objects, but possibly under a different name (to avoid
+        # name clashes)
         self._name = "_".join([k.name for k in kernels])
+        self._function_names = {self.cache_key: self._name}
+
+        self._cpp = any(k._cpp for k in kernels)
         self._opts = dict(flatten([k._opts.items() for k in kernels]))
         self._applied_blas = any(k._applied_blas for k in kernels)
         self._include_dirs = list(set(flatten([k._include_dirs for k in kernels])))
+        self._ldargs = list(set(flatten([k._ldargs for k in kernels])))
         self._headers = list(set(flatten([k._headers for k in kernels])))
         self._user_code = "\n".join(list(set([k._user_code for k in kernels])))
         self._attached_info = False
-        # Code generation is delayed until actually needed
-        self._ast = asts
-        self._code = None
+
+        # What sort of Kernel do I have?
+        if fused_ast:
+            # A single, already fused AST (code generation is then delayed)
+            self._ast = fused_ast
+            self._code = None
+        else:
+            # Multiple kernels, interpreted as different C functions
+            self._ast = None
+            self._code = self._multiple_ast_to_c(kernels)
+        self._original_ast = self._ast
+        self._kernels = kernels
 
         self._initialized = True
 
@@ -210,7 +313,25 @@ class Kernel(host.Kernel, tuple):
 
 # Parallel loop API
 
-class JITModule(host.JITModule):
+class IterationSpace(base.IterationSpace):
+
+    """A simple bag of :class:`IterationSpace` objects."""
+
+    def __init__(self, all_itspaces):
+        self._iterset = [i._iterset for i in all_itspaces]
+
+    def __str__(self):
+        output = "OP2 Fused Iteration Space:"
+        output += "\n  ".join(["%s with extents %s" % (i._iterset, i._extents)
+                               for i in self.iterset])
+        return output
+
+    def __repr__(self):
+        return "\n".join(["IterationSpace(%r, %r)" % (i._iterset, i._extents)
+                          for i in self.iterset])
+
+
+class JITModule(sequential.JITModule):
 
     _cppargs = []
     _libraries = []
@@ -220,11 +341,15 @@ class JITModule(host.JITModule):
 extern "C" void %(wrapper_name)s(%(executor_arg)s,
                       %(ssinds_arg)s
                       %(wrapper_args)s
-                      %(const_args)s);
+                      %(const_args)s
+                      %(rank)s
+                      %(region_flag)s);
 void %(wrapper_name)s(%(executor_arg)s,
                       %(ssinds_arg)s
                       %(wrapper_args)s
-                      %(const_args)s) {
+                      %(const_args)s
+                      %(rank)s
+                      %(region_flag)s) {
   %(user_code)s
   %(wrapper_decs)s;
   %(const_inits)s;
@@ -239,43 +364,47 @@ void %(wrapper_name)s(%(executor_arg)s,
 %(args_binding)s;
 %(tile_init)s;
 for (int n = %(tile_start)s; n < %(tile_end)s; n++) {
-  int i = %(index_expr)s;
+  int i = %(tile_iter)s;
   %(vec_inits)s;
-  i = %(tile_iter)s[%(index_expr)s];
   %(buffer_decl)s;
   %(buffer_gather)s
   %(kernel_name)s(%(kernel_args)s);
-  %(layout_decl)s;
-  %(layout_loop)s
-      %(layout_assign)s;
-  %(layout_loop_close)s
   i = %(index_expr)s;
   %(itset_loop_body)s;
 }
+%(tile_finish)s;
 %(interm_globals_writeback)s;
 """
 
     @classmethod
-    def _cache_key(cls, kernel, it_space, *args, **kwargs):
-        key = (hash(kwargs['executor']),)
+    def _cache_key(cls, kernel, itspace, *args, **kwargs):
+        insp_name = kwargs['insp_name']
+        use_glb_maps = kwargs['use_glb_maps']
+        key = (insp_name, use_glb_maps)
+        if insp_name != lazy_trace_name:
+            return key
+        all_kernels = kwargs['all_kernels']
+        all_itspaces = kwargs['all_itspaces']
         all_args = kwargs['all_args']
-        for kernel_i, it_space_i, args_i in zip(kernel, it_space, all_args):
-            key += super(JITModule, cls)._cache_key(kernel_i, it_space_i, *args_i)
+        for kernel, itspace, args in zip(all_kernels, all_itspaces, all_args):
+            key += super(JITModule, cls)._cache_key(kernel, itspace, *args)
         return key
 
-    def __init__(self, kernel, it_space, *args, **kwargs):
+    def __init__(self, kernel, itspace, *args, **kwargs):
         if self._initialized:
             return
+        self._all_kernels = kwargs.pop('all_kernels')
+        self._all_itspaces = kwargs.pop('all_itspaces')
         self._all_args = kwargs.pop('all_args')
         self._executor = kwargs.pop('executor')
-        self._it_space = it_space
-        super(JITModule, self).__init__(kernel, it_space, *args, **kwargs)
+        self._use_glb_maps = kwargs.pop('use_glb_maps')
+        super(JITModule, self).__init__(kernel, itspace, *args, **kwargs)
 
     def set_argtypes(self, iterset, *args):
         argtypes = [slope.Executor.meta['py_ctype_exec']]
-        for it_space in self._it_space:
-            if isinstance(it_space.iterset, Subset):
-                argtypes.append(it_space.iterset._argtype)
+        for itspace in self._all_itspaces:
+            if isinstance(itspace.iterset, Subset):
+                argtypes.append(itspace.iterset._argtype)
         for arg in args:
             if arg._is_mat:
                 argtypes.append(arg.data._argtype)
@@ -283,24 +412,24 @@ for (int n = %(tile_start)s; n < %(tile_end)s; n++) {
                 for d in arg.data:
                     argtypes.append(d._argtype)
             if arg._is_indirect or arg._is_mat:
-                maps = as_tuple(arg.Map, Map)
+                maps = as_tuple(arg.map, Map)
                 for map in maps:
                     for m in map:
                         argtypes.append(m._argtype)
         for c in Const._definitions():
             argtypes.append(c._argtype)
 
-        return argtypes
+        # MPI related stuff (rank, region)
+        argtypes.append(ctypes.c_int)
+        argtypes.append(ctypes.c_int)
+
+        self._argtypes = argtypes
 
     def compile(self):
         # If we weren't in the cache we /must/ have arguments
         if not hasattr(self, '_args'):
             raise RuntimeError("JITModule not in cache, but has no args associated")
 
-        # Prior to the instantiation and compilation of the JITModule, a fusion
-        # kernel object needs be created. This is because the superclass' method
-        # expects a single kernel, not a list as we have at this point.
-        self._kernel = Kernel(self._kernel)
         # Set compiler and linker options
         slope_dir = os.environ['SLOPE_DIR']
         self._kernel._name = 'executor'
@@ -315,7 +444,9 @@ for (int n = %(tile_start)s; n < %(tile_end)s; n++) {
 
         if hasattr(self, '_all_args'):
             # After the JITModule is compiled, can drop any reference to now
-            # useless fields, which would otherwise cause memory leaks
+            # useless fields
+            del self._all_kernels
+            del self._all_itspaces
             del self._all_args
             del self._executor
 
@@ -323,79 +454,125 @@ for (int n = %(tile_start)s; n < %(tile_end)s; n++) {
 
     def generate_code(self):
         indent = lambda t, i: ('\n' + '  ' * i).join(t.split('\n'))
-        code_dict = {}
 
+        # 1) Construct the wrapper arguments
+        code_dict = {}
         code_dict['wrapper_name'] = 'wrap_executor'
         code_dict['executor_arg'] = "%s %s" % (slope.Executor.meta['ctype_exec'],
                                                slope.Executor.meta['name_param_exec'])
-
-        # Construct the wrapper
         _wrapper_args = ', '.join([arg.c_wrapper_arg() for arg in self._args])
         _wrapper_decs = ';\n'.join([arg.c_wrapper_dec() for arg in self._args])
-        if len(Const._defs) > 0:
-            _const_args = ', '
-            _const_args += ', '.join([c_const_arg(c) for c in Const._definitions()])
-        else:
-            _const_args = ''
-        _const_inits = ';\n'.join([c_const_init(c) for c in Const._definitions()])
-
         code_dict['wrapper_args'] = _wrapper_args
-        code_dict['const_args'] = _const_args
         code_dict['wrapper_decs'] = indent(_wrapper_decs, 1)
-        code_dict['const_inits'] = indent(_const_inits, 1)
+        code_dict['rank'] = ", %s %s" % (slope.Executor.meta['ctype_rank'],
+                                         slope.Executor.meta['rank'])
+        code_dict['region_flag'] = ", %s %s" % (slope.Executor.meta['ctype_region_flag'],
+                                                slope.Executor.meta['region_flag'])
 
-        # Construct kernels invocation
-        _loop_chain_body, _user_code, _ssinds_arg = [], [], []
-        for i, loop in enumerate(zip(self._kernel, self._itspace, self._all_args)):
-            kernel, it_space, args = loop
+        # 2) Construct the kernel invocations
+        _loop_body, _user_code, _ssinds_arg = [], [], []
+        _const_args, _const_inits = set(), set()
+        # For each kernel ...
+        for i, (kernel, it_space, args) in enumerate(zip(self._all_kernels,
+                                                         self._all_itspaces,
+                                                         self._all_args)):
+            # ... bind the Executor's arguments to this kernel's arguments
+            binding = []
+            for a1 in args:
+                for a2 in self._args:
+                    if a1.data is a2.data and a1.map is a2.map:
+                        a1.ref_arg = a2
+                        break
+                binding.append(a1.c_arg_bindto)
+            binding = ";\n".join(binding)
 
-            # Obtain code_dicts of individual kernels, since these have pieces of
-            # code that can be straightforwardly reused for this code generation
-            loop_code_dict = host.JITModule(kernel, it_space, *args).generate_code()
+            # ... obtain the /code_dict/ as if it were not part of an Executor,
+            # since bits of code generation can be reused
+            loop_code_dict = sequential.JITModule(kernel, it_space, *args, delay=True)
+            loop_code_dict = loop_code_dict.generate_code()
 
-            # Need to bind executor arguments to this kernel's arguments
-            # Using a dict because need comparison on identity, not equality
-            args_dict = dict(zip([_a.data for _a in self._args], self._args))
-            binding = OrderedDict(zip(args, [args_dict[a.data] for a in args]))
-            if len(binding) != len(args):
-                raise RuntimeError("Tiling code gen failed due to args mismatching")
-            binding = ';\n'.join([a0.c_arg_bindto(a1) for a0, a1 in binding.items()])
+            # ... does the scatter use global or local maps ?
+            if self._use_glb_maps:
+                loop_code_dict['index_expr'] = '%s[n]' % self._executor.gtl_maps[i]['DIRECT']
 
+            # ... build the subset indirection array, if necessary
+            _ssind_arg, _ssind_decl = '', ''
+            if loop_code_dict['ssinds_arg']:
+                _ssind_arg = 'ssinds_%d' % i
+                _ssind_decl = 'int* %s' % _ssind_arg
+                loop_code_dict['index_expr'] = '%s[n]' % _ssind_arg
+
+            # ... use the proper function name (the function name of the kernel
+            # within *this* specific loop chain)
+            loop_code_dict['kernel_name'] = kernel._function_names[self._kernel.cache_key]
+
+            # ... finish building up the /code_dict/
             loop_code_dict['args_binding'] = binding
-            loop_code_dict['tile_iter'] = self._executor.gtl_maps[i]['DIRECT']
             loop_code_dict['tile_init'] = self._executor.c_loop_init[i]
+            loop_code_dict['tile_finish'] = self._executor.c_loop_end[i]
             loop_code_dict['tile_start'] = slope.Executor.meta['tile_start']
             loop_code_dict['tile_end'] = slope.Executor.meta['tile_end']
+            loop_code_dict['tile_iter'] = '%s[n]' % self._executor.gtl_maps[i]['DIRECT']
+            if _ssind_arg:
+                loop_code_dict['tile_iter'] = '%s[%s]' % (_ssind_arg, loop_code_dict['tile_iter'])
 
-            _loop_chain_body.append(strip(JITModule._kernel_wrapper % loop_code_dict))
+            # ... concatenate the rest, i.e., body, user code, constants, ...
+            _loop_body.append(strip(JITModule._kernel_wrapper % loop_code_dict))
             _user_code.append(kernel._user_code)
-            _ssinds_arg.append(loop_code_dict['ssinds_arg'])
-        _loop_chain_body = "\n\n".join(_loop_chain_body)
-        _user_code = "\n".join(_user_code)
-        _ssinds_arg = ", ".join([s for s in _ssinds_arg if s])
+            _ssinds_arg.append(_ssind_decl)
+            _const_args.add(loop_code_dict['const_args'])
+            _const_inits.add(loop_code_dict['const_inits'])
 
-        code_dict['user_code'] = indent(_user_code, 1)
-        code_dict['ssinds_arg'] = _ssinds_arg
-        executor_code = indent(self._executor.c_code(indent(_loop_chain_body, 2)), 1)
-        code_dict['executor_code'] = executor_code
+        _loop_chain_body = indent("\n\n".join(_loop_body), 2)
+        code_dict['const_args'] = "".join(_const_args)
+        code_dict['const_inits'] = indent("".join(_const_inits), 1)
+        code_dict['user_code'] = indent("\n".join(_user_code), 1)
+        code_dict['ssinds_arg'] = "".join(["%s," % s for s in _ssinds_arg if s])
+        code_dict['executor_code'] = indent(self._executor.c_code(_loop_chain_body), 1)
 
         return code_dict
 
 
-class ParLoop(host.ParLoop):
+class ParLoop(sequential.ParLoop):
 
     def __init__(self, kernel, it_space, *args, **kwargs):
-        read_args = [a.data for a in args if a.access in [READ, RW]]
-        written_args = [a.data for a in args if a.access in [RW, WRITE, MIN, MAX, INC]]
-        inc_args = [a.data for a in args if a.access in [INC]]
-        LazyComputation.__init__(self, set(read_args) | Const._defs,
-                                 set(written_args), set(inc_args))
+        LazyComputation.__init__(self,
+                                 kwargs['read_args'] | Const._defs,
+                                 kwargs['written_args'],
+                                 kwargs['inc_args'])
+
+        # Inspector related stuff
+        self._all_kernels = kwargs.get('all_kernels', [kernel])
+        self._all_itspaces = kwargs.get('all_itspaces', [kernel])
+        self._all_args = kwargs.get('all_args', [args])
+        self._insp_name = kwargs.get('insp_name')
+        self._inspection = kwargs.get('inspection')
+        self._executor = kwargs.get('executor')
+        self._use_glb_maps = kwargs.get('use_glb_maps')
+
+        # Global reductions are obviously forbidden when tiling; however, the user
+        # might have bypassed this condition because sure about safety. Therefore,
+        # we act as in the super class, computing the result in a temporary buffer,
+        # and then copying it back into the original input. This is for safety of
+        # parallel global reductions (for more details, see base.ParLoop)
+        self._reduced_globals = {}
+        for _globs, _args in zip(kwargs.get('reduced_globals', []), self._all_args):
+            if not _globs:
+                continue
+            for i, glob in _globs.iteritems():
+                shadow_glob = _args[i].data
+                for j, data in enumerate([a.data for a in args]):
+                    if shadow_glob is data:
+                        self._reduced_globals[j] = glob
+                        break
 
         self._kernel = kernel
         self._actual_args = args
         self._it_space = it_space
+        self._only_local = False
 
         for i, arg in enumerate(self._actual_args):
+            arg.name = "arg%d" % i  # Override the previously cached_property name
             arg.position = i
             arg.indirect_position = i
         for i, arg1 in enumerate(self._actual_args):
@@ -407,24 +584,11 @@ class ParLoop(host.ParLoop):
                     if arg2.data is arg1.data and arg2.map is arg1.map:
                         arg2.indirect_position = arg1.indirect_position
 
-        # These parameters are expected in a tiled ParLoop
-        self._all_args = kwargs.get('all_args', [args])
-        self._inspection = kwargs.get('inspection')
-        self._executor = kwargs.get('executor')
-
-    @collective
-    @profile
-    def compute(self):
-        """Execute the kernel over all members of the iteration space."""
-        arglist = self.prepare_arglist(None, *self.args)
-        with timed_region("ParLoopChain: compute"):
-            self._compute(*arglist)
-
     def prepare_arglist(self, part, *args):
         arglist = [self._inspection]
-        for it_space in self.it_space:
-            if isinstance(it_space._iterset, Subset):
-                arglist.append(it_space._iterset._indices.ctypes.data)
+        for itspace in self._all_itspaces:
+            if isinstance(itspace._iterset, Subset):
+                arglist.append(itspace._iterset._indices.ctypes.data)
         for arg in args:
             if arg._is_mat:
                 arglist.append(arg.data.handle.handle)
@@ -443,60 +607,82 @@ class ParLoop(host.ParLoop):
         for c in Const._definitions():
             arglist.append(c._data.ctypes.data)
 
+        arglist.append(MPI.comm.rank)
+
         return arglist
 
     @collective
-    @lineprof
-    def _compute(self, *arglist):
+    def compute(self):
+        """Execute the kernel over all members of the iteration space."""
         kwargs = {
+            'all_kernels': self._all_kernels,
+            'all_itspaces': self._all_itspaces,
             'all_args': self._all_args,
             'executor': self._executor,
+            'insp_name': self._insp_name,
+            'use_glb_maps': self._use_glb_maps
         }
         fun = JITModule(self.kernel, self.it_space, *self.args, **kwargs)
+        arglist = self.prepare_arglist(None, *self.args)
 
-        with timed_region("ParLoopChain: executor"):
-            fun(*arglist)
+        with timed_region("ParLoopChain: executor (%s)" % self._insp_name):
+            self.halo_exchange_begin()
+            with timed_region("ParLoopChain: executor - core (%s)" % self._insp_name):
+                fun(*(arglist + [0]))
+            self.halo_exchange_end()
+            with timed_region("ParLoopChain: executor - exec (%s)" % self._insp_name):
+                fun(*(arglist + [1]))
+
+            # Only meaningful if the user is enforcing tiling in presence of
+            # global reductions
+            self.reduction_begin()
+            self.reduction_end()
+
+            self.update_arg_data_state()
 
 
-# Possible Schedules as produced by an Inspector
+# An Inspector produces one of the following Schedules
 
 class Schedule(object):
+
     """Represent an execution scheme for a sequence of :class:`ParLoop` objects."""
 
-    def __init__(self, kernel):
+    def __init__(self, insp_name, kernel):
+        self._insp_name = insp_name
         self._kernel = list(kernel)
 
     def __call__(self, loop_chain):
-        """The argument ``loop_chain`` is a list of :class:`ParLoop` objects,
-        which is expected to be mapped onto an optimized scheduling.
+        """Given an iterator of :class:`ParLoop` objects (``loop_chain``),
+        return an iterator of new :class:`ParLoop` objects. The input parloops
+        are "scheduled" according to the strategy of this Schedule. The Schedule
+        itself was produced by an Inspector.
 
-        In the simplest case, this Schedule's kernels exactly match the :class:`Kernel`
-        objects in ``loop_chain``; the default PyOP2 execution model should then be
-        used, and an unmodified ``loop_chain`` therefore be returned.
+        In the simplest case, the returned value is identical to the input
+        ``loop_chain``. That is, the Inspector that created this Schedule could
+        not apply any fusion or tiling.
 
-        In other scenarios, this Schedule's kernels could represent the fused
-        version, or the tiled version, of the provided ``loop_chain``; a sequence
-        of new :class:`ParLoop` objects using the fused/tiled kernels should be
-        returned.
+        In general, the Schedule could fuse or tile the loops in ``loop_chain``.
+        A sequence of  :class:`fusion.ParLoop` objects would then be returned.
         """
         raise NotImplementedError("Subclass must implement ``__call__`` method")
 
 
 class PlainSchedule(Schedule):
 
-    def __init__(self):
-        super(PlainSchedule, self).__init__([])
+    def __init__(self, insp_name, kernels):
+        super(PlainSchedule, self).__init__(insp_name, kernels or [])
 
     def __call__(self, loop_chain):
         return loop_chain
 
 
 class FusionSchedule(Schedule):
-    """Schedule for a sequence of :class:`ParLoop` objects after soft fusion."""
 
-    def __init__(self, kernels, offsets):
-        super(FusionSchedule, self).__init__(kernels)
-        # Track the indices of the loop chain's /ParLoop/s each fused kernel maps to
+    """Schedule an iterator of :class:`ParLoop` objects applying soft fusion."""
+
+    def __init__(self, insp_name, kernels, offsets):
+        super(FusionSchedule, self).__init__(insp_name, kernels)
+        # Track the /ParLoop/ indices in the loop chain that each fused kernel maps to
         offsets = [0] + list(offsets)
         loop_indices = [range(offsets[i], o) for i, o in enumerate(offsets[1:])]
         self._info = [{'loop_indices': li} for li in loop_indices]
@@ -512,19 +698,26 @@ class FusionSchedule(Schedule):
             iterset = loop_chain[loop_indices[0]].it_space.iterset
             loops = [loop_chain[i] for i in loop_indices]
             args = Arg.filter_args([loop.args for loop in loops]).values()
-            # Create any ParLoop's additional arguments
+            # Create any ParLoop additional arguments
             extra_args = [Dat(*d)(*a) for d, a in extra_args] if extra_args else []
             args += extra_args
+            # Remove now incorrect cached properties:
+            for a in args:
+                a.__dict__.pop('name', None)
             # Create the actual ParLoop, resulting from the fusion of some kernels
             fused_par_loops.append(_make_object('ParLoop', kernel, iterset, *args,
-                                                **{'iterate': iterregion}))
+                                                **{'iterate': iterregion,
+                                                   'insp_name': self._insp_name}))
         return fused_par_loops
 
 
 class HardFusionSchedule(FusionSchedule):
-    """Schedule a sequence of :class:`ParLoop` objects after hard fusion."""
 
-    def __init__(self, schedule, fused):
+    """Schedule an iterator of :class:`ParLoop` objects applying hard fusion
+    on top of soft fusion."""
+
+    def __init__(self, insp_name, schedule, fused):
+        self._insp_name = insp_name
         self._schedule = schedule
         self._fused = fused
 
@@ -536,17 +729,18 @@ class HardFusionSchedule(FusionSchedule):
 
         # Update the input schedule to make use of hard fusion kernels
         kernel = scopy(schedule._kernel)
-        for fused_kernel, fused_map in fused:
+        for ofs, (fused_kernel, fused_map) in enumerate(fused):
+            # Find the position of the /fused/ kernel in the new loop chain.
             base, fuse = fused_kernel._kernels
             base_idx, fuse_idx = kernel.index(base), kernel.index(fuse)
             pos = min(base_idx, fuse_idx)
-            kernel.insert(pos, fused_kernel)
-            self._info[pos]['loop_indices'] = [base_idx, fuse_idx]
-            # In addition to the union of the /base/ and /fuse/'s sets of arguments,
-            # a bitmap, with i-th bit indicating whether the i-th iteration in "fuse"
-            # has been executed, will have to be passed in
+            self._info[pos]['loop_indices'] = [base_idx + ofs, fuse_idx + ofs]
+            # We also need a bitmap, with the i-th bit indicating whether the i-th
+            # iteration in "fuse" has been executed or not
             self._info[pos]['extra_args'] = [((fused_map.toset, None, np.int32),
                                               (RW, fused_map))]
+            # Now we can modify the kernel sequence
+            kernel.insert(pos, fused_kernel)
             kernel.pop(pos+1)
             pos = max(base_idx, fuse_idx)
             self._info.pop(pos)
@@ -561,47 +755,74 @@ class HardFusionSchedule(FusionSchedule):
 
 
 class TilingSchedule(Schedule):
-    """Schedule a sequence of tiled :class:`ParLoop` objects after tiling."""
 
-    def __init__(self, schedule, inspection, executor):
+    """Schedule an iterator of :class:`ParLoop` objects applying tiling on top
+    of hard fusion and soft fusion."""
+
+    def __init__(self, insp_name, kernel, schedule, inspection, executor, **options):
+        self._insp_name = insp_name
         self._schedule = schedule
         self._inspection = inspection
         self._executor = executor
+        self._kernel = kernel
+        self._use_glb_maps = options.get('use_glb_maps', False)
 
     def __call__(self, loop_chain):
         loop_chain = self._schedule(loop_chain)
+        # Track the individual kernels, and the args of each kernel
+        all_itspaces = tuple(loop.it_space for loop in loop_chain)
+        all_args = []
+        for i, (loop, gtl_map) in enumerate(zip(loop_chain, self._executor.gtl_maps)):
+            all_args.append(Arg.specialize(loop.args, gtl_map, i, self._use_glb_maps))
+        all_args = tuple(all_args)
+        # Data for the actual ParLoop
+        it_space = IterationSpace(all_itspaces)
         args = Arg.filter_args([loop.args for loop in loop_chain]).values()
-        kernel = tuple((loop.kernel for loop in loop_chain))
-        all_args = tuple((Arg.specialize(loop.args, gtl_map, i) for i, (loop, gtl_map)
-                         in enumerate(zip(loop_chain, self._executor.gtl_maps))))
-        it_space = tuple((loop.it_space for loop in loop_chain))
+        reduced_globals = [loop._reduced_globals for loop in loop_chain]
+        read_args = set(flatten([loop.reads for loop in loop_chain]))
+        written_args = set(flatten([loop.writes for loop in loop_chain]))
+        inc_args = set(flatten([loop.incs for loop in loop_chain]))
         kwargs = {
-            'inspection': self._inspection,
+            'all_kernels': self._kernel._kernels,
+            'all_itspaces': all_itspaces,
             'all_args': all_args,
+            'read_args': read_args,
+            'written_args': written_args,
+            'reduced_globals': reduced_globals,
+            'inc_args': inc_args,
+            'insp_name': self._insp_name,
+            'use_glb_maps': self._use_glb_maps,
+            'inspection': self._inspection,
             'executor': self._executor
         }
-        return [ParLoop(kernel, it_space, *args, **kwargs)]
+        return [ParLoop(self._kernel, it_space, *args, **kwargs)]
 
 
 # Loop chain inspection
 
 class Inspector(Cached):
-    """An inspector is used to fuse or tile a sequence of :class:`ParLoop` objects.
 
-    For tiling, the inspector exploits the SLOPE library, which the user makes
-    visible by setting the environment variable ``SLOPE_DIR`` to the root SLOPE
-    directory."""
+    """An Inspector constructs a Schedule to fuse or tile a sequence of loops.
+
+    .. note:: For tiling, the Inspector relies on the SLOPE library."""
 
     _cache = {}
-    _modes = ['soft', 'hard', 'tile']
+    _modes = ['soft', 'hard', 'tile', 'only_tile', 'only_omp']
 
     @classmethod
-    def _cache_key(cls, name, loop_chain, tile_size):
-        key = (name, tile_size)
+    def _cache_key(cls, name, loop_chain, **options):
+        key = (name,)
+        if name != lazy_trace_name:
+            # Special case: the Inspector comes from a user-defined /loop_chain/
+            key += (options['mode'], options['tile_size'], options['use_glb_maps'])
+            key += (loop_chain[0].kernel.cache_key,)
+            return key
+        # Inspector extracted from lazy evaluation trace
         for loop in loop_chain:
-            if isinstance(loop, Mat._Assembly):
+            if isinstance(loop, base._LazyMatOp):
                 continue
-            key += (hash(str(loop.kernel._ast)),)
+            key += (loop.kernel.cache_key,)
+            key += (loop.it_space.cache_key, loop.it_space.iterset.sizes)
             for arg in loop.args:
                 if arg._is_global:
                     key += (arg.data.dim, arg.data.dtype, arg.access)
@@ -619,100 +840,93 @@ class Inspector(Cached):
                     key += (arg.data.dims, arg.data.dtype, idxs, map_arities, arg.access)
         return key
 
-    def __init__(self, name, loop_chain, tile_size):
+    def __init__(self, name, loop_chain, **options):
+        """Initialize an Inspector object.
+
+        :arg name: a name for the Inspector
+        :arg loop_chain: an iterator for the loops that will be fused/tiled
+        :arg options: a set of parameters to drive fusion/tiling
+            * mode: can take any of the values in ``Inspector._modes``, namely
+                soft, hard, tile, only_tile, only_omp:
+                * soft: consecutive loops over the same iteration set that do
+                    not present RAW or WAR dependencies through indirections
+                    are fused.
+                * hard: ``soft`` fusion; then, loops over different iteration sets
+                    are also fused, provided that there are no RAW or WAR
+                    dependencies.
+                * tile: ``soft`` and ``hard`` fusion; then, tiling through the
+                    SLOPE library takes place.
+                * only_tile: only tiling through the SLOPE library (i.e., no fusion)
+                * only_omp: ompize individual parloops through the SLOPE library
+            * tile_size: starting average tile size
+            * extra_halo: are we providing SLOPE with extra halo to be efficient
+                and allow it to minimize redundant computation ?
+        """
         if self._initialized:
             return
-        if not hasattr(self, '_inspected'):
-            # Initialization can occur more than once (until the inspection is
-            # actually performed), but only the first time this attribute is set
-            self._inspected = 0
         self._name = name
-        self._tile_size = tile_size
         self._loop_chain = loop_chain
+        self._mode = options.pop('mode')
+        self._options = options
+        self._schedule = PlainSchedule(name, [loop.kernel for loop in self._loop_chain])
 
-    def inspect(self, mode):
-        """Inspect this Inspector's loop chain and produce a Schedule object.
-
-        :param mode: can take any of the values in ``Inspector._modes``, namely
-                     ``soft``, ``hard``, and ``tile``. If ``soft`` is specified,
-                     only soft fusion takes place; that is, only consecutive loops
-                     over the same iteration set that do not present RAW or WAR
-                     dependencies through indirections are fused. If ``hard`` is
-                     specified, then first ``soft`` is applied, followed by fusion
-                     of loops over different iteration sets, provided that RAW or
-                     WAR dependencies are not present. If ``tile`` is specified,
-                     than tiling through the SLOPE library takes place just after
-                     ``soft`` and ``hard`` fusion.
-        """
-        self._inspected += 1
-        if self._heuristic_skip_inspection(mode):
-            # Heuristically skip this inspection if there is a suspicion the
-            # overhead is going to be too much; for example, when the loop
-            # chain could potentially be executed only once or a few times.
-            # Blow away everything we don't need any more
+    def inspect(self):
+        """Inspect the loop chain and produce a :class:`Schedule`."""
+        if self._initialized:
+            # An inspection plan is in cache.
+            return self._schedule
+        elif self._heuristic_skip_inspection():
+            # Not in cache, and too premature for running a potentially costly inspection
             del self._name
             del self._loop_chain
-            del self._tile_size
-            return PlainSchedule()
-        elif hasattr(self, '_schedule'):
-            # An inspection plan is in cache.
-            # It should not be possible to pull a jit module out of the cache
-            # /with/ the loop chain
-            if hasattr(self, '_loop_chain'):
-                raise RuntimeError("Inspector is holding onto loop_chain, memory leaks!")
-            # The fusion mode was recorded, and must match the one provided for
-            # this inspection
-            if self.mode != mode:
-                raise RuntimeError("Cached Inspector's mode doesn't match")
+            del self._mode
+            del self._options
             return self._schedule
-        elif not hasattr(self, '_loop_chain'):
-            # The inspection should be executed /now/. We weren't in the cache,
-            # so we /must/ have a loop chain
-            raise RuntimeError("Inspector must have a loop chain associated with it")
-        # Finally, we check the legality of `mode`
-        if mode not in Inspector._modes:
-            raise TypeError("Inspection accepts only %s fusion modes",
-                            str(Inspector._modes))
-        self._mode = mode
-        mode = Inspector._modes.index(mode)
+
+        # Is `mode` legal ?
+        if self.mode not in Inspector._modes:
+            raise RuntimeError("Inspection accepts only %s fusion modes", Inspector._modes)
 
         with timed_region("ParLoopChain `%s`: inspector" % self._name):
-            self._soft_fuse()
-            if mode > 0:
+            if self.mode in ['soft', 'hard', 'tile']:
+                self._soft_fuse()
+            if self.mode in ['hard', 'tile']:
                 self._hard_fuse()
-            if mode > 1:
+            if self.mode in ['tile', 'only_tile', 'only_omp']:
                 self._tile()
 
-        # A schedule has been computed by any of /_soft_fuse/, /_hard_fuse/ or
-        # or /_tile/; therefore, consider this Inspector initialized, and
-        # retrievable from cache in subsequent calls to inspect().
+        # A schedule has been computed. The Inspector is initialized and therefore
+        # retrievable from cache. We then blow away everything we don't need any more.
         self._initialized = True
-
-        # Blow away everything we don't need any more
         del self._name
         del self._loop_chain
-        del self._tile_size
+        del self._mode
+        del self._options
         return self._schedule
 
-    def _heuristic_skip_inspection(self, mode):
-        """Decide heuristically whether to run an inspection or not."""
-        # At the moment, a simple heuristic is used. If tiling is not requested,
-        # then inspection and fusion are always performed. If tiling is on the other
-        # hand requested, then fusion is performed only if inspection is requested
-        # more than once. This is to amortize the cost of inspection due to tiling.
-        if mode == 'tile' and self._inspected < 2:
+    def _heuristic_skip_inspection(self):
+        """Decide, heuristically, whether to run an inspection or not.
+        If tiling is not requested, then inspection is performed.
+        If tiling is requested, then inspection is performed on the third
+        invocation. The fact that an inspection for the same loop chain
+        is requested multiple times suggests the parloops originate in a
+        time stepping loop. The cost of building tiles in SLOPE-land would
+        then be amortized over several iterations."""
+        self._ninsps = self._ninsps + 1 if hasattr(self, '_ninsps') else 1
+        if self.mode in ['tile', 'only_tile'] and self._ninsps < 3:
             return True
         return False
 
     def _filter_kernel_args(self, loops, fundecl):
-        """Eliminate redundant arguments in the fused kernel's signature."""
+        """Eliminate redundant arguments in the fused kernel signature."""
         fused_loop_args = list(flatten([l.args for l in loops]))
         unique_fused_loop_args = Arg.filter_args([l.args for l in loops])
         fused_kernel_args = fundecl.args
         binding = OrderedDict(zip(fused_loop_args, fused_kernel_args))
         new_fused_kernel_args, args_maps = [], []
         for fused_loop_arg, fused_kernel_arg in binding.items():
-            unique_fused_loop_arg = unique_fused_loop_args[fused_loop_arg.data]
+            key = (fused_loop_arg.data, fused_loop_arg.map)
+            unique_fused_loop_arg = unique_fused_loop_args[key]
             if fused_loop_arg is unique_fused_loop_arg:
                 new_fused_kernel_args.append(fused_kernel_arg)
                 continue
@@ -790,7 +1004,7 @@ class Inspector(Cached):
                     [ast.Block(base_fundecl.children[0].children, open_scope=True),
                      ast.FlatBlock("\n\n// Begin of fused kernel\n\n"),
                      ast.Block(fuse_fundecl.children[0].children, open_scope=True)])
-            # Eliminate redundancies in the fused kernel's signature
+            # Eliminate redundancies in the /fused/ kernel signature
             self._filter_kernel_args(loops, base_fundecl)
             # Naming convention
             fused_ast = base_ast
@@ -816,7 +1030,7 @@ class Inspector(Cached):
             fused.append((fuse(self, fusing, len(fused)), len(self._loop_chain)))
 
         fused_kernels, offsets = zip(*fused)
-        self._schedule = FusionSchedule(fused_kernels, offsets)
+        self._schedule = FusionSchedule(self._name, fused_kernels, offsets)
         self._loop_chain = self._schedule(self._loop_chain)
 
     def _hard_fuse(self):
@@ -838,28 +1052,31 @@ class Inspector(Cached):
         the presence of ``INC`` does not imply a real WAR dependency, because
         increments are associative."""
 
+        reads = lambda l: set([a.data for a in l.args if a.access in [READ, RW]])
+        writes = lambda l: set([a.data for a in l.args if a.access in [RW, WRITE, MIN, MAX]])
+        incs = lambda l: set([a.data for a in l.args if a.access in [INC]])
+
         def has_raw_or_war(loop1, loop2):
             # Note that INC after WRITE is a special case of RAW dependency since
             # INC cannot take place before WRITE.
-            return loop2.reads & loop1.writes or loop2.writes & loop1.reads or \
-                loop1.incs & (loop2.writes - loop2.incs) or \
-                loop2.incs & (loop1.writes - loop1.incs)
+            return reads(loop2) & writes(loop1) or writes(loop2) & reads(loop1) or \
+                incs(loop1) & (writes(loop2) - incs(loop2)) or \
+                incs(loop2) & (writes(loop1) - incs(loop1))
 
         def has_iai(loop1, loop2):
-            return loop1.incs & loop2.incs
+            return incs(loop1) & incs(loop2)
 
         def fuse(base_loop, loop_chain, fused):
             """Try to fuse one of the loops in ``loop_chain`` with ``base_loop``."""
             for loop in loop_chain:
                 if has_raw_or_war(loop, base_loop):
                     # Can't fuse across loops preseting RAW or WAR dependencies
-                    return
+                    return []
                 if loop.it_space == base_loop.it_space:
                     warning("Ignoring unexpected sequence of loops in loop fusion")
                     continue
-                # Is there an overlap in any incremented regions? If that is
-                # the case, then fusion can really be useful, by allowing to
-                # save on the number of indirect increments or matrix insertions
+                # Is there an overlap in any of the incremented regions? If that is
+                # the case, then fusion can really be beneficial
                 common_inc_data = has_iai(base_loop, loop)
                 if not common_inc_data:
                     continue
@@ -874,17 +1091,22 @@ class Inspector(Cached):
                 fused_map = [m for m in maps if set1 == m.iterset and set2 == m.toset]
                 if fused_map:
                     fused.append((base_loop, loop, fused_map[0], common_incs[1]))
-                    return
+                    return loop_chain[:loop_chain.index(loop)+1]
                 fused_map = [m for m in maps if set1 == m.toset and set2 == m.iterset]
                 if fused_map:
                     fused.append((loop, base_loop, fused_map[0], common_incs[0]))
-                    return
+                    return loop_chain[:loop_chain.index(loop)+1]
+            return []
 
         # First, find fusible kernels
-        fused = []
+        fusible, skip = [], []
         for i, l in enumerate(self._loop_chain, 1):
-            fuse(l, self._loop_chain[i:], fused)
-        if not fused:
+            if l in skip:
+                # /l/ occurs between (hard) fusible loops, let's leave it where
+                # it is for safeness
+                continue
+            skip = fuse(l, self._loop_chain[i:], fusible)
+        if not fusible:
             return
 
         # Then, create a suitable hard-fusion kernel
@@ -897,7 +1119,7 @@ class Inspector(Cached):
         #   insertion (...)
         #
         # Where /extra/ represents additional arguments, like the map from
-        # kernel1's iteration space to kernel2's iteration space. The /fusion/
+        # /kernel1/ iteration space to /kernel2/ iteration space. The /fusion/
         # function looks like:
         #
         # fusion (...):
@@ -906,11 +1128,11 @@ class Inspector(Cached):
         #     if not already_executed[i]:
         #       kernel2 (buffer[..], ...)
         #
-        # Where /arity/ is the number of kernel2's iterations incident to
-        # kernel1's iterations.
-        _fused = []
-        for base_loop, fuse_loop, fused_map, fused_inc_arg in fused:
-            # Start with analyzing the kernels' ASTs. Note: fusion occurs on fresh
+        # Where /arity/ is the number of /kernel2/ iterations incident to
+        # /kernel1/ iterations.
+        fused = []
+        for base_loop, fuse_loop, fused_map, fused_inc_arg in fusible:
+            # Start with analyzing the kernel ASTs. Note: fusion occurs on fresh
             # copies of the /base/ and /fuse/ ASTs. This is because the optimization
             # of the /fused/ AST should be independent of that of individual ASTs,
             # and subsequent cache hits for non-fused ParLoops should always retrive
@@ -930,13 +1152,12 @@ class Inspector(Cached):
             fuse_headers = fuse_info[ast.PreprocessNode]
             fuse_fundecl = fuse_info[ast.FunDecl]
             retval = SymbolReferences.default_retval()
-            fuse_symbol_refs = SymbolReferences().visit(fuse_ast, ret=retval)
             if len(base_fundecl) != 1 or len(fuse_fundecl) != 1:
                 raise RuntimeError("Fusing kernels, but found unexpected AST")
             base_fundecl = base_fundecl[0]
             fuse_fundecl = fuse_fundecl[0]
 
-            # Craft the /fusion/ kernel #
+            # 1) Craft the /fusion/ kernel #
 
             # 1A) Create /fusion/ arguments and signature
             body = ast.Block([])
@@ -965,7 +1186,7 @@ class Inspector(Cached):
             fuse_for = ast.c_for('i', fused_map.arity, fuse_body, pragma=None)
             body.children.extend([base_funcall, fuse_for.children[0]])
 
-            # Modify the /fuse/ kernel #
+            # 2) Modify the /fuse/ kernel #
             # This is to take into account that many arguments are shared with
             # /base/, so they will only staged once for /base/. This requires
             # tweaking the way the arguments are declared and accessed in /fuse/
@@ -973,156 +1194,205 @@ class Inspector(Cached):
             # in the pseudocode in the comment above) now needs to take offsets
             # to be sure the locations that /base/ is supposed to increment are
             # actually accessed. The same concept apply to indirect arguments.
-            ofs_syms, ofs_decls, ofs_vals = [], [], []
             init = lambda v: '{%s}' % ', '.join([str(j) for j in v])
             for i, fuse_args in enumerate(zip(fuse_loop.args, fuse_fundecl.args)):
                 fuse_loop_arg, fuse_kernel_arg = fuse_args
                 sym_id = fuse_kernel_arg.sym.symbol
-                if fuse_loop_arg == fused_inc_arg:
-                    # 2A) The shared incremented argument. A 'buffer' of statically
-                    #     known size is expected by the kernel, so the offset is used
-                    #     to index into it
-                    # Note: the /fused_map/ is a factor of the /base/ iteration
-                    # set map, so the order the /fuse/ loop's iterations are
-                    # executed (in the /for i=0 to arity/ loop) reflects the order
-                    # of the entries in /fused_map/
-                    fuse_inc_refs = fuse_symbol_refs[sym_id]
-                    fuse_inc_refs = [sym for sym, parent in fuse_inc_refs
-                                     if not isinstance(parent, ast.Decl)]
-                    # Handle the declaration
-                    fuse_kernel_arg.sym.rank = binding[fused_inc_arg].sym.rank
+                # 2A) Use temporaries to invoke the /fuse/ kernel
+                buffer = '_%s' % fuse_kernel_arg.sym.symbol
+                # 2B) How should I use the temporaries ?
+                if fuse_loop_arg.access == INC:
+                    op = ast.Incr
+                    lvalue, rvalue = sym_id, buffer
+                    extend_if_body = lambda body, block: body.children.extend(block)
+                    buffer_decl = ast.Decl('%s' % fuse_loop_arg.ctype, ast.Symbol(buffer))
+                elif fuse_loop_arg.access == READ:
+                    op = ast.Assign
+                    lvalue, rvalue = buffer, sym_id
+                    extend_if_body = lambda body, block: \
+                        [body.children.insert(0, b) for b in reversed(block)]
+                    buffer_decl = ast.Decl('%s*' % fuse_loop_arg.ctype, ast.Symbol(buffer))
+                # 2C) Now handle arguments depending on their type ...
+                if fuse_loop_arg._is_mat:
+                    # ... Handle Mats
+                    staging = []
                     for b in fused_inc_arg._block_shape:
                         for rc in b:
-                            _ofs_vals = [[0] for j in range(len(rc))]
-                            for j, ofs in enumerate(rc):
-                                ofs_sym_id = 'm_ofs_%d_%d' % (i, j)
-                                ofs_syms.append(ofs_sym_id)
-                                ofs_decls.append(ast.Decl('int', ast.Symbol(ofs_sym_id)))
-                                _ofs_vals[j].append(ofs)
-                            for s in fuse_inc_refs:
-                                s.offset = tuple((1, o) for o in ofs_syms)
-                            ofs_vals.extend([init(o) for o in _ofs_vals])
-                    # Tell COFFEE that the argument is not an empty buffer anymore,
-                    # so any write to it must actually be an increment
-                    fuse_kernel_arg.pragma = set([ast.INC])
+                            lvalue = ast.Symbol(lvalue, ('i', 'i'),
+                                                ((rc[0], 'j'), (rc[1], 'k')))
+                            rvalue = ast.Symbol(rvalue, ('j', 'k'))
+                            staging = ItSpace(mode=0).to_for([(0, rc[0]), (0, rc[1])],
+                                                             ('j', 'k'),
+                                                             [op(lvalue, rvalue)])[:1]
+                    # Set up the temporary
+                    buffer_decl.sym.rank = fuse_kernel_arg.sym.rank
+                    if fuse_loop_arg.access == INC:
+                        buffer_decl.init = ast.ArrayInit(init([init([0.0])]))
                 elif fuse_loop_arg._is_indirect:
-                    # 2B) All indirect arguments. At the C level, these arguments
-                    #     are of pointer type, so simple pointer arithmetic is used
-                    #     to ensure the kernel accesses are to the correct locations
+                    # ... Handle indirect arguments. At the C level, these arguments
+                    # are of pointer type, so simple pointer arithmetic is used
+                    # to ensure the kernel accesses are to the correct locations
                     fuse_arity = fuse_loop_arg.map.arity
                     base_arity = fuse_arity*fused_map.arity
                     cdim = fuse_loop_arg.data.dataset.cdim
                     size = fuse_arity*cdim
-                    if fuse_loop_arg._flatten and cdim > 1:
-                        # Set the proper storage layout before invoking /fuse/
-                        ofs_tmp = '_%s' % fuse_kernel_arg.sym.symbol
-                        ofs_tmp_sym = ast.Symbol(ofs_tmp, (size,))
-                        ofs_tmp_decl = ast.Decl('%s*' % fuse_loop_arg.ctype, ofs_tmp_sym)
-                        _ofs_vals = [[base_arity*j + k for k in range(fuse_arity)]
-                                     for j in range(cdim)]
-                        _ofs_vals = [[fuse_arity*j + k for k in flatten(_ofs_vals)]
-                                     for j in range(fused_map.arity)]
-                        _ofs_vals = list(flatten(_ofs_vals))
-                        ofs_idx_sym = 'v_i_ofs_%d' % i
-                        body.children.insert(0, ast.Decl(
-                            'int', ast.Symbol(ofs_idx_sym, (len(_ofs_vals),)),
-                            ast.ArrayInit(init(_ofs_vals)), ['static', 'const']))
-                        ofs_idx_syms = [ast.Symbol(ofs_idx_sym, ('i',), ((size, j),))
-                                        for j in range(size)]
-                        ofs_assigns = [ofs_tmp_decl]
-                        ofs_assigns += [ast.Assign(ast.Symbol(ofs_tmp, (j,)),
-                                                   ast.Symbol(sym_id, (k,)))
-                                        for j, k in enumerate(ofs_idx_syms)]
-                        # Need to reflect this onto the invocation of /fuse/
-                        fuse_funcall.children[fuse_loop.args.index(fuse_loop_arg)] = \
-                            ast.Symbol(ofs_tmp)
+                    # Set the proper storage layout before invoking /fuse/
+                    ofs_vals = [[base_arity*j + k for k in range(fuse_arity)]
+                                for j in range(cdim)]
+                    ofs_vals = [[fuse_arity*j + k for k in flatten(ofs_vals)]
+                                for j in range(fused_map.arity)]
+                    ofs_vals = list(flatten(ofs_vals))
+                    ofs_idx_sym = 'v_ofs_%d' % i
+                    body.children.insert(0, ast.Decl(
+                        'int', ast.Symbol(ofs_idx_sym, (len(ofs_vals),)),
+                        ast.ArrayInit(init(ofs_vals)), ['static', 'const']))
+                    ofs_idx_syms = [ast.Symbol(ofs_idx_sym, ('i',), ((size, j),))
+                                    for j in range(size)]
+                    # Set up the temporary and stage data into it
+                    buffer_decl.sym.rank = (size,)
+                    if fuse_loop_arg.access == INC:
+                        buffer_decl.init = ast.ArrayInit(init([0.0]))
+                        staging = [op(ast.Symbol(lvalue, (k,)), ast.Symbol(rvalue, (j,)))
+                                   for j, k in enumerate(ofs_idx_syms)]
                     else:
-                        # In this case, can just use offsets since it's not a
-                        # multi-dimensional Dat
-                        ofs_sym = ast.Symbol('ofs', (len(ofs_vals), 'i'))
-                        ofs_assigns = [ast.Assign(sym_id, ast.Sum(sym_id, ofs_sym))]
-                        ofs_vals.append(init([j*size for j in range(fused_map.arity)]))
-                    if_exec.children[0].children[0:0] = ofs_assigns
-            # Now change the /fusion/ kernel body accordingly
-            body.children.insert(0, ast.Decl(
-                'int', ast.Symbol('ofs', (len(ofs_vals), fused_map.arity)),
-                ast.ArrayInit(init(ofs_vals)), ['static', 'const']))
-            if_exec.children[0].children[0:0] = \
-                [ast.Decl('int', ast.Symbol(s), ast.Symbol('ofs', (i, 'i')))
-                 for i, s in enumerate(ofs_syms)]
+                        staging = [op(ast.Symbol(lvalue, (j,)), ast.Symbol(rvalue, (k,)))
+                                   for j, k in enumerate(ofs_idx_syms)]
+                else:
+                    # Nothing special to do for direct arguments
+                    continue
+                # Update the If body to use the temporary
+                extend_if_body(if_exec.children[0], staging)
+                if_exec.children[0].children.insert(0, buffer_decl)
+                fuse_funcall.children[fuse_loop.args.index(fuse_loop_arg)] = \
+                    ast.Symbol(buffer)
 
-            # 2C) Change /fuse/ kernel invocation, declaration, and body
-            fuse_funcall.children.extend([ast.Symbol(s) for s in ofs_syms])
-            fuse_fundecl.args.extend(ofs_decls)
-
-            # 2D) Hard fusion breaks any padding applied to the /fuse/ kernel, so
-            # this transformation pass needs to be re-performed;
-
-            # Create a /fusion.Kernel/ object to be used to update the schedule
+            # 3) Create a /fusion.Kernel/ object to be used to update the schedule
             fused_headers = set([str(h) for h in base_headers + fuse_headers])
             fused_ast = ast.Root([ast.PreprocessNode(h) for h in fused_headers] +
                                  [base_fundecl, fuse_fundecl, fusion_fundecl])
             kernels = [base, fuse]
             loop_chain_index = (self._loop_chain.index(base_loop),
                                 self._loop_chain.index(fuse_loop))
-            _fused.append((Kernel(kernels, fused_ast, loop_chain_index), fused_map))
+            fused.append((Kernel(kernels, fused_ast, loop_chain_index), fused_map))
 
         # Finally, generate a new schedule
-        self._schedule = HardFusionSchedule(self._schedule, _fused)
+        self._schedule = HardFusionSchedule(self._name, self._schedule, fused)
         self._loop_chain = self._schedule(self._loop_chain, only_hard=True)
 
     def _tile(self):
         """Tile consecutive loops over different iteration sets characterized
         by RAW and WAR dependencies. This requires interfacing with the SLOPE
         library."""
-        try:
-            backend_map = {'sequential': 'SEQUENTIAL', 'openmp': 'OMP'}
-            slope_backend = backend_map[configuration['backend']]
-            slope.set_exec_mode(slope_backend)
-            log_info("SLOPE backend set to %s" % slope_backend)
-        except KeyError:
-            warning("Unable to set backend %s for SLOPE" % configuration['backend'])
 
-        inspector = slope.Inspector()
+        def inspect_set(s, insp_sets, extra_halo):
+            """Inspect the iteration set of a loop and store set info suitable
+            for SLOPE in /insp_sets/. Further, check that such iteration set has
+            a sufficiently depth halo region for correct execution in the case a
+            SLOPE MPI backend is enabled."""
+            # Get and format some iterset info
+            partitioning, superset, s_name = None, None, s.name
+            if isinstance(s, Subset):
+                superset = s.superset.name
+                s_name = "%s_ss" % s.name
+            if hasattr(s, '_partitioning'):
+                partitioning = s._partitioning
+            # If not an MPI backend, return "standard" values for core, exec, and
+            # non-exec regions (recall that SLOPE expects owned to be part of exec)
+            if slope.get_exec_mode() not in ['OMP_MPI', 'ONLY_MPI']:
+                exec_size = s.exec_size - s.core_size
+                nonexec_size = s.total_size - s.exec_size
+                infoset = s_name, s.core_size, exec_size, nonexec_size, superset
+            else:
+                if not hasattr(s, '_deep_size'):
+                    raise RuntimeError("SLOPE backend (%s) requires deep halos",
+                                       slope.get_exec_mode())
+                # Assume [1, ..., N] levels of halo depth
+                level_N = s._deep_size[-1]
+                core_size = level_N[0]
+                exec_size = level_N[2] - core_size
+                nonexec_size = level_N[3] - level_N[2]
+                if extra_halo and nonexec_size == 0:
+                    level_E = s._deep_size[-2]
+                    exec_size = level_E[2] - core_size
+                    nonexec_size = level_E[3] - level_E[2]
+                infoset = s_name, core_size, exec_size, nonexec_size, superset
+            insp_sets[infoset] = partitioning
+            return infoset
 
-        # Build arguments types and values
+        tile_size = self._options.get('tile_size', 1)
+        extra_halo = self._options.get('extra_halo', False)
+        log = self._options.get('log', False)
+
+        # The SLOPE inspector, which needs be populated with sets, maps,
+        # descriptors, and loop chain structure
+        inspector = slope.Inspector(self._name)
+
+        # Build inspector and argument types and values
+        # Note: we need ordered containers to be sure that SLOPE generates
+        # identical code for all ranks
         arguments = []
-        insp_sets, insp_maps, insp_loops = set(), {}, []
+        insp_sets, insp_maps, insp_loops = OrderedDict(), OrderedDict(), []
         for loop in self._loop_chain:
             slope_desc = set()
-            # Add sets
-            insp_sets.add((loop.it_space.name, loop.it_space.core_size))
+            # 1) Add sets
+            iterset = loop.it_space.iterset
+            iterset = iterset.subset if hasattr(iterset, 'subset') else iterset
+            infoset = inspect_set(iterset, insp_sets, extra_halo)
+            iterset_name, is_superset = infoset[0], infoset[4]
+            # If iterating over a subset, we fake an indirect parloop from the
+            # (iteration) subset to the superset. This allows the propagation of
+            # tiling across the hierarchy of sets (see SLOPE for further info)
+            if is_superset:
+                inspect_set(iterset.superset, insp_sets, extra_halo)
+                map_name = "%s_tosuperset" % iterset_name
+                insp_maps[iterset_name] = (map_name, iterset_name,
+                                           iterset.superset.name, iterset.indices)
+                slope_desc.add((map_name, INC._mode))
             for a in loop.args:
+                # 2) Add access descriptors
                 maps = as_tuple(a.map, Map)
-                # Add maps (there can be more than one per argument if the arg
-                # is actually a Mat - in which case there are two maps - or if
-                # a MixedMap) and relative descriptors
                 if not maps:
+                    # Simplest case: direct loop
                     slope_desc.add(('DIRECT', a.access._mode))
-                    continue
-                for i, map in enumerate(maps):
-                    for j, m in enumerate(map):
-                        map_name = "%s%d_%d" % (m.name, i, j)
-                        insp_maps[m.name] = (map_name, m.iterset.name,
-                                             m.toset.name, m.values)
-                        slope_desc.add((map_name, a.access._mode))
-            # Add loop
-            insp_loops.append((loop.kernel.name, loop.it_space.name, list(slope_desc)))
-        # Provide structure of loop chain to the SLOPE's inspector
-        arguments.extend([inspector.add_sets(insp_sets)])
+                else:
+                    # Add maps (there can be more than one per argument if the arg
+                    # is actually a Mat - in which case there are two maps - or if
+                    # a MixedMap) and relative descriptors
+                    for i, map in enumerate(maps):
+                        for j, m in enumerate(map):
+                            map_name = "%s%d_%d" % (m.name, i, j)
+                            insp_maps[m.name] = (map_name, m.iterset.name,
+                                                 m.toset.name, m.values_with_halo)
+                            slope_desc.add((map_name, a.access._mode))
+                            inspect_set(m.iterset, insp_sets, extra_halo)
+                            inspect_set(m.toset, insp_sets, extra_halo)
+            # 3) Add loop
+            insp_loops.append((loop.kernel.name, iterset_name, list(slope_desc)))
+        # Provide structure of loop chain to SLOPE
+        arguments.extend([inspector.add_sets(insp_sets.keys())])
         arguments.extend([inspector.add_maps(insp_maps.values())])
         inspector.add_loops(insp_loops)
-        # Get type and value of any additional arguments that the SLOPE's inspector
-        # expects
-        arguments.extend([inspector.set_external_dats()])
 
         # Set a specific tile size
-        arguments.extend([inspector.set_tile_size(self._tile_size)])
+        arguments.extend([inspector.set_tile_size(tile_size)])
+
+        # Tell SLOPE the rank of the MPI process
+        arguments.extend([inspector.set_mpi_rank(MPI.comm.rank)])
+
+        # Get type and value of additional arguments that SLOPE can exploit
+        arguments.extend(inspector.add_extra_info())
+
+        # Add any available partitioning
+        partitionings = [(s[0], v) for s, v in insp_sets.items() if v is not None]
+        arguments.extend([inspector.add_partitionings(partitionings)])
 
         # Arguments types and values
         argtypes, argvalues = zip(*arguments)
 
-        # Generate inspector C code
+        # Set a tile partitioning strategy
+        inspector.set_part_mode('chunk')
+
+        # Generate the C code
         src = inspector.generate_code()
 
         # Return type of the inspector
@@ -1134,31 +1404,78 @@ class Inspector(Cached):
         cppargs = slope.get_compile_opts(compiler)
         cppargs += ['-I%s/%s' % (slope_dir, slope.get_include_dir())]
         ldargs = ['-L%s/%s' % (slope_dir, slope.get_lib_dir()),
-                  '-l%s' % slope.get_lib_name()]
+                  '-l%s' % slope.get_lib_name(),
+                  '-L%s/lib' % os.environ['SLOPE_METIS'],
+                  '-lmetis', '-lrt']
 
         # Compile and run inspector
         fun = compilation.load(src, "cpp", "inspector", cppargs, ldargs,
                                argtypes, rettype, compiler)
         inspection = fun(*argvalues)
 
+        # Log the inspector output, if necessary
+        if log:
+            filename = os.path.join("logging",
+                                    "lc_%s_rank%d.txt" % (self._name, MPI.comm.rank))
+            if not os.path.exists(os.path.dirname(filename)):
+                os.makedirs(os.path.dirname(filename))
+            with open(filename, 'w') as f:
+                f.write('iteration set - memory footprint (KB) - number of Megaflops\n')
+                f.write('-------------------------------------------------------\n')
+                tot_mem_footprint, tot_flops = {}, 0
+                for loop in self._loop_chain:
+                    loop_flops = loop.num_flops/(1000*1000)
+                    loop_mem_footprint = 0
+                    for arg in loop.args:
+                        dat_size = arg.data.nbytes
+                        map_size = len(arg.map.values_with_halo)*4 if arg.map else 0
+                        tot_dat_size = (dat_size + map_size)/1000
+                        loop_mem_footprint += tot_dat_size
+                        tot_mem_footprint[arg.data] = tot_dat_size
+                    f.write("%s - %d - %d\n" %
+                            (loop.it_space.name, loop_mem_footprint, loop_flops))
+                    tot_flops += loop_flops
+                tot_mem_footprint = sum(tot_mem_footprint.values())
+                f.write("** Summary: %d KB moved, %d Megaflops performed\n" %
+                        (tot_mem_footprint, tot_flops))
+                probSeed = 0 if MPI.parallel else len(self._loop_chain) / 2
+                probNtiles = self._loop_chain[probSeed].it_space.exec_size / tile_size or 1
+                f.write("** KB/tile: %d" % (tot_mem_footprint/probNtiles))
+                f.write("  (Estimated: %d tiles)\n" % probNtiles)
+                f.write('-------------------------------------------------------\n\n')
+
         # Finally, get the Executor representation, to be used at executor
         # code generation time
         executor = slope.Executor(inspector)
 
-        self._schedule = TilingSchedule(self._schedule, inspection, executor)
+        kernel = Kernel(tuple(loop.kernel for loop in self._loop_chain))
+        self._schedule = TilingSchedule(self._name, kernel, self._schedule, inspection,
+                                        executor, **self._options)
 
     @property
     def mode(self):
         return self._mode
 
+    @property
+    def schedule(self):
+        return self._schedule
 
-# Interface for triggering loop fusion
 
-def fuse(name, loop_chain, tile_size):
-    """Apply fusion (and possibly tiling) to a list of :class:`ParLoop` obecjts,
-    which we refer to as ``loop_chain``. Return a smaller list of :class:`ParLoop`s
-    objects, when some loops may have been fused/tiled. If fusion could not be
-    applied, return the original, unmodified ``loop_chain``.
+# Loop fusion interface
+
+class LoopChainTag(object):
+    """A special element in the trace of lazily evaluated parallel loops that
+    delimits two different Inspectors."""
+
+    def _run(self):
+        return
+
+
+def fuse(name, loop_chain, **kwargs):
+    """Apply fusion (and possibly tiling) to an iterator of :class:`ParLoop`
+    obecjts, which we refer to as ``loop_chain``. Return an iterator of
+    :class:`ParLoop` objects, in which some loops may have been fused or tiled.
+    If fusion could not be applied, return the unmodified ``loop_chain``.
 
     .. note::
        At the moment, the following features are not supported, in which
@@ -1176,34 +1493,54 @@ def fuse(name, loop_chain, tile_size):
     if len(loop_chain) in [0, 1]:
         return loop_chain
 
-    # Search for _Assembly objects since they introduce a synchronization point;
-    # that is, loops cannot be fused across an _Assembly object. In that case, try
-    # to fuse only the segment of loop chain right before the synchronization point
+    # Are there _LazyMatOp objects (i.e., synch points) preventing fusion?
     remainder = []
-    synch_points = [l for l in loop_chain if isinstance(l, Mat._Assembly)]
+    synch_points = [l for l in loop_chain if isinstance(l, base._LazyMatOp)]
     if synch_points:
         if len(synch_points) > 1:
             warning("Fusing loops and found more than one synchronization point")
+        # Fuse only the sub-sequence before the first synch point
         synch_point = loop_chain.index(synch_points[0])
         remainder, loop_chain = loop_chain[synch_point:], loop_chain[:synch_point]
 
-    # If there is nothing left to fuse (e.g. only _Assembly objects were present), return
+    # Get an inspector for fusing this /loop_chain/. If there's a cache hit,
+    # return the fused par loops straight away. Otherwise, try to run an inspection.
+    options = {
+        'log': kwargs.get('log', False),
+        'mode': kwargs.get('mode', 'hard'),
+        'use_glb_maps': kwargs.get('use_glb_maps', False),
+        'tile_size': kwargs.get('tile_size', 1),
+        'extra_halo': kwargs.get('extra_halo', False)
+    }
+    inspector = Inspector(name, loop_chain, **options)
+    if inspector._initialized:
+        return inspector.schedule(loop_chain) + remainder
+
+    # Otherwise, is the inspection legal ?
+    mode = kwargs.get('mode', 'hard')
+    force_glb = kwargs.get('force_glb', False)
+
+    # Return if there is nothing to fuse (e.g. only _LazyMatOp objects were present)
     if len(loop_chain) in [0, 1]:
         return loop_chain + remainder
 
-    # If loops in /loop_chain/ are already /fusion/ objects (this could happen
-    # when loops had already been fused because in a /loop_chain/ context) or
-    # if global reductions are present, return
-    if any([isinstance(l, ParLoop) for l in loop_chain]) or \
-            any([l._reduced_globals for l in loop_chain]):
+    # Skip if loops in /loop_chain/ are already /fusion/ objects: this could happen
+    # when loops had already been fused in a /loop_chain/ context
+    if any([isinstance(l, ParLoop) for l in loop_chain]):
+        return loop_chain + remainder
+
+    # Global reductions are dangerous for correctness, so avoid fusion unless the
+    # user is forcing it
+    if not force_glb and any([l._reduced_globals for l in loop_chain]):
         return loop_chain + remainder
 
     # Loop fusion requires modifying kernels, so ASTs must be present...
-    if any([not hasattr(l.kernel, '_ast') or not l.kernel._ast for l in loop_chain]):
-        return loop_chain + remainder
-    # ...and must not be "fake" ASTs
-    if any([isinstance(l.kernel._ast, ast.FlatBlock) for l in loop_chain]):
-        return loop_chain + remainder
+    if not mode == 'only_tile':
+        if any([not hasattr(l.kernel, '_ast') or not l.kernel._ast for l in loop_chain]):
+            return loop_chain + remainder
+        # ...and must not be "fake" ASTs
+        if any([isinstance(l.kernel._ast, ast.FlatBlock) for l in loop_chain]):
+            return loop_chain + remainder
 
     # Mixed still not supported
     if any(a._is_mixed for a in flatten([l.args for l in loop_chain])):
@@ -1213,30 +1550,30 @@ def fuse(name, loop_chain, tile_size):
     if any([l.is_layered for l in loop_chain]):
         return loop_chain + remainder
 
-    # Check if tiling needs be applied
-    mode = 'hard'
-    if tile_size > 0:
-        mode = 'tile'
-        # Loop tiling requires the SLOPE library to be available on the system.
-        if slope is None:
-            warning("Requested tiling, but couldn't locate SLOPE. Check the PYTHONPATH")
-            return loop_chain + remainder
-        try:
-            os.environ['SLOPE_DIR']
-        except KeyError:
-            warning("Set the env variable SLOPE_DIR to the location of SLOPE")
-            warning("Loops won't be fused, and plain ParLoops will be executed")
-            return loop_chain + remainder
+    # If tiling is requested, SLOPE must be visible
+    if mode in ['tile', 'only_tile'] and not slope:
+        return loop_chain + remainder
 
-    # Get an inspector for fusing this loop_chain, possibly retrieving it from
-    # the cache, and obtain the fused ParLoops through the schedule it produces
-    inspector = Inspector(name, loop_chain, tile_size)
-    schedule = inspector.inspect(mode)
+    schedule = inspector.inspect()
     return schedule(loop_chain) + remainder
 
 
+@decorator
+def loop_chain_tag(method, self, *args, **kwargs):
+    from base import _trace
+    retval = method(self, *args, **kwargs)
+    _trace._trace.append(LoopChainTag())
+    return retval
+
+
 @contextmanager
-def loop_chain(name, num_unroll=1, tile_size=0):
+def sub_loop_chain():
+    from base import _trace
+    _trace._trace.append(LoopChainTag())
+
+
+@contextmanager
+def loop_chain(name, **kwargs):
     """Analyze the sub-trace of loops lazily evaluated in this contextmanager ::
 
         [loop_0, loop_1, ..., loop_n-1]
@@ -1251,33 +1588,98 @@ def loop_chain(name, num_unroll=1, tile_size=0):
     new :class:`ParLoop` objects representing the fusion or the tiling of the
     original trace slice.
 
-    :param name: identifier of the loop chain
-    :param num_unroll: in a time stepping loop, the length of the loop chain
-                       is given by ``num_loops * num_unroll``, where ``num_loops``
-                       is the number of loops per time loop iteration. Therefore,
-                       setting this value to a number greater than 1 enables
-                       fusing/tiling longer loop chains (optional, defaults to 1).
-    :param tile_size: suggest a tile size in case loop tiling is used (optional).
-                      If ``0`` is passed in, only soft fusion is performed.
+    :arg name: identifier of the loop chain
+    :arg kwargs:
+        * mode (default='tile'): the fusion/tiling mode (accepted: soft, hard,
+            tile, only_tile)
+        * tile_size: (default=1) suggest a starting average tile size
+        * num_unroll (default=1): in a time stepping loop, the length of the loop
+            chain is given by ``num_loops * num_unroll``, where ``num_loops`` is the
+            number of loops per time loop iteration. Therefore, setting this value
+            to a number >1 enables tiling longer chains.
+        * force_glb (default=False): force tiling even in presence of global
+            reductions. In this case, the user becomes responsible of semantic
+            correctness.
+        * split_mode (default=0): split the loop chain every /split_mode/ occurrences
+            of the special object ``LoopChainTag`` in the trace, thus creating a
+            specific inspector for each slice.
+        * log (default=False): output inspector and loop chain info to a file
+        * use_glb_maps (default=False): when tiling, use the global maps provided by
+            PyOP2, rather than the ones constructed by SLOPE.
     """
+    assert name != lazy_trace_name, "Loop chain name must differ from %s" % lazy_trace_name
+
+    num_unroll = kwargs.setdefault('num_unroll', 1)
+    tile_size = kwargs.setdefault('tile_size', 1)
+    kwargs.setdefault('use_glb_maps', False)
+    split_mode = kwargs.pop('split_mode', 0)
+
+    # Get a snapshot of the trace before new par loops are added within this
+    # context manager
     from base import _trace
-    trace = _trace._trace
-    stamp = trace[-1:]
+    stamp = list(_trace._trace)
 
     yield
 
-    if num_unroll < 1:
+    trace = _trace._trace
+    if trace == stamp:
         return
 
-    start_point = trace.index(stamp[0])+1 if stamp else 0
-    extracted_loop_chain = trace[start_point:]
+    # What's the first item /B/ that appeared in the trace /before/ entering the
+    # context manager and that still has to be executed ?
+    # The loop chain will be (B, end_of_current_trace]
+    bottom = 0
+    for i in reversed(stamp):
+        if i in trace:
+            bottom = trace.index(i) + 1
+            break
+    extracted_trace = trace[bottom:]
 
-    # Unroll the loop chain /num_unroll/ times before fusion/tiling
-    total_loop_chain = loop_chain.unrolled_loop_chain + extracted_loop_chain
-    if len(total_loop_chain) / len(extracted_loop_chain) == num_unroll:
-        start_point = trace.index(total_loop_chain[0])
-        trace[start_point:] = fuse(name, total_loop_chain, tile_size)
-        loop_chain.unrolled_loop_chain = []
+    # Identify sub traces
+    extracted_sub_traces, sub_trace, tags = [], [], []
+    for loop in extracted_trace:
+        if not isinstance(loop, LoopChainTag):
+            sub_trace.append(loop)
+        else:
+            tags.append(loop)
+            if split_mode and len(tags) % split_mode == 0:
+                extracted_sub_traces.append(sub_trace)
+                sub_trace = []
+    if sub_trace:
+        extracted_sub_traces.append(sub_trace)
+    extracted_trace = [i for i in extracted_trace if i not in tags]
+
+    # Three possibilities: ...
+    if num_unroll < 1:
+        # 1) ... No tiling requested, but the openmp backend was set. So we still
+        # omp-ize the loops going through SLOPE
+        if slope and slope.get_exec_mode() in ['OMP', 'OMP_MPI'] and tile_size > 0:
+            block_size = tile_size    # This is rather a 'block' size (no tiling)
+            options = {'mode': 'only_omp',
+                       'tile_size': block_size}
+            new_trace = [Inspector(name, [loop], **options).inspect()([loop])
+                         for loop in extracted_trace]
+            trace[bottom:] = list(flatten(new_trace))
+            _trace.evaluate_all()
+    elif split_mode > 0:
+        # 2) ... Tile over subsets of loops in the loop chain. The subsets have
+        # been identified by the user through /sub_loop_chain/ or /loop_chain_tag/
+        new_trace = []
+        for i, sub_loop_chain in enumerate(extracted_sub_traces):
+            sub_name = "%s_sub%d" % (name, i)
+            new_trace.append(fuse(sub_name, sub_loop_chain, **kwargs))
+        trace[bottom:] = list(flatten(new_trace))
+        _trace.evaluate_all()
     else:
-        loop_chain.unrolled_loop_chain.extend(extracted_loop_chain)
+        # 3) ... Tile over the entire loop chain, possibly unrolled as by user
+        # request of a factor = /num_unroll/
+        total_loop_chain = loop_chain.unrolled_loop_chain + extracted_trace
+        if len(total_loop_chain) / len(extracted_trace) == num_unroll:
+            bottom = trace.index(total_loop_chain[0])
+            trace[bottom:] = fuse(name, total_loop_chain, **kwargs)
+            loop_chain.unrolled_loop_chain = []
+            # We force the evaluation of the trace, because this frees resources
+            _trace.evaluate_all()
+        else:
+            loop_chain.unrolled_loop_chain.extend(extracted_trace)
 loop_chain.unrolled_loop_chain = []
