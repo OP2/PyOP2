@@ -523,7 +523,7 @@ for (int n = %(tile_start)s; n < %(tile_end)s; n++) {
                                         if a._is_vec_map)
                 # HORRIBLE HACK
                 if "interior" in kernel._name:
-                    prefetch_vecs = flatten(a.c_vec_entry('(p + 1)', True) for a in args[:-2] if a._is_vec_map)
+                    prefetch_vecs = flatten(a.c_vec_entry('p', True) for a in args[:-2] if a._is_vec_map)
                 prefetch_vecs = ';\n'.join([prefetch(pv) for pv in prefetch_vecs])
             loop_code_dict['prefetch_maps'] = prefetch_maps
             loop_code_dict['prefetch_vecs'] = prefetch_vecs
@@ -1410,6 +1410,7 @@ class Inspector(Cached):
         tile_size = self._options.get('tile_size', 1)
         extra_halo = self._options.get('extra_halo', False)
         coloring = self._options.get('coloring', 'default')
+        use_prefetch = self._options.get('use_prefetch', 0)
         log = self._options.get('log', False)
 
         # The SLOPE inspector, which needs be populated with sets, maps,
@@ -1483,6 +1484,9 @@ class Inspector(Cached):
 
         # Set a tile coloring strategy
         inspector.set_coloring(coloring)
+
+        # Inform about the prefetch distance that needs be guaranteed
+        inspector.set_prefetch_halo(use_prefetch)
 
         # Generate the C code
         src = inspector.generate_code()
