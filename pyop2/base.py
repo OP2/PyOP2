@@ -3771,7 +3771,7 @@ class Kernel(Cached):
     @classmethod
     @validate_type(('name', str, NameTypeError))
     def _cache_key(cls, code, name, opts={}, include_dirs=[], headers=[],
-                   user_code="", cpp=False, libs=[], libdirs=[]):
+                   user_code="", cpp=False, libs=[], lib_dirs=[]):
         # Both code and name are relevant since there might be multiple kernels
         # extracting different functions from the same code
         # Also include the PyOP2 version, since the Kernel class might change
