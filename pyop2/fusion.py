@@ -510,15 +510,16 @@ for (int n = %(tile_start)s; n < %(tile_end)s; n++) {
             prefetch_maps, prefetch_vecs = '', ''
             if self._use_prefetch:
                 prefetch = lambda addr: '_mm_prefetch ((char*)(%s), _MM_HINT_T0)' % addr
-                prefetch_var = 'int p = %s[n + 1]' % self._executor.gtl_maps[i]['DIRECT']
-                prefetch_maps = [a.c_map_entry('(p + 1)') for a in args if a._is_vec_map]
+                prefetch_var = 'int p = %s[n + %d]' % (self._executor.gtl_maps[i]['DIRECT'],
+                                                       self._use_prefetch)
+                prefetch_maps = [a.c_map_entry('p') for a in args if a._is_vec_map]
                 # can save some instructions since prefetching targets chunks of 32 bytes
                 prefetch_maps = flatten([j for j in pm if pm.index(j) % 2 == 0]
                                         for pm in prefetch_maps)
                 prefetch_maps = list(OrderedDict.fromkeys(prefetch_maps))
                 prefetch_maps = ';\n'.join([prefetch_var] +
                                            [prefetch('&(%s)' % pm) for pm in prefetch_maps])
-                prefetch_vecs = flatten(a.c_vec_entry('(p + 1)', True) for a in args
+                prefetch_vecs = flatten(a.c_vec_entry('p', True) for a in args
                                         if a._is_vec_map)
                 prefetch_vecs = ';\n'.join([prefetch(pv) for pv in prefetch_vecs])
             loop_code_dict['prefetch_maps'] = prefetch_maps
@@ -881,7 +882,7 @@ class TilingSchedule(Schedule):
         self._executor = executor
         self._kernel = kernel
         self._use_glb_maps = options.get('use_glb_maps', False)
-        self._use_prefetch = options.get('use_prefetch', False)
+        self._use_prefetch = options.get('use_prefetch', 0)
 
     def __call__(self, loop_chain):
         loop_chain = self._schedule(loop_chain)
@@ -1597,7 +1598,7 @@ def fuse(name, loop_chain, **kwargs):
         'log': kwargs.get('log', False),
         'mode': kwargs.get('mode', 'hard'),
         'use_glb_maps': kwargs.get('use_glb_maps', False),
-        'use_prefetch': kwargs.get('use_prefetch', False),
+        'use_prefetch': kwargs.get('use_prefetch', 0),
         'tile_size': kwargs.get('tile_size', 1),
         'extra_halo': kwargs.get('extra_halo', False),
         'coloring': kwargs.get('coloring', 'default')
@@ -1711,7 +1712,7 @@ def loop_chain(name, **kwargs):
     num_unroll = kwargs.setdefault('num_unroll', 1)
     tile_size = kwargs.setdefault('tile_size', 1)
     kwargs.setdefault('use_glb_maps', False)
-    kwargs.setdefault('use_prefetch', False)
+    kwargs.setdefault('use_prefetch', 0)
     kwargs.setdefault('coloring', 'default')
     split_mode = kwargs.pop('split_mode', 0)
     explicit = kwargs.pop('explicit', None)
