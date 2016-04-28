@@ -780,7 +780,9 @@ class JITModule(base.JITModule):
             cppargs += [compiler[coffee.plan.isa['inst_set']]]
         ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
                  ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()] + \
-                 ["-lpetsc", "-lm"] + self._libraries
+                 ["-lpetsc", "-lm"] + self._libraries + \
+                 ["-l"+s for s in self._kernel._libs] + \
+                 ["-L"+s for s in self._kernel._lib_dirs]
         if self._kernel._applied_blas:
             blas_dir = blas['dir']
             if blas_dir:

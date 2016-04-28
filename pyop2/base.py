@@ -3749,6 +3749,8 @@ class Kernel(Cached):
     :param cpp: Is the kernel actually C++ rather than C?  If yes,
         then compile with the C++ compiler (kernel is wrapped in
         extern C for linkage reasons).
+    :param lib_dirs: Additional search path for libraries used by the kernel.
+    :param libs: Additional libraries used by the kernel
 
     Consider the case of initialising a :class:`~pyop2.Dat` with seeded random
     values in the interval 0 to 1. The corresponding :class:`~pyop2.Kernel` is
@@ -3769,7 +3771,7 @@ class Kernel(Cached):
     @classmethod
     @validate_type(('name', str, NameTypeError))
     def _cache_key(cls, code, name, opts={}, include_dirs=[], headers=[],
-                   user_code="", cpp=False):
+                   user_code="", cpp=False, libs=[], libdirs=[]):
         # Both code and name are relevant since there might be multiple kernels
         # extracting different functions from the same code
         # Also include the PyOP2 version, since the Kernel class might change
@@ -3787,12 +3789,14 @@ class Kernel(Cached):
         return ast.gencode()
 
     def __init__(self, code, name, opts={}, include_dirs=[], headers=[],
-                 user_code="", cpp=False):
+                 user_code="", cpp=False, libs=[], lib_dirs=[]):
         # Protect against re-initialization when retrieved from cache
         if self._initialized:
             return
         self._name = name or "kernel_%d" % Kernel._globalcount
         self._cpp = cpp
+        self._libs = libs
+        self._lib_dirs = lib_dirs
         Kernel._globalcount += 1
         # Record used optimisations
         self._opts = opts
