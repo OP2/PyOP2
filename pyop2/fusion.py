@@ -512,7 +512,7 @@ for (int n = %(tile_start)s; n < %(tile_end)s; n++) {
                 prefetch = lambda addr: '_mm_prefetch ((char*)(%s), _MM_HINT_T0)' % addr
                 prefetch_var = 'int p = %s[n + %d]' % (self._executor.gtl_maps[i]['DIRECT'],
                                                        self._use_prefetch)
-                prefetch_maps = [a.c_map_entry('p') for a in args if a._is_vec_map]
+                prefetch_maps = [a.c_map_entry('p') for a in args if a._is_indirect]
                 # can save some instructions since prefetching targets chunks of 32 bytes
                 prefetch_maps = flatten([j for j in pm if pm.index(j) % 2 == 0]
                                         for pm in prefetch_maps)
@@ -520,7 +520,7 @@ for (int n = %(tile_start)s; n < %(tile_end)s; n++) {
                 prefetch_maps = ';\n'.join([prefetch_var] +
                                            [prefetch('&(%s)' % pm) for pm in prefetch_maps])
                 prefetch_vecs = flatten(a.c_vec_entry('p', True) for a in args
-                                        if a._is_vec_map)
+                                        if a._is_indirect)
                 # HORRIBLE HACK
                 if "interior" in kernel._name:
                     prefetch_vecs = flatten(a.c_vec_entry('p', True) for a in args[:-2] if a._is_vec_map)
