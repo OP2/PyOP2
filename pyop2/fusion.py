@@ -1517,6 +1517,7 @@ class Inspector(Cached):
             filename = os.path.join("logging", "lc_%s_rank%d.txt" % (self._name, rank))
             if rank == 0 and not os.path.exists(os.path.dirname(filename)):
                 os.makedirs(os.path.dirname(filename))
+            MPI.comm.barrier()
             with open(filename, 'w') as f:
                 f.write('iteration set - memory footprint (KB) - megaflops\n')
                 f.write('-------------------------------------------------------\n')
