@@ -1414,6 +1414,7 @@ class Inspector(Cached):
         coloring = self._options.get('coloring', 'default')
         use_prefetch = self._options.get('use_prefetch', 0)
         log = self._options.get('log', False)
+        rank = MPI.comm.rank
 
         # The SLOPE inspector, which needs be populated with sets, maps,
         # descriptors, and loop chain structure
@@ -1469,7 +1470,7 @@ class Inspector(Cached):
         arguments.extend([inspector.set_tile_size(tile_size)])
 
         # Tell SLOPE the rank of the MPI process
-        arguments.extend([inspector.set_mpi_rank(MPI.comm.rank)])
+        arguments.extend([inspector.set_mpi_rank(rank)])
 
         # Get type and value of additional arguments that SLOPE can exploit
         arguments.extend(inspector.add_extra_info())
@@ -1513,9 +1514,8 @@ class Inspector(Cached):
 
         # Log the inspector output, if necessary
         if log:
-            filename = os.path.join("logging",
-                                    "lc_%s_rank%d.txt" % (self._name, MPI.comm.rank))
-            if not os.path.exists(os.path.dirname(filename)):
+            filename = os.path.join("logging", "lc_%s_rank%d.txt" % (self._name, rank))
+            if rank == 0 and not os.path.exists(os.path.dirname(filename)):
                 os.makedirs(os.path.dirname(filename))
             with open(filename, 'w') as f:
                 f.write('iteration set - memory footprint (KB) - megaflops\n')
