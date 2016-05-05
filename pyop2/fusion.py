@@ -139,7 +139,7 @@ class Arg(sequential.Arg):
                  'map_name': self.c_map_name(i, 0),
                  'arity': self.map.split[i].arity,
                  'idx': idx,
-                 'var': var if var else 'i',
+                 'var': var if var else 'n',
                  'top': ' + start_layer' if is_top else '',
                  'dim': self.data[i].cdim,
                  'off': ' + %d' % j if j else '',
@@ -149,7 +149,7 @@ class Arg(sequential.Arg):
             return "%(name)s + (%(map_name)s[%(var)s * %(arity)s + %(idx)s]%(top)s%(off_mul)s%(off_add)s)* %(dim)s%(off)s" % \
                 {'name': self.c_arg_name(i),
                  'map_name': self.c_map_name(i, 0),
-                 'var': var if var else 'i',
+                 'var': var if var else 'n',
                  'arity': self.map.split[i].arity,
                  'idx': idx,
                  'top': ' + start_layer' if is_top else '',
@@ -505,13 +505,15 @@ for (int n = %(tile_start)s; n < %(tile_end)s; n++) {
             # ... does the scatter use global or local maps ?
             if self._use_glb_maps:
                 loop_code_dict['index_expr'] = '%s[n]' % self._executor.gtl_maps[i]['DIRECT']
+                prefetch_var = 'int p = %s[n + %d]'  % (self._executor.gtl_maps[i]['DIRECT'],
+                                                        self._use_prefetch)
+            else:
+                prefetch_var = 'int p = n + %d' % self._use_prefetch
 
             # ... add prefetch intrinsics, if requested
             prefetch_maps, prefetch_vecs = '', ''
             if self._use_prefetch:
                 prefetch = lambda addr: '_mm_prefetch ((char*)(%s), _MM_HINT_T0)' % addr
-                prefetch_var = 'int p = %s[n + %d]' % (self._executor.gtl_maps[i]['DIRECT'],
-                                                       self._use_prefetch)
                 prefetch_maps = [a.c_map_entry('p') for a in args if a._is_indirect]
                 # can save some instructions since prefetching targets chunks of 32 bytes
                 prefetch_maps = flatten([j for j in pm if pm.index(j) % 2 == 0]
