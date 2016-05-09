@@ -1788,6 +1788,7 @@ def loop_chain(name, **kwargs):
             transformed.extend(extracted_trace[prev_last:first])
             transformed.extend(fuse(sub_name, extracted_trace[first:last+1], **kwargs))
             prev_last = last + 1
+        transformed.extend(extracted_trace[prev_last:])
         trace[bottom:] = transformed
         _trace.evaluate_all()
     elif split_mode > 0:
