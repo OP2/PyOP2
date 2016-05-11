@@ -2351,7 +2351,7 @@ class MixedDat(Dat):
         if isinstance(mdset_or_dats, MixedDat):
             self._dats = tuple(_make_object('Dat', d) for d in mdset_or_dats)
             return
-        self._dats = tuple(d if isinstance(d, Dat) else _make_object('Dat', d)
+        self._dats = tuple(d if isinstance(d, (Dat, Global)) else _make_object('Dat', d)
                            for d in mdset_or_dats)
         if not all(d.dtype == self._dats[0].dtype for d in self._dats):
             raise DataValueError('MixedDat with different dtypes is not supported')
