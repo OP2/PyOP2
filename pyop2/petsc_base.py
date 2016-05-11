@@ -692,7 +692,7 @@ class Mat(base.Mat, CopyOnWrite):
         except TypeError:
             # One of the path entries was not an Arg.
             if path == (None, None):
-                #if not hasattr(self, "_global"):
+                #  if not hasattr(self, "_global"):
                 #    self._init()
                 return _make_object('Arg', data=self.handle.getPythonContext(),
                                     access=access, flatten=flatten)
