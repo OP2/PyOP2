@@ -520,8 +520,6 @@ class Set(object):
 
     :param size: The size of the set.
     :type size: integer or list of four integers.
-    :param dim: The shape of the data associated with each element of this ``Set``.
-    :type dim: integer or tuple of integers
     :param string name: The name of the set (optional).
     :param halo: An exisiting halo to use (optional).
 
@@ -702,6 +700,71 @@ class Set(object):
             raise SizeTypeError("Shape of %s is incorrect" % name)
         size = slot.value.astype(np.int)
         return cls(size[0], name)
+
+
+class GlobalSet(Set):
+
+    """A proxy set allowing a :class:`Global` to be used in place of a
+    :class:`Dat` where appropriate."""
+
+    def __init__(self):
+        pass
+
+    @cached_property
+    def core_size(self):
+        return 0
+
+    @cached_property
+    def size(self):
+        return 1 if MPI.comm.rank == 0 else 0
+
+    @cached_property
+    def exec_size(self):
+        return 0
+
+    @cached_property
+    def total_size(self):
+        """Total set size, including halo elements."""
+        return 1 if MPI.comm.rank == 0 else 0
+
+    @cached_property
+    def sizes(self):
+        """Set sizes: core, owned, execute halo, total."""
+        return (self.core_size, self.size, self.exec_size, self.total_size)
+
+    @cached_property
+    def name(self):
+        """User-defined label"""
+        return "GLobalSet"
+
+    @cached_property
+    def halo(self):
+        """:class:`Halo` associated with this Set"""
+        return None
+
+    @property
+    def partition_size(self):
+        """Default partition size"""
+        return None
+
+    def __iter__(self):
+        """Yield self when iterated over."""
+        yield self
+
+    def __getitem__(self, idx):
+        """Allow indexing to return self"""
+        assert idx == 0
+        return self
+
+    def __len__(self):
+        """This is not a mixed type and therefore of length 1."""
+        return 1
+
+    def __str__(self):
+        return "OP2 GlobalSet"
+
+    def __repr__(self):
+        return "GlobalSet()"
 
 
 class ExtrudedSet(Set):
@@ -905,7 +968,7 @@ class MixedSet(Set, ObjectCached):
         if self._initialized:
             return
         self._sets = sets
-        assert all(s.layers == self._sets[0].layers for s in sets), \
+        assert all(s is None or s.layers == self._sets[0].layers for s in sets), \
             "All components of a MixedSet must have the same number of layers."
         self._initialized = True
 
@@ -1090,6 +1153,7 @@ class GlobalDataSet(DataSet):
     """A proxy :class:`DataSet` for use in a :class:`Sparsity` where the
     matrix has :class:`Global` rows or columns."""
     _globalcount = 0
+    _globalset = GlobalSet()
 
     def __init__(self, global_):
         """
@@ -1120,12 +1184,12 @@ class GlobalDataSet(DataSet):
     @cached_property
     def set(self):
         """Returns the parent set of the data set."""
-        return None
+        return self._globalset
 
     @cached_property
     def size(self):
-        """The number of entries in the Dataset (1)"""
-        return 1
+        """The number of local entries in the Dataset (1 on rank 0)"""
+        return 1 if MPI.comm.rank == 0 else 0
 
     def __iter__(self):
         """Yield self when iterated over."""
@@ -3211,9 +3275,6 @@ class MixedMap(Map, ObjectCached):
         if self._initialized:
             return
         self._maps = maps
-        # Make sure all itersets are identical
-        if not all(m.iterset == self._maps[0].iterset for m in self._maps):
-            raise MapTypeError("All maps in a MixedMap need to share the same iterset")
         self._initialized = True
 
     @classmethod
@@ -3239,7 +3300,8 @@ class MixedMap(Map, ObjectCached):
     @cached_property
     def toset(self):
         """:class:`MixedSet` mapped to."""
-        return MixedSet(tuple(m.toset for m in self._maps))
+        return MixedSet(tuple(GlobalDataSet._globalset if m is None else
+                              m.toset for m in self._maps))
 
     @cached_property
     def arity(self):
@@ -3275,7 +3337,8 @@ class MixedMap(Map, ObjectCached):
         This returns all map values (including halo points), see
         :meth:`values` if you only need to look at the local
         points."""
-        return tuple(m.values_with_halo for m in self._maps)
+        return tuple(None if m is None else
+                     m.values_with_halo for m in self._maps)
 
     @cached_property
     def name(self):
@@ -3348,6 +3411,10 @@ class Sparsity(ObjectCached):
             self._d_nz = 0
             self._o_nz = 0
             self._dims = (((1, 1),),)
+            self._rowptr = None
+            self._colidx = None
+            self._d_nnz = None
+            self._o_nnz = None
             self._nrows = None if isinstance(dsets[0], GlobalDataSet) else self._rmaps[0].toset.size
             self._ncols = None if isinstance(dsets[1], GlobalDataSet) else self._cmaps[0].toset.size
         else:
@@ -3461,7 +3528,7 @@ class Sparsity(ObjectCached):
 
         # Need to return the caching object, a tuple of the processed
         # arguments and a dict of kwargs (empty in this case)
-        if dsets[0] is None:
+        if isinstance(dsets[0], GlobalDataSet):
             cache = None
         elif isinstance(dsets[0].set, MixedSet):
             cache = dsets[0].set[0]
