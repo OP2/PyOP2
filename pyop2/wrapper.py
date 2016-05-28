@@ -140,8 +140,7 @@ def compose_wrapper(backend="sequential"):
             for (int n = efirst; n < efirst+ nelem; n++ )
             {
         """
-
-    if backend == "sequential":
+    else:
         wrapper += """
         for ( int n = start; n < end; n++ ) {
         """
@@ -316,6 +315,7 @@ def compose_openmp4_wrapper():
 
                 %(kernel_name)s(%(kernel_args)s);
 
+                %(parallel_pragma_four)s
                 %(itset_loop_body)s
                 %(add_writeback)s
                 %(map_bcs_p)s;

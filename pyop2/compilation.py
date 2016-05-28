@@ -93,7 +93,6 @@ class Compiler(object):
 
         pid = os.getpid()
         cname = os.path.join(cachedir, "%s_p%d.%s" % (basename, pid, extension))
-
         # Get manually optimized generated code if any
         if configuration["hpc_optimize"]:
             src, cname = source_code(src, cname)

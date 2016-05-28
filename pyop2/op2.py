@@ -37,7 +37,7 @@ import atexit
 
 import backends
 import base
-import pyop2
+import pyop2.sequential as seq
 from base import READ, WRITE, RW, INC, MIN, MAX, i
 from base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL
 from base import DatView
@@ -284,6 +284,10 @@ def par_loop(kernel, iterset, *args, **kwargs):
     passed to the kernel as a vector.
     """
     return backends._BackendSelector._backend.par_loop(kernel, iterset, *args, **kwargs)
+
+
+def seq_loop(kernel, iterset, *args, **kwargs):
+    return seq.ParLoop(kernel, iterset, *args, **kwargs).enqueue()
 
 
 @collective

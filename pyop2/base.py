@@ -4264,10 +4264,11 @@ class ParLoop(LazyComputation):
                         print "Data transposing required for arg: %d" % (i)
                         arg.data_needs_transposing = True
 
-        if configuration["hpc_gen_code_output"]:
-            print self._jitmodule._code_to_compile
+        #if configuration["hpc_gen_code_output"]:
+        #    print self._jitmodule._code_to_compile
         import pyparloop
         ret = None
+        #from IPython import embed; embed()
         if isinstance(self._kernel, pyparloop.Kernel) or not configuration["hpc_profiling"]:
             ret = self.compute()
         elif self.is_direct and configuration["only_indirect_loops"]:
@@ -4339,6 +4340,14 @@ class ParLoop(LazyComputation):
         Return None if the child class should deal with this in another way."""
         return None
 
+    @property
+    @collective
+    def _jitmodule_backup(self):
+        """Return the :class:`JITModule` that encapsulates the compiled par_loop code.
+
+        Return None if the child class should deal with this in another way."""
+        return None
+
     @collective
     def compute(self):
         """Executes the kernel over all members of the iteration space."""
@@ -4346,6 +4355,9 @@ class ParLoop(LazyComputation):
         iterset = self.iterset
         arglist = self.prepare_arglist(iterset, *self.args)
         fun = self._jitmodule
+        if any([a._is_mat for a in self.args]):
+            print  " ===> Execute the function sequentially since Matrix is invovled. <=== (Non-profiled)"
+            fun = self._jitmodule_backup
         print " ===> Execute core part <=== (Non-profiled)"
         self._compute(iterset.core_part, fun, *arglist)
         self.halo_exchange_end()
@@ -4389,13 +4401,14 @@ class ParLoop(LazyComputation):
                 fun = self._jitmodule
                 # t, other_measures = self._compute(self.it_space.iterset.core_part)
                 print "===> Execute core part <==="
-                print self._jitmodule._code_to_compile
+                # print self._jitmodule._code_to_compile
                 t, measures = self._compute(iterset.core_part, fun, *arglist)
                 self.halo_exchange_end()
 
             # Set the name of the region before creating the function
             with configure("region_name", region_name + "_halo"):
                 # configuration['region_name'] = region_name + "_halo"
+                print "=> Computing Halo <="
                 fun = self._jitmodule_halo
 
                 # Disable checking and saving results for halos

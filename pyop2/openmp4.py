@@ -109,6 +109,7 @@ class JITModule(host.JITModule):
         code_dict.update({'parallel_pragma_one': ""})
         code_dict.update({'parallel_pragma_two': ""})
         code_dict.update({'parallel_pragma_three': ""})
+        code_dict.update({'parallel_pragma_four': ""})
 
         optimize_wrapper(self, code_dict, host=True)
         return code_dict
@@ -192,7 +193,9 @@ class ParLoop(host.ParLoop):
         time = 0.0
         with timed_region("ParLoop kernel"):
             # time = fun(*self._jit_args, argtypes=self._argtypes, restype=ctypes.c_double)
+            print " => Start OMP4 execution on HOST. <="
             time = fun(part.offset, part.offset + part.size, *arglist)
+            print " => Finished OMP4 execution on HOST. <="
             if configuration['hpc_check_result']:
                 for arg in self.args:
                     if arg.access in [WRITE, INC]:

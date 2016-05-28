@@ -536,11 +536,12 @@ class Arg(base.Arg):
         rdim = rbs * nrows
         addto_name = buf_name
         addto = 'MatSetValuesLocal'
-        ret += ["""
-                for (int j=0; j<%(nrows)d; j++){
-                    printf(" %%d ", xtr_arg0_0_map0_0[j]);
-                }
-                printf("\\n");""" % {'nrows': nrows}]
+        # Debug code. TODO: Remove
+        #ret += ["""
+        #        for (int j=0; j<%(nrows)d; j++){
+        #            printf(" %%d ", xtr_arg0_0_map0_0[j]);
+        #        }
+        #        printf("\\n");""" % {'nrows': nrows}]
         if self.data._is_vector_field:
             addto = 'MatSetValuesBlockedLocal'
             if self._flatten:
@@ -1853,8 +1854,8 @@ def wrapper_snippets(itspace, args,
         _index_expr = "ssinds[n]"
         # TODO: Implement array saving for this case.
         _store_array += ["storeArray_int(ssinds, %(size)s, "");" % {"size": itspace._iterset.size}]
-        _load_array += ["TODO"]
-        _call_args += ["TODO"]
+        _load_array += ["TODOSUBSET"]
+        _call_args += ["TODOSUBSET"]
 
     _wrapper_args = []
     for arg in args:
@@ -1944,14 +1945,6 @@ def wrapper_snippets(itspace, args,
         _map_decl_vals = []
         for arg in args:
             if arg._uses_itspace:
-                # if configuration["hpc_code_gen"] == 3 and not arg._is_mat:
-                #     _map_decl_vals += [arg.c_map_init_s3(is_top=is_top, is_facet=is_facet)]
-                # else:
-                #     _map_decl_vals += [arg.c_map_init(is_top=is_top, is_facet=is_facet)]
-                # if configuration["hpc_code_gen"] == 3 and not arg._is_mat:
-                #     _map_decl_vals += [arg.c_map_init_s3_itset(is_top=is_top, is_facet=is_facet)]
-                # else:
-                #     _map_decl_vals += [arg.c_map_init(is_top=is_top, is_facet=is_facet)]
                 if configuration["hpc_code_gen"] == 3:
                     if arg._is_mat:
                         _map_decl_vals += [arg.c_map_init_s3_itset_mat(is_top=is_top, is_facet=is_facet)]

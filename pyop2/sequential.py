@@ -140,6 +140,10 @@ class ParLoop(host.ParLoop):
     def _jitmodule_halo(self):
         return self._jitmodule
 
+    @cached_property
+    def _jitmodule_backup(self):
+        return self._jitmodule
+
     @collective
     def _compute(self, part, fun, *arglist):
         time = 0.0

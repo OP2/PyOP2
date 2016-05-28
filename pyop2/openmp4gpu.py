@@ -39,6 +39,7 @@ from numpy.ctypeslib import ndpointer
 from base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS
 from base import WRITE, INC
 import pyop2.openmp4 as omp4
+import pyop2.sequential as seq
 from exceptions import *
 import host
 from mpi import collective
@@ -78,7 +79,7 @@ class Arg(host.Arg):
 
     def c_offload_dat(self):
         if self._is_mat:
-            call_args = ["TODO"]
+            call_args = ["TODOMAT"]
         else:
             call_args = [self.c_arg_name(i) + "[:%(size)s]" % {'size': str(len(self.data[i].data) * self.data[i].cdim)}
                          for i in range(len(self.data))]
@@ -150,11 +151,16 @@ class JITModule(host.JITModule):
         _inc_args = []
         _write_args = []
         _print_args = []
+        # Any calculation which contains a matrix should be performed on the
+        # host. Set the host flag to true if that's the case.
+        _execute_on_host = any([arg._is_mat for arg in self._args])
         for arg in self._args:
             # Offloading for dats based on access type:
+            #
             # READ  'to'
             # INC   'tofrom'
             # WRITE 'from'
+            #
             if arg.access in [WRITE]:
                 _write_args += arg.c_offload_dat()
                 _print_args += arg.c_print_dat()
@@ -177,33 +183,17 @@ class JITModule(host.JITModule):
                         'inc_args': _inc_args,
                         'write_args': _write_args}
 
-        # _offload_one = """%(print_args)s
-        #                   double *dd = arg0_0;
-        #                   printf("Just before offload\\n");
-        #                   printf("Address of arg0_0 is: 0x%%llx\\n", *&arg0_0);
-        #                   printf("Address of arg0_0 is: 0x%%llx\\n", arg0_0);
-        #                   printf("Address of arg0_0 is: 0x%%llx\\n", &arg0_0);
-        #                   printf("Value of arg0_0[0] is: %%f\\n", (*&arg0_0)[0]);
-        #                   %(offld)s
-        #                """ % {"print_args": "", # _print_args,
-        #                       "offld": _offload_one}
-
-        # If the work is performed on an extruded mesh then we have to also offload the offset
-        # associated with each map
-        # if self._itspace._extruded:
-        #     _read_args = ", ".join([_read_args] + [arg.c_offload_offset() for arg in self._args
-        #                                            if arg._uses_itspace or arg._is_vec_map])
-
-        code_dict.update({'offload_one': _offload_one})
+        code_dict.update({'offload_one': "" if _execute_on_host else _offload_one})
 
         # Init pragma placeholders
         code_dict.update({'parallel_pragma_one': ""})
         code_dict.update({'parallel_pragma_two': ""})
         code_dict.update({'parallel_pragma_three': ""})
+        code_dict.update({'parallel_pragma_four': ""})
 
         # This is a good place to apply some application level optimizations
-        print "=> Running OPENMP 4.0 on GPU"
-        optimize_wrapper(self, code_dict)
+        print "=> Running OPENMP 4.0 on GPU (except if a matrix is present run on HOST. Matrix presence test: ", _execute_on_host, " )"
+        optimize_wrapper(self, code_dict, host=_execute_on_host)
         return code_dict
 
     def get_c_code(self, kernel_code, wrapper_code):
@@ -307,6 +297,12 @@ class ParLoop(host.ParLoop):
         return arglist
 
     @cached_property
+    def _jitmodule_backup(self):
+        # Default to the original sequential backend when not able to offload.
+        return seq.JITModule(self.kernel, self.it_space, *self.args,
+                             direct=self.is_direct, iterate=self.iteration_region)
+
+    @cached_property
     def _jitmodule(self):
         return JITModule(self.kernel, self.it_space, *self.args,
                          direct=self.is_direct, iterate=self.iteration_region)
@@ -317,12 +313,23 @@ class ParLoop(host.ParLoop):
         return omp4.JITModule(self.kernel, self.it_space, *self.args,
                               direct=self.is_direct, iterate=self.iteration_region, halo=True)
 
+    def _print_arg(self, filename, arr):
+        with open(filename, "w+") as h:
+           h.write(str(len(arr)) + "\n")
+           for i in range(len(arr)):
+               h.write(str(arr[i]) + "\n")
+
     @collective
     def _compute(self, part, fun, *arglist):
         time = 0.0
         with timed_region("ParLoop kernel"):
             # time = fun(*self._jit_args, argtypes=self._argtypes, restype=ctypes.c_double)
             print " => Start OMP4GPU Execution"
+            print self._jitmodule._code_to_compile
+            # For printing out arg dats and maps:
+            # self._print_arg("arg0_fvdx_dg2dg2_200K_map.dat", a.map.values.flatten())
+            # self._print_arg("arg0_fvdx_dg2dg2_200K_dat.dat", a.map.values.flatten())
+            from IPython import embed; embed()
             time = fun(part.offset, part.offset + part.size, *arglist)
             print " => Finished OMP4GPU Execution."
             if configuration['hpc_check_result']:
