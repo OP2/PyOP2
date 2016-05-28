@@ -155,7 +155,7 @@ class Arg(base.Arg):
 
     def c_ind_data(self, idx, i, j=0, is_top=False, offset=None,
                    style=configuration["hpc_code_gen"],
-                   repeated=[], extruded=[]):
+                   repeated=[], extruded=[], loop_index=None):
         ind_map = None
         if configuration["hpc_code_gen"] in [2, 3] and self._is_vec_map:
             # Only apply the scheme 3 when the flag is set and
@@ -168,7 +168,6 @@ class Arg(base.Arg):
 
             # Flag for the application of Scheme 3
             apply_scheme_3 = configuration["hpc_code_gen"] == 3 and not repeated is None and not extruded is None
-            # apply_scheme_3 = configuration["hpc_code_gen"] == 3 and is_extruded
 
             # Flag for offset application in Scheme 2
             apply_offset_2 = configuration["hpc_code_gen"] == 2 and not ind_map is None and ind_map.iterset._extruded
@@ -176,7 +175,7 @@ class Arg(base.Arg):
             # Populate value
             value = "(xtr_%(map_name)s[%(idx)s]%(layer_advance)s)%(dim)s%(off)s%(layers)s%(layer_it_var)s" % \
                     {'map_name': self.c_map_name(i, 0),
-                     'idx': idx,
+                     'idx': idx if not loop_index else loop_index + "++",
                      'dim': "* %d" % self.data[i].cdim if not apply_scheme_3 else "",
                      'off': ' + %d' % j if j else '',
                      'layers': (" * (layers + 1)" if not idx in extruded else " * layers") if j and apply_scheme_3 else '',
@@ -293,11 +292,13 @@ class Arg(base.Arg):
     def c_vec_init(self, is_top, is_facet=False):
         is_top_init = is_top
         val = []
+        loop = []
         vec_idx = 0
         # When flattening the arg, the xtr_...[*]
         # needs to be flattened only within a dimension.
         # When the dimension changes, the map_idx needs to be reset.
         map_idx = 0
+        populate_indexed_vec = configuration["hpc_code_gen"] == 3
         for i, (m, d) in enumerate(zip(self.map, self.data)):
             is_top = is_top_init and m.iterset._extruded
             # TODO: Fix the passing down of the information for Scheme 3.
@@ -308,6 +309,8 @@ class Arg(base.Arg):
             if self._flatten:
                 for k in range(d.cdim):
                     map_idx = 0
+                    if populate_indexed_vec:
+                        loop.append("i_0 = 0")
                     for idx in range(m.arity):
                         val.append("%(vec_name)s[%(idx)s] = %(data)s" %
                                    {'vec_name': self.c_vec_name(),
@@ -315,6 +318,13 @@ class Arg(base.Arg):
                                     'data': self.c_ind_data(idx, i, k, is_top=is_top,
                                                             offset=m.offset[idx] if is_top else None,
                                                             repeated=reps, extruded=xtrs)})
+                        if populate_indexed_vec:
+                            loop.append("%(vec_name)s[%(idx)s] = %(data)s;" %
+                                        {'vec_name': self.c_vec_name(),
+                                         'idx': vec_idx,
+                                         'data': self.c_ind_data(idx, i, k, is_top=is_top,
+                                                                 repeated=reps, extruded=xtrs,
+                                                                 loop_index="i_0")})
                         vec_idx += 1
                         map_idx += 1
                     # In the case of interior horizontal facets the map for the
@@ -335,6 +345,13 @@ class Arg(base.Arg):
                                             'data': self.c_ind_data(map_idx, i, k, is_top=is_top,
                                                                     offset=m.offset[idx],
                                                                     repeated=reps, extruded=xtrs)})
+                                if populate_indexed_vec:
+                                    loop.append("%(vec_name)s[%(idx)s] = %(data)s;" %
+                                                {'vec_name': self.c_vec_name(),
+                                                 'idx': vec_idx,
+                                                 'data': self.c_ind_data(map_idx, i, k, is_top=is_top,
+                                                                         repeated=reps, extruded=xtrs,
+                                                                         loop_index="i_0")})
                                 vec_idx += 1
                                 map_idx += 1
                         else:
@@ -345,8 +362,17 @@ class Arg(base.Arg):
                                             'data': self.c_ind_data(idx, i, k, is_top=is_top,
                                                                     offset=m.offset[idx],
                                                                     repeated=reps, extruded=xtrs)})
+                                if populate_indexed_vec:
+                                    loop.append("%(vec_name)s[%(idx)s] = %(data)s;" %
+                                                {'vec_name': self.c_vec_name(),  
+                                                 'idx': vec_idx,
+                                                 'data': self.c_ind_data(idx, i, k, is_top=is_top,
+                                                                         repeated=reps, extruded=xtrs,
+                                                                         loop_index="i_0")})
                                 vec_idx += 1
             else:
+                if populate_indexed_vec:
+                        loop.append("i_0 = 0")
                 for idx in range(m.arity):
                     val.append("%(vec_name)s[%(idx)s] = %(data)s" %
                                {'vec_name': self.c_vec_name(),
@@ -354,6 +380,13 @@ class Arg(base.Arg):
                                 'data': self.c_ind_data(idx, i, is_top=is_top,
                                                         offset=m.offset[idx] if is_top else None,
                                                         repeated=reps, extruded=xtrs)})
+                    if populate_indexed_vec:
+                        loop.append("%(vec_name)s[%(idx)s] = %(data)s;" %
+                                    {'vec_name': self.c_vec_name(),
+                                     'idx': vec_idx,
+                                     'data': self.c_ind_data(idx, i, is_top=is_top,
+                                                             repeated=reps, extruded=xtrs,
+                                                             loop_index="i_0")})
                     vec_idx += 1
                 if is_facet:
                     if configuration["hpc_code_gen"] in [2, 3]:
@@ -364,6 +397,13 @@ class Arg(base.Arg):
                                         'data': self.c_ind_data(vec_idx, i, is_top=is_top,
                                                                 offset=m.offset[idx],
                                                                 repeated=reps, extruded=xtrs)})
+                            if populate_indexed_vec:
+                                loop.append("%(vec_name)s[%(idx)s] = %(data)s;" %
+                                            {'vec_name': self.c_vec_name(),
+                                             'idx': vec_idx,
+                                             'data': self.c_ind_data(vec_idx, i, is_top=is_top,
+                                                                     repeated=reps, extruded=xtrs,
+                                                                     loop_index="i_0")})
                             vec_idx += 1
                     else:
                         for idx in range(m.arity):
@@ -373,8 +413,17 @@ class Arg(base.Arg):
                                         'data': self.c_ind_data(idx, i, is_top=is_top,
                                                                 offset=m.offset[idx],
                                                                 repeated=reps, extruded=xtrs)})
+                            if populate_indexed_vec:
+                                loop.append("%(vec_name)s[%(idx)s] = %(data)s;" %
+                                            {'vec_name': self.c_vec_name(),
+                                             'idx': vec_idx,
+                                             'data': self.c_ind_data(idx, i, is_top=is_top,
+                                                                     repeated=reps, extruded=xtrs,
+                                                                     loop_index="i_0")})
                             vec_idx += 1
 
+        if populate_indexed_vec:
+            return ";\n".join(loop)
         return ";\n".join(val)
 
     def c_addto(self, i, j, buf_name, tmp_name, tmp_decl,
@@ -1981,7 +2030,6 @@ def wrapper_snippets(itspace, args,
         _extr_loop_close = '}\n'
         if configuration["hpc_code_gen"] == 3:
             _layer_comp = " %d " % (itspace.layers - 1)
-            # if configuration["hpc_active_transposing"]:
             _transpose_arg = ';\n'.join([arg.c_transpose_dat(is_subset=isinstance(itspace._iterset, Subset))
                                          for arg in args if arg._is_transposable and arg.data_needs_transposing])
             # _free_transpose_arg = ';\n'.join([arg.c_free_transpose_dat(is_subset=isinstance(itspace._iterset, Subset))
