@@ -87,66 +87,70 @@ lazy_trace_name = 'lazy_trace'
 by lazy evaluation."""
 
 
-class Arg(sequential.Arg):
+class FArg(sequential.Arg):
 
-    @staticmethod
-    def specialize(args, **kwargs):
-            #gtl_map, loop_position, use_glb_maps, postpone_gather):
-        """Given an iterator of :class:`sequential.Arg` objects, return an iterator
-        of :class:`fusion.Arg` objects.
+    """An Arg specialized for kernels and loops subjected to any kind of fusion."""
 
-        :arg args: Rither a single :class:`sequential.Arg` object or an iterator
-             (accepted: list, tuple) of :class:`sequential.Arg` objects.
-        :arg kwargs: Recognied values in ``kwargs``: ::
-            ``gtl_maps``: a dict associating global map names to local map names.
-            ``loop_position``: the position of the loop using ``args`` in the loop chain
-            ``use_glb_maps``: shold global or local maps be used when generating code?
-            ``postpone_gather``: True if the host code generator should not generate
-                a gather, False otherwise
+    def __init__(self, arg):
+        """Initialize a :class:`HFArg`.
+
+        :arg arg: a supertype of :class:`HFArg`, from which this Arg is derived.
         """
+        super(FArg, self).__init__(arg.data, arg.map, arg.idx, arg.access, arg._flatten)
+        self.position = arg.position
+        self.indirect_position = arg.indirect_position
 
-        def convert(arg):
-            gtl_maps = kwargs.get('gtl_maps', None)
-            maps = as_tuple(arg.map, Map)
-            c_local_maps = None
-            if gtl_maps:
-                c_local_maps = [None]*len(maps)
-                for i, map in enumerate(maps):
-                    c_local_maps[i] = [None]*len(map)
-                    for j, m in enumerate(map):
-                        c_local_maps[i][j] = gtl_maps["%s%d_%d" % (m.name, i, j)]
-            _arg = arg if isinstance(arg, Arg) else Arg(arg.data, arg.map, arg.idx,
-                                                        arg.access, arg._flatten)
-            _arg.position = arg.position
-            _arg.indirect_position = arg.indirect_position
-            _arg.loop_position = kwargs.get('loop_position', _arg.loop_position)
-            _arg._c_local_maps = c_local_maps or _arg._c_local_maps
-            _arg._use_glb_maps = kwargs.get('use_glb_maps', _arg._use_glb_maps)
-            _arg._postpone_gather = kwargs.get('postpone_gather', _arg._postpone_gather)
-            if hasattr(arg, 'hackflatten'):
-                _arg.hackflatten = True
-            return _arg
+        if hasattr(arg, 'hackflatten'):
+            self.hackflatten = True
 
-        try:
-            return [convert(arg) for arg in args]
-        except TypeError:
-            return convert(args)
 
-    def __init__(self, data, map, idx, access, flatten):
-        super(Arg, self).__init__(data, map, idx, access, flatten)
-        self.loop_position = 0
+class HFArg(FArg):
+
+    """An Arg specialized for kernels and loops subjected to hard fusion."""
+
+    def __init__(self, arg):
+        """Initialize a :class:`HFArg`.
+
+        :arg arg: a supertype of :class:`HFArg`, from which this Arg is derived.
+        """
+        super(HFArg, self).__init__(arg)
+        self._opt_postpone_gather = True
+
+
+class TileArg(FArg):
+
+    """An Arg specialized for kernels and loops subjected to tiling."""
+
+    def __init__(self, arg, loop_position, gtl_maps=None):
+        """Initialize a :class:`TileArg`.
+
+        :arg arg: a supertype of :class:`TileArg`, from which this Arg is derived.
+        :arg loop_position: the position of the loop in the loop chain that this
+            object belongs to.
+        :arg gtl_maps: a dict associating global map names to local map names.
+        """
+        super(TileArg, self).__init__(arg)
+        self._opt_postpone_gather = arg._opt_postpone_gather
         self._ref_arg = None
-        self._c_local_maps = None
-        self._use_glb_maps = False
-        self._postpone_gather = False
+        self.loop_position = loop_position
+
+        c_local_maps = None
+        maps = as_tuple(arg.map, Map)
+        if gtl_maps:
+            c_local_maps = [None]*len(maps)
+            for i, map in enumerate(maps):
+                c_local_maps[i] = [None]*len(map)
+                for j, m in enumerate(map):
+                    c_local_maps[i][j] = gtl_maps["%s%d_%d" % (m.name, i, j)]
+        self._c_local_maps = c_local_maps
 
     def c_arg_bindto(self):
         """Assign this Arg's c_pointer to ``arg``."""
         return "%s* %s = %s" % (self.ctype, self.c_arg_name(), self.ref_arg.c_arg_name())
 
     def c_ind_data(self, idx, i, j=0, is_top=False, offset=None, var=None, flatten=True):
-        if self._use_glb_maps:
-            return super(Arg, self).c_ind_data(idx, i, j, is_top, offset, var, flatten)
+        if not self._c_local_maps:
+            return super(TileArg, self).c_ind_data(idx, i, j, is_top, offset, var, flatten)
         elif flatten and configuration.get('flatten') and self.data.name != 'Coordinates' and not hasattr(self, 'hackflatten'):
             return "%(name)s[(%(map_name)s[%(var)s * %(arity)s + %(idx)s]%(top)s%(off_mul)s%(off_add)s)* %(dim)s%(off)s]" % \
                 {'name': self.c_arg_name(i),
@@ -173,7 +177,7 @@ class Arg(sequential.Arg):
                  'off_add': ' + %d' % offset if not is_top and offset is not None else ''}
 
     def c_map_name(self, i, j):
-        if self._use_glb_maps:
+        if not self._c_local_maps:
             return host.Arg.c_map_name(self.ref_arg, i, j)
         else:
             return self._c_local_maps[i][j]
@@ -785,9 +789,9 @@ class Schedule(object):
 
     """Represent an execution scheme for a sequence of :class:`ParLoop` objects."""
 
-    def __init__(self, insp_name, kernel):
+    def __init__(self, insp_name, schedule=None):
         self._insp_name = insp_name
-        self._kernel = list(kernel)
+        self._schedule = schedule
 
     def __call__(self, loop_chain):
         """Given an iterator of :class:`ParLoop` objects (``loop_chain``),
@@ -802,7 +806,7 @@ class Schedule(object):
         In general, the Schedule could fuse or tile the loops in ``loop_chain``.
         A sequence of  :class:`fusion.ParLoop` objects would then be returned.
         """
-        raise NotImplementedError("Subclass must implement ``__call__`` method")
+        return loop_chain
 
     def _filter(self, loops):
         return Filter().loop_args(loops).values()
@@ -811,9 +815,15 @@ class Schedule(object):
 class PlainSchedule(Schedule):
 
     def __init__(self, insp_name, kernels):
-        super(PlainSchedule, self).__init__(insp_name, kernels or [])
+        super(PlainSchedule, self).__init__(insp_name)
+        self._kernel = kernels
 
     def __call__(self, loop_chain):
+        for loop in loop_chain:
+            for arg in loop.args:
+                arg._opt_postpone_gather = False
+                arg._opt_glb_maps = False
+                arg._opt_prefetch = False
         return loop_chain
 
 
@@ -821,14 +831,17 @@ class FusionSchedule(Schedule):
 
     """Schedule an iterator of :class:`ParLoop` objects applying soft fusion."""
 
-    def __init__(self, insp_name, kernels, offsets):
-        super(FusionSchedule, self).__init__(insp_name, kernels)
-        # Track the /ParLoop/ indices in the loop chain that each fused kernel maps to
+    def __init__(self, insp_name, schedule, kernels, offsets):
+        super(FusionSchedule, self).__init__(insp_name, schedule)
+        self._kernel = list(kernels)
+
+        # Track the /ParLoop/s in the loop chain that each fused kernel maps to
         offsets = [0] + list(offsets)
         loop_indices = [range(offsets[i], o) for i, o in enumerate(offsets[1:])]
         self._info = [{'loop_indices': li} for li in loop_indices]
 
     def __call__(self, loop_chain):
+        loop_chain = self._schedule(loop_chain)
         fused_par_loops = []
         for kernel, info in zip(self._kernel, self._info):
             loop_indices = info['loop_indices']
@@ -853,14 +866,13 @@ class FusionSchedule(Schedule):
         return fused_par_loops
 
 
-class HardFusionSchedule(FusionSchedule):
+class HardFusionSchedule(FusionSchedule, Schedule):
 
     """Schedule an iterator of :class:`ParLoop` objects applying hard fusion
     on top of soft fusion."""
 
     def __init__(self, insp_name, schedule, fused):
-        self._insp_name = insp_name
-        self._schedule = schedule
+        Schedule.__init__(self, insp_name, schedule)
         self._fused = fused
 
         # Set proper loop_indices for this schedule
@@ -895,15 +907,12 @@ class HardFusionSchedule(FusionSchedule):
         # First apply soft fusion, then hard fusion
         if not only_hard:
             loop_chain = self._schedule(loop_chain)
-        fused_par_loops = super(HardFusionSchedule, self).__call__(loop_chain)
+        fused_par_loops = FusionSchedule.__call__(self, loop_chain)
         for i, (loop, info) in enumerate(zip(list(fused_par_loops), self._info)):
             unshared = info.get('unshared')
             if not unshared:
                 continue
-            args = list(loop.args)
-            for j in unshared:
-                args[j] = Arg.specialize(loop.args[j],
-                                         use_glb_maps=True, postpone_gather=True)[0]
+            args = [HFArg(arg) if j in unshared else arg for j, arg in enumerate(loop.args)]
             fused_par_loop = _make_object('ParLoop', loop.kernel, loop.it_space.iterset,
                                           *tuple(args), iterate=loop.iteration_region,
                                           insp_name=self._insp_name)
@@ -916,17 +925,17 @@ class HardFusionSchedule(FusionSchedule):
 
 class TilingSchedule(Schedule):
 
-    """Schedule an iterator of :class:`ParLoop` objects applying tiling on top
-    of hard fusion and soft fusion."""
+    """Schedule an iterator of :class:`ParLoop` objects applying tiling, possibly on
+    top of hard fusion and soft fusion."""
 
-    def __init__(self, insp_name, kernel, schedule, inspection, executor, **options):
-        self._insp_name = insp_name
-        self._schedule = schedule
+    def __init__(self, insp_name, schedule, kernel, inspection, executor, **options):
+        super(TilingSchedule, self).__init__(insp_name, schedule)
         self._inspection = inspection
         self._executor = executor
         self._kernel = kernel
-        self._use_glb_maps = options.get('use_glb_maps', False)
-        self._use_prefetch = options.get('use_prefetch', 0)
+        # Schedule's optimizations
+        self._opt_glb_maps = options.get('use_glb_maps', False)
+        self._opt_prefetch = options.get('use_prefetch', 0)
 
     def __call__(self, loop_chain):
         loop_chain = self._schedule(loop_chain)
@@ -934,8 +943,8 @@ class TilingSchedule(Schedule):
         all_itspaces = tuple(loop.it_space for loop in loop_chain)
         all_args = []
         for i, (loop, gtl_maps) in enumerate(zip(loop_chain, self._executor.gtl_maps)):
-            all_args.append(Arg.specialize(loop.args, gtl_maps=gtl_maps, loop_position=i,
-                                           use_glb_maps=self._use_glb_maps))
+            all_args.append([TileArg(arg, i, gtl_maps if self._opt_glb_maps else None)
+                             for arg in loop.args])
         all_args = tuple(all_args)
         # Data for the actual ParLoop
         it_space = IterationSpace(all_itspaces)
@@ -953,8 +962,8 @@ class TilingSchedule(Schedule):
             'reduced_globals': reduced_globals,
             'inc_args': inc_args,
             'insp_name': self._insp_name,
-            'use_glb_maps': self._use_glb_maps,
-            'use_prefetch': self._use_prefetch,
+            'use_glb_maps': self._opt_glb_maps,
+            'use_prefetch': self._opt_prefetch,
             'inspection': self._inspection,
             'executor': self._executor
         }
@@ -1159,7 +1168,7 @@ class Inspector(Cached):
             fused.append((fuse(self, fusing, len(fused)), len(self._loop_chain)))
 
         fused_kernels, offsets = zip(*fused)
-        self._schedule = FusionSchedule(self._name, fused_kernels, offsets)
+        self._schedule = FusionSchedule(self._name, self._schedule, fused_kernels, offsets)
         self._loop_chain = self._schedule(self._loop_chain)
 
     def _hard_fuse(self):
@@ -1596,7 +1605,7 @@ class Inspector(Cached):
         executor = slope.Executor(inspector)
 
         kernel = Kernel(tuple(loop.kernel for loop in self._loop_chain))
-        self._schedule = TilingSchedule(self._name, kernel, self._schedule, inspection,
+        self._schedule = TilingSchedule(self._name, self._schedule, kernel, inspection,
                                         executor, **self._options)
 
     @property
