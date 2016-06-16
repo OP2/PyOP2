@@ -943,7 +943,7 @@ class TilingSchedule(Schedule):
         all_itspaces = tuple(loop.it_space for loop in loop_chain)
         all_args = []
         for i, (loop, gtl_maps) in enumerate(zip(loop_chain, self._executor.gtl_maps)):
-            all_args.append([TileArg(arg, i, gtl_maps if self._opt_glb_maps else None)
+            all_args.append([TileArg(arg, i, None if self._opt_glb_maps else gtl_maps)
                              for arg in loop.args])
         all_args = tuple(all_args)
         # Data for the actual ParLoop
