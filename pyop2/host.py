@@ -818,6 +818,7 @@ class JITModule(base.JITModule):
                'sys_headers': '\n'.join(self._kernel._headers + self._system_headers)}
 
         self._dump_generated_code(code_to_compile)
+
         if configuration["debug"]:
             self._wrapper_code = code_to_compile
 

@@ -91,30 +91,53 @@ class FArg(sequential.Arg):
 
     """An Arg specialized for kernels and loops subjected to any kind of fusion."""
 
-    def __init__(self, arg):
-        """Initialize a :class:`HFArg`.
+    def __init__(self, arg, gather=None):
+        """Initialize a :class:`FArg`.
 
-        :arg arg: a supertype of :class:`HFArg`, from which this Arg is derived.
+        :arg arg: a supertype of :class:`FArg`, from which this Arg is derived.
+        :arg gather: recognized values: ``postponed``, ``only_map``. With ``postponed``,
+            the gather is performed at some in a callee of the wrapper function; with
+            ``only_map``, the gather is performed as usual in the wrapper, but only
+            the map values are staged.
         """
         super(FArg, self).__init__(arg.data, arg.map, arg.idx, arg.access, arg._flatten)
         self.position = arg.position
         self.indirect_position = arg.indirect_position
+        self.gather = gather or arg.gather
 
         if hasattr(arg, 'hackflatten'):
             self.hackflatten = True
 
+    def c_vec_dec(self, is_facet=False):
+        if self.gather == 'only_map':
+            facet_mult = 2 if is_facet else 1
+            cdim = self.data.cdim if self._flatten else 1
+            return "%(type)s %(vec_name)s[%(arity)s];\n" % \
+                {'type': self.ctype,
+                 'vec_name': self.c_vec_name(),
+                 'arity': self.map.arity * cdim * facet_mult}
+        else:
+            return super(FArg, self).c_vec_dec(is_facet)
 
-class HFArg(FArg):
+    def c_vec_init(self, is_top, is_facet=False, force_gather=False):
+        if self.gather == 'postponed' and not force_gather:
+            return ''
+        elif self.gather == 'only_map':
+            vec_name = self.c_vec_name()
+            map_name = self.c_map_name(0, 0)
+            arity = self.map.arity
+            return ';\n'.join(["%s[%s] = %s[i*%s+%s]" % (vec_name, i, map_name, arity, i)
+                               for i in range(self.map.arity)])
+        else:
+            return super(FArg, self).c_vec_init(is_top, is_facet)
 
-    """An Arg specialized for kernels and loops subjected to hard fusion."""
-
-    def __init__(self, arg):
-        """Initialize a :class:`HFArg`.
-
-        :arg arg: a supertype of :class:`HFArg`, from which this Arg is derived.
-        """
-        super(HFArg, self).__init__(arg)
-        self._opt_postpone_gather = True
+    def c_kernel_arg(self, count, i=0, j=0, shape=(0,), layers=1):
+        if self.gather == 'postponed':
+            return "%s, %s" % (self.c_arg_name(i), self.c_map_name(i, 0))
+        elif self.gather == 'only_map':
+            return "%s, %s" % (self.c_arg_name(i), self.c_vec_name())
+        else:
+            return super(FArg, self).c_kernel_arg(count, i, j, shape, is_facet)
 
 
 class TileArg(FArg):
@@ -130,8 +153,6 @@ class TileArg(FArg):
         :arg gtl_maps: a dict associating global map names to local map names.
         """
         super(TileArg, self).__init__(arg)
-        self._opt_postpone_gather = arg._opt_postpone_gather
-        self._ref_arg = None
         self.loop_position = loop_position
 
         c_local_maps = None
@@ -216,16 +237,6 @@ class TileArg(FArg):
     def name(self, val):
         """Change the generated argument name."""
         self._name = val
-
-    @property
-    def ref_arg(self):
-        """Return the argument mapped to self."""
-        return self._ref_arg if self._ref_arg else self
-
-    @ref_arg.setter
-    def ref_arg(self, val):
-        """Set the argument mapped to self."""
-        self._ref_arg = val
 
 
 class Kernel(sequential.Kernel, tuple):
@@ -821,9 +832,7 @@ class PlainSchedule(Schedule):
     def __call__(self, loop_chain):
         for loop in loop_chain:
             for arg in loop.args:
-                arg._opt_postpone_gather = False
-                arg._opt_glb_maps = False
-                arg._opt_prefetch = False
+                arg.gather = None
         return loop_chain
 
 
@@ -883,7 +892,7 @@ class HardFusionSchedule(FusionSchedule, Schedule):
 
         # Update the input schedule to make use of hard fusion kernels
         kernel = scopy(schedule._kernel)
-        for ofs, (fused_kernel, fused_map, unshared) in enumerate(fused):
+        for ofs, (fused_kernel, fused_map, pgather) in enumerate(fused):
             # Find the position of the /fused/ kernel in the new loop chain.
             base, fuse = fused_kernel._kernels
             base_idx, fuse_idx = kernel.index(base), kernel.index(fuse)
@@ -893,8 +902,8 @@ class HardFusionSchedule(FusionSchedule, Schedule):
             # iteration in "fuse" has been executed or not
             self._info[pos]['extra_args'] = [((fused_map.toset, None, np.int32),
                                               (RW, fused_map))]
-            # Keep track of the unshared arguments
-            self._info[pos]['unshared'] = unshared
+            # Keep track of the arguments needing a postponed gather
+            self._info[pos]['pgather'] = pgather
             # Now we can modify the kernel sequence
             kernel.insert(pos, fused_kernel)
             kernel.pop(pos+1)
@@ -909,10 +918,10 @@ class HardFusionSchedule(FusionSchedule, Schedule):
             loop_chain = self._schedule(loop_chain)
         fused_par_loops = FusionSchedule.__call__(self, loop_chain)
         for i, (loop, info) in enumerate(zip(list(fused_par_loops), self._info)):
-            unshared = info.get('unshared')
-            if not unshared:
-                continue
-            args = [HFArg(arg) if j in unshared else arg for j, arg in enumerate(loop.args)]
+            pgather = info.get('pgather', [])
+            args = [FArg(arg, gather='postponed') if j in pgather else arg
+                    for j, arg in enumerate(loop.args[:-1])]
+            args += [FArg(loop.args[-1], gather='only_map')]
             fused_par_loop = _make_object('ParLoop', loop.kernel, loop.it_space.iterset,
                                           *tuple(args), iterate=loop.iteration_region,
                                           insp_name=self._insp_name)
@@ -1303,38 +1312,44 @@ class Inspector(Cached):
 
             # Filter out duplicate arguments, and append extra arguments to the fundecl
             binding = WeakFilter().kernel_args([base_loop, fuse_loop], fusion_fundecl)
-            fusion_fundecl.args += [ast.Decl('int**', ast.Symbol('executed'))]
+            fusion_fundecl.args += [ast.Decl('int*', 'executed'),
+                                    ast.Decl('int*', 'fused_iters')]
 
             # Which args are actually used in /fuse/, but not in /base/ ?
+            # The gather for such arguments is moved to /fusion/, to avoid any
+            # usless LOAD from memory
             retval = SymbolReferences.default_retval()
             base_symbols = SymbolReferences().visit(base_fundecl.body, ret=retval)
             retval = SymbolReferences.default_retval()
             fuse_symbols = SymbolReferences().visit(fuse_fundecl.body, ret=retval)
             base_funcall_syms, unshared = [], OrderedDict()
             for arg, decl in binding.items():
-                input_symbol = decl.sym.symbol
-                if input_symbol in fuse_symbols and input_symbol not in base_symbols:
+                if decl.sym.symbol in set(fuse_symbols) - set(base_symbols):
                     base_funcall_sym = ast.Symbol('NULL')
-                    unshared[fusion_fundecl.args.index(decl)] = decl
+                    unshared.setdefault(decl, arg)
                 else:
                     base_funcall_sym = ast.Symbol(decl.sym.symbol)
                 if arg in base_loop.args:
                     base_funcall_syms.append(base_funcall_sym)
-            unshared = unshared.keys()
+            for decl, arg in unshared.items():
+                decl.sym.symbol = arg.c_arg_name()
+                fusion_fundecl.args.insert(fusion_fundecl.args.index(decl) + 1,
+                                           ast.Decl('int*', arg.c_map_name(0, 0)))
 
             # Append the invocation of /base/; then, proceed with the invocation
             # of the /fuse/ kernels
-            body.children.append(ast.FunCall(base_fundecl.name, *base_funcall_syms))
+            body.children.extend([ast.FunCall(base_fundecl.name, *base_funcall_syms),
+                                  ast.Decl('int', 'i')])
 
             for idx in range(fused_map.arity):
 
+                fused_iter = ast.Assign('i', ast.Symbol('fused_iters', (idx,)))
                 fuse_funcall = ast.FunCall(fuse_fundecl.name)
-                if_cond = ast.Not(ast.Symbol('executed', (idx, 0)))
-                if_update = ast.Assign(ast.Symbol('executed', (idx, 0)), 1)
+                if_cond = ast.Not(ast.Symbol('executed', ('i',)))
+                if_update = ast.Assign(ast.Symbol('executed', ('i',)), 1)
                 if_body = ast.Block([fuse_funcall, if_update], open_scope=True)
                 if_exec = ast.If(if_cond, [if_body])
-                body.children.append(ast.FlatBlock('\n'))
-                body.children.append(ast.Block([if_exec], open_scope=True).children[0])
+                body.children.extend([ast.FlatBlock('\n'), fused_iter, if_exec])
 
                 # Modify the /fuse/ kernel
                 # This is to take into account that many arguments are shared with
@@ -1347,20 +1362,20 @@ class Inspector(Cached):
                 init = lambda v: '{%s}' % ', '.join([str(j) for j in v])
                 for i, fuse_loop_arg in enumerate(fuse_loop.args):
                     fuse_kernel_arg = binding[fuse_loop_arg]
-                    buffer = '%s_%d' % (fuse_kernel_arg.sym.symbol, idx)
+                    buffer = '%s_vec' % fuse_kernel_arg.sym.symbol
 
                     # How should I use the temporaries ?
                     if fuse_loop_arg.access == INC:
                         op = ast.Incr
                         lvalue, rvalue = fuse_kernel_arg.sym.symbol, buffer
                         extend_if_body = lambda body, block: body.children.extend(block)
-                        buffer_decl = ast.Decl('%s' % fuse_loop_arg.ctype, ast.Symbol(buffer))
+                        buffer_decl = ast.Decl('%s' % fuse_loop_arg.ctype, buffer)
                     elif fuse_loop_arg.access == READ:
                         op = ast.Assign
                         lvalue, rvalue = buffer, fuse_kernel_arg.sym.symbol
                         extend_if_body = lambda body, block: \
                             [body.children.insert(0, b) for b in reversed(block)]
-                        buffer_decl = ast.Decl('%s*' % fuse_loop_arg.ctype, ast.Symbol(buffer))
+                        buffer_decl = ast.Decl('%s*' % fuse_loop_arg.ctype, buffer)
 
                     # Now handle arguments depending on their type ...
                     if fuse_loop_arg._is_mat:
@@ -1394,12 +1409,16 @@ class Inspector(Cached):
                                     for j in range(fused_map.arity)]
                         ofs_vals = list(flatten(ofs_vals))
                         indices = [ofs_vals[idx*size + j] for j in range(size)]
-                        # Set up the temporary and stage data into it
+                        # Set up the temporary and stage (gather) data into it
                         buffer_decl.sym.rank = (size,)
                         if fuse_loop_arg.access == INC:
                             buffer_decl.init = ast.ArrayInit(init([0.0]))
                             staging = [op(ast.Symbol(lvalue, (k,)), ast.Symbol(rvalue, (j,)))
                                        for j, k in enumerate(indices)]
+                        elif fuse_kernel_arg in unshared:
+                            staging = unshared[fuse_kernel_arg].c_vec_init(False).split('\n')
+                            staging = [j for i, j in enumerate(staging) if i in indices]
+                            staging = [ast.FlatBlock('\n'.join(staging) + ';\n')]
                         else:
                             staging = [op(ast.Symbol(lvalue, (j,)), ast.Symbol(rvalue, (k,)))
                                        for j, k in enumerate(indices)]
@@ -1413,14 +1432,18 @@ class Inspector(Cached):
                     if_exec.children[0].children.insert(0, buffer_decl)
                     fuse_funcall.children.append(ast.Symbol(buffer))
 
-            # Create a /fusion.Kernel/ object to be used to update the schedule
+            # Create a /fusion.Kernel/ object as well as the schedule
             fused_headers = set([str(h) for h in base_headers + fuse_headers])
             fused_ast = ast.Root([ast.PreprocessNode(h) for h in fused_headers] +
                                  [base_fundecl, fuse_fundecl, fusion_fundecl])
             kernels = [base, fuse]
             loop_chain_index = (self._loop_chain.index(base_loop),
                                 self._loop_chain.index(fuse_loop))
-            fused.append((Kernel(kernels, fused_ast, loop_chain_index), fused_map, unshared))
+            # Track position of Args that need a postponed gather
+            # Can't track Args themselves as they change across different parloops
+            pgather = [fusion_args.index(i) for i in unshared.keys()]
+            pgather += [len(fusion_fundecl.args) - 1]
+            fused.append((Kernel(kernels, fused_ast, loop_chain_index), fused_map, pgather))
 
         # Finally, generate a new schedule
         self._schedule = HardFusionSchedule(self._name, self._schedule, fused)
