@@ -91,25 +91,32 @@ class FArg(sequential.Arg):
 
     """An Arg specialized for kernels and loops subjected to any kind of fusion."""
 
-    def __init__(self, arg, gather=None):
+    def __init__(self, arg, gather=None, c_index=False):
         """Initialize a :class:`FArg`.
 
         :arg arg: a supertype of :class:`FArg`, from which this Arg is derived.
-        :arg gather: recognized values: ``postponed``, ``only_map``. With ``postponed``,
+        :arg gather: recognized values: ``postponed``, ``onlymap``. With ``postponed``,
             the gather is performed at some in a callee of the wrapper function; with
-            ``only_map``, the gather is performed as usual in the wrapper, but only
+            ``onlymap``, the gather is performed as usual in the wrapper, but only
             the map values are staged.
+        :arg c_index: if True, will provide the kernel with the iteration index of this
+            Arg's set. Otherwise, code generation is unaffected.
         """
         super(FArg, self).__init__(arg.data, arg.map, arg.idx, arg.access, arg._flatten)
         self.position = arg.position
         self.indirect_position = arg.indirect_position
         self.gather = gather or arg.gather
+        self.c_index = c_index or arg.c_index
 
         if hasattr(arg, 'hackflatten'):
             self.hackflatten = True
 
+    def c_map_name(self, i, j, fromvector=False):
+        map_name = super(FArg, self).c_map_name(i, j)
+        return map_name if not fromvector else "&%s[0]" % map_name
+
     def c_vec_dec(self, is_facet=False):
-        if self.gather == 'only_map':
+        if self.gather == 'onlymap':
             facet_mult = 2 if is_facet else 1
             cdim = self.data.cdim if self._flatten else 1
             return "%(type)s %(vec_name)s[%(arity)s];\n" % \
@@ -122,22 +129,33 @@ class FArg(sequential.Arg):
     def c_vec_init(self, is_top, is_facet=False, force_gather=False):
         if self.gather == 'postponed' and not force_gather:
             return ''
-        elif self.gather == 'only_map':
+        elif self.gather == 'onlymap':
             vec_name = self.c_vec_name()
             map_name = self.c_map_name(0, 0)
             arity = self.map.arity
-            return ';\n'.join(["%s[%s] = %s[i*%s+%s]" % (vec_name, i, map_name, arity, i)
+            return ';\n'.join(["%s[%s] = %s[%s*%s+%s]" %
+                               (vec_name, i, map_name, self.c_def_index(), arity, i)
                                for i in range(self.map.arity)])
         else:
             return super(FArg, self).c_vec_init(is_top, is_facet)
 
     def c_kernel_arg(self, count, i=0, j=0, shape=(0,), layers=1):
         if self.gather == 'postponed':
-            return "%s, %s" % (self.c_arg_name(i), self.c_map_name(i, 0))
-        elif self.gather == 'only_map':
-            return "%s, %s" % (self.c_arg_name(i), self.c_vec_name())
+            c_args = "%s, %s" % (self.c_arg_name(i),
+                                 self.c_map_name(i, 0, self.c_map_is_vector()))
+        elif self.gather == 'onlymap':
+            c_args = "%s, %s" % (self.c_arg_name(i), self.c_vec_name())
         else:
-            return super(FArg, self).c_kernel_arg(count, i, j, shape, layers)
+            c_args = super(FArg, self).c_kernel_arg(count, i, j, shape, layers)
+        if self.c_index:
+            c_args += ", %s" % self.c_def_index()
+        return c_args
+
+    def c_def_index(self):
+        return 'i'
+
+    def c_map_is_vector(self):
+        return False
 
 
 class TileArg(FArg):
@@ -197,11 +215,12 @@ class TileArg(FArg):
                  'off_mul': ' * %d' % offset if is_top and offset is not None else '',
                  'off_add': ' + %d' % offset if not is_top and offset is not None else ''}
 
-    def c_map_name(self, i, j):
+    def c_map_name(self, i, j, fromvector=False):
         if not self._c_local_maps:
-            return host.Arg.c_map_name(self.ref_arg, i, j)
+            map_name = host.Arg.c_map_name(self.ref_arg, i, j)
         else:
-            return self._c_local_maps[i][j]
+            map_name = self._c_local_maps[i][j]
+        return map_name if not fromvector else "&%s[0]" % map_name
 
     def c_map_entry(self, var):
         maps = []
@@ -228,15 +247,16 @@ class TileArg(FArg):
             'name': self.c_arg_name(),
             'count': count}
 
+    def c_def_index(self):
+        return 'i' if not self._c_local_maps else 'n'
+
+    def c_map_is_vector(self):
+        return False if not self._c_local_maps else True
+
     @property
     def name(self):
         """The generated argument name."""
         return "arg_exec_loop%d_%d" % (self.loop_position, self.position)
-
-    @name.setter
-    def name(self, val):
-        """Change the generated argument name."""
-        self._name = val
 
 
 class Kernel(sequential.Kernel, tuple):
@@ -549,7 +569,7 @@ for (int n = %(tile_start)s; n < %(tile_end)s; n++) {
             # ... does the scatter use global or local maps ?
             if self._use_glb_maps:
                 loop_code_dict['index_expr'] = '%s[n]' % self._executor.gtl_maps[i]['DIRECT']
-                prefetch_var = 'int p = %s[n + %d]'  % (self._executor.gtl_maps[i]['DIRECT'],
+                prefetch_var = 'int p = %s[n + %d]' % (self._executor.gtl_maps[i]['DIRECT'],
                                                         self._use_prefetch)
             else:
                 prefetch_var = 'int p = n + %d' % self._use_prefetch
@@ -833,6 +853,7 @@ class PlainSchedule(Schedule):
         for loop in loop_chain:
             for arg in loop.args:
                 arg.gather = None
+                arg.c_index = False
         return loop_chain
 
 
@@ -892,18 +913,17 @@ class HardFusionSchedule(FusionSchedule, Schedule):
 
         # Update the input schedule to make use of hard fusion kernels
         kernel = scopy(schedule._kernel)
-        for ofs, (fused_kernel, fused_map, pgather) in enumerate(fused):
+        for ofs, (fused_kernel, fused_map, fargs) in enumerate(fused):
             # Find the position of the /fused/ kernel in the new loop chain.
             base, fuse = fused_kernel._kernels
             base_idx, fuse_idx = kernel.index(base), kernel.index(fuse)
             pos = min(base_idx, fuse_idx)
             self._info[pos]['loop_indices'] = [base_idx + ofs, fuse_idx + ofs]
-            # We also need a bitmap, with the i-th bit indicating whether the i-th
-            # iteration in "fuse" has been executed or not
+            # A bitmap indicates whether the i-th iteration in /fuse/ has been executed
             self._info[pos]['extra_args'] = [((fused_map.toset, None, np.int32),
                                               (RW, fused_map))]
             # Keep track of the arguments needing a postponed gather
-            self._info[pos]['pgather'] = pgather
+            self._info[pos]['fargs'] = fargs
             # Now we can modify the kernel sequence
             kernel.insert(pos, fused_kernel)
             kernel.pop(pos+1)
@@ -918,8 +938,8 @@ class HardFusionSchedule(FusionSchedule, Schedule):
             loop_chain = self._schedule(loop_chain)
         fused_par_loops = FusionSchedule.__call__(self, loop_chain)
         for i, (loop, info) in enumerate(zip(list(fused_par_loops), self._info)):
-            pgather = info.get('pgather', {})
-            args = [FArg(arg, gather=pgather[j]) if j in pgather else arg
+            fargs = info.get('fargs', {})
+            args = [FArg(arg, *fargs[j]) if j in fargs else arg
                     for j, arg in enumerate(loop.args)]
             fused_par_loop = _make_object('ParLoop', loop.kernel, loop.it_space.iterset,
                                           *tuple(args), iterate=loop.iteration_region,
@@ -1312,7 +1332,8 @@ class Inspector(Cached):
             # Filter out duplicate arguments, and append extra arguments to the fundecl
             binding = WeakFilter().kernel_args([base_loop, fuse_loop], fusion_fundecl)
             fusion_fundecl.args += [ast.Decl('int*', 'executed'),
-                                    ast.Decl('int*', 'fused_iters')]
+                                    ast.Decl('int*', 'fused_iters'),
+                                    ast.Decl('int', 'i')]
 
             # Which args are actually used in /fuse/, but not in /base/ ?
             # The gather for such arguments is moved to /fusion/, to avoid any
@@ -1337,18 +1358,17 @@ class Inspector(Cached):
 
             # Append the invocation of /base/; then, proceed with the invocation
             # of the /fuse/ kernels
-            body.children.extend([ast.FunCall(base_fundecl.name, *base_funcall_syms),
-                                  ast.Decl('int', 'i')])
+            body.children.append(ast.FunCall(base_fundecl.name, *base_funcall_syms))
 
             for idx in range(fused_map.arity):
 
-                fused_iter = ast.Assign('i', ast.Symbol('fused_iters', (idx,)))
+                fused_iter = 'fused_iters[%d]' % idx
                 fuse_funcall = ast.FunCall(fuse_fundecl.name)
-                if_cond = ast.Not(ast.Symbol('executed', ('i',)))
-                if_update = ast.Assign(ast.Symbol('executed', ('i',)), 1)
+                if_cond = ast.Not(ast.Symbol('executed', (fused_iter,)))
+                if_update = ast.Assign(ast.Symbol('executed', (fused_iter,)), 1)
                 if_body = ast.Block([fuse_funcall, if_update], open_scope=True)
                 if_exec = ast.If(if_cond, [if_body])
-                body.children.extend([ast.FlatBlock('\n'), fused_iter, if_exec])
+                body.children.extend([ast.FlatBlock('\n'), if_exec])
 
                 # Modify the /fuse/ kernel
                 # This is to take into account that many arguments are shared with
@@ -1442,9 +1462,9 @@ class Inspector(Cached):
                                 self._loop_chain.index(fuse_loop))
             # Track position of Args that need a postponed gather
             # Can't track Args themselves as they change across different parloops
-            pgather = {fusion_args.index(i): 'postponed' for i in unshared.keys()}
-            pgather.update({len(set(binding.values())): 'only_map'})
-            fused.append((Kernel(kernels, fused_ast, loop_chain_index), fused_map, pgather))
+            fargs = {fusion_args.index(i): ('postponed', False) for i in unshared.keys()}
+            fargs.update({len(set(binding.values())): ('onlymap', True)})
+            fused.append((Kernel(kernels, fused_ast, loop_chain_index), fused_map, fargs))
 
         # Finally, generate a new schedule
         self._schedule = HardFusionSchedule(self._name, self._schedule, fused)
