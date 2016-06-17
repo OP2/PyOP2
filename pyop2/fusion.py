@@ -137,7 +137,7 @@ class FArg(sequential.Arg):
         elif self.gather == 'only_map':
             return "%s, %s" % (self.c_arg_name(i), self.c_vec_name())
         else:
-            return super(FArg, self).c_kernel_arg(count, i, j, shape, is_facet)
+            return super(FArg, self).c_kernel_arg(count, i, j, shape, layers)
 
 
 class TileArg(FArg):
@@ -918,10 +918,9 @@ class HardFusionSchedule(FusionSchedule, Schedule):
             loop_chain = self._schedule(loop_chain)
         fused_par_loops = FusionSchedule.__call__(self, loop_chain)
         for i, (loop, info) in enumerate(zip(list(fused_par_loops), self._info)):
-            pgather = info.get('pgather', [])
-            args = [FArg(arg, gather='postponed') if j in pgather else arg
-                    for j, arg in enumerate(loop.args[:-1])]
-            args += [FArg(loop.args[-1], gather='only_map')]
+            pgather = info.get('pgather', {})
+            args = [FArg(arg, gather=pgather[j]) if j in pgather else arg
+                    for j, arg in enumerate(loop.args)]
             fused_par_loop = _make_object('ParLoop', loop.kernel, loop.it_space.iterset,
                                           *tuple(args), iterate=loop.iteration_region,
                                           insp_name=self._insp_name)
@@ -1418,7 +1417,9 @@ class Inspector(Cached):
                         elif fuse_kernel_arg in unshared:
                             staging = unshared[fuse_kernel_arg].c_vec_init(False).split('\n')
                             staging = [j for i, j in enumerate(staging) if i in indices]
-                            staging = [ast.FlatBlock('\n'.join(staging) + ';\n')]
+                            rvalues = [ast.FlatBlock(i.split('=')[1]) for i in staging]
+                            lvalues = [ast.Symbol(buffer, (i,)) for i in range(len(staging))]
+                            staging = [ast.Assign(i, j) for i, j in zip(lvalues, rvalues)]
                         else:
                             staging = [op(ast.Symbol(lvalue, (j,)), ast.Symbol(rvalue, (k,)))
                                        for j, k in enumerate(indices)]
@@ -1441,8 +1442,8 @@ class Inspector(Cached):
                                 self._loop_chain.index(fuse_loop))
             # Track position of Args that need a postponed gather
             # Can't track Args themselves as they change across different parloops
-            pgather = [fusion_args.index(i) for i in unshared.keys()]
-            pgather += [len(fusion_fundecl.args) - 1]
+            pgather = {fusion_args.index(i): 'postponed' for i in unshared.keys()}
+            pgather.update({len(set(binding.values())): 'only_map'})
             fused.append((Kernel(kernels, fused_ast, loop_chain_index), fused_map, pgather))
 
         # Finally, generate a new schedule
