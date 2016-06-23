@@ -664,15 +664,19 @@ class ParLoop(sequential.ParLoop):
             }
             fun = JITModule(self.kernel, self.it_space, *self.args, **kwargs)
             arglist = self.prepare_arglist(None, *self.args)
-            fun(*(arglist + [0]))
+            self._compute(fun, *(arglist + [0]))
             self.halo_exchange_end()
-            fun(*(arglist + [1]))
+            self._compute(fun, *(arglist + [1]))
             # Only meaningful if the user is enforcing tiling in presence of
             # global reductions
             self.reduction_begin()
             self.reduction_end()
             self.update_arg_data_state()
 
+    @collective
+    def _compute(self, fun, *arglist):
+        with timed_region("ParLoop kernel"):
+            fun(*(arglist))
 
 # Utility classes
 
