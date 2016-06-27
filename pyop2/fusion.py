@@ -1528,7 +1528,7 @@ class Inspector(Cached):
                     flops, footprint = loop.num_flops/(1000*1000), 0
                     for arg in loop.args:
                         dat_size = arg.data.nbytes
-                        map_size = 0 if arg._is_direct else arg.map.values_with_halo.nbytes
+                        map_size = 0 if not arg.map else arg.map.values_with_halo.nbytes
                         tot_dat_size = (dat_size + map_size)/1000
                         footprint += tot_dat_size
                     tot_footprint += footprint
@@ -1538,8 +1538,7 @@ class Inspector(Cached):
                         (tot_footprint, tot_flops))
                 probSeed = 0 if MPI.parallel else len(self._loop_chain) / 2
                 probNtiles = self._loop_chain[probSeed].it_space.exec_size / tile_size or 1
-                f.write('** KB/tile: %d' % (tot_footprint/probNtiles))
-                f.write('  (Estimated: %d tiles)\n' % probNtiles)
+                f.write('Estimated: %d tiles\n' % probNtiles)
                 f.write('-' * 68 + '\n')
 
                 # Estimate data reuse
@@ -1567,11 +1566,18 @@ class Inspector(Cached):
                         else field.nbytes
                     # First position needs be cut away as it's the first touch
                     ideal_reuse += (size/1000)*len(positions[1:])
-                out = '** Ideal reuse (i.e., no tile growth): %d / %d KBytes (%f %%)\n' % \
-                    (ideal_reuse, tot_footprint, float(ideal_reuse)*100/tot_footprint)
+
+                max_tile_footprint = tot_footprint/probNtiles
+                max_perc_reuse = float(ideal_reuse)*100/tot_footprint
+                min_tile_footprint = max_tile_footprint - max_tile_footprint*(max_perc_reuse/100)
+                out = '** Worst case (ie, no reuse) KB/tile: %d\n' % max_tile_footprint
+                out += '** Best case (ie, max reuse) KB/tile: %d\n' % min_tile_footprint
+                out += 'Ideal reuse was: %d / %d KBytes (%f %%)\n' % \
+                    (ideal_reuse, tot_footprint, max_perc_reuse)
                 f.write(out)
                 f.write('-' * 125 + '\n')
                 s.write(out)
+                s.write('-'*50 + '\n')
 
         # Finally, get the Executor representation, to be used at executor
         # code generation time
