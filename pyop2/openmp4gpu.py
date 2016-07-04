@@ -313,6 +313,26 @@ class ParLoop(host.ParLoop):
         return omp4.JITModule(self.kernel, self.it_space, *self.args,
                               direct=self.is_direct, iterate=self.iteration_region, halo=True)
 
+    def _detach_code(self):
+        for i, arg in enumerate(self.args):
+           discretisation = "K2_dg0dg0"
+           filename = "arg"+str(i)+"_"+discretisation+"_200K_"
+           if arg._is_mat:
+              print "There shouldn't be any matrices here."
+              import sys
+              sys.exit()
+           if arg._is_indirect:
+              print "Map: ", filename + "map.dat"
+              self._print_arg(filename+"map.dat", arg.map.values.flatten())
+           if arg._is_dat:
+              print "Dat: ", filename + "dat.dat"
+              self._print_arg(filename + "dat.dat", arg.data.data.flatten())
+           if arg._is_global:
+              print "Global Dat: ", filename + "dat.dat"
+              self._print_arg(filename + "dat.dat", arg.data.data.flatten())
+        with open("adv_"+discretisation+".c", "w+") as h:
+            h.write(self._jitmodule._code_to_compile)
+
     def _print_arg(self, filename, arr):
         with open(filename, "w+") as h:
            h.write(str(len(arr)) + "\n")
@@ -329,7 +349,7 @@ class ParLoop(host.ParLoop):
             # For printing out arg dats and maps:
             # self._print_arg("arg0_fvdx_dg2dg2_200K_map.dat", a.map.values.flatten())
             # self._print_arg("arg0_fvdx_dg2dg2_200K_dat.dat", a.map.values.flatten())
-            from IPython import embed; embed()
+            #from IPython import embed; embed()
             time = fun(part.offset, part.offset + part.size, *arglist)
             print " => Finished OMP4GPU Execution."
             if configuration['hpc_check_result']:

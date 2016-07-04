@@ -162,7 +162,6 @@ def compose_wrapper(backend="sequential"):
 
     if configuration["hpc_code_gen"] in [2, 3]:
         wrapper += """
-        int i_0 = 0;
         %(vec_inits)s;
         """
 
@@ -306,7 +305,6 @@ def compose_openmp4_wrapper():
     if configuration["hpc_code_gen"] in [2, 3]:
         wrapper += """
                 %(vec_decs)s;
-                int i_0 = 0;
                 %(vec_inits)s;
         """
 
