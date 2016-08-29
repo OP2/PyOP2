@@ -4266,7 +4266,10 @@ class ParLoop(LazyComputation):
                'KERNEL_CODE':self._kernel.code(),
                'PARAMETERS':parameters}
         s = code.replace('double','LoggedDouble').replace('float','LoggedDouble')
-        func = compilation.load(s,'cpp','count_flops',restype=np.int32)
+        cppargs = ["-I%s" % d for d in self._kernel._include_dirs]
+
+        func = compilation.load(s,'cpp','count_flops',restype=np.int32,
+                                cppargs=cppargs)
         flops = func()
         return flops * size
 
