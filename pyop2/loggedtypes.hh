@@ -28,9 +28,13 @@ public:
   // *** Unary operators ***
 
   // * Same type *
+  // Multiply by -1
+  LoggedDouble operator-() { totalflops++; return LoggedDouble(-x); }
   // Assignment operator
   LoggedDouble& operator=(LoggedDouble other) { x=other.x; return *this; }
-  // ?= operator
+
+  // *** Binary operators ***
+  // += operator
   LoggedDouble& operator+=(LoggedDouble other) { x+=other.x; totalflops++; return *this; }
   LoggedDouble& operator-=(LoggedDouble other) { x-=other.x; totalflops++; return *this; }
   LoggedDouble& operator*=(LoggedDouble other) { x*=other.x; totalflops++; return *this; }
@@ -125,4 +129,7 @@ template <typename T>
 bool operator<=(const T lhs, LoggedDouble rhs) { return lhs <= rhs.value(); }
 template <typename T>
 bool operator>=(const T lhs, LoggedDouble rhs) { return lhs >= rhs.value(); }
+
+// absolute value function
+LoggedDouble fabs(LoggedDouble tmp) { return LoggedDouble(fabs(tmp.value())); }
 #endif // LOGGEDDOUBLE
