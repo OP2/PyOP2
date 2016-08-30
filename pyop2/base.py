@@ -4227,6 +4227,8 @@ class ParLoop(LazyComputation):
                 definitions += data_type+'** '+varname+';\n'
                 definitions += data_type+'* '+varname+'__;\n'
                 N = arg.map.arity
+                if arg._flatten:
+                    N *= arg.data.dataset.cdim
                 definitions += varname+' = ('+data_type+'**) '
                 definitions += 'malloc('+str(N)+'*sizeof('+data_type+'*));\n'
                 definitions += varname+'__ = ('+data_type+'*) malloc('+str(N*M)+'*sizeof('+data_type+'));\n'
