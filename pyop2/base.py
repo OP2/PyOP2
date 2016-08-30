@@ -4265,7 +4265,7 @@ class ParLoop(LazyComputation):
                'DEFINITIONS':definitions,
                'DEALLOCATIONS':deallocations,
                'KERNEL_NAME':self._kernel.name,
-               'KERNEL_CODE':self._kernel.code(),
+               'KERNEL_CODE':self._kernel.code().replace('.h','_LOGGED.h'),
                'PARAMETERS':parameters}
         s = code.replace('double','LoggedDouble').replace('float','LoggedDouble')
         cppargs = ["-I%s" % d for d in self._kernel._include_dirs]
