@@ -4187,7 +4187,7 @@ class ParLoop(LazyComputation):
         return DataVolume(loads=loads, stores=stores, bytes=total_bytes)
 
     @property
-    def total_flops(self):
+    def flops_per_cell(self):
         """Return an estimate of the total flops executed by this
         :class:`ParLoop`
         
@@ -4202,16 +4202,6 @@ class ParLoop(LazyComputation):
         """
         if (not self._measure_flops):
             return 0
-        iterset = self.iterset
-        size = iterset.size
-        if self.needs_exec_halo:
-            size = iterset.exec_size
-        if self.is_indirect and iterset._extruded:
-            region = self.iteration_region
-            if region is ON_INTERIOR_FACETS:
-                size *= iterset.layers - 2
-            elif region not in [ON_TOP, ON_BOTTOM]:
-                size *= iterset.layers - 1
         parameters = ''
         definitions = ''
         deallocations = ''
@@ -4273,7 +4263,24 @@ class ParLoop(LazyComputation):
         func = compilation.load(s,'cpp','count_flops',restype=np.int32,
                                 cppargs=cppargs)
         flops = func()
-        return flops * size
+        return flops
+    
+    @property
+    def total_flops(self):
+        """Return an estimate for the total number of FLOPs executed
+        (i.e. flops_per_cell x mesh size)
+        """
+        iterset = self.iterset
+        size = iterset.size
+        if self.needs_exec_halo:
+            size = iterset.exec_size
+        if self.is_indirect and iterset._extruded:
+            region = self.iteration_region
+            if region is ON_INTERIOR_FACETS:
+                size *= iterset.layers - 2
+            elif region not in [ON_TOP, ON_BOTTOM]:
+                size *= iterset.layers - 1
+        return self.flops_per_cell * size
 
     @property
     def arithmetic_intensity(self):
