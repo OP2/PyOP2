@@ -486,7 +486,7 @@ def loops_analyzer(loop1, loop2):
 
     info = {}
 
-    homogeneous = loop1.it_space == loop2.it_space
+    homogeneous = loop1.it_space.iterset == loop2.it_space.iterset
     heterogeneous = not homogeneous
 
     info['homogeneous'] = homogeneous

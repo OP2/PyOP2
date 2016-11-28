@@ -131,8 +131,11 @@ class FusionSchedule(Schedule):
         return fused_loops
 
     def _make(self, kernel, it_space, iterregion, args, info):
-        return _make_object('ParLoop', kernel, it_space.iterset, *args,
-                            iterate=iterregion, insp_name=self._insp_name)
+        fargs = info.get('fargs', {})
+        args = tuple(FusionArg(arg, *fargs[j]) if j in fargs else arg
+                     for j, arg in enumerate(args))
+        return FusionParLoop(kernel, it_space.iterset, *args, it_space=it_space,
+                             iterate=iterregion, insp_name=self._insp_name)
 
     def __call__(self, loop_chain):
         return self._combine(self._schedule(loop_chain))
