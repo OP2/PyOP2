@@ -1059,7 +1059,13 @@ def wrapper_snippets(itspace, args,
             continue
         _buf_name[arg] = "buffer_%s" % arg.c_arg_name(count)
         _tmp_name[arg] = "tmp_%s" % _buf_name[arg]
-        _buf_size = list(itspace._extents)
+        # _buf_size = list(itspace._extents)
+        if(isinstance(arg.data, Dat)):
+            _buf_size=[sum([bb[0] for b in arg._block_shape for bb in b])]
+        else:
+            # arg.data is Mat
+            _buf_size=[sum([bb[0] for b in arg._block_shape for bb in b]),
+                       sum([bb[1] for b in arg._block_shape for bb in b])]
         if not arg._is_mat:
             # Readjust size to take into account the size of a vector space
             _dat_size = (arg.data.cdim,)

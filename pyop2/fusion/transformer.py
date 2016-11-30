@@ -637,7 +637,6 @@ def build_hard_fusion_kernel(base_loop, fuse_loop, fusion_map, loop_chain_index)
     body.children.append(ast.FunCall(base_fundecl.name, *base_funcall_syms))
 
     for idx in range(fusion_map.arity):
-
         fused_iter = ast.Assign('i', ast.Symbol('fused_iters', (idx,)))
         fuse_funcall = ast.FunCall(fuse_fundecl.name)
         if_cond = ast.Not(ast.Symbol('executed', ('i',)))
@@ -657,7 +656,6 @@ def build_hard_fusion_kernel(base_loop, fuse_loop, fusion_map, loop_chain_index)
         init = lambda v: '{%s}' % ', '.join([str(j) for j in v])
         for i, fuse_loop_arg in enumerate(fuse_loop.args):
             fuse_kernel_arg = binding[fuse_loop_arg]
-
             buffer_name = '%s_vec' % fuse_kernel_arg.sym.symbol
             fuse_funcall_sym = ast.Symbol(buffer_name)
 
@@ -672,6 +670,7 @@ def build_hard_fusion_kernel(base_loop, fuse_loop, fusion_map, loop_chain_index)
                 stager = lambda b, l: [b.children.insert(0, j) for j in reversed(l)]
                 indexer = lambda indices: [(j, k) for j, k in enumerate(indices)]
                 pointers = list(fuse_kernel_arg.pointers)
+                pointers = map(lambda l: tuple([x for x in l if x!='const']), pointers)
 
             # Now gonna handle arguments depending on their type and rank ...
 
@@ -762,7 +761,6 @@ def build_hard_fusion_kernel(base_loop, fuse_loop, fusion_map, loop_chain_index)
                     # Update the if-then AST body
                     stager(if_exec.children[0], staging)
                     if_exec.children[0].children.insert(0, buffer_decl)
-
             else:
                 # Nothing special to do for direct arguments
                 pass

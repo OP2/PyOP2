@@ -104,7 +104,6 @@ class FusionSchedule(Schedule):
     def __init__(self, insp_name, schedule, kernels, offsets):
         super(FusionSchedule, self).__init__(insp_name, schedule)
         self._kernel = list(kernels)
-
         # Track the /ParLoop/s in the loop chain that each fused kernel maps to
         offsets = [0] + list(offsets)
         loop_indices = [list(range(offsets[i], o)) for i, o in enumerate(offsets[1:])]
@@ -131,6 +130,8 @@ class FusionSchedule(Schedule):
         return fused_loops
 
     def _make(self, kernel, it_space, iterregion, args, info):
+        # return _make_object('ParLoop', kernel, it_space.iterset, *args,
+        #                     iterate=iterregion, insp_name=self._insp_name)
         fargs = info.get('fargs', {})
         args = tuple(FusionArg(arg, *fargs[j]) if j in fargs else arg
                      for j, arg in enumerate(args))
