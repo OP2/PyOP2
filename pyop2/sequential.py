@@ -1115,12 +1115,14 @@ def wrapper_snippets(itspace, args,
                 continue
             elif arg._is_dat and not arg._flatten:
                 loop_size = shape[0]*mult
+                print(loop_size)
                 _itspace_loops, _itspace_loop_close = itspace_loop(0, loop_size), '}'
                 _scatter_stmts = arg.c_buffer_scatter_vec(count, i, j, offsets, _buf_name[arg])
                 _buf_offset, _buf_offset_decl = '', ''
             elif arg._is_dat:
                 dim = arg.data.split[i].cdim
                 loop_size = shape[0]*mult//dim
+                print(loop_size)
                 _itspace_loops, _itspace_loop_close = itspace_loop(0, loop_size), '}'
                 _buf_offset_name = 'offset_%d[%s]' % (count, '%s')
                 _buf_offset_decl = 'int %s' % _buf_offset_name % loop_size
@@ -1141,6 +1143,7 @@ def wrapper_snippets(itspace, args,
                 'ofs_itspace_loop_close': indent(_itspace_loop_close, 2) if _buf_offset else ''
             }
         scatter = ";\n".join(_buf_scatter.values())
+        print(scatter)
 
         if itspace._extruded:
             _addtos_extruded = ';\n'.join([arg.c_addto(i, j, _buf_name[arg],
@@ -1171,7 +1174,9 @@ def wrapper_snippets(itspace, args,
             'addtos_extruded': indent(_addtos_extruded, 2 + nloops),
             'addtos': indent(_addtos, 2),
         }
-
+    print(itspace)
+    print(args)
+    print("------------------")
     return {'kernel_name': kernel_name,
             'wrapper_name': wrapper_name,
             'ssinds_arg': _ssinds_arg,

@@ -726,7 +726,8 @@ def build_hard_fusion_kernel(base_loop, fuse_loop, fusion_map, loop_chain_index)
                     # ... Handle rank 1 indirect arguments that appear in both
                     # /base/ and /fuse/: just point into the right location
                     rank = (idx,) if fusion_map.arity > 1 else ()
-                    fuse_funcall_sym = ast.Symbol(fuse_kernel_arg.sym.symbol, rank)
+                    # fuse_funcall_sym = ast.Symbol(fuse_kernel_arg.sym.symbol, rank)
+                    fuse_funcall_sym = ast.Sum(fuse_kernel_arg.sym.symbol, idx*fuse_loop_arg._block_shape[0][0][0])
 
                 else:
                     # ... Handle indirect arguments. At the C level, these arguments
