@@ -257,7 +257,7 @@ class LinuxCompiler(Compiler):
         # gcc.gnu.org/bugzilla/show_bug.cgi?id=61068
         # This is the default in Ubuntu 14.04 so work around this
         # problem by turning ivopts off.
-        opt_flags = ['-march=native', '-O3', '-fno-ivopts']
+        opt_flags = ['-march=native', '-O3', '-fno-ivopts', '-fopenmp']
         if configuration['debug']:
             opt_flags = ['-O0', '-g']
         cc = "mpicc"
@@ -282,7 +282,7 @@ class LinuxIntelCompiler(Compiler):
         rank 0 compiles code) (defaults to COMM_WORLD).
     """
     def __init__(self, cppargs=[], ldargs=[], cpp=False, comm=None):
-        opt_flags = ['-O3', '-xHost']
+        opt_flags = ['-O3', '-xHost', '-qopenmp']
         if configuration['debug']:
             opt_flags = ['-O0', '-g']
         cc = "mpicc"
