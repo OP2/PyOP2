@@ -60,7 +60,6 @@ from coffee import base as ast
 from coffee.utils import ItSpace
 from coffee.visitors import FindInstances, SymbolReferences
 
-
 class Inspector(Cached):
 
     """An Inspector constructs a Schedule to fuse or tile a sequence of loops.
@@ -528,6 +527,7 @@ def build_soft_fusion_kernel(loops, loop_chain_index):
 
     base_fundecl = FindInstances(ast.FunDecl).visit(base_ast)[ast.FunDecl][0]
     base_fundecl.body[:] = [ast.Block(base_fundecl.body, open_scope=True)]
+
     for unique_id, _fuse_ast in enumerate(fuse_asts, 1):
         fuse_ast = dcopy(_fuse_ast)
         fuse_fundecl = FindInstances(ast.FunDecl).visit(fuse_ast)[ast.FunDecl][0]
@@ -538,7 +538,7 @@ def build_soft_fusion_kernel(loops, loop_chain_index):
         # 3) Uniquify symbols identifiers
         fuse_symbols = SymbolReferences().visit(fuse_ast)
         for decl in fuse_fundecl.args:
-            for symbol, _ in fuse_symbols[decl.sym.symbol]:
+            for symbol, p in fuse_symbols[decl.sym.symbol]:
                 symbol.symbol = "%s_%d" % (symbol.symbol, unique_id)
         # 4) Concatenate bodies
         base_fundecl.body.extend([ast.FlatBlock("\n\n// Fused kernel: \n\n")] +

@@ -584,6 +584,7 @@ for (int n = %(tile_start)s; n < %(tile_end)s; n++) {
             _loop_body.append(strip(TilingJITModule._kernel_wrapper % loop_code_dict))
             _user_code.append(kernel._user_code)
             _ssinds_arg.append(_ssind_decl)
+            print(_loo)
 
         _loop_chain_body = indent("\n\n".join(_loop_body), 2)
         code_dict['user_code'] = indent("\n".join(_user_code), 1)
