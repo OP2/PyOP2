@@ -54,6 +54,30 @@ def _check_hashes(x, y, datatype):
     return False
 
 
+@collective
+def single_out_a_rank(comm):
+    rank = MPI.Comm.Get_rank(comm)
+    debug('Using file-based mechanism on %d', rank)
+    fname = os.path.join("/tmp", "fb.%d" % rank)
+
+    with open(fname, 'w+') as f:
+        f.write("This is a file.")
+
+    MPI.Comm.Barrier(comm)
+    tbb = []
+    for dl, sl, fl in os.walk("/tmp"):
+        for fi in fl:
+            if str(fi).split(".")[0] == "fb":
+                tbb.append(str(fi).split(".")[1])
+
+    MPI.Comm.Barrier(comm)
+    os.remove(fname)
+    if str(min(tbb)) == str(rank):
+        return True
+    else:
+        return False
+
+
 _check_op = MPI.Op.Create(_check_hashes, commute=True)
 
 
