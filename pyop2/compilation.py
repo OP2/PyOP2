@@ -36,6 +36,7 @@ import os
 import subprocess
 import sys
 import ctypes
+import random
 from hashlib import md5
 
 from pyop2.mpi import MPI, collective, COMM_WORLD
@@ -114,7 +115,7 @@ class Compiler(object):
             # If MPI3 library is available, split the communicator based on shared memory regions.
             newcomm = self.comm.Split_type(MPI.COMM_TYPE_SHARED)
             debug("Using MPI3 on rank ", newcomm.rank)
-            if newcomm.rank == 0:
+            if newcomm.rank==0:
                 singleton = True
         else:
             # Otherwise, copy the communicator and use file-based methods to isolate one rank per node.
@@ -122,6 +123,7 @@ class Compiler(object):
             debug("Not using MPI3 on %d" % newcomm.rank)
             singleton = self.single_out_a_rank(newcomm)
             MPI.Comm.Barrier(newcomm)
+            
 
         if configuration['check_src_hashes'] or configuration['debug']:
             matching = newcomm.allreduce(basename, op=_check_op)
@@ -137,10 +139,10 @@ class Compiler(object):
                     f.write(src)
                 newcomm.barrier()
                 raise CompilationError("Generated code differs across ranks (see output in %s)" % output)
-
+            
         try:
             # Are we in the cache?
-            return ctypes.CDLL(soname)
+            return ctypes.CDLL(soname)    
         except OSError:
             # No, let's go ahead and build
             if singleton:
@@ -227,14 +229,14 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
     def single_out_a_rank(self, comm):
         rank = MPI.Comm.Get_rank(comm)
         debug('Using file-based mechanism on %d', rank)
-        fname = os.path.join("/tmp", "fb.%d" % rank)
+        fname =  os.path.join("/tmp", "fb.%d" % rank)
 
         with open(fname, 'w+') as f:
             f.write("This is a file.")
 
         MPI.Comm.Barrier(comm)
         tbb = []
-        for dl, sl, fl in os.walk("/tmp"):
+        for dl,sl,fl in os.walk("/tmp"):
             for fi in fl:
                 if str(fi).split(".")[0] == "fb":
                     tbb.append(str(fi).split(".")[1])
