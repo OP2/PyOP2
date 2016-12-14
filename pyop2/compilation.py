@@ -31,12 +31,14 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
 # OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
+import six
+from six.moves import input
+
 import os
 import subprocess
 import sys
 import ctypes
-import random
 from hashlib import md5
 
 from pyop2.mpi import MPI, collective, COMM_WORLD
@@ -50,6 +52,7 @@ def _check_hashes(x, y, datatype):
     if x == y:
         return x
     return False
+
 
 _check_op = MPI.Op.Create(_check_hashes, commute=True)
 
@@ -91,12 +94,12 @@ class Compiler(object):
         library."""
 
         # Determine cache key
-        hsh = md5(src)
-        hsh.update(self._cc)
+        hsh = md5(six.b(src))
+        hsh.update(six.b(self._cc))
         if self._ld:
-            hsh.update(self._ld)
-        hsh.update("".join(self._cppargs))
-        hsh.update("".join(self._ldargs))
+            hsh.update(six.b(self._ld))
+        hsh.update(six.b("".join(self._cppargs)))
+        hsh.update(six.b("".join(self._ldargs)))
 
         basename = hsh.hexdigest()
 
@@ -108,59 +111,42 @@ class Compiler(object):
         # Link into temporary file, then rename to shared library
         # atomically (avoiding races).
         tmpname = os.path.join(cachedir, "%s_p%d.so.tmp" % (basename, pid))
-        singleton = False
-
-        # To aid in compilation speed, compile only on one MPI rank per node.
-        if MPI.VERSION >= 3:
-            # If MPI3 library is available, split the communicator based on shared memory regions.
-            newcomm = self.comm.Split_type(MPI.COMM_TYPE_SHARED)
-            debug("Using MPI3 on rank ", newcomm.rank)
-            if newcomm.rank==0:
-                singleton = True
-        else:
-            # Otherwise, copy the communicator and use file-based methods to isolate one rank per node.
-            newcomm = self.comm
-            debug("Not using MPI3 on %d" % newcomm.rank)
-            singleton = self.single_out_a_rank(newcomm)
-            MPI.Comm.Barrier(newcomm)
-            
 
         if configuration['check_src_hashes'] or configuration['debug']:
-            matching = newcomm.allreduce(basename, op=_check_op)
+            matching = self.comm.allreduce(basename, op=_check_op)
             if matching != basename:
                 # Dump all src code to disk for debugging
                 output = os.path.join(cachedir, "mismatching-kernels")
-                srcfile = os.path.join(output, "src-rank%d.c" % newcomm.rank)
-                if newcomm.rank == 0:
+                srcfile = os.path.join(output, "src-rank%d.c" % self.comm.rank)
+                if self.comm.rank == 0:
                     if not os.path.exists(output):
                         os.makedirs(output)
-                newcomm.barrier()
+                self.comm.barrier()
                 with open(srcfile, "w") as f:
                     f.write(src)
-                newcomm.barrier()
+                self.comm.barrier()
                 raise CompilationError("Generated code differs across ranks (see output in %s)" % output)
-            
         try:
             # Are we in the cache?
-            return ctypes.CDLL(soname)    
+            return ctypes.CDLL(soname)
         except OSError:
             # No, let's go ahead and build
-            if singleton:
+            if self.comm.rank == 0:
                 # No need to do this on all ranks
                 if not os.path.exists(cachedir):
                     os.makedirs(cachedir)
                 logfile = os.path.join(cachedir, "%s_p%d.log" % (basename, pid))
                 errfile = os.path.join(cachedir, "%s_p%d.err" % (basename, pid))
                 with progress(INFO, 'Compiling wrapper'):
-                    with file(cname, "w") as f:
+                    with open(cname, "w") as f:
                         f.write(src)
                     # Compiler also links
                     if self._ld is None:
                         cc = [self._cc] + self._cppargs + \
                              ['-o', tmpname, cname] + self._ldargs
                         debug('Compilation command: %s', ' '.join(cc))
-                        with file(logfile, "w") as log:
-                            with file(errfile, "w") as err:
+                        with open(logfile, "w") as log:
+                            with open(errfile, "w") as err:
                                 log.write("Compilation command:\n")
                                 log.write(" ".join(cc))
                                 log.write("\n\n")
@@ -186,8 +172,8 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
                         ld = self._ld.split() + ['-o', tmpname, oname] + self._ldargs
                         debug('Compilation command: %s', ' '.join(cc))
                         debug('Link command: %s', ' '.join(ld))
-                        with file(logfile, "w") as log:
-                            with file(errfile, "w") as err:
+                        with open(logfile, "w") as log:
+                            with open(errfile, "w") as err:
                                 log.write("Compilation command:\n")
                                 log.write(" ".join(cc))
                                 log.write("\n\n")
@@ -220,33 +206,9 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
                     # Atomically ensure soname exists
                     os.rename(tmpname, soname)
             # Wait for compilation to complete
-            newcomm.barrier()
             self.comm.barrier()
             # Load resulting library
             return ctypes.CDLL(soname)
-
-    @collective
-    def single_out_a_rank(self, comm):
-        rank = MPI.Comm.Get_rank(comm)
-        debug('Using file-based mechanism on %d', rank)
-        fname =  os.path.join("/tmp", "fb.%d" % rank)
-
-        with open(fname, 'w+') as f:
-            f.write("This is a file.")
-
-        MPI.Comm.Barrier(comm)
-        tbb = []
-        for dl,sl,fl in os.walk("/tmp"):
-            for fi in fl:
-                if str(fi).split(".")[0] == "fb":
-                    tbb.append(str(fi).split(".")[1])
-
-        MPI.Comm.Barrier(comm)
-        os.remove(fname)
-        if str(min(tbb)) == str(rank):
-            return True
-        else:
-            return False
 
 
 class MacCompiler(Compiler):
@@ -387,23 +349,23 @@ def clear_cache(prompt=False):
     nfiles = len(files)
 
     if nfiles == 0:
-        print "No cached libraries to remove"
+        print("No cached libraries to remove")
         return
 
     remove = True
     if prompt:
 
-        user = raw_input("Remove %d cached libraries from %s? [Y/n]: " % (nfiles, cachedir))
+        user = input("Remove %d cached libraries from %s? [Y/n]: " % (nfiles, cachedir))
 
         while user.lower() not in ['', 'y', 'n']:
-            print "Please answer y or n."
-            user = raw_input("Remove %d cached libraries from %s? [Y/n]: " % (nfiles, cachedir))
+            print("Please answer y or n.")
+            user = input("Remove %d cached libraries from %s? [Y/n]: " % (nfiles, cachedir))
 
         if user.lower() == 'n':
             remove = False
 
     if remove:
-        print "Removing %d cached libraries from %s" % (nfiles, cachedir)
+        print("Removing %d cached libraries from %s" % (nfiles, cachedir))
         [os.remove(f) for f in files]
     else:
-        print "Not removing cached libraries"
+        print("Not removing cached libraries")
