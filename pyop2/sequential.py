@@ -809,6 +809,10 @@ void %(wrapper_name)s(int start, int end,
         #include <petsc.h>
         #include <stdbool.h>
         #include <math.h>
+
+        #include <xmmintrin.h>
+        #include <pmmintrin.h>
+
         %(sys_headers)s
 
         %(kernel)s
@@ -831,6 +835,7 @@ void %(wrapper_name)s(int start, int end,
         cppargs += ["-I%s/include" % d for d in get_petsc_dir()] + \
                    ["-I%s" % d for d in self._kernel._include_dirs] + \
                    ["-I%s" % os.path.abspath(os.path.dirname(__file__))]
+
         if compiler:
             cppargs += [compiler[coffee.system.isa['inst_set']]]
         ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
@@ -966,6 +971,11 @@ def wrapper_snippets(itspace, args,
         wrapper_name = "wrap_" + kernel_name
     if user_code is None:
         user_code = ""
+
+    user_code += """
+  _MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
+  _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+"""
 
     direct = all(a.map is None for a in args)
 

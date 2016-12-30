@@ -586,7 +586,13 @@ for (int n = %(tile_start)s; n < %(tile_end)s; n++) {
             _ssinds_arg.append(_ssind_decl)
 
         _loop_chain_body = indent("\n\n".join(_loop_body), 2)
-        code_dict['user_code'] = indent("\n".join(_user_code), 1)
+        if not _user_code:
+            code_dict['user_code'] = indent("\n".join(_user_code), 1)
+        else:
+            code_dict['user_code'] = """
+  _MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
+  _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+"""
         code_dict['ssinds_arg'] = "".join(["%s," % s for s in _ssinds_arg if s])
         code_dict['executor_code'] = indent(self._executor.c_code(_loop_chain_body), 1)
 
