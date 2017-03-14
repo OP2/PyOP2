@@ -40,6 +40,7 @@ import subprocess
 import sys
 import ctypes
 from hashlib import md5
+import glob
 
 from pyop2.mpi import MPI, collective, COMM_WORLD
 from pyop2.configuration import configuration
@@ -52,6 +53,31 @@ def _check_hashes(x, y, datatype):
     if x == y:
         return x
     return False
+
+
+@collective
+def single_out_a_rank(comm):
+    rank = MPI.Comm.Get_rank(comm)
+    debug('Using file-based mechanism on %d', rank)
+    fname = os.path.join("/tmp", "fb.%d" % rank)
+
+    with open(fname, 'w+') as f:
+        f.write("This is a file.")
+
+    MPI.Comm.Barrier(comm)
+    tbb = []
+    # for dl, sl, fl in os.walk("/tmp"):
+    #     for fi in fl:
+    files = glob.glob("/tmp/fb.[0-9]+")
+    for fi in files:
+        if str(fi).split(".")[0] == "fb":
+            tbb.append(str(fi).split(".")[1])
+
+    os.remove(fname)
+    if str(min(tbb)) == str(rank):
+        return True
+    else:
+        return False
 
 
 _check_op = MPI.Op.Create(_check_hashes, commute=True)
@@ -112,26 +138,38 @@ class Compiler(object):
         # atomically (avoiding races).
         tmpname = os.path.join(cachedir, "%s_p%d.so.tmp" % (basename, pid))
 
+        if MPI.version >= 3:
+            # Assume that the library supports flashy MPI3 features
+            newcomm = self.comm.Split_type(MPI.COMM_TYPE_SHARED)
+            debug("Using MPI3 on rank ", newcomm.rank)
+            if newcomm.rank == 0:
+                singleton = True
+        else:
+            newcomm = self.comm
+            debug("Not using MPI3 on %d" % newcomm.rank)
+            singleton = self.single_out_a_rank(newcomm)
+
         if configuration['check_src_hashes'] or configuration['debug']:
-            matching = self.comm.allreduce(basename, op=_check_op)
+            matching = newcomm.allreduce(basename, op=_check_op)
             if matching != basename:
                 # Dump all src code to disk for debugging
                 output = os.path.join(cachedir, "mismatching-kernels")
-                srcfile = os.path.join(output, "src-rank%d.c" % self.comm.rank)
-                if self.comm.rank == 0:
+                srcfile = os.path.join(output, "src-rank%d.c" % newcomm.rank)
+                if newcomm.rank == 0:
                     if not os.path.exists(output):
                         os.makedirs(output)
-                self.comm.barrier()
+                newcomm.barrier()
                 with open(srcfile, "w") as f:
                     f.write(src)
-                self.comm.barrier()
+                newcomm.barrier()
                 raise CompilationError("Generated code differs across ranks (see output in %s)" % output)
+
         try:
             # Are we in the cache?
             return ctypes.CDLL(soname)
         except OSError:
             # No, let's go ahead and build
-            if self.comm.rank == 0:
+            if singleton:
                 # No need to do this on all ranks
                 if not os.path.exists(cachedir):
                     os.makedirs(cachedir)
@@ -206,6 +244,7 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
                     # Atomically ensure soname exists
                     os.rename(tmpname, soname)
             # Wait for compilation to complete
+            newcomm.barrier()
             self.comm.barrier()
             # Load resulting library
             return ctypes.CDLL(soname)
