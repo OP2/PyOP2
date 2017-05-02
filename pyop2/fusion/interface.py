@@ -104,6 +104,7 @@ def fuse(name, loop_chain, **kwargs):
     # return the fused par loops straight away. Otherwise, try to run an inspection.
     options = {
         'log': kwargs.get('log', False),
+        # 'mode': kwargs.get('mode', 'soft'),
         'mode': kwargs.get('mode', 'hard'),
         'ignore_war': kwargs.get('ignore_war', False),
         'use_glb_maps': kwargs.get('use_glb_maps', False),

@@ -924,6 +924,7 @@ def wrapper_snippets(itspace, args,
             _loop_size = [_buf_size[i]//_dat_size[i] for i in range(len(_buf_size))]
         else:
             _dat_size = arg.data.dims[0][0]  # TODO: [0][0] ?
+            _buf_size = arg._block_shape[0][0]
             _buf_size = [e*d for e, d in zip(_buf_size, _dat_size)]
         _buf_decl[arg] = arg.c_buffer_decl(_buf_size, count, _buf_name[arg], is_facet=is_facet)
         _tmp_decl[arg] = arg.c_buffer_decl(_buf_size, count, _tmp_name[arg], is_facet=is_facet,
