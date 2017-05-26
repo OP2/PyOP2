@@ -920,7 +920,8 @@ def wrapper_snippets(itspace, args,
         if not arg._is_mat:
             # Readjust size to take into account the size of a vector space
             _dat_size = (arg.data.cdim,)
-            _buf_size = [sum([e*d for e, d in zip(_buf_size, _dat_size)])]
+            # _buf_size = [sum([e*d for e, d in zip(_buf_size, _dat_size)])]
+            _buf_size = [arg._block_shape[0][0][0]]
             _loop_size = [_buf_size[i]//_dat_size[i] for i in range(len(_buf_size))]
         else:
             _dat_size = arg.data.dims[0][0]  # TODO: [0][0] ?

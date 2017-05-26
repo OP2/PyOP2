@@ -312,7 +312,7 @@ class LinuxCompiler(Compiler):
     :kwarg comm: Optional communicator to compile the code on (only
     rank 0 compiles code) (defaults to COMM_WORLD)."""
     def __init__(self, cppargs=[], ldargs=[], cpp=False, comm=None):
-        opt_flags = ['-march=native', '-O3']
+        opt_flags = ['-march=native', '-O3', '-g', '-vec-threshold0', '-qopt-report 5', '-inline-forceinline', '-fno-alias', '-fargument-noalias']
         if configuration['debug']:
             opt_flags = ['-O0', '-g']
         cc = "mpicc"

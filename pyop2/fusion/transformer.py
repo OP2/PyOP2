@@ -205,7 +205,7 @@ class Inspector(Cached):
         for i, loop in enumerate(loop_chain[1:]):
             base_loop = fusing[-1]
             info = loops_analyzer(base_loop, loop)
-            if info['heterogeneous'] or info['indirect_w']:
+            if (not info['pure_iai']) and (info['heterogeneous'] or info['indirect_w']):
                 # Cannot fuse /loop/ into /base_loop/, so fuse what we found to be
                 # fusible so far and pick a new base
                 fused_kernel = build_soft_fusion_kernel(fusing, len(handled))
