@@ -39,6 +39,7 @@ import ctypes
 import collections
 from hashlib import md5
 from distutils import version
+from time import sleep
 
 
 from pyop2.mpi import MPI, collective, COMM_WORLD
@@ -321,6 +322,12 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
                     os.rename(tmpname, soname)
             # Wait for compilation to complete
             self.comm.barrier()
+            if not os.path.isfile(soname):
+                # Wait more if .so file is not visible on disk
+                for i in range(60):
+                    sleep(1.0)
+                    if os.path.isfile(soname):
+                        break
             # Load resulting library
             return ctypes.CDLL(soname)
 
