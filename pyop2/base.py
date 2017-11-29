@@ -2063,9 +2063,11 @@ class DatView(Dat):
     :arg index: The component to select a view of.
     """
     def __init__(self, dat, index):
-        cdim = dat.cdim
-        if not (0 <= index < cdim):
-            raise IndexTypeError("Can't create DatView with index %d for Dat with shape %s" % (index, dat.dim))
+        index = as_tuple(index)
+        assert len(index) == len(dat.dim)
+        for i, d in zip(index, dat.dim):
+            if not (0 <= i < d):
+                raise IndexValueError("Can't create DatView with index %s for Dat with shape %s" % (index, dat.dim))
         self.index = index
         # Point at underlying data
         super(DatView, self).__init__(dat.dataset,
@@ -2089,35 +2091,27 @@ class DatView(Dat):
 
     @property
     def data(self):
-        cdim = self._parent.cdim
         full = self._parent.data
-
-        sub = full.reshape(-1, cdim)[:, self.index]
-        return sub
+        idx = (slice(None), *self.index)
+        return full[idx]
 
     @property
     def data_ro(self):
-        cdim = self._parent.cdim
         full = self._parent.data_ro
-
-        sub = full.reshape(-1, cdim)[:, self.index]
-        return sub
+        idx = (slice(None), *self.index)
+        return full[idx]
 
     @property
     def data_with_halos(self):
-        cdim = self._parent.cdim
         full = self._parent.data_with_halos
-
-        sub = full.reshape(-1, cdim)[:, self.index]
-        return sub
+        idx = (slice(None), *self.index)
+        return full[idx]
 
     @property
     def data_ro_with_halos(self):
-        cdim = self._parent.cdim
         full = self._parent.data_ro_with_halos
-
-        sub = full.reshape(-1, cdim)[:, self.index]
-        return sub
+        idx = (slice(None), *self.index)
+        return full[idx]
 
 
 class MixedDat(Dat):
