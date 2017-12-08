@@ -304,6 +304,10 @@ class Arg(object):
         else:
             self._block_shape = None
 
+    @cached_property
+    def _kernel_args_(self):
+        return self.data._kernel_args_
+
     @property
     def _key(self):
         return (self.data, self._map, self._idx, self._access)
@@ -583,6 +587,8 @@ class Set(object):
 
     masks = None
 
+    _kernel_args_ = ()
+
     @validate_type(('size', (numbers.Integral, tuple, list, np.ndarray), SizeTypeError),
                    ('name', str, NameTypeError))
     def __init__(self, size, name=None, halo=None, comm=None):
@@ -713,6 +719,8 @@ class GlobalSet(Set):
     """A proxy set allowing a :class:`Global` to be used in place of a
     :class:`Dat` where appropriate."""
 
+    _kernel_args_ = ()
+
     def __init__(self, comm=None):
         self.comm = dup_comm(comm)
 
@@ -820,6 +828,14 @@ class ExtrudedSet(Set):
         self._layers = layers
         self._extruded = True
 
+    @cached_property
+    def _kernel_args_(self):
+        if self.constant_layers:
+            return (self.layers_array.ctypes.data, )
+        else:
+            raise NotImplementedError
+            return (self.layers_array.ctypes.data, self.masks)
+
     def __getattr__(self, name):
         """Returns a :class:`Set` specific attribute."""
         return getattr(self._parent, name)
@@ -902,6 +918,10 @@ class Subset(ExtrudedSet):
         self._sizes = ((self._indices < superset.core_size).sum(),
                        (self._indices < superset.size).sum(),
                        len(self._indices))
+
+    @cached_property
+    def _kernel_args_(self):
+        return self._superset._kernel_args_ + (self._indices.ctypes.data, )
 
     # Look up any unspecified attributes on the _set.
     def __getattr__(self, name):
@@ -998,6 +1018,10 @@ class MixedSet(Set, ObjectCached):
         # TODO: do all sets need the same communicator?
         self.comm = reduce(lambda a, b: a or b, map(lambda s: s if s is None else s.comm, sets))
         self._initialized = True
+
+    @cached_property
+    def _kernel_args_(self):
+        raise NotImplementedError
 
     @classmethod
     def _process_args(cls, sets, **kwargs):
@@ -1561,6 +1585,10 @@ class Dat(DataCarrier, _EmptyDataMixin):
             self._id = uid
         self._name = name or "dat_%d" % self._id
 
+    @cached_property
+    def _kernel_args_(self):
+        return (self._data.ctypes.data, )
+
     @validate_in(('access', _modes, ModeValueError))
     def __call__(self, access, path=None):
         if isinstance(path, _MapArg):
@@ -2076,6 +2104,10 @@ class DatView(Dat):
         self._parent = dat
 
     @cached_property
+    def _kernel_args_(self):
+        return self._parent._kernel_args_
+
+    @cached_property
     def cdim(self):
         return 1
 
@@ -2137,6 +2169,10 @@ class MixedDat(Dat):
             raise DataValueError('MixedDat with different dtypes is not supported')
         # TODO: Think about different communicators on dats (c.f. MixedSet)
         self.comm = self._dats[0].comm
+
+    @cached_property
+    def _kernel_args_(self):
+        return tuple(itertools.chain(*(d._kernel_args_ for d in self)))
 
     def __getitem__(self, idx):
         """Return :class:`Dat` with index ``idx`` or a given slice of Dats."""
@@ -2417,6 +2453,10 @@ class Global(DataCarrier, _EmptyDataMixin):
         self._name = name or "global_%d" % Global._globalcount
         self.comm = comm
         Global._globalcount += 1
+
+    @cached_property
+    def _kernel_args_(self):
+        return (self._data.ctypes.data, )
 
     @validate_in(('access', _modes, ModeValueError))
     def __call__(self, access, path=None):
@@ -2752,6 +2792,10 @@ class Map(object):
             struct.indices = self.indices.ctypes.data
             return ctypes.pointer(struct)
 
+    @cached_property
+    def _kernel_args_(self):
+        return (self._values.ctypes.data, )
+
     @validate_type(('index', (int, IterationIndex), IndexTypeError))
     def __getitem__(self, index):
         if configuration["type_check"]:
@@ -2967,6 +3011,10 @@ class DecoratedMap(Map, ObjectCached):
         self.vector_index = vector_index
         self._initialized = True
 
+    @cached_property
+    def _kernel_args_(self):
+        return self._map._kernel_args_
+
     @classmethod
     def _process_args(cls, m, **kwargs):
         return (m, ) + (m, ), kwargs
@@ -3030,6 +3078,10 @@ class MixedMap(Map, ObjectCached):
     @classmethod
     def _cache_key(cls, maps):
         return maps
+
+    @cached_property
+    def _kernel_args_(self):
+        return tuple(itertools.chain(*(m._kernel_args_ for m in self)))
 
     @cached_property
     def split(self):
