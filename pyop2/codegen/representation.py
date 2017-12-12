@@ -41,6 +41,14 @@ class Constant(Terminal):
     __slots__ = ()
 
 
+class DTypeMixin(object):
+
+    @property
+    def dtype(self):
+        dtype, = set(c.dtype for c in self.children)
+        return dtype
+
+
 class Zero(Constant):
     __slots__ = ("shape", "dtype")
     __front__ = ("shape", "dtype")
@@ -281,6 +289,10 @@ class When(Node):
     def __init__(self, condition, expr):
         self.children = condition, expr
 
+    @property
+    def dtype(self):
+        return self.children[1].dtype
+
 
 class Materialise(Node):
     _count = itertools.count()
@@ -343,9 +355,13 @@ class Conditional(Scalar):
         assert not condition.shape
         assert not then.shape
         assert then.shape == else_.shape
-
+        assert then.dtype == else_.dtype
         self.children = condition, then, else_
         self.shape = then.shape
+
+    @property
+    def dtype(self):
+        return self.children[1].dtype
 
 
 class Comparison(Scalar):
@@ -362,7 +378,7 @@ class Comparison(Scalar):
         self.children = a, b
 
 
-class LogicalNot(Scalar):
+class LogicalNot(Scalar, DTypeMixin):
     __slots__ = ("children", )
 
     def __init__(self, expression):
@@ -370,7 +386,7 @@ class LogicalNot(Scalar):
         self.children = expression,
 
 
-class LogicalAnd(Scalar):
+class LogicalAnd(Scalar, DTypeMixin):
     __slots__ = ("children", )
 
     def __init__(self, a, b):
@@ -379,7 +395,7 @@ class LogicalAnd(Scalar):
         self.children = a, b
 
 
-class LogicalOr(Scalar):
+class LogicalOr(Scalar, DTypeMixin):
     __slots__ = ("children", )
 
     def __init__(self, a, b):
@@ -388,7 +404,7 @@ class LogicalOr(Scalar):
         self.children = a, b
 
 
-class BitwiseNot(Scalar):
+class BitwiseNot(Scalar, DTypeMixin):
     __slots__ = ("children", )
 
     def __init__(self, expression):
@@ -396,7 +412,7 @@ class BitwiseNot(Scalar):
         self.children = expression,
 
 
-class BitwiseAnd(Scalar):
+class BitwiseAnd(Scalar, DTypeMixin):
     __slots__ = ("children", )
 
     def __init__(self, a, b):
@@ -405,7 +421,7 @@ class BitwiseAnd(Scalar):
         self.children = a, b
 
 
-class BitwiseOr(Scalar):
+class BitwiseOr(Scalar, DTypeMixin):
     __slots__ = ("children", )
 
     def __init__(self, a, b):
@@ -414,7 +430,7 @@ class BitwiseOr(Scalar):
         self.children = a, b
 
 
-class BitShift(Scalar):
+class BitShift(Scalar, DTypeMixin):
     __slots__ = ("direction", "children", )
     __front__ = ("direction", )
 
