@@ -308,6 +308,18 @@ class Arg(object):
     def _kernel_args_(self):
         return self.data._kernel_args_
 
+    @cached_property
+    def _wrapper_cache_key_(self):
+        if isinstance(self.idx, IterationIndex):
+            idx = self.idx._wrapper_cache_key_
+        else:
+            idx = self.idx
+        if self.map is not None:
+            map_ = tuple(m._wrapper_cache_key_ for m in self.map)
+        else:
+            map_ = self.map
+        return (type(self), idx, self.access, self.data._wrapper_cache_key_, map_)
+
     @property
     def _key(self):
         return (self.data, self._map, self._idx, self._access)
@@ -583,7 +595,13 @@ class Set(object):
 
     masks = None
 
+    _extruded = False
+
     _kernel_args_ = ()
+
+    @cached_property
+    def _wrapper_cache_key_(self):
+        return (type(self), )
 
     @validate_type(('size', (numbers.Integral, tuple, list, np.ndarray), SizeTypeError),
                    ('name', str, NameTypeError))
@@ -598,7 +616,6 @@ class Set(object):
         self._name = name or "set_%d" % Set._globalcount
         self._halo = halo
         self._partition_size = 1024
-        self._extruded = False
         # A cache of objects built on top of this set
         self._cache = {}
         Set._globalcount += 1
@@ -835,6 +852,10 @@ class ExtrudedSet(Set):
             raise NotImplementedError
             return (self.layers_array.ctypes.data, self.masks)
 
+    @cached_property
+    def _wrapper_cache_key_(self):
+        return (super()._wrapper_cache_key_, self.constant_layers)
+
     def __getattr__(self, name):
         """Returns a :class:`Set` specific attribute."""
         return getattr(self._parent, name)
@@ -1021,6 +1042,10 @@ class MixedSet(Set, ObjectCached):
     def _kernel_args_(self):
         raise NotImplementedError
 
+    @cached_property
+    def _wrapper_cache_key_(self):
+        raise NotImplementedError
+
     @classmethod
     def _process_args(cls, sets, **kwargs):
         sets = [s for s in sets]
@@ -1136,6 +1161,10 @@ class DataSet(ObjectCached):
     @classmethod
     def _cache_key(cls, iter_set, dim=1, name=None):
         return (iter_set, as_tuple(dim, numbers.Integral))
+
+    @cached_property
+    def _wrapper_cache_key_(self):
+        return (type(self), self.dim, self._set._wrapper_cache_key_)
 
     def __getstate__(self):
         """Extract state to pickle."""
@@ -1333,6 +1362,10 @@ class MixedDataSet(DataSet, ObjectCached):
     @classmethod
     def _cache_key(cls, arg, dims=None):
         return arg
+
+    @cached_property
+    def _wrapper_cache_key_(self):
+        raise NotImplementedError
 
     def __getitem__(self, idx):
         """Return :class:`DataSet` with index ``idx`` or a given slice of datasets."""
@@ -1584,6 +1617,10 @@ class Dat(DataCarrier, _EmptyDataMixin):
     @cached_property
     def _kernel_args_(self):
         return (self._data.ctypes.data, )
+
+    @cached_property
+    def _wrapper_cache_key_(self):
+        return (type(self), self.dtype, self._dataset._wrapper_cache_key_)
 
     @validate_in(('access', _modes, ModeValueError))
     def __call__(self, access, path=None):
@@ -2065,8 +2102,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         """Construct a :class:`Dat` from a Dat named ``name`` in HDF5 data ``f``"""
         slot = f[name]
         data = slot.value
-        soa = slot.attrs['type'].find(':soa') > 0
-        ret = cls(dataset, data, name=name, soa=soa)
+        ret = cls(dataset, data, name=name)
         return ret
 
 
@@ -2097,6 +2133,10 @@ class DatView(Dat):
     @cached_property
     def _kernel_args_(self):
         return self._parent._kernel_args_
+
+    @cached_property
+    def _wrapper_cache_key_(self):
+        return (type(self), self.index, self._parent._wrapper_cache_key_)
 
     @cached_property
     def cdim(self):
@@ -2170,6 +2210,10 @@ class MixedDat(Dat):
     @cached_property
     def _kernel_args_(self):
         return tuple(itertools.chain(*(d._kernel_args_ for d in self)))
+
+    @cached_property
+    def _wrapper_cache_key_(self):
+        raise NotImplementedError
 
     def __getitem__(self, idx):
         """Return :class:`Dat` with index ``idx`` or a given slice of Dats."""
@@ -2450,6 +2494,10 @@ class Global(DataCarrier, _EmptyDataMixin):
     def _kernel_args_(self):
         return (self._data.ctypes.data, )
 
+    @cached_property
+    def _wrapper_cache_key_(self):
+        return (type(self), self.shape)
+
     @validate_in(('access', _modes, ModeValueError))
     def __call__(self, access, path=None):
         return _make_object('Arg', data=self, access=access)
@@ -2664,18 +2712,17 @@ class IterationIndex(object):
 
     def __init__(self, index=None):
         assert index is None or isinstance(index, int), "i must be an int"
-        self._index = index
+        self.index = index
+
+    @cached_property
+    def _wrapper_cache_key_(self):
+        return (type(self), self.index)
 
     def __str__(self):
-        return "OP2 IterationIndex: %s" % self._index
+        return "OP2 IterationIndex: %s" % self.index
 
     def __repr__(self):
-        return "IterationIndex(%r)" % self._index
-
-    @property
-    def index(self):
-        """Return the integer value of this index."""
-        return self._index
+        return "IterationIndex(%r)" % self.index
 
     def __getitem__(self, idx):
         return IterationIndex(idx)
@@ -2781,6 +2828,11 @@ class Map(object):
     @cached_property
     def _kernel_args_(self):
         return (self._values.ctypes.data, )
+
+    @cached_property
+    def _wrapper_cache_key_(self):
+        # FIXME: boundary masks
+        return (type(self), self.arity, tuplify(self.offset), self.implicit_bcs, self.vector_index)
 
     @validate_type(('index', (int, IterationIndex), IndexTypeError))
     def __getitem__(self, index):
@@ -3074,6 +3126,10 @@ class MixedMap(Map, ObjectCached):
     @cached_property
     def _kernel_args_(self):
         return tuple(itertools.chain(*(m._kernel_args_ for m in self)))
+
+    @cached_property
+    def _wrapper_cache_key_(self):
+        raise NotImplementedError
 
     @cached_property
     def split(self):
@@ -3557,6 +3613,10 @@ class Mat(DataCarrier):
         return _make_object('Arg', data=self, map=path_maps, access=access,
                             idx=path_idxs)
 
+    @cached_property
+    def _wrapper_cache_key_(self):
+        return (type(self), self.dtype, self.dims)
+
     def assemble(self):
         """Finalise this :class:`Mat` ready for use.
 
@@ -3750,6 +3810,10 @@ class Kernel(Cached):
                   + str(headers) + version + str(configuration['loop_fusion'])
                   + str(ldargs) + str(cpp))
         return md5(hashee.encode()).hexdigest()
+
+    @cached_property
+    def _wrapper_cache_key_(self):
+        return (self._key, )
 
     def _ast_to_c(self, ast, opts={}):
         """Transform an Abstract Syntax Tree representing the kernel into a
