@@ -773,20 +773,11 @@ PetscErrorCode %(wrapper_name)s(int start,
         externc_open = '' if not self._kernel._cpp else 'extern "C" {'
         externc_close = '' if not self._kernel._cpp else '}'
         headers = "\n".join([compiler.get('vect_header', "")])
-        if any(arg._is_soa for arg in self._args):
-            kernel_code = """
-            #define OP2_STRIDE(a, idx) a[idx]
-            %(header)s
-            %(code)s
-            #undef OP2_STRIDE
-            """ % {'code': self._kernel.code(),
-                   'header': headers}
-        else:
-            kernel_code = """
+        kernel_code = """
 %(header)s
 %(code)s
-            """ % {'code': self._kernel.code(),
-                   'header': headers}
+        """ % {'code': self._kernel.code(),
+               'header': headers}
         code_to_compile = strip(dedent(self._wrapper) % self.generate_code())
 
         code_to_compile = """
