@@ -460,11 +460,7 @@ def expression_namedliteral(expr, parameters):
 
 @expression.register(Conditional)
 def expression_conditional(expr, parameters):
-    condition, then, else_ = expr.children
-    condition = expression(condition, parameters)
-    then = expression(then, parameters)
-    else_ = expression(else_, parameters)
-    return pym.If(condition, then, else_)
+    return pym.If(*(expression(c, parameters) for c in expr.children))
 
 
 @expression.register(Comparison)
@@ -500,7 +496,6 @@ def expression_binop(expr, parameters):
 @expression.register(BitShift)
 def expression_bitshift(expr, parameters):
     children = (expression(c, parameters) for c in expr.children)
-
     return {"<<": pym.LeftShift,
             ">>": pym.RightShift}[expr.direction](*children)
 
