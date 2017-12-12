@@ -248,6 +248,13 @@ def prepare_arglist(iterset, *args):
     return arglist
 
 
+def prepare_cache_key(kernel, iterset, *args):
+    key = kernel._wrapper_cache_key_ + iterset._wrapper_cache_key_
+    for arg in args:
+        key += arg._wrapper_cache_key_
+    return key
+
+
 @singledispatch
 def statement(expr, parameters):
     raise AssertionError("Unhandled type")
