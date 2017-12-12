@@ -256,8 +256,8 @@ def prepare_cache_key(kernel, iterset, *args):
 
 
 @singledispatch
-def statement(expr, parameters):
-    raise AssertionError("Unhandled type")
+def statement(expr, context):
+    raise AssertionError("Unhandled statement type '%s'" % type(expr))
 
 
 @statement.register(When)
@@ -312,7 +312,7 @@ def statement_functioncall(expr, context):
 
 @singledispatch
 def expression(expr, parameters):
-    raise AssertionError("Unhandled type")
+    raise AssertionError("Unhandled expression type '%s'" % type(expr))
 
 
 @expression.register(Index)
@@ -335,7 +335,7 @@ def expression_fixedindex(expr, parameters):
 def expression_runtimeindex(expr, parameters):
     @singledispatch
     def translate(expr, vars):
-        raise AssertionError
+        raise AssertionError("Unhandled type '%s' in domain translation" % type(expr))
 
     @translate.register(Sum)
     def translate_sum(expr, vars):
