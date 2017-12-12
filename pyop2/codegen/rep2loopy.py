@@ -137,8 +137,10 @@ def instruction_dependencies(instructions):
     for op, name in names.items():
         if isinstance(op, Accumulate):
             _, rvalue = op.children
-            depends_on = frozenset(itertools.chain(*(writers[r]
-                                                     for r in variables([rvalue]))))
+            depends_on = frozenset(x for x in
+                                   itertools.chain(*(writers[r]
+                                                     for r in variables([rvalue])))
+                                   if x is not name)
         else:
             depends_on = []
             for access, arg in zip(op.access, op.children):
