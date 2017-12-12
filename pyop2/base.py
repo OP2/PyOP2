@@ -392,10 +392,6 @@ class Arg(object):
         return isinstance(self.data, DatView)
 
     @cached_property
-    def _is_soa(self):
-        return self._is_dat and self.data.soa
-
-    @cached_property
     def _is_vec_map(self):
         return self._is_indirect and self._idx is None
 
@@ -1557,11 +1553,11 @@ class Dat(DataCarrier, _EmptyDataMixin):
                    ('name', str, NameTypeError))
     @validate_dtype(('dtype', None, DataTypeError))
     def __init__(self, dataset, data=None, dtype=None, name=None,
-                 soa=None, uid=None):
+                 uid=None):
 
         if isinstance(dataset, Dat):
             self.__init__(dataset.dataset, None, dtype=dataset.dtype,
-                          name="copy_of_%s" % dataset.name, soa=dataset.soa)
+                          name="copy_of_%s" % dataset.name)
             dataset.copy(self)
             return
         if type(dataset) is Set or type(dataset) is ExtrudedSet:
@@ -1573,8 +1569,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
 
         self._dataset = dataset
         self.comm = dataset.comm
-        # Are these data to be treated as SoA on the device?
-        self._soa = bool(soa)
         self.halo_valid = True
         # If the uid is not passed in from outside, assume that Dats
         # have been declared in the same order everywhere.
@@ -1624,11 +1618,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
         """The scalar number of values for each member of the object. This is
         the product of the dim tuple."""
         return self.dataset.cdim
-
-    @cached_property
-    def soa(self):
-        """Are the data in SoA format?"""
-        return self._soa
 
     @cached_property
     def _argtype(self):
@@ -2194,11 +2183,6 @@ class MixedDat(Dat):
         return _make_object('MixedDataSet', tuple(s.dataset for s in self._dats))
 
     @cached_property
-    def soa(self):
-        """Are the data in SoA format?"""
-        return tuple(s.soa for s in self._dats)
-
-    @cached_property
     def _data(self):
         """Return the user-provided data buffer, or a zeroed buffer of
         the correct size if none was provided."""
@@ -2532,12 +2516,6 @@ class Global(DataCarrier, _EmptyDataMixin):
         """
 
         return self.dtype.itemsize * self._cdim
-
-    @property
-    def soa(self):
-        """Are the data in SoA format? This is always false for :class:`Global`
-        objects."""
-        return False
 
     @collective
     def duplicate(self):
@@ -4180,10 +4158,6 @@ class ParLoop(LazyComputation):
     def args(self):
         """Arguments to this parallel loop."""
         return self._actual_args
-
-    @cached_property
-    def _has_soa(self):
-        return any(a._is_soa for a in self._actual_args)
 
     @cached_property
     def is_layered(self):
