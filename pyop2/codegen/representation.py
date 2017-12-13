@@ -438,3 +438,34 @@ class BitShift(Scalar, DTypeMixin):
         assert direction in {"<<", ">>"}
         self.direction = direction
         self.children = expr, shift
+
+
+class Concat(Node, DTypeMixin):
+
+    __slots__ = ("children", "shaping")
+    __front__ = ("shaping", )
+
+    def __init__(self, shaping, *children):
+        assert numpy.prod(shaping) == len(children)
+        assert all(len(c.shape) == len(shaping) for c in children)
+        tmp = numpy.asarray(children, dtype=object).reshape(shaping)
+        for i in range(len(shaping)):
+            index = [slice(None) for _ in range(len(shaping))]
+            for j in range(shaping[i]):
+                index[i] = j
+                assert len(set(c.shape[i] for c in tmp[index])) == 1, "Sub-shapes do not match on axis %d" % j
+        self.children = children
+        self.shaping = shaping
+
+    @cached_property
+    def shape(self):
+        shapes = numpy.empty(self.shaping, dtype=object).reshape(-1)
+        shapes[:] = tuple(c.shape for c in self.children)
+        shapes = shapes.reshape(self.shaping)
+        shape = []
+        dim = len(self.shaping)
+        for i in range(dim):
+            index = [0 for _ in range(dim)]
+            index[i] = slice(None)
+            shape.append(sum(a[i] for a in shapes[index]))
+        return tuple(shape)
