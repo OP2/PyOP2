@@ -43,7 +43,7 @@ class Constant(Terminal):
 
 class DTypeMixin(object):
 
-    @property
+    @cached_property
     def dtype(self):
         dtype, = set(c.dtype for c in self.children)
         return dtype
@@ -101,11 +101,11 @@ class RuntimeIndex(Scalar):
         self.name = name or "r%d" % next(RuntimeIndex._count)
         self.children = lo, hi, constraint
 
-    @property
+    @cached_property
     def extents(self):
         return self.children[:2]
 
-    @property
+    @cached_property
     def dtype(self):
         a, b, c = self.children
         assert a.dtype == b.dtype
@@ -187,7 +187,7 @@ class Literal(Terminal, Scalar):
     def get_hash(self):
         return hash((type(self), self.value))
 
-    @property
+    @cached_property
     def dtype(self):
         return self.value.dtype
 
@@ -212,11 +212,11 @@ class NamedLiteral(Terminal):
     def get_hash(self):
         return hash((type(self), self.shape, tuple(self.value.flat)))
 
-    @property
+    @cached_property
     def shape(self):
         return self.value.shape
 
-    @property
+    @cached_property
     def dtype(self):
         return self.value.dtype
 
@@ -229,7 +229,7 @@ class Sum(Scalar):
         assert not b.shape
         self.children = a, b
 
-    @property
+    @cached_property
     def dtype(self):
         a, b = self.children
         return a.dtype
@@ -243,7 +243,7 @@ class Product(Scalar):
         assert not b.shape
         self.children = a, b
 
-    @property
+    @cached_property
     def dtype(self):
         a, b = self.children
         return a.dtype
@@ -270,15 +270,15 @@ class Indexed(Scalar):
         _, multiindex = self.children
         return tuple(i for i in self.multiindex if isinstance(i, Index))
 
-    @property
+    @cached_property
     def dtype(self):
         return self.aggregate.dtype
 
-    @property
+    @cached_property
     def aggregate(self):
         return self.children[0]
 
-    @property
+    @cached_property
     def multiindex(self):
         return self.children[1]
 
@@ -289,7 +289,7 @@ class When(Node):
     def __init__(self, condition, expr):
         self.children = condition, expr
 
-    @property
+    @cached_property
     def dtype(self):
         return self.children[1].dtype
 
@@ -359,7 +359,7 @@ class Conditional(Scalar):
         self.children = condition, then, else_
         self.shape = then.shape
 
-    @property
+    @cached_property
     def dtype(self):
         return self.children[1].dtype
 
