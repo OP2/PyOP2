@@ -1,5 +1,5 @@
 from abc import ABCMeta, abstractmethod
-from collections import OrderedDict
+from collections import OrderedDict, namedtuple
 import numpy
 
 from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
@@ -10,7 +10,7 @@ from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
                                           Argument, Literal, NamedLiteral,
                                           Materialise, Accumulate, FunctionCall, When,
                                           Symbol, Zero,
-                                          Sum, Product)
+                                          Sum, Product, view)
 
 from pyop2.utils import cached_property
 from pyop2.datatypes import IntType
@@ -18,15 +18,8 @@ from pyop2.op2 import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL, Subset, Decora
 from pyop2.op2 import READ, WRITE, INC
 
 
-class SparseArray(object):
-    __slots__ = ("values", "dof", "offset")
-
-    def __init__(self, values, dof, offset):
-        self.values = values
-        self.dof = dof
-        self.offset = offset
-
-    @property
+class SparseArray(namedtuple("SparseArray", ("values", "dof", "offset"))):
+    @cached_property
     def nrows(self):
         extent, = self.offset.shape
         return extent
@@ -340,11 +333,11 @@ class DatPack(Pack):
         elif self.access is INC:
             multiindex = tuple(Index(e) for e in pack.shape)
             rvalue = self._rvalue(multiindex, loop_indices=loop_indices)
-            return Accumulate(rvalue, Sum(rvalue, Indexed(pack, multiindex)))
+            return Accumulate(rvalue, Sum(rvalue, view(pack, tuple((0, i) for i in multiindex))))
         else:
             multiindex = tuple(Index(e) for e in pack.shape)
             return Accumulate(self._rvalue(multiindex, loop_indices=loop_indices),
-                              Indexed(pack, multiindex))
+                              view(pack, tuple((0, i) for i in multiindex)))
 
 
 class MatPack(Pack):
