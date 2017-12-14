@@ -280,6 +280,12 @@ class Arg(object):
         A :class:`MapValueError` is raised if these conditions are not met."""
         self.data = data
         self._map = map
+        if map is None:
+            self.map_tuple = ()
+        elif isinstance(map, Map):
+            self.map_tuple = (map, )
+        else:
+            self.map_tuple = tuple(map)
         self._idx = idx
         self._access = access
         self._in_flight = False  # some kind of comms in flight for this arg
