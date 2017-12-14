@@ -445,7 +445,11 @@ class Concat(Node, DTypeMixin):
     __slots__ = ("children", "shaping")
     __front__ = ("shaping", )
 
-    def __init__(self, shaping, *children):
+    def __new__(cls, shaping, *children):
+        if len(children) == 1:
+            c, = children
+            assert shaping == c.shape
+            return c
         assert numpy.prod(shaping) == len(children)
         assert all(len(c.shape) == len(shaping) for c in children)
         tmp = numpy.asarray(children, dtype=object).reshape(shaping)
@@ -454,8 +458,11 @@ class Concat(Node, DTypeMixin):
             for j in range(shaping[i]):
                 index[i] = j
                 assert len(set(c.shape[i] for c in tmp[index])) == 1, "Sub-shapes do not match on axis %d" % j
+
+        self = super().__new__(cls)
         self.children = children
         self.shaping = shaping
+        return self
 
     @cached_property
     def shape(self):
@@ -469,3 +476,33 @@ class Concat(Node, DTypeMixin):
             index[i] = slice(None)
             shape.append(sum(a[i] for a in shapes[index]))
         return tuple(shape)
+
+
+def view(var, slices):
+    assert len(slices) == len(var.shape)
+    for (offset, index), s in zip(slices, var.shape):
+        assert isinstance(index, Index)
+        assert offset >= 0
+        assert offset + index.extent <= s
+
+    return Indexed(var, (Sum(Literal(numpy.int32(o)), i) for o, i in slices))
+
+
+class View(Node, DTypeMixin):
+
+    __slots__ = ("children", "slices")
+    __back__ = ("slices", )
+
+    def __init__(self, var, slices):
+        assert len(slices) == len(var.shape)
+        for (offset, extent), s in zip(slices, var.shape):
+            assert offset >= 0
+            assert offset + extent <= s
+
+        self.children = var,
+        self.slices = tuple(tuple(s) for s in slices)
+
+    @cached_property
+    def shape(self):
+        return tuple(e for _, e in self.slices)
+    

@@ -236,15 +236,13 @@ def prepare_arglist(iterset, *args):
         arglist += arg._kernel_args_
     seen = set()
     for arg in args:
-        maps = arg.map
-        if maps is None:
-            continue
+        maps = arg.map_tuple
         for map_ in maps:
-            karg = map_._kernel_args_
-            if karg in seen:
-                continue
-            arglist += karg
-            seen.add(karg)
+            for k in map_._kernel_args_:
+                if k in seen:
+                    continue
+                arglist += (k, )
+                seen.add(k)
     return arglist
 
 
