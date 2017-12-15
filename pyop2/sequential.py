@@ -62,15 +62,20 @@ from pyop2.utils import as_tuple, cached_property, strip, get_petsc_dir
 import coffee.system
 from coffee.plan import ASTKernel
 
+import loopy
+
 
 class Kernel(base.Kernel):
 
     def _ast_to_c(self, ast, opts={}):
         """Transform an Abstract Syntax Tree representing the kernel into a
         string of code (C syntax) suitable to CPU execution."""
-        ast_handler = ASTKernel(ast, self._include_dirs)
-        ast_handler.plan_cpu(self._opts)
-        return ast_handler.gencode()
+        if isinstance(ast, loopy.kernel.LoopKernel):
+            return loopy.generate_code_v2(ast).device_code()
+        else:
+            ast_handler = ASTKernel(ast, self._include_dirs)
+            ast_handler.plan_cpu(self._opts)
+            return ast_handler.gencode()
 
 
 class Arg(base.Arg):
