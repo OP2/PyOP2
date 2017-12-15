@@ -62,6 +62,8 @@ from coffee.visitors import Find, EstimateFlops
 from coffee import base as ast
 from functools import reduce
 
+import loopy
+
 
 def _make_object(name, *args, **kwargs):
     from pyop2 import sequential
@@ -3812,9 +3814,11 @@ class Kernel(Cached):
         # HACK: Temporary fix!
         if isinstance(code, Node):
             code = code.gencode()
-        hashee = (str(code) + name + str(sorted(opts.items())) + str(include_dirs)
-                  + str(headers) + version + str(configuration['loop_fusion'])
-                  + str(ldargs) + str(cpp))
+        if isinstance(code, loopy.kernel.LoopKernel):
+            code = loopy.generate_code_v2(code).device_code()
+        hashee = (str(code) + name + str(sorted(opts.items())) + str(include_dirs) +
+                  str(headers) + version + str(configuration['loop_fusion']) +
+                  str(ldargs) + str(cpp))
         return md5(hashee.encode()).hexdigest()
 
     @cached_property
@@ -3845,7 +3849,7 @@ class Kernel(Cached):
             self._ast = None
             self._code = code
             self._attached_info = {'fundecl': None, 'attached': False}
-        else:
+        elif isinstance(code, Node):
             self._ast = code
             self._code = self._ast_to_c(self._ast, opts)
             search = Find((ast.FunDecl, ast.FlatBlock)).visit(self._ast)
@@ -3856,6 +3860,15 @@ class Kernel(Cached):
                 'fundecl': fundecl,
                 'attached': False,
                 'flatblocks': len(flatblocks) > 0
+            }
+        else:
+            assert isinstance(code, loopy.kernel.LoopKernel)
+            self._ast = code
+            self._code = self._ast_to_c(self._ast, opts)
+            self._attached_info = {
+                'fundecl': None,
+                'attached': False,
+                'flatblocks': True
             }
         self._initialized = True
 
