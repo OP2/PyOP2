@@ -194,6 +194,7 @@ def generate(builder):
     assumptions, = reduce(operator.and_,
                           parameters.assumptions.values()).params().get_basic_sets()
     options = loopy.Options(check_dep_resolution=True)
+    kernel_code = loopy.generate_code_v2(builder.kernel).device_code()
 
     knl = loopy.make_kernel(domains,
                             statements,
@@ -205,7 +206,7 @@ def generate(builder):
                             options=options,
                             assumptions=assumptions,
                             name="wrap_%s" % builder.kernel.name,
-                            preambles=[(0, builder.kernel.code())])
+                            preambles=[(0, kernel_code)])
 
     for indices in context.index_ordering:
         knl = loopy.prioritize_loops(knl, indices)
@@ -301,6 +302,16 @@ def statement_functioncall(expr, context):
     predicates = frozenset(context.conditions)
 
     statement_id, depends_on = context.instruction_dependencies[expr]
+    args = [c.children[0] if isinstance(c, Indexed) else c for c in expr.children]
+    code = expr.name
+    code += "("
+    code += ", ".join([arg.name for arg in args])
+    code += ");"
+    return loopy.CInstruction("", code,
+                              within_inames=within_inames,
+                              predicates=predicates,
+                              id=statement_id,
+                              depends_on=depends_on)
     return loopy.CallInstruction(tuple(written), call,
                                  within_inames=within_inames,
                                  predicates=predicates,
@@ -433,7 +444,8 @@ def expression_variable(expr, parameters):
 @expression.register(Zero)
 def expression_zero(expr, parameters):
     assert expr.shape == ()
-    return loopy.symbolic.TypeCast(expr.dtype, expr.dtype.type(0))
+    return 0
+    # return loopy.symbolic.TypeCast(expr.dtype, expr.dtype.type(0))
 
 
 @expression.register(Literal)
