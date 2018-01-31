@@ -58,7 +58,6 @@ from pyop2.mpi import collective
 from pyop2.profiling import timed_region
 from pyop2.utils import as_tuple, cached_property, strip, get_petsc_dir
 
-
 import coffee.system
 from coffee.plan import ASTKernel
 
@@ -771,6 +770,18 @@ PetscErrorCode %(wrapper_name)s(int start,
 
     @cached_property
     def code_to_compile(self):
+        from pyop2.codegen.builder import WrapperBuilder
+        from pyop2.codegen.rep2loopy import generate
+        builder = WrapperBuilder(iterset=self._iterset, iteration_region=ALL)
+        for arg in self._args:
+            builder.add_argument(arg)
+        builder.set_kernel(self._kernel._ast)
+        wrapper = generate(builder)
+        print(wrapper)
+        code = loopy.generate_code_v2(wrapper)
+
+        return code.device_code()
+
         if not hasattr(self, '_args'):
             raise RuntimeError("JITModule has no args associated with it, should never happen")
 
