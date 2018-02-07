@@ -770,17 +770,41 @@ PetscErrorCode %(wrapper_name)s(int start,
 
     @cached_property
     def code_to_compile(self):
-        from pyop2.codegen.builder import WrapperBuilder
-        from pyop2.codegen.rep2loopy import generate
-        builder = WrapperBuilder(iterset=self._iterset, iteration_region=ALL)
-        for arg in self._args:
-            builder.add_argument(arg)
-        builder.set_kernel(self._kernel._ast)
-        wrapper = generate(builder)
-        print(wrapper)
-        code = loopy.generate_code_v2(wrapper)
+        if isinstance(self._kernel._ast, loopy.LoopKernel):
+            from pyop2.codegen.builder import WrapperBuilder
+            from pyop2.codegen.rep2loopy import generate
+            builder = WrapperBuilder(iterset=self._iterset, iteration_region=ALL)
+            for arg in self._args:
+                builder.add_argument(arg)
+            builder.set_kernel(self._kernel._ast)
+            # builder.set_batch(4)
+            wrapper = generate(builder)
+            code = loopy.generate_code_v2(wrapper)
 
-        return code.device_code()
+            index_type = as_ctypes(IntType)
+            argtypes = [index_type, index_type]
+            if self._iterset._extruded:
+                argtypes.append(ctypes.c_voidp)
+
+            for arg in self._args:
+                if arg._is_mat:
+                    argtypes.append(arg.data._argtype)
+                else:
+                    for d in arg.data:
+                        argtypes.append(d._argtype)
+
+            for m in builder.maps.keys():
+                argtypes.append(m._argtype)
+            self._argtypes = argtypes
+
+            nbytes = 0
+            for arg in self._args:
+                nbytes += arg.data.nbytes
+            for m in builder.maps.keys():
+                nbytes += len(m.values) * 4
+            print("BYTES= {0}".format(nbytes))
+
+            return code.device_code()
 
         if not hasattr(self, '_args'):
             raise RuntimeError("JITModule has no args associated with it, should never happen")
@@ -838,7 +862,10 @@ PetscErrorCode %(wrapper_name)s(int start,
 
         if self._kernel._cpp:
             extension = "cpp"
-        self._fun = compilation.load(self.code_to_compile,
+
+        code_to_compile = self.code_to_compile
+
+        self._fun = compilation.load(code_to_compile,
                                      extension,
                                      self._wrapper_name,
                                      cppargs=cppargs,
@@ -867,6 +894,7 @@ PetscErrorCode %(wrapper_name)s(int start,
     def set_argtypes(self, iterset, *args):
         index_type = as_ctypes(IntType)
         argtypes = [index_type, index_type]
+
         if iterset.masks is not None:
             argtypes.append(iterset.masks._argtype)
         if isinstance(iterset, Subset):
@@ -901,6 +929,11 @@ PetscErrorCode %(wrapper_name)s(int start,
 class ParLoop(petsc_base.ParLoop):
 
     def prepare_arglist(self, iterset, *args):
+
+        if isinstance(self._kernel._ast, loopy.LoopKernel):
+            from pyop2.codegen.rep2loopy import prepare_arglist
+            return prepare_arglist(iterset, *args)
+
         arglist = []
         if iterset.masks is not None:
             arglist.append(iterset.masks.handle)
@@ -935,7 +968,10 @@ class ParLoop(petsc_base.ParLoop):
 
     @collective
     def _compute(self, part, fun, *arglist):
-        with timed_region("ParLoop%s" % self.iterset.name):
+        lp_str = ""
+        if isinstance(self._kernel._ast, loopy.LoopKernel):
+            lp_str = "_LOOPY"
+        with timed_region("ParLoop{0}".format(self.iterset.name) + lp_str):
             fun(part.offset, part.offset + part.size, *arglist)
             self.log_flops(self.num_flops * part.size)
 
