@@ -369,7 +369,8 @@ class LinuxCompiler(Compiler):
     :kwarg comm: Optional communicator to compile the code on (only
     rank 0 compiles code) (defaults to COMM_WORLD)."""
     def __init__(self, cppargs=[], ldargs=[], cpp=False, comm=None):
-        opt_flags = ['-march=native', '-O3', '-ffast-math']
+        cppargs.pop()
+        opt_flags = ['-march=native', '-O3', '-ffast-math', "-mavx2"]
         if configuration['debug']:
             opt_flags = ['-O0', '-g']
         cc = "mpicc"
@@ -379,6 +380,7 @@ class LinuxCompiler(Compiler):
             stdargs = []
         cppargs = stdargs + ['-fPIC', '-Wall'] + opt_flags + cppargs
         ldargs = ['-shared'] + ldargs
+
         super(LinuxCompiler, self).__init__(cc, cppargs=cppargs, ldargs=ldargs,
                                             cpp=cpp, comm=comm)
 
