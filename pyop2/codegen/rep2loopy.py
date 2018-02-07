@@ -194,29 +194,70 @@ def generate(builder):
     assumptions, = reduce(operator.and_,
                           parameters.assumptions.values()).params().get_basic_sets()
     options = loopy.Options(check_dep_resolution=True)
-    kernel_code = loopy.generate_code_v2(builder.kernel).device_code()
 
-    knl = loopy.make_kernel(domains,
-                            statements,
-                            kernel_data=parameters.kernel_data,
-                            target=loopy.CTarget(),
-                            temporary_variables=parameters.temporaries,
-                            function_manglers=[petsc_function_mangler, kernel_mangler],
-                            symbol_manglers=[symbol_mangler],
-                            options=options,
-                            assumptions=assumptions,
-                            name="wrap_%s" % builder.kernel.name,
-                            preambles=[(0, kernel_code)])
+    wrapper = loopy.make_kernel(domains,
+                                statements,
+                                kernel_data=parameters.kernel_data,
+                                target=loopy.CTarget(),
+                                temporary_variables=parameters.temporaries,
+                                function_manglers=[petsc_function_mangler, kernel_mangler],
+                                symbol_manglers=[symbol_mangler],
+                                options=options,
+                                assumptions=assumptions,
+                                name="wrap_%s" % builder.kernel.name)
 
     for indices in context.index_ordering:
-        knl = loopy.prioritize_loops(knl, indices)
+        wrapper = loopy.prioritize_loops(wrapper, indices)
+
+    kernel = builder.kernel
+
+    if builder.batch > 1:
+        for name in wrapper.temporary_variables:
+            tv = wrapper.temporary_variables[name]
+            wrapper.temporary_variables[name] = tv.copy(alignment=64)
+        wrapper = loopy.assume(wrapper, "start mod {0} = 0".format(builder.batch))
+        wrapper = loopy.assume(wrapper, "exists zz: zz > 0 and end = {0}*zz + start".format(builder.batch))
+        wrapper = loopy.split_iname(wrapper, "n", builder.batch, inner_tag="ilp.seq")
+        new_insn = []
+        for insn in wrapper.instructions:
+            if isinstance(insn, loopy.CInstruction):
+                within_inames = insn.within_inames - set(['n_inner'])
+                new_insn.append(insn.copy(within_inames=within_inames))
+            else:
+                new_insn.append(insn)
+        wrapper = wrapper.copy(instructions=new_insn)
+        kernel = loopy.to_batched(kernel, builder.batch,
+                                  tuple([arg.name for arg in kernel.args]),
+                                  batch_iname_prefix="elem")
+        # Transpose arguments and temporaries
+        def transpose(tags):
+            new_tags = ["N0"]
+            for tag in tags[1:]:
+                new_tags.append("N{0}".format(tag.layout_nesting_level + 1))
+            return tuple(new_tags)
+
+        for arg in kernel.args:
+            tags = ["N0"]
+            kernel = loopy.tag_array_axes(kernel, arg.name, transpose(arg.dim_tags))
+        for tv in kernel.temporary_variables.values():
+            if tv.initializer is None:
+                kernel = loopy.tag_array_axes(kernel, tv.name, transpose(tv.dim_tags))
+        kernel = loopy.tag_inames(kernel, {"elem": "ilp.seq"})
+
+    kernel_code = loopy.generate_code_v2(kernel).device_code()
+    # FIXME: declare static inline
+    kernel_code = kernel_code.replace("void", "static inline void")
+    kernel_code = "#include <math.h>\n" + kernel_code
+
+    wrapper = wrapper.copy(preambles=[(0, kernel_code)])
+
     # refcount = collect_refcount(instructions)
     # for map_, *_ in builder.maps.values():
     #     if refcount[map_] > 1 or builder.extruded:
     #         knl = loopy.add_prefetch(knl, map_.name,
     #                                  footprint_subscripts=[(pym.Variable(builder._loop_index.name),
     #                                                         pym.Slice((None, )))])
-    return knl
+    return wrapper
 
 
 def argtypes(kernel):

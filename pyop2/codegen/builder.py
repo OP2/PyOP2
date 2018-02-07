@@ -433,6 +433,7 @@ class WrapperBuilder(object):
         self.iterset = iterset
         self.iteration_region = iteration_region
         self.pass_layer_to_kernel = False
+        self.batch = 1
 
     @property
     def subset(self):
@@ -448,6 +449,9 @@ class WrapperBuilder(object):
 
     def set_kernel(self, kernel):
         self.kernel = kernel
+
+    def set_batch(self, batch):
+        self.batch = batch
 
     @cached_property
     def loop_extents(self):
