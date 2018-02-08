@@ -665,6 +665,10 @@ class Mat(base.Mat):
         self._init()
         self.assembly_state = Mat.ASSEMBLED
 
+    @utils.cached_property
+    def _kernel_args_(self):
+        return (self.handle.handle, )
+
     @collective
     def _init(self):
         if not self.dtype == PETSc.ScalarType:

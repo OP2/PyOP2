@@ -58,9 +58,10 @@ from pyop2.mpi import collective
 from pyop2.profiling import timed_region
 from pyop2.utils import as_tuple, cached_property, strip, get_petsc_dir
 
-
 import coffee.system
 from coffee.plan import ASTKernel
+
+import loopy
 
 
 class Kernel(base.Kernel):
@@ -68,9 +69,12 @@ class Kernel(base.Kernel):
     def _ast_to_c(self, ast, opts={}):
         """Transform an Abstract Syntax Tree representing the kernel into a
         string of code (C syntax) suitable to CPU execution."""
-        ast_handler = ASTKernel(ast, self._include_dirs)
-        ast_handler.plan_cpu(self._opts)
-        return ast_handler.gencode()
+        if isinstance(ast, loopy.kernel.LoopKernel):
+            return loopy.generate_code_v2(ast).device_code()
+        else:
+            ast_handler = ASTKernel(ast, self._include_dirs)
+            ast_handler.plan_cpu(self._opts)
+            return ast_handler.gencode()
 
 
 class Arg(base.Arg):
@@ -766,6 +770,42 @@ PetscErrorCode %(wrapper_name)s(int start,
 
     @cached_property
     def code_to_compile(self):
+        if isinstance(self._kernel._ast, loopy.LoopKernel):
+            from pyop2.codegen.builder import WrapperBuilder
+            from pyop2.codegen.rep2loopy import generate
+            builder = WrapperBuilder(iterset=self._iterset, iteration_region=ALL)
+            for arg in self._args:
+                builder.add_argument(arg)
+            builder.set_kernel(self._kernel._ast)
+            # builder.set_batch(4)
+            wrapper = generate(builder)
+            code = loopy.generate_code_v2(wrapper)
+
+            index_type = as_ctypes(IntType)
+            argtypes = [index_type, index_type]
+            if self._iterset._extruded:
+                argtypes.append(ctypes.c_voidp)
+
+            for arg in self._args:
+                if arg._is_mat:
+                    argtypes.append(arg.data._argtype)
+                else:
+                    for d in arg.data:
+                        argtypes.append(d._argtype)
+
+            for m in builder.maps.keys():
+                argtypes.append(m._argtype)
+            self._argtypes = argtypes
+
+            nbytes = 0
+            for arg in self._args:
+                nbytes += arg.data.nbytes
+            for m in builder.maps.keys():
+                nbytes += len(m.values) * 4
+            print("BYTES= {0}".format(nbytes))
+
+            return code.device_code()
+
         if not hasattr(self, '_args'):
             raise RuntimeError("JITModule has no args associated with it, should never happen")
 
@@ -773,20 +813,11 @@ PetscErrorCode %(wrapper_name)s(int start,
         externc_open = '' if not self._kernel._cpp else 'extern "C" {'
         externc_close = '' if not self._kernel._cpp else '}'
         headers = "\n".join([compiler.get('vect_header', "")])
-        if any(arg._is_soa for arg in self._args):
-            kernel_code = """
-            #define OP2_STRIDE(a, idx) a[idx]
-            %(header)s
-            %(code)s
-            #undef OP2_STRIDE
-            """ % {'code': self._kernel.code(),
-                   'header': headers}
-        else:
-            kernel_code = """
+        kernel_code = """
 %(header)s
 %(code)s
-            """ % {'code': self._kernel.code(),
-                   'header': headers}
+        """ % {'code': self._kernel.code(),
+               'header': headers}
         code_to_compile = strip(dedent(self._wrapper) % self.generate_code())
 
         code_to_compile = """
@@ -831,7 +862,10 @@ PetscErrorCode %(wrapper_name)s(int start,
 
         if self._kernel._cpp:
             extension = "cpp"
-        self._fun = compilation.load(self.code_to_compile,
+
+        code_to_compile = self.code_to_compile
+
+        self._fun = compilation.load(code_to_compile,
                                      extension,
                                      self._wrapper_name,
                                      cppargs=cppargs,
@@ -860,6 +894,7 @@ PetscErrorCode %(wrapper_name)s(int start,
     def set_argtypes(self, iterset, *args):
         index_type = as_ctypes(IntType)
         argtypes = [index_type, index_type]
+
         if iterset.masks is not None:
             argtypes.append(iterset.masks._argtype)
         if isinstance(iterset, Subset):
@@ -894,6 +929,11 @@ PetscErrorCode %(wrapper_name)s(int start,
 class ParLoop(petsc_base.ParLoop):
 
     def prepare_arglist(self, iterset, *args):
+
+        if isinstance(self._kernel._ast, loopy.LoopKernel):
+            from pyop2.codegen.rep2loopy import prepare_arglist
+            return prepare_arglist(iterset, *args)
+
         arglist = []
         if iterset.masks is not None:
             arglist.append(iterset.masks.handle)
@@ -928,7 +968,10 @@ class ParLoop(petsc_base.ParLoop):
 
     @collective
     def _compute(self, part, fun, *arglist):
-        with timed_region("ParLoop%s" % self.iterset.name):
+        lp_str = ""
+        if isinstance(self._kernel._ast, loopy.LoopKernel):
+            lp_str = "_LOOPY"
+        with timed_region("ParLoop{0}".format(self.iterset.name) + lp_str):
             fun(part.offset, part.offset + part.size, *arglist)
             self.log_flops(self.num_flops * part.size)
 
