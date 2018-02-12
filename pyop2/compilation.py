@@ -349,7 +349,7 @@ class MacCompiler(Compiler):
         if cpp:
             cc = "mpicxx"
             stdargs = []
-        cppargs = stdargs + ['-fPIC', '-Wall', '-framework', 'Accelerate'] + \
+        cppargs = stdargs + ['-fPIC','-fopenmp', '-Wall', '-framework', 'Accelerate'] + \
             opt_flags + cppargs
         ldargs = ['-dynamiclib'] + ldargs
         super(MacCompiler, self).__init__(cc,
@@ -371,6 +371,9 @@ class LinuxCompiler(Compiler):
     def __init__(self, cppargs=[], ldargs=[], cpp=False, comm=None):
         cppargs.pop()
         opt_flags = ['-march=native', '-O3', '-ffast-math', "-mavx2"]
+        import os
+        if os.environ['VECTORIZE'] != '1':
+            opt_flags += ['-fno-tree-vectorize', "-mno-avx", "-mno-avx2", "-mno-sse2"]
         if configuration['debug']:
             opt_flags = ['-O0', '-g']
         cc = "mpicc"
@@ -378,7 +381,7 @@ class LinuxCompiler(Compiler):
         if cpp:
             cc = "mpicxx"
             stdargs = []
-        cppargs = stdargs + ['-fPIC', '-Wall'] + opt_flags + cppargs
+        cppargs = stdargs + ['-fPIC', '-fopenmp', '-Wall'] + opt_flags + cppargs
         ldargs = ['-shared'] + ldargs
 
         super(LinuxCompiler, self).__init__(cc, cppargs=cppargs, ldargs=ldargs,
