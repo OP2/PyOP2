@@ -777,7 +777,10 @@ PetscErrorCode %(wrapper_name)s(int start,
             for arg in self._args:
                 builder.add_argument(arg)
             builder.set_kernel(self._kernel._ast)
-            # builder.set_batch(4)
+            import os
+            batch_size = int(os.environ['BATCHSIZE'])
+            if batch_size > 1:
+                builder.set_batch(batch_size)
             wrapper = generate(builder)
             code = loopy.generate_code_v2(wrapper)
 

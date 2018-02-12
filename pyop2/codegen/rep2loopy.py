@@ -247,6 +247,7 @@ def generate(builder):
     kernel_code = loopy.generate_code_v2(kernel).device_code()
     # FIXME: declare static inline
     kernel_code = kernel_code.replace("void", "static inline void")
+    kernel_code = kernel_code.replace("for (int elem", "#pragma omp simd\nfor (int elem")
     kernel_code = "#include <math.h>\n" + kernel_code
 
     wrapper = wrapper.copy(preambles=[(0, kernel_code)])
