@@ -211,17 +211,29 @@ def generate(builder):
 
     kernel = builder.kernel
 
+    for name in wrapper.temporary_variables:
+        tv = wrapper.temporary_variables[name]
+        wrapper.temporary_variables[name] = tv.copy(alignment=64)
+
     if builder.batch > 1:
-        for name in wrapper.temporary_variables:
-            tv = wrapper.temporary_variables[name]
-            wrapper.temporary_variables[name] = tv.copy(alignment=64)
-        wrapper = loopy.assume(wrapper, "start mod {0} = 0".format(builder.batch))
-        wrapper = loopy.assume(wrapper, "exists zz: zz > 0 and end = {0}*zz + start".format(builder.batch))
-        wrapper = loopy.split_iname(wrapper, "n", builder.batch, inner_tag="ilp.seq")
+
+        if builder.extruded:
+            outer = "layer"
+            inner = "layer_inner"
+            wrapper = loopy.assume(wrapper, "t0 mod {0} = 0".format(builder.batch))
+            wrapper = loopy.assume(wrapper, "exists zz: zz > 0 and t1 = {0}*zz + t0".format(builder.batch))
+        else:
+            outer = "n"
+            inner = "n_inner"
+            wrapper = loopy.assume(wrapper, "start mod {0} = 0".format(builder.batch))
+            wrapper = loopy.assume(wrapper, "exists zz: zz > 0 and end = {0}*zz + start".format(builder.batch))
+
+        wrapper = loopy.split_iname(wrapper, outer, builder.batch, inner_tag="ilp.seq")
+
         new_insn = []
         for insn in wrapper.instructions:
             if isinstance(insn, loopy.CInstruction):
-                within_inames = insn.within_inames - set(['n_inner'])
+                within_inames = insn.within_inames - set([inner])
                 new_insn.append(insn.copy(within_inames=within_inames))
             else:
                 new_insn.append(insn)
