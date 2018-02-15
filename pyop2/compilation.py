@@ -371,7 +371,7 @@ class LinuxCompiler(Compiler):
         opt_flags = ['-march=native', '-O3', '-ffast-math', "-mavx2"]
         import os
         if os.environ['VECTORIZE'] != '1':
-            opt_flags += ['-fno-tree-vectorize', "-mno-avx", "-mno-avx2", "-mno-sse2"]
+            opt_flags += ['-fno-tree-vectorize', "-mno-avx", "-mno-avx2"]
         if configuration['debug']:
             opt_flags = ['-O0', '-g']
         cc = "mpicc"
@@ -379,7 +379,7 @@ class LinuxCompiler(Compiler):
         if cpp:
             cc = "mpicxx"
             stdargs = []
-        cppargs = stdargs + ['-fPIC', '-fopenmp', '-Wall'] + opt_flags + cppargs
+        cppargs = stdargs + ['-fPIC', '-fopenmp-simd', '-Wall'] + opt_flags + cppargs
         ldargs = ['-shared'] + ldargs
 
         super(LinuxCompiler, self).__init__(cc, cppargs=cppargs, ldargs=ldargs,
