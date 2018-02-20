@@ -3708,7 +3708,7 @@ class Kernel(Cached):
         if isinstance(code, Node):
             code = code.gencode()
         if isinstance(code, loopy.kernel.LoopKernel):
-            code = str(code)
+            code = loopy.generate_code_v2(code).device_code()
         hashee = (str(code) + name + str(sorted(opts.items())) + str(include_dirs) +
                   str(headers) + version + str(configuration['loop_fusion']) +
                   str(ldargs) + str(cpp))

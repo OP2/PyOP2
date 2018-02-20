@@ -195,6 +195,9 @@ class Compiler(object):
             if version.StrictVersion("7.1.0") <= ver < version.StrictVersion("7.1.2"):
                 # GCC bug https://gcc.gnu.org/bugzilla/show_bug.cgi?id=81633
                 return ["-fno-tree-loop-vectorize"]
+            if version.StrictVersion("4.9.4") <= ver < version.StrictVersion("6.1"):
+                # GCC bug https://gcc.gnu.org/bugzilla/show_bug.cgi?id=84477
+                return ["-fno-tree-loop-vectorize"]
         return []
 
     @collective
