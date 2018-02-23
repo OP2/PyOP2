@@ -215,52 +215,28 @@ def generate(builder):
         tv = wrapper.temporary_variables[name]
         wrapper.temporary_variables[name] = tv.copy(alignment=64)
 
-    if builder.batch > 1:
+    if builder.ispc:
+        wrapper = wrapper.copy(target=loopy.ISPCTarget())
+        kernel = kernel.copy(target=loopy.ISPCTarget())
+        kernel_code = loopy.generate_code_v2(kernel).device_code()
+        kernel_code = kernel_code.replace("task void", "static inline void")
+        kernel_code = kernel_code.replace("fabs", "abs")
+        kernel_code = kernel_code.replace("otherwise_inner", "otherwise")
+        kernel_code = kernel_code.replace("uniform double t", "double t")
+        kernel_code = kernel_code.replace("static double ", "uniform static double ")
+        start = kernel_code.find("static inline")
+        end = kernel_code.find(")\n{") + 1
+        middle = kernel_code[start:end]
+        middle = middle.replace("uniform", "")
+        middle = middle.replace("*", "")
+        middle = middle.replace(",", "[],")
+        middle = middle.replace(")", "[])")
+        middle = middle.replace("  ", " ")
+        kernel_code = kernel_code[:start] + middle + kernel_code[end:]
 
-        if builder.extruded:
-            outer = "layer"
-            inner = "layer_inner"
-            wrapper = loopy.assume(wrapper, "t0 mod {0} = 0".format(builder.batch))
-            wrapper = loopy.assume(wrapper, "exists zz: zz > 0 and t1 = {0}*zz + t0".format(builder.batch))
-        else:
-            outer = "n"
-            inner = "n_inner"
-            wrapper = loopy.assume(wrapper, "start mod {0} = 0".format(builder.batch))
-            wrapper = loopy.assume(wrapper, "exists zz: zz > 0 and end = {0}*zz + start".format(builder.batch))
-
-        wrapper = loopy.split_iname(wrapper, outer, builder.batch, inner_tag="ilp.seq")
-
-        new_insn = []
-        for insn in wrapper.instructions:
-            if isinstance(insn, loopy.CInstruction):
-                within_inames = insn.within_inames - set([inner])
-                new_insn.append(insn.copy(within_inames=within_inames))
-            else:
-                new_insn.append(insn)
-        wrapper = wrapper.copy(instructions=new_insn)
-        kernel = loopy.to_batched(kernel, builder.batch,
-                                  tuple([arg.name for arg in kernel.args]),
-                                  batch_iname_prefix="elem")
-        # Transpose arguments and temporaries
-        def transpose(tags):
-            new_tags = ["N0"]
-            for tag in tags[1:]:
-                new_tags.append("N{0}".format(tag.layout_nesting_level + 1))
-            return tuple(new_tags)
-
-        for arg in kernel.args:
-            tags = ["N0"]
-            kernel = loopy.tag_array_axes(kernel, arg.name, transpose(arg.dim_tags))
-        for tv in kernel.temporary_variables.values():
-            if tv.initializer is None:
-                kernel = loopy.tag_array_axes(kernel, tv.name, transpose(tv.dim_tags))
-        kernel = loopy.tag_inames(kernel, {"elem": "ilp.seq"})
-
-    kernel_code = loopy.generate_code_v2(kernel).device_code()
-    # FIXME: declare static inline
-    kernel_code = kernel_code.replace("void", "static inline void")
-    kernel_code = kernel_code.replace("for (int elem", "#pragma omp simd\nfor (int elem")
-    kernel_code = "#include <math.h>\n" + kernel_code
+    else:
+        kernel_code = loopy.generate_code_v2(kernel).device_code()
+        kernel_code = kernel_code.replace("void", "static inline void")
 
     wrapper = wrapper.copy(preambles=[(0, kernel_code)])
 

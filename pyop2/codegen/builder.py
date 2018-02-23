@@ -434,6 +434,7 @@ class WrapperBuilder(object):
         self.iteration_region = iteration_region
         self.pass_layer_to_kernel = False
         self.batch = 1
+        self.ispc = False
 
     @property
     def subset(self):
@@ -452,6 +453,9 @@ class WrapperBuilder(object):
 
     def set_batch(self, batch):
         self.batch = batch
+
+    def set_ispc(self, ispc):
+        self.ispc = ispc
 
     @cached_property
     def loop_extents(self):

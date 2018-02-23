@@ -70,7 +70,7 @@ class Kernel(base.Kernel):
         """Transform an Abstract Syntax Tree representing the kernel into a
         string of code (C syntax) suitable to CPU execution."""
         if isinstance(ast, loopy.kernel.LoopKernel):
-            return loopy.generate_code_v2(ast).device_code()
+            return loopy.generate_code_v2(ast).all_code()
         else:
             ast_handler = ASTKernel(ast, self._include_dirs)
             ast_handler.plan_cpu(self._opts)
@@ -778,9 +778,8 @@ PetscErrorCode %(wrapper_name)s(int start,
                 builder.add_argument(arg)
             builder.set_kernel(self._kernel._ast)
             import os
-            batch_size = int(os.environ['BATCHSIZE'])
-            if batch_size > 1:
-                builder.set_batch(batch_size)
+            ispc = bool(os.environ['LOOPY_ISPC'])
+            builder.set_ispc(ispc)
             wrapper = generate(builder)
             code = loopy.generate_code_v2(wrapper)
 
@@ -807,7 +806,16 @@ PetscErrorCode %(wrapper_name)s(int start,
                 nbytes += len(m.values) * 4
             print("BYTES= {0}".format(nbytes))
 
-            return code.device_code()
+            if ispc:
+                code = code.device_code().replace("for (uniform int32 n = start; n <= -1 + end; ++n)", "foreach (n = start ... end)")
+                start = code.find("task void")
+                middle = code[start:].replace("uniform double t", "double t")
+                code = code[:start] + middle
+                code = code.replace("task", "export")
+                code = code.replace("_inner", "")
+                return code
+
+            return code.all_code()
 
         if not hasattr(self, '_args'):
             raise RuntimeError("JITModule has no args associated with it, should never happen")

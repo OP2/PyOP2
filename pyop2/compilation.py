@@ -254,6 +254,17 @@ class Compiler(object):
                 with progress(INFO, 'Compiling wrapper'):
                     with open(cname, "w") as f:
                         f.write(src)
+
+                    ispc = bool(os.environ['LOOPY_ISPC'])
+                    if ispc and "petsc" not in src:
+                        cmd = "ispc {0} -o test.o --pic -O3".format(cname)
+                        print(cmd)
+                        os.system(cmd)
+                        cmd = "gcc -shared -o {0} test.o".format(soname)
+                        print(cmd)
+                        os.system(cmd)
+                        return ctypes.CDLL(soname)
+
                     # Compiler also links
                     if self._ld is None:
                         cc = [self._cc] + self._cppargs + \
