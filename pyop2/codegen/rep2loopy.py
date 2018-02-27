@@ -256,6 +256,7 @@ def generate(builder):
                 kernel = loopy.tag_array_axes(kernel, tv.name, transpose(tv.dim_tags))
         kernel = loopy.tag_inames(kernel, {"elem": "ilp.seq"})
 
+    kernel = kernel.copy(target=loopy.CTarget())
     kernel_code = loopy.generate_code_v2(kernel).device_code()
     # FIXME: declare static inline
     kernel_code = kernel_code.replace("void", "static inline void")

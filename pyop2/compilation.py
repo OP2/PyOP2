@@ -381,7 +381,7 @@ class LinuxCompiler(Compiler):
         if cpp:
             cc = "mpicxx"
             stdargs = []
-        cppargs = stdargs + ['-fPIC', '-fopenmp-simd', '-Wall'] + opt_flags + cppargs
+        cppargs = stdargs + ['-fPIC', '-fopenmp', '-Wall'] + opt_flags + cppargs
         ldargs = ['-shared'] + ldargs
 
         super(LinuxCompiler, self).__init__(cc, cppargs=cppargs, ldargs=ldargs,
