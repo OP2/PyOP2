@@ -204,6 +204,7 @@ def generate(builder):
                                 symbol_manglers=[symbol_mangler],
                                 options=options,
                                 assumptions=assumptions,
+                                lang_version=(2018, 1),
                                 name="wrap_%s" % builder.kernel.name)
 
     for indices in context.index_ordering:
