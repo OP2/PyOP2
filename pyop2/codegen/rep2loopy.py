@@ -257,11 +257,21 @@ def generate(builder):
                 kernel = loopy.tag_array_axes(kernel, tv.name, transpose(tv.dim_tags))
         kernel = loopy.tag_inames(kernel, {"elem": "ilp.seq"})
 
-    kernel = kernel.copy(target=loopy.CTarget())
+    # kernel = kernel.copy(target=loopy.CTarget())
+
+    # mark inner most loop as omp simd
+    innermost_iname = set(kernel.all_inames())
+    priority, = kernel.loop_priority
+    for inst in kernel.instructions:
+        for iname in list(sorted(inst.within_inames, key=lambda iname: priority.index(iname)))[:-1]:
+            innermost_iname.discard(iname)
+
+    for iname in innermost_iname:
+        kernel.iname_to_pragma[iname] = "omp simd"
+
     kernel_code = loopy.generate_code_v2(kernel).device_code()
     # FIXME: declare static inline
     kernel_code = kernel_code.replace("void", "static inline void")
-    kernel_code = kernel_code.replace("for (int elem", "#pragma omp simd\nfor (int elem")
     kernel_code = "#include <math.h>\n" + kernel_code
 
     wrapper = wrapper.copy(preambles=[(0, kernel_code)])
