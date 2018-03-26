@@ -212,9 +212,12 @@ def generate(builder):
 
     kernel = builder.kernel
 
+    alignment = 64
+
     for name in wrapper.temporary_variables:
         tv = wrapper.temporary_variables[name]
-        wrapper.temporary_variables[name] = tv.copy(alignment=64)
+        if tv.shape:
+            wrapper.temporary_variables[name] = tv.copy(alignment=alignment)
 
     if builder.batch > 1:
 
@@ -239,8 +242,11 @@ def generate(builder):
             else:
                 new_insn.append(insn)
         wrapper = wrapper.copy(instructions=new_insn)
+
+        args_to_batch = tuple([arg.name for arg in kernel.args if arg.shape != (1,)])
+
         kernel = loopy.to_batched(kernel, builder.batch,
-                                  tuple([arg.name for arg in kernel.args]),
+                                  args_to_batch,
                                   batch_iname_prefix="elem")
         # Transpose arguments and temporaries
         def transpose(tags):
@@ -249,9 +255,11 @@ def generate(builder):
                 new_tags.append("N{0}".format(tag.layout_nesting_level + 1))
             return tuple(new_tags)
 
-        for arg in kernel.args:
+        for arg_name in args_to_batch:
+            arg = kernel.arg_dict[arg_name]
             tags = ["N0"]
-            kernel = loopy.tag_array_axes(kernel, arg.name, transpose(arg.dim_tags))
+            kernel = loopy.tag_array_axes(kernel, arg_name, transpose(arg.dim_tags))
+
         for tv in kernel.temporary_variables.values():
             if tv.initializer is None:
                 kernel = loopy.tag_array_axes(kernel, tv.name, transpose(tv.dim_tags))
@@ -259,15 +267,24 @@ def generate(builder):
 
     # kernel = kernel.copy(target=loopy.CTarget())
 
-    # mark inner most loop as omp simd
-    innermost_iname = set(kernel.all_inames())
-    priority, = kernel.loop_priority
-    for inst in kernel.instructions:
-        for iname in list(sorted(inst.within_inames, key=lambda iname: priority.index(iname)))[:-1]:
-            innermost_iname.discard(iname)
+    for name in kernel.temporary_variables:
+        tv = kernel.temporary_variables[name]
+        if tv.shape:
+            kernel.temporary_variables[name] = tv.copy(alignment=alignment)
 
-    for iname in innermost_iname:
-        kernel.iname_to_pragma[iname] = "omp simd"
+
+    # mark inner most loop as omp simd
+    import os
+    if os.environ['INNERMOST'] == '1':
+        innermost_iname = set(kernel.all_inames())
+        priority, = kernel.loop_priority
+        priority = priority + ('elem',)
+        for inst in kernel.instructions:
+            for iname in list(sorted(inst.within_inames, key=lambda iname: priority.index(iname)))[:-1]:
+                innermost_iname.discard(iname)
+
+        for iname in innermost_iname:
+            kernel.iname_to_pragma[iname] = "omp simd"
 
     kernel_code = loopy.generate_code_v2(kernel).device_code()
     # FIXME: declare static inline
