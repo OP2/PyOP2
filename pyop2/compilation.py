@@ -368,10 +368,7 @@ class LinuxCompiler(Compiler):
     rank 0 compiles code) (defaults to COMM_WORLD)."""
     def __init__(self, cppargs=[], ldargs=[], cpp=False, comm=None):
         cppargs.pop()
-        opt_flags = ['-march=native', '-O3', '-ffast-math', "-mavx2"]
-        import os
-        if os.environ['VECTORIZE'] != '1':
-            opt_flags += ['-fno-tree-vectorize', "-mno-avx", "-mno-avx2"]
+        opt_flags = ['-march=native', '-O3', '-ffast-math']
         if configuration['debug']:
             opt_flags = ['-O0', '-g']
         cc = "mpicc"
