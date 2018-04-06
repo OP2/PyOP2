@@ -263,19 +263,24 @@ def generate(builder):
         for tv in kernel.temporary_variables.values():
             if tv.initializer is None:
                 kernel = loopy.tag_array_axes(kernel, tv.name, transpose(tv.dim_tags))
+
         kernel = loopy.tag_inames(kernel, {"elem": "ilp.seq"})
 
-    # kernel = kernel.copy(target=loopy.CTarget())
+    kernel = kernel.copy(target=loopy.OpenMPTarget())
 
     for name in kernel.temporary_variables:
         tv = kernel.temporary_variables[name]
         if tv.shape:
             kernel.temporary_variables[name] = tv.copy(alignment=alignment)
 
-
     # mark inner most loop as omp simd
     import os
-    if os.environ['INNERMOST'] == '1':
+    try:
+        innermost = os.environ["INNERMOST"] == "1"
+    except:
+        innermost = False
+
+    if innermost:
         innermost_iname = set(kernel.all_inames())
         priority, = kernel.loop_priority
         priority = priority + ('elem',)
@@ -284,10 +289,11 @@ def generate(builder):
                 innermost_iname.discard(iname)
 
         for iname in innermost_iname:
-            kernel.iname_to_pragma[iname] = "omp simd"
-
+            kernel = loopy.tag_inames(kernel, {iname: "l.0"})
+    print(kernel)
     kernel_code = loopy.generate_code_v2(kernel).device_code()
     # FIXME: declare static inline
+    # kernel_code = kernel_code.replace("for (int elem = 0;", "#pragma omp simd\nfor (int elem = 0;")
     kernel_code = kernel_code.replace("void", "static inline void")
     kernel_code = "#include <math.h>\n" + kernel_code
 
