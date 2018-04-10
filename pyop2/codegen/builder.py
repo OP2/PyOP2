@@ -406,10 +406,15 @@ class MatPack(Pack):
 
         access = Symbol({WRITE: "INSERT_VALUES",
                          INC: "ADD_VALUES"}[self.access])
+        free_indices = ((),
+                        (), rmap.multiindex.children,
+                        (), cmap.multiindex.children,
+                        pack.multiindex.children, ())
+
 
         call = FunctionCall(name,
-                            (self.access,
-                             READ, READ, READ, READ, READ, READ),
+                            (self.access, READ, READ, READ, READ, READ, READ),
+                            free_indices,
                             self.outer,
                             Extent(MultiIndex(*rindices)),
                             rmap,
@@ -667,10 +672,12 @@ class WrapperBuilder(object):
     def kernel_call(self):
         args = self.kernel_args
         access = self.argument_accesses
+        free_indices = tuple(arg.multiindex.children for arg in args)
         if self.pass_layer_to_kernel:
             args = args + (self.layer_index, )
             access = access + (READ, )
-        return FunctionCall(self.kernel.name, access, *args)
+            free_indices = free_indices + ((),)
+        return FunctionCall(self.kernel.name, access, free_indices, *args)
 
     def emit_instructions(self):
         yield self.kernel_call()
