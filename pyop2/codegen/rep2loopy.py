@@ -86,7 +86,7 @@ def runtime_indices(expressions):
         if isinstance(node, RuntimeIndex):
             indices.append(node.name)
 
-    indices = frozenset(indices)
+    return frozenset(indices)
 
 
 def outer_loop_nesting(instructions, outer_inames, kernel_name):
@@ -266,8 +266,6 @@ def generate(builder):
 
         kernel = loopy.tag_inames(kernel, {"elem": "ilp.seq"})
 
-    kernel = kernel.copy(target=loopy.OpenMPTarget())
-
     for name in kernel.temporary_variables:
         tv = kernel.temporary_variables[name]
         if tv.shape:
@@ -281,6 +279,7 @@ def generate(builder):
         innermost = False
 
     if innermost:
+        kernel = kernel.copy(target=loopy.OpenMPTarget())
         innermost_iname = set(kernel.all_inames())
         priority, = kernel.loop_priority
         priority = priority + ('elem',)
@@ -295,6 +294,7 @@ def generate(builder):
     # FIXME: declare static inline
     # kernel_code = kernel_code.replace("for (int elem = 0;", "#pragma omp simd\nfor (int elem = 0;")
     kernel_code = kernel_code.replace("void", "static inline void")
+    kernel_code = "#include <petsc.h>\n" + kernel_code
     kernel_code = "#include <math.h>\n" + kernel_code
 
     wrapper = wrapper.copy(preambles=[(0, kernel_code)])
@@ -391,21 +391,43 @@ def statement_functioncall(expr, context):
     predicates = frozenset(context.conditions)
 
     statement_id, depends_on = context.instruction_dependencies[expr]
-    args = [c.children[0] if isinstance(c, Indexed) else c for c in expr.children]
-    code = expr.name
-    code += "("
-    code += ", ".join([arg.name for arg in args])
-    code += ");"
+
+    # return loopy.CallInstruction(tuple(written), call,
+    #                              within_inames=within_inames,
+    #                              predicates=predicates,
+    #                              id=statement_id,
+    #                              depends_on=depends_on)
+
+    # {{{ temporary hack
+
+    def arg_name(free_indices, arg):
+        if isinstance(arg, pym.Variable):
+            return arg.name
+        elif isinstance(arg, pym.Subscript):
+            if any(isinstance(fi, RuntimeIndex) for fi in free_indices):
+                extent = []
+                for i in free_indices:
+                    if isinstance(i, Index):
+                        extent.append(str(i.extent))
+                    else:
+                        assert isinstance(i, RuntimeIndex)
+                        extent.append(i.name)
+                return "{0} + {1}".format(arg.aggregate.name, " * ".join(extent))
+            else:
+                return arg.aggregate.name
+        elif isinstance(arg, int):
+            return str(arg)
+        else:
+            assert False
+    code = "{0}({1});".format(expr.name,
+                ", ".join([arg_name(arg, fi) for arg, fi in zip(expr.free_indices, children)]))
     return loopy.CInstruction("", code,
                               within_inames=within_inames,
                               predicates=predicates,
                               id=statement_id,
                               depends_on=depends_on)
-    return loopy.CallInstruction(tuple(written), call,
-                                 within_inames=within_inames,
-                                 predicates=predicates,
-                                 id=statement_id,
-                                 depends_on=depends_on)
+
+    # }}}
 
 
 @singledispatch
