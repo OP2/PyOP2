@@ -338,12 +338,13 @@ class Accumulate(Node):
 
 
 class FunctionCall(Node):
-    __slots__ = ("name", "access", "children")
-    __front__ = ("name", "access")
+    __slots__ = ("name", "access", "free_indices", "children")
+    __front__ = ("name", "access", "free_indices")
 
-    def __init__(self, name, access, *arguments):
+    def __init__(self, name, access, free_indices, *arguments):
         self.children = tuple(arguments)
         self.access = tuple(access)
+        self.free_indices = tuple(free_indices)
         self.name = name
         assert len(self.access) == len(self.children)
 
