@@ -290,14 +290,23 @@ def generate(builder):
         for iname in innermost_iname:
             kernel = loopy.tag_inames(kernel, {iname: "l.0"})
     print(kernel)
-    kernel_code = loopy.generate_code_v2(kernel).device_code()
+    # kernel_code = loopy.generate_code_v2(kernel).device_code()
     # FIXME: declare static inline
     # kernel_code = kernel_code.replace("for (int elem = 0;", "#pragma omp simd\nfor (int elem = 0;")
-    kernel_code = kernel_code.replace("void", "static inline void")
-    kernel_code = "#include <petsc.h>\n" + kernel_code
-    kernel_code = "#include <math.h>\n" + kernel_code
+    # kernel_code = kernel_code.replace("void", "static inline void")
 
-    wrapper = wrapper.copy(preambles=[(0, kernel_code)])
+    wrapper = loopy.register_callable_kernel(wrapper, kernel.name, kernel)
+    wrapper = loopy.inline_kernel(wrapper, kernel.name)
+    scoped_functions = wrapper.scoped_functions.copy()
+    scoped_functions.update(kernel.scoped_functions)
+    wrapper = wrapper.copy(scoped_functions=scoped_functions)
+
+    preamble = ""
+    preamble = "#include <petsc.h>\n" + preamble
+    preamble = "#include <math.h>\n" + preamble
+    wrapper = wrapper.copy(preambles=[(0, preamble)])
+
+    # wrapper = loopy.register_callable_kernel(wrapper, kernel.name, kernel)
 
     # refcount = collect_refcount(instructions)
     # for map_, *_ in builder.maps.values():
@@ -305,6 +314,7 @@ def generate(builder):
     #         knl = loopy.add_prefetch(knl, map_.name,
     #                                  footprint_subscripts=[(pym.Variable(builder._loop_index.name),
     #                                                         pym.Slice((None, )))])
+    print(wrapper)
     return wrapper
 
 
@@ -377,26 +387,42 @@ def statement_assign(expr, context):
 def statement_functioncall(expr, context):
     # FIXME: function manglers
     parameters = context.parameters
-    name = expr.name
-    children = list(expression(c, parameters) for c in expr.children)
 
-    call = pym.Call(pym.Variable(name), children)
+    from loopy.symbolic import SubArrayRef
 
-    written = []
-    for access, child in zip(expr.access, children):
-        if access is not READ:
-            written.append(child)
+    # children = list(expression(c, parameters) for c in expr.children)
+    # call = pym.Call(pym.Variable(name), children)
+
+    writes = []
+    reads = []
+    for access, child in zip(expr.access, expr.children):
+        var = expression(child, parameters)
+        indices = []
+        sweeping_indices = []
+        for e in child.shape:
+            index = expression(Index(e), parameters)
+            indices.append(index)
+            sweeping_indices.append(index)
+        subscript = var.index(tuple(indices))
+        sar = SubArrayRef(tuple(sweeping_indices), subscript)
+        # sweeping_indices =
+        if access is READ:
+            # free_indices = child.
+            reads.append(sar)
+        else:
+            writes.append(sar)
 
     within_inames = context.within_inames[expr]
     predicates = frozenset(context.conditions)
-
     statement_id, depends_on = context.instruction_dependencies[expr]
 
-    # return loopy.CallInstruction(tuple(written), call,
-    #                              within_inames=within_inames,
-    #                              predicates=predicates,
-    #                              id=statement_id,
-    #                              depends_on=depends_on)
+    call = pym.Call(pym.Variable(expr.name), tuple(reads))
+
+    return loopy.CallInstruction(tuple(writes), call,
+                                 within_inames=within_inames,
+                                 predicates=predicates,
+                                 id=statement_id,
+                                 depends_on=depends_on)
 
     # {{{ temporary hack
 
