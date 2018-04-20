@@ -676,7 +676,7 @@ class WrapperBuilder(object):
         if self.pass_layer_to_kernel:
             args = args + (self.layer_index, )
             access = access + (READ, )
-        return FunctionCall(self.kernel.name, access,  *args)
+        return FunctionCall(self.kernel.name, access, *args)
 
     def emit_instructions(self):
         yield self.kernel_call()

@@ -290,18 +290,24 @@ def generate(builder):
         for iname in innermost_iname:
             kernel = loopy.tag_inames(kernel, {iname: "l.0"})
     print(kernel)
-    # kernel_code = loopy.generate_code_v2(kernel).device_code()
-    # FIXME: declare static inline
-    # kernel_code = kernel_code.replace("for (int elem = 0;", "#pragma omp simd\nfor (int elem = 0;")
-    # kernel_code = kernel_code.replace("void", "static inline void")
 
-    wrapper = loopy.register_callable_kernel(wrapper, kernel.name, kernel)
-    wrapper = loopy.inline_kernel(wrapper, kernel.name)
-    scoped_functions = wrapper.scoped_functions.copy()
-    scoped_functions.update(kernel.scoped_functions)
-    wrapper = wrapper.copy(scoped_functions=scoped_functions)
+    try:
+        inline = os.environ["INLINE"] == "1"
+    except:
+        inline = False
 
-    preamble = ""
+    if inline:
+        wrapper = loopy.register_callable_kernel(wrapper, kernel.name, kernel)
+        wrapper = loopy.inline_kernel(wrapper, kernel.name)
+        scoped_functions = wrapper.scoped_functions.copy()
+        scoped_functions.update(kernel.scoped_functions)
+        wrapper = wrapper.copy(scoped_functions=scoped_functions)
+        preamble = ""
+    else:
+        preamble = loopy.generate_code_v2(kernel).device_code()
+        # kernel_code = kernel_code.replace("for (int elem = 0;", "#pragma omp simd\nfor (int elem = 0;")
+        preamble = preamble.replace("void", "static inline void")
+
     preamble = "#include <petsc.h>\n" + preamble
     preamble = "#include <math.h>\n" + preamble
     wrapper = wrapper.copy(preambles=[(0, preamble)])
@@ -387,66 +393,62 @@ def statement_assign(expr, context):
 def statement_functioncall(expr, context):
     # FIXME: function manglers
     parameters = context.parameters
+    import os
+    try:
+        inline = os.environ["INLINE"] == "1"
+    except:
+        inline = False
 
-    from loopy.symbolic import SubArrayRef
+    if inline:
+        from loopy.symbolic import SubArrayRef
 
-    # children = list(expression(c, parameters) for c in expr.children)
-    # call = pym.Call(pym.Variable(name), children)
+        # children = list(expression(c, parameters) for c in expr.children)
+        # call = pym.Call(pym.Variable(name), children)
 
-    writes = []
-    reads = []
-    for access, child in zip(expr.access, expr.children):
-        var = expression(child, parameters)
-        indices = []
-        sweeping_indices = []
-        for e in child.shape:
-            index = expression(Index(e), parameters)
-            indices.append(index)
-            sweeping_indices.append(index)
-        subscript = var.index(tuple(indices))
-        sar = SubArrayRef(tuple(sweeping_indices), subscript)
-        # sweeping_indices =
-        if access is READ:
-            # free_indices = child.
-            reads.append(sar)
-        else:
-            writes.append(sar)
+        writes = []
+        reads = []
+        for access, child in zip(expr.access, expr.children):
+            var = expression(child, parameters)
+            indices = []
+            sweeping_indices = []
+            for e in child.shape:
+                index = expression(Index(e), parameters)
+                indices.append(index)
+                sweeping_indices.append(index)
+            subscript = var.index(tuple(indices))
+            sar = SubArrayRef(tuple(sweeping_indices), subscript)
+            # sweeping_indices =
+            if access is READ:
+                # free_indices = child.
+                reads.append(sar)
+            else:
+                writes.append(sar)
+
+        within_inames = context.within_inames[expr]
+        predicates = frozenset(context.conditions)
+        statement_id, depends_on = context.instruction_dependencies[expr]
+
+        call = pym.Call(pym.Variable(expr.name), tuple(reads))
+
+        return loopy.CallInstruction(tuple(writes), call,
+                                     within_inames=within_inames,
+                                     predicates=predicates,
+                                     id=statement_id,
+                                     depends_on=depends_on)
+
+    # {{{ temporary hack
 
     within_inames = context.within_inames[expr]
     predicates = frozenset(context.conditions)
     statement_id, depends_on = context.instruction_dependencies[expr]
-
-    call = pym.Call(pym.Variable(expr.name), tuple(reads))
-
-    return loopy.CallInstruction(tuple(writes), call,
-                                 within_inames=within_inames,
-                                 predicates=predicates,
-                                 id=statement_id,
-                                 depends_on=depends_on)
-
-    # {{{ temporary hack
-
-    def arg_name(free_indices, arg):
-        if isinstance(arg, pym.Variable):
+    def arg_name(arg):
+        if isinstance(arg, Variable):
             return arg.name
-        elif isinstance(arg, pym.Subscript):
-            if any(isinstance(fi, RuntimeIndex) for fi in free_indices):
-                extent = []
-                for i in free_indices:
-                    if isinstance(i, Index):
-                        extent.append(str(i.extent))
-                    else:
-                        assert isinstance(i, RuntimeIndex)
-                        extent.append(i.name)
-                return "{0} + {1}".format(arg.aggregate.name, " * ".join(extent))
-            else:
-                return arg.aggregate.name
         elif isinstance(arg, int):
             return str(arg)
         else:
             assert False
-    code = "{0}({1});".format(expr.name,
-                ", ".join([arg_name(arg, fi) for arg, fi in zip(expr.free_indices, children)]))
+    code = "{0}({1});".format(expr.name, ", ".join([arg_name(arg) for arg in expr.children]))
     return loopy.CInstruction("", code,
                               within_inames=within_inames,
                               predicates=predicates,
@@ -651,3 +653,7 @@ def expression_bitshift(expr, parameters):
 def expression_indexed(expr, parameters):
     aggregate, multiindex = (expression(c, parameters) for c in expr.children)
     return pym.Subscript(aggregate, multiindex)
+    extents = [int(numpy.prod(expr.aggregate.shape[i+1:])) for i in range(len(multiindex))]
+    make_sum = lambda x, y: pym.Sum((x, y))
+    index = reduce(make_sum, [pym.Product((e, m)) for e, m in zip(extents, multiindex)])
+    return pym.Subscript(aggregate, (index,))
