@@ -210,17 +210,18 @@ def generate(builder):
     for indices in context.index_ordering:
         wrapper = loopy.prioritize_loops(wrapper, indices)
 
-    kernel = builder.kernel
+    # {{{ vectorization
 
+    kernel = builder.kernel
     alignment = 64
 
-    for name in wrapper.temporary_variables:
-        tv = wrapper.temporary_variables[name]
-        if tv.shape:
-            wrapper.temporary_variables[name] = tv.copy(alignment=alignment)
+    wrapper = loopy.register_callable_kernel(wrapper, kernel.name, kernel)
+    wrapper = loopy.inline_kernel(wrapper, kernel.name)
+    scoped_functions = wrapper.scoped_functions.copy()
+    scoped_functions.update(kernel.scoped_functions)
+    wrapper = wrapper.copy(scoped_functions=scoped_functions)
 
     if builder.batch > 1:
-
         if builder.extruded:
             outer = "layer"
             inner = "layer_inner"
@@ -232,87 +233,54 @@ def generate(builder):
             wrapper = loopy.assume(wrapper, "start mod {0} = 0".format(builder.batch))
             wrapper = loopy.assume(wrapper, "exists zz: zz > 0 and end = {0}*zz + start".format(builder.batch))
 
-        wrapper = loopy.split_iname(wrapper, outer, builder.batch, inner_tag="ilp.seq")
+        wrapper = loopy.split_iname(wrapper, outer, builder.batch, inner_tag="ilp.seq", inner_iname=inner)
 
-        new_insn = []
-        for insn in wrapper.instructions:
-            if isinstance(insn, loopy.CInstruction):
-                within_inames = insn.within_inames - set([inner])
-                new_insn.append(insn.copy(within_inames=within_inames))
-            else:
-                new_insn.append(insn)
-        wrapper = wrapper.copy(instructions=new_insn)
-
-        args_to_batch = tuple([arg.name for arg in kernel.args if arg.shape != (1,)])
-
-        kernel = loopy.to_batched(kernel, builder.batch,
-                                  args_to_batch,
-                                  batch_iname_prefix="elem")
         # Transpose arguments and temporaries
-        def transpose(tags):
-            new_tags = ["N0"]
-            for tag in tags[1:]:
-                new_tags.append("N{0}".format(tag.layout_nesting_level + 1))
-            return tuple(new_tags)
-
-        for arg_name in args_to_batch:
-            arg = kernel.arg_dict[arg_name]
-            tags = ["N0"]
-            kernel = loopy.tag_array_axes(kernel, arg_name, transpose(arg.dim_tags))
-
-        for tv in kernel.temporary_variables.values():
-            if tv.initializer is None:
-                kernel = loopy.tag_array_axes(kernel, tv.name, transpose(tv.dim_tags))
-
-        kernel = loopy.tag_inames(kernel, {"elem": "ilp.seq"})
-
-    for name in kernel.temporary_variables:
-        tv = kernel.temporary_variables[name]
-        if tv.shape:
-            kernel.temporary_variables[name] = tv.copy(alignment=alignment)
+        # def transpose(tags):
+        #     new_tags = ["N0"]
+        #     for tag in tags[1:]:
+        #         new_tags.append("N{0}".format(tag.layout_nesting_level + 1))
+        #     return tuple(new_tags)
+        #
+        # for arg_name in args_to_batch:
+        #     arg = kernel.arg_dict[arg_name]
+        #     tags = ["N0"]
+        #     kernel = loopy.tag_array_axes(kernel, arg_name, transpose(arg.dim_tags))
+        #
+        # for tv in kernel.temporary_variables.values():
+        #     if tv.initializer is None:
+        #         kernel = loopy.tag_array_axes(kernel, tv.name, transpose(tv.dim_tags))
+        #
+        # kernel = loopy.tag_inames(kernel, {"elem": "ilp.seq"})
+    # from IPython import embed; embed()
+    for name in wrapper.temporary_variables:
+        tv = wrapper.temporary_variables[name]
+        wrapper.temporary_variables[name] = tv.copy(alignment=alignment)
 
     # mark inner most loop as omp simd
-    import os
-    try:
-        innermost = os.environ["INNERMOST"] == "1"
-    except:
-        innermost = False
+    # import os
+    # try:
+    #     innermost = os.environ["INNERMOST"] == "1"
+    # except:
+    #     innermost = False
 
-    if innermost:
-        kernel = kernel.copy(target=loopy.OpenMPTarget())
-        innermost_iname = set(kernel.all_inames())
-        priority, = kernel.loop_priority
-        priority = priority + ('elem',)
-        for inst in kernel.instructions:
-            for iname in list(sorted(inst.within_inames, key=lambda iname: priority.index(iname)))[:-1]:
-                innermost_iname.discard(iname)
+    # if innermost:
+    #     kernel = kernel.copy(target=loopy.OpenMPTarget())
+    #     innermost_iname = set(kernel.all_inames())
+    #     priority, = kernel.loop_priority
+    #     priority = priority + ('elem',)
+    #     for inst in kernel.instructions:
+    #         for iname in list(sorted(inst.within_inames, key=lambda iname: priority.index(iname)))[:-1]:
+    #             innermost_iname.discard(iname)
+    #
+    #     for iname in innermost_iname:
+    #         kernel = loopy.tag_inames(kernel, {iname: "l.0"})
 
-        for iname in innermost_iname:
-            kernel = loopy.tag_inames(kernel, {iname: "l.0"})
-    print(kernel)
-
-    try:
-        inline = os.environ["INLINE"] == "1"
-    except:
-        inline = False
-
-    if inline:
-        wrapper = loopy.register_callable_kernel(wrapper, kernel.name, kernel)
-        wrapper = loopy.inline_kernel(wrapper, kernel.name)
-        scoped_functions = wrapper.scoped_functions.copy()
-        scoped_functions.update(kernel.scoped_functions)
-        wrapper = wrapper.copy(scoped_functions=scoped_functions)
-        preamble = ""
-    else:
-        preamble = loopy.generate_code_v2(kernel).device_code()
-        # kernel_code = kernel_code.replace("for (int elem = 0;", "#pragma omp simd\nfor (int elem = 0;")
-        preamble = preamble.replace("void", "static inline void")
-
-    preamble = "#include <petsc.h>\n" + preamble
+    preamble = "#include <petsc.h>\n"
     preamble = "#include <math.h>\n" + preamble
     wrapper = wrapper.copy(preambles=[(0, preamble)])
 
-    # wrapper = loopy.register_callable_kernel(wrapper, kernel.name, kernel)
+    # vectorization }}}
 
     # refcount = collect_refcount(instructions)
     # for map_, *_ in builder.maps.values():
@@ -393,69 +361,42 @@ def statement_assign(expr, context):
 def statement_functioncall(expr, context):
     # FIXME: function manglers
     parameters = context.parameters
-    import os
-    try:
-        inline = os.environ["INLINE"] == "1"
-    except:
-        inline = False
 
-    if inline:
-        from loopy.symbolic import SubArrayRef
+    from loopy.symbolic import SubArrayRef
 
-        # children = list(expression(c, parameters) for c in expr.children)
-        # call = pym.Call(pym.Variable(name), children)
+    # children = list(expression(c, parameters) for c in expr.children)
+    # call = pym.Call(pym.Variable(name), children)
 
-        writes = []
-        reads = []
-        for access, child in zip(expr.access, expr.children):
-            var = expression(child, parameters)
-            indices = []
-            sweeping_indices = []
-            for e in child.shape:
-                index = expression(Index(e), parameters)
-                indices.append(index)
-                sweeping_indices.append(index)
-            subscript = var.index(tuple(indices))
-            sar = SubArrayRef(tuple(sweeping_indices), subscript)
-            # sweeping_indices =
-            if access is READ:
-                # free_indices = child.
-                reads.append(sar)
-            else:
-                writes.append(sar)
-
-        within_inames = context.within_inames[expr]
-        predicates = frozenset(context.conditions)
-        statement_id, depends_on = context.instruction_dependencies[expr]
-
-        call = pym.Call(pym.Variable(expr.name), tuple(reads))
-
-        return loopy.CallInstruction(tuple(writes), call,
-                                     within_inames=within_inames,
-                                     predicates=predicates,
-                                     id=statement_id,
-                                     depends_on=depends_on)
-
-    # {{{ temporary hack
+    writes = []
+    reads = []
+    for access, child in zip(expr.access, expr.children):
+        var = expression(child, parameters)
+        indices = []
+        sweeping_indices = []
+        for e in child.shape:
+            index = expression(Index(e), parameters)
+            indices.append(index)
+            sweeping_indices.append(index)
+        subscript = var.index(tuple(indices))
+        sar = SubArrayRef(tuple(sweeping_indices), subscript)
+        # sweeping_indices =
+        if access is READ:
+            # free_indices = child.
+            reads.append(sar)
+        else:
+            writes.append(sar)
 
     within_inames = context.within_inames[expr]
     predicates = frozenset(context.conditions)
     statement_id, depends_on = context.instruction_dependencies[expr]
-    def arg_name(arg):
-        if isinstance(arg, Variable):
-            return arg.name
-        elif isinstance(arg, int):
-            return str(arg)
-        else:
-            assert False
-    code = "{0}({1});".format(expr.name, ", ".join([arg_name(arg) for arg in expr.children]))
-    return loopy.CInstruction("", code,
-                              within_inames=within_inames,
-                              predicates=predicates,
-                              id=statement_id,
-                              depends_on=depends_on)
 
-    # }}}
+    call = pym.Call(pym.Variable(expr.name), tuple(reads))
+
+    return loopy.CallInstruction(tuple(writes), call,
+                                 within_inames=within_inames,
+                                 predicates=predicates,
+                                 id=statement_id,
+                                 depends_on=depends_on)
 
 
 @singledispatch
