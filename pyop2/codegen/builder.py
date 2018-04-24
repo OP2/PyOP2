@@ -412,7 +412,6 @@ class MatPack(Pack):
                         (), cmap.multiindex.children,
                         pack.multiindex.children, ())
 
-
         call = FunctionCall(name,
                             (self.access, READ, READ, READ, READ, READ, READ),
                             free_indices,
