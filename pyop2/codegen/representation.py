@@ -505,4 +505,3 @@ class View(Node, DTypeMixin):
     @cached_property
     def shape(self):
         return tuple(e for _, e in self.slices)
-    
