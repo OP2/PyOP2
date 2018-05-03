@@ -320,7 +320,6 @@ class DatPack(Pack):
             return Indexed(self.outer, multiindex)
         else:
             pack = self.pack(loop_indices)
-            return pack
             shape = pack.shape
             return Indexed(pack, (Index(e) for e in shape))
 
@@ -407,18 +406,19 @@ class MatPack(Pack):
 
         access = Symbol({WRITE: "INSERT_VALUES",
                          INC: "ADD_VALUES"}[self.access])
-        free_indices = ((),
-                        (), rmap.multiindex.children,
-                        (), cmap.multiindex.children,
-                        pack.multiindex.children, ())
+
+        rextent = Extent(MultiIndex(*rindices))
+        cextent = Extent(MultiIndex(*cindices))
+
+        free_indices = rindices + cindices
 
         call = FunctionCall(name,
                             (self.access, READ, READ, READ, READ, READ, READ),
                             free_indices,
                             self.outer,
-                            Extent(MultiIndex(*rindices)),
+                            rextent,
                             rmap,
-                            Extent(MultiIndex(*cindices)),
+                            cextent,
                             cmap,
                             pack,
                             access)
@@ -672,10 +672,13 @@ class WrapperBuilder(object):
     def kernel_call(self):
         args = self.kernel_args
         access = self.argument_accesses
+        import itertools
+        # assuming every index is free index for now
+        free_indices = tuple(itertools.chain.from_iterable(arg.multiindex for arg in args))
         if self.pass_layer_to_kernel:
             args = args + (self.layer_index, )
-            access = access + (READ, )
-        return FunctionCall(self.kernel.name, access, *args)
+            access = access + (READ,)
+        return FunctionCall(self.kernel.name, access, free_indices, *args)
 
     def emit_instructions(self):
         yield self.kernel_call()

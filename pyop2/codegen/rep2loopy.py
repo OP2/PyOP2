@@ -32,17 +32,69 @@ class Bag(object):
     pass
 
 
+# {{{ manglers
+
+
+from loopy.types import NumpyType
+from loopy import LoopyError
+
+
 def symbol_mangler(kernel, name):
     if name in {"ADD_VALUES", "INSERT_VALUES"}:
         return loopy.types.to_loopy_type(numpy.int32), name
     return None
 
 
-def petsc_function_mangler(kernel, name, arg_dtypes):
-    if name == "CHKERRQ":
-        return loopy.CallMangleInfo(name, (), arg_dtypes)
-    if name in {"MatSetValuesBlockedLocal", "MatSetValuesLocal"}:
-        return loopy.CallMangleInfo(name, (), arg_dtypes)
+
+class PetscCallable(loopy.ScalarCallable):
+
+    def with_types(self, arg_id_to_dtype, kernel):
+        new_arg_id_to_dtype = arg_id_to_dtype.copy()
+        return self.copy(
+            name_in_target=self.name,
+            arg_id_to_dtype=new_arg_id_to_dtype
+        )
+
+    def with_descrs(self, arg_id_to_descr):
+        from loopy.kernel.function_interface import ArrayArgDescriptor
+        from loopy.kernel.array import FixedStrideArrayDimTag
+        new_arg_id_to_descr = arg_id_to_descr.copy()
+        for i, des in arg_id_to_descr.items():
+            if isinstance(des, ArrayArgDescriptor):
+                dim_tags = tuple(
+                    FixedStrideArrayDimTag(
+                        stride=int(numpy.prod(des.shape[i+1:])),
+                        layout_nesting_level=len(des.shape)-i-1
+                    )
+                    for i in range(len(des.shape))
+                )
+                new_arg_id_to_descr[i] = ArrayArgDescriptor(
+                    shape=des.shape,
+                    mem_scope=des.mem_scope,
+                    dim_tags=dim_tags
+                )
+
+
+        return self.copy(arg_id_to_descr=new_arg_id_to_descr)
+
+
+
+def petsc_function_lookup(target, identifier):
+    if identifier == 'MatSetValuesBlockedLocal':
+        return PetscCallable(name=identifier)
+    return None
+
+
+
+
+# def petsc_function_mangler(kernel, name, arg_dtypes):
+#     if name == "CHKERRQ":
+#         return loopy.CallMangleInfo(name, (), arg_dtypes)
+#     if name in {"MatSetValuesBlockedLocal", "MatSetValuesLocal"}:
+#         return loopy.CallMangleInfo(name, (), arg_dtypes)
+
+
+# }}}
 
 
 @singledispatch
@@ -154,6 +206,15 @@ def instruction_dependencies(instructions):
     return deps
 
 
+def kernel_mangler(kernel, name, arg_dtypes):
+    rettypes = []
+    if name == builder.kernel.name:
+        for arg, access in zip(builder.arguments, builder.argument_accesses):
+            if access is not READ:
+                rettypes.append(loopy.types.to_loopy_type(arg.dtype))
+        return loopy.CallMangleInfo(name, tuple(rettypes), arg_dtypes)
+
+
 def generate(builder):
     parameters = Bag()
     parameters.domains = OrderedDict()
@@ -182,14 +243,6 @@ def generate(builder):
     context.instruction_dependencies = instruction_dependencies(instructions)
     statements = list(statement(insn, context) for insn in instructions)
 
-    def kernel_mangler(kernel, name, arg_dtypes):
-        rettypes = []
-        if name == builder.kernel.name:
-            for arg, access in zip(builder.arguments, builder.argument_accesses):
-                if access is not READ:
-                    rettypes.append(loopy.types.to_loopy_type(arg.dtype))
-            return loopy.CallMangleInfo(name, tuple(rettypes), arg_dtypes)
-
     domains = list(parameters.domains.values())
     assumptions, = reduce(operator.and_,
                           parameters.assumptions.values()).params().get_basic_sets()
@@ -200,7 +253,7 @@ def generate(builder):
                                 kernel_data=parameters.kernel_data,
                                 target=loopy.CTarget(),
                                 temporary_variables=parameters.temporaries,
-                                function_manglers=[petsc_function_mangler, kernel_mangler],
+                                # function_manglers=[petsc_function_mangler, kernel_mangler],
                                 symbol_manglers=[symbol_mangler],
                                 options=options,
                                 assumptions=assumptions,
@@ -215,8 +268,13 @@ def generate(builder):
     kernel = builder.kernel
     alignment = 64
 
-    wrapper = loopy.register_callable_kernel(wrapper, kernel.name, kernel)
-    wrapper = loopy.inline_kernel(wrapper, kernel.name)
+    # register kernel
+    wrapper = loopy.register_callable_kernel(wrapper, kernel.name, kernel, inline=True)
+
+    # register petsc functions
+    wrapper = loopy.register_function_lookup(wrapper, petsc_function_lookup)
+
+    # wrapper = loopy.inline_kernel(wrapper, kernel.name)
     scoped_functions = wrapper.scoped_functions.copy()
     scoped_functions.update(kernel.scoped_functions)
     wrapper = wrapper.copy(scoped_functions=scoped_functions)
@@ -252,7 +310,6 @@ def generate(builder):
         #         kernel = loopy.tag_array_axes(kernel, tv.name, transpose(tv.dim_tags))
         #
         # kernel = loopy.tag_inames(kernel, {"elem": "ilp.seq"})
-    # from IPython import embed; embed()
     for name in wrapper.temporary_variables:
         tv = wrapper.temporary_variables[name]
         wrapper.temporary_variables[name] = tv.copy(alignment=alignment)
@@ -289,6 +346,7 @@ def generate(builder):
     #                                  footprint_subscripts=[(pym.Variable(builder._loop_index.name),
     #                                                         pym.Slice((None, )))])
     print(wrapper)
+    # from IPython import embed; embed()
     return wrapper
 
 
@@ -366,25 +424,27 @@ def statement_functioncall(expr, context):
 
     # children = list(expression(c, parameters) for c in expr.children)
     # call = pym.Call(pym.Variable(name), children)
-
+    free_indices = set(i.name for i in expr.free_indices)
     writes = []
     reads = []
     for access, child in zip(expr.access, expr.children):
         var = expression(child, parameters)
-        indices = []
-        sweeping_indices = []
-        for e in child.shape:
-            index = expression(Index(e), parameters)
-            indices.append(index)
-            sweeping_indices.append(index)
-        subscript = var.index(tuple(indices))
-        sar = SubArrayRef(tuple(sweeping_indices), subscript)
-        # sweeping_indices =
-        if access is READ:
-            # free_indices = child.
-            reads.append(sar)
+        if isinstance(var, pym.Subscript):
+            # tensor argument
+            indices = []
+            sweeping_indices = []
+            for index in var.index_tuple:
+                indices.append(index)
+                if isinstance(index, pym.Variable) and index.name in free_indices:
+                    sweeping_indices.append(index)
+            arg = SubArrayRef(tuple(sweeping_indices), var)
         else:
-            writes.append(sar)
+            # scalar argument or constant
+            arg = var
+        if access is READ:
+            reads.append(arg)
+        else:
+            writes.append(arg)
 
     within_inames = context.within_inames[expr]
     predicates = frozenset(context.conditions)
