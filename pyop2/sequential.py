@@ -805,7 +805,7 @@ PetscErrorCode %(wrapper_name)s(int start,
                 nbytes += arg.data.nbytes
             for m in builder.maps.keys():
                 nbytes += len(m.values) * 4
-            print("BYTES= {0}".format(nbytes))
+            # print("BYTES= {0}".format(nbytes))
 
             return code.device_code()
 

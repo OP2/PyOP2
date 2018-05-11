@@ -38,12 +38,10 @@ class Bag(object):
 from loopy.types import NumpyType
 from loopy import LoopyError
 
-
 def symbol_mangler(kernel, name):
     if name in {"ADD_VALUES", "INSERT_VALUES"}:
         return loopy.types.to_loopy_type(numpy.int32), name
     return None
-
 
 
 class PetscCallable(loopy.ScalarCallable):
@@ -60,6 +58,7 @@ class PetscCallable(loopy.ScalarCallable):
         from loopy.kernel.array import FixedStrideArrayDimTag
         new_arg_id_to_descr = arg_id_to_descr.copy()
         for i, des in arg_id_to_descr.items():
+            # petsc takes 1D arrays as arguments
             if isinstance(des, ArrayArgDescriptor):
                 dim_tags = tuple(
                     FixedStrideArrayDimTag(
@@ -233,8 +232,10 @@ def generate(builder):
 
     instructions = preprocess(builder.emit_instructions())
 
+    # generate loopy
     context = Bag()
     context.parameters = parameters
+    # These inames do not need to be translated, might have to change later
     context.within_inames = outer_loop_nesting(instructions, outer_inames,
                                                parameters.kernel_name)
     context.conditions = []
@@ -345,7 +346,7 @@ def generate(builder):
     #         knl = loopy.add_prefetch(knl, map_.name,
     #                                  footprint_subscripts=[(pym.Variable(builder._loop_index.name),
     #                                                         pym.Slice((None, )))])
-    print(wrapper)
+    # print(wrapper)
     # from IPython import embed; embed()
     return wrapper
 
@@ -379,9 +380,15 @@ def prepare_arglist(iterset, *args):
 
 
 def prepare_cache_key(kernel, iterset, *args):
+    counter = itertools.count()
+    seen = defaultdict(lambda: next(counter))
     key = kernel._wrapper_cache_key_ + iterset._wrapper_cache_key_
+
     for arg in args:
         key += arg._wrapper_cache_key_
+        maps = arg.map_tuple
+        for map_ in maps:
+            key += (seen[map_], )
     return key
 
 
@@ -421,6 +428,7 @@ def statement_functioncall(expr, context):
     parameters = context.parameters
 
     from loopy.symbolic import SubArrayRef
+    from loopy.types import OpaqueType
 
     # children = list(expression(c, parameters) for c in expr.children)
     # call = pym.Call(pym.Variable(name), children)
@@ -441,7 +449,8 @@ def statement_functioncall(expr, context):
         else:
             # scalar argument or constant
             arg = var
-        if access is READ:
+        if access is READ or (isinstance(child, Argument) and isinstance(child.dtype, OpaqueType)):
+            # opaque data type treated as read
             reads.append(arg)
         else:
             writes.append(arg)
@@ -523,8 +532,7 @@ def expression_runtimeindex(expr, parameters):
     name = expr.name
     if name not in parameters.domains:
         lo, hi, constraint = expr.children
-        params = list(v.name for v in traversal([lo, hi])
-                      if isinstance(v, (Argument, Variable)))
+        params = list(v.name for v in traversal([lo, hi]) if isinstance(v, (Argument, Variable)))
         vars = isl.make_zero_and_vars([name], params)
         domain = (vars[name].ge_set(translate(lo, vars)) &
                   vars[name].lt_set(translate(hi, vars)))
