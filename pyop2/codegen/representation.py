@@ -72,6 +72,10 @@ class Index(Terminal, Scalar):
         self.extent = None
         self.set_extent(extent)
 
+    @classmethod
+    def restart_counter(cls):
+        cls._count = itertools.count()
+
     def set_extent(self, value):
         if self.extent is None:
             if isinstance(value, numbers.Integral):
@@ -100,6 +104,10 @@ class RuntimeIndex(Scalar):
     def __init__(self, lo, hi, constraint, name=None):
         self.name = name or "r%d" % next(RuntimeIndex._count)
         self.children = lo, hi, constraint
+
+    @classmethod
+    def restart_counter(cls):
+        cls._count = itertools.count()
 
     @cached_property
     def extents(self):
@@ -151,6 +159,10 @@ class Argument(Terminal):
 
     __slots__ = ("shape", "dtype", "name")
     __front__ = ("shape", "dtype", "name")
+
+    @classmethod
+    def restart_counter(cls):
+        cls._count = defaultdict(partial(itertools.count))
 
     def __init__(self, shape, dtype, name=None, pfx=None):
         self.dtype = dtype
@@ -308,6 +320,10 @@ class Materialise(Node):
         new = type(self)(*self._cons_args(args))
         new.name = self.name
         return new
+
+    @classmethod
+    def restart_counter(cls):
+        cls._count = itertools.count()
 
     @cached_property
     def shape(self):
