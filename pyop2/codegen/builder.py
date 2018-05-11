@@ -16,6 +16,12 @@ from pyop2.utils import cached_property
 from pyop2.datatypes import IntType
 from pyop2.op2 import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL, Subset, DecoratedMap
 from pyop2.op2 import READ, WRITE, INC
+from loopy.types import OpaqueType
+
+
+class PetscMat(OpaqueType):
+    def __init__(self):
+        super(PetscMat, self).__init__(name="Mat")
 
 
 class SparseArray(namedtuple("SparseArray", ("values", "dof", "offset"))):
@@ -428,7 +434,7 @@ class MatPack(Pack):
 
 class WrapperBuilder(object):
 
-    def __init__(self, *, iterset, iteration_region=None):
+    def __init__(self, *, iterset, iteration_region=None, restart=True):
         super().__init__()
         self.arguments = []
         self.argument_accesses = []
@@ -439,6 +445,11 @@ class WrapperBuilder(object):
         self.iteration_region = iteration_region
         self.pass_layer_to_kernel = False
         self.batch = 1
+        if restart:
+            Argument.restart_counter()
+            Index.restart_counter()
+            RuntimeIndex.restart_counter()
+            Materialise.restart_counter()
 
     @property
     def subset(self):
@@ -608,7 +619,8 @@ class WrapperBuilder(object):
             pack = GlobalPack(argument, arg.access)
         elif arg._is_mat:
             # FIXME: pointer types?
-            argument = Argument((), numpy.dtype(numpy.uint64), pfx="mat")
+            argument = Argument((), PetscMat(), pfx="mat")
+            # argument = Argument((), numpy.dtype(numpy.uint64), pfx="mat")
             map_ = tuple(self.map_(m) for m in arg.map)
             pack = MatPack(argument, arg.access, map_,
                            arg.data.dims, arg.data.dtype,
