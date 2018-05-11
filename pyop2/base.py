@@ -2710,9 +2710,15 @@ class IterationIndex(object):
     Users should not directly instantiate :class:`IterationIndex` objects. Use
     ``op2.i`` instead."""
 
-    def __init__(self, index=None):
+    _cache = {}
+    def __new__(cls, index=None):
         assert index is None or isinstance(index, int), "i must be an int"
-        self.index = index
+        try:
+            return cls._cache[index]
+        except KeyError:
+            self = super().__new__(cls)
+            self.index = index
+            return cls._cache.setdefault(index, self)
 
     @cached_property
     def _wrapper_cache_key_(self):
@@ -3898,6 +3904,8 @@ class JITModule(Cached):
 
     @classmethod
     def _cache_key(cls, kernel, iterset, *args, **kwargs):
+        from pyop2.codegen.rep2loopy import prepare_cache_key
+        return prepare_cache_key(kernel, iterset, *args) + (kwargs.get("iterate", None), )
         key = (kernel.cache_key, iterset._extruded,
                (iterset._extruded and iterset.constant_layers),
                isinstance(iterset, Subset))
