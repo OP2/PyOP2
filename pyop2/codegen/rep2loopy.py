@@ -195,11 +195,11 @@ def instruction_dependencies(instructions):
         else:
             depends_on = []
             for access, arg in zip(op.access, op.children):
-                if access is not WRITE:
-                    depends_on.extend(x for x in
-                                      itertools.chain(*(writers[r]
-                                                        for r in variables([arg])))
-                                      if x is not name)
+                # if access is not WRITE:  # or True:
+                depends_on.extend(x for x in
+                                  itertools.chain(*(writers[r]
+                                                    for r in variables([arg])))
+                                  if x is not name)
             depends_on = frozenset(depends_on)
         deps[op] = (name, depends_on)
     return deps
@@ -271,6 +271,7 @@ def generate(builder):
 
     # register kernel
     wrapper = loopy.register_callable_kernel(wrapper, kernel.name, kernel, inline=True)
+    # wrapper = loopy.register_callable_kernel(wrapper, kernel.name, kernel, should_inline=True)
 
     # register petsc functions
     wrapper = loopy.register_function_lookup(wrapper, petsc_function_lookup)
@@ -378,11 +379,34 @@ def prepare_arglist(iterset, *args):
                 seen.add(k)
     return arglist
 
+def set_argtypes(iterset, *args):
+    from pyop2.datatypes import IntType, as_cstr, as_ctypes
+    index_type = as_ctypes(IntType)
+    argtypes = (index_type, index_type)
+    argtypes += iterset._argtypes_
+    for arg in args:
+        argtypes += arg._argtypes_
+    seen = set()
+    for arg in args:
+        maps = arg.map_tuple
+        for map_ in maps:
+            for k, t in zip(map_._kernel_args_, map_._argtypes_):
+                if k in seen:
+                    continue
+                argtypes += (t, )
+                seen.add(k)
+    return argtypes
+
 
 def prepare_cache_key(kernel, iterset, *args):
+    from pyop2 import Subset
     counter = itertools.count()
     seen = defaultdict(lambda: next(counter))
-    key = kernel._wrapper_cache_key_ + iterset._wrapper_cache_key_
+    key = (
+            kernel._wrapper_cache_key_
+            + iterset._wrapper_cache_key_
+            + (iterset._extruded, (iterset._extruded and iterset.constant_layers), isinstance(iterset, Subset))
+    )
 
     for arg in args:
         key += arg._wrapper_cache_key_
