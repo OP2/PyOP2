@@ -9,7 +9,7 @@ from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
                                           LogicalNot, LogicalAnd, LogicalOr,
                                           Argument, Literal, NamedLiteral,
                                           Materialise, Accumulate, FunctionCall, When,
-                                          Symbol, Zero,
+                                          Symbol, Zero, Variable,
                                           Sum, Product, view)
 
 from pyop2.utils import cached_property
@@ -297,7 +297,7 @@ class DatPack(Pack):
         if self.view_index is None:
             shape = shape + self.outer.shape[1:]
 
-        if self.access in {WRITE, INC}:
+        if self.access in {INC, WRITE}:
             val = Zero((), self.outer.dtype)
             multiindex = MultiIndex(*(Index(e) for e in shape))
             self._pack = Materialise(val, multiindex)
@@ -404,10 +404,13 @@ class MatPack(Pack):
 
         pack = self.pack(loop_indices=loop_indices)
         if vector:
-            pack = Indexed(pack, rindices + cindices)
+            free_indices = rindices + cindices
+            pack = Indexed(pack, free_indices)
             name = "MatSetValuesLocal"
         else:
-            pack = Indexed(pack, rindices + (Index(), ) + cindices + (Index(), ))
+            # TODO: What is this?
+            free_indices = rindices + (Index(), ) + cindices + (Index(), )
+            pack = Indexed(pack, free_indices)
             name = "MatSetValuesBlockedLocal"
 
         access = Symbol({WRITE: "INSERT_VALUES",
@@ -415,8 +418,6 @@ class MatPack(Pack):
 
         rextent = Extent(MultiIndex(*rindices))
         cextent = Extent(MultiIndex(*cindices))
-
-        free_indices = rindices + cindices
 
         call = FunctionCall(name,
                             (self.access, READ, READ, READ, READ, READ, READ),
@@ -686,7 +687,9 @@ class WrapperBuilder(object):
         access = self.argument_accesses
         import itertools
         # assuming every index is free index for now
-        free_indices = tuple(itertools.chain.from_iterable(arg.multiindex for arg in args))
+        free_indices = set(itertools.chain.from_iterable(arg.multiindex for arg in args))
+        # remove runtime index
+        free_indices = tuple(i for i in free_indices if isinstance(i, Index))
         if self.pass_layer_to_kernel:
             args = args + (self.layer_index, )
             access = access + (READ,)

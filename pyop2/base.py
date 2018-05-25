@@ -317,6 +317,10 @@ class Arg(object):
         return self.data._kernel_args_
 
     @cached_property
+    def _argtypes_(self):
+        return self.data._argtypes_
+
+    @cached_property
     def _wrapper_cache_key_(self):
         if isinstance(self.idx, IterationIndex):
             idx = self.idx._wrapper_cache_key_
@@ -606,6 +610,7 @@ class Set(object):
     _extruded = False
 
     _kernel_args_ = ()
+    _argtypes_ = ()
 
     @cached_property
     def _wrapper_cache_key_(self):
@@ -741,6 +746,7 @@ class GlobalSet(Set):
     :class:`Dat` where appropriate."""
 
     _kernel_args_ = ()
+    _argtypes_ = ()
 
     def __init__(self, comm=None):
         self.comm = dup_comm(comm)
@@ -858,6 +864,14 @@ class ExtrudedSet(Set):
             return (self.layers_array.ctypes.data, self.masks)
 
     @cached_property
+    def _argtypes_(self):
+        if self.constant_layers:
+            return (ctypes.c_voidp, )
+        else:
+            raise NotImplementedError
+            return (ctypes.c_voidp, ctypes.c_voidp)
+
+    @cached_property
     def _wrapper_cache_key_(self):
         return (super()._wrapper_cache_key_, self.constant_layers)
 
@@ -947,6 +961,10 @@ class Subset(ExtrudedSet):
     @cached_property
     def _kernel_args_(self):
         return self._superset._kernel_args_ + (self._indices.ctypes.data, )
+
+    @cached_property
+    def _argtypes_(self):
+        return self._superset._argtypes_ + (ctypes.c_voidp, )
 
     # Look up any unspecified attributes on the _set.
     def __getattr__(self, name):
@@ -1046,6 +1064,10 @@ class MixedSet(Set, ObjectCached):
 
     @cached_property
     def _kernel_args_(self):
+        raise NotImplementedError
+
+    @cached_property
+    def _argtypes_(self):
         raise NotImplementedError
 
     @cached_property
@@ -1625,6 +1647,10 @@ class Dat(DataCarrier, _EmptyDataMixin):
         return (self._data.ctypes.data, )
 
     @cached_property
+    def _argtypes_(self):
+        return (ctypes.c_voidp, )
+
+    @cached_property
     def _wrapper_cache_key_(self):
         return (type(self), self.dtype, self._dataset._wrapper_cache_key_)
 
@@ -2141,6 +2167,10 @@ class DatView(Dat):
         return self._parent._kernel_args_
 
     @cached_property
+    def _argtypes_(self):
+        return self._parent._argtypes_
+
+    @cached_property
     def _wrapper_cache_key_(self):
         return (type(self), self.index, self._parent._wrapper_cache_key_)
 
@@ -2210,6 +2240,10 @@ class MixedDat(Dat):
     @cached_property
     def _kernel_args_(self):
         return tuple(itertools.chain(*(d._kernel_args_ for d in self)))
+
+    @cached_property
+    def _argtypes_(self):
+        return tuple(itertools.chain(*(d._argtypes_ for d in self)))
 
     @cached_property
     def _wrapper_cache_key_(self):
@@ -2493,6 +2527,10 @@ class Global(DataCarrier, _EmptyDataMixin):
     @cached_property
     def _kernel_args_(self):
         return (self._data.ctypes.data, )
+
+    @cached_property
+    def _argtypes_(self):
+        return (ctypes.c_voidp, )
 
     @cached_property
     def _wrapper_cache_key_(self):
@@ -2836,6 +2874,10 @@ class Map(object):
         return (self._values.ctypes.data, )
 
     @cached_property
+    def _argtypes_(self):
+        return (ctypes.c_voidp, )
+
+    @cached_property
     def _wrapper_cache_key_(self):
         # FIXME: boundary masks
         return (type(self), self.arity, tuplify(self.offset), self.implicit_bcs, self.vector_index)
@@ -3059,6 +3101,10 @@ class DecoratedMap(Map, ObjectCached):
     def _kernel_args_(self):
         return self._map._kernel_args_
 
+    @cached_property
+    def _argtypes_(self):
+        return self._map._argtypes_
+
     @classmethod
     def _process_args(cls, m, **kwargs):
         return (m, ) + (m, ), kwargs
@@ -3126,6 +3172,10 @@ class MixedMap(Map, ObjectCached):
     @cached_property
     def _kernel_args_(self):
         return tuple(itertools.chain(*(m._kernel_args_ for m in self)))
+
+    @cached_property
+    def _argtypes_(self):
+        return tuple(itertools.chain(*(m._argtypes_ for m in self)))
 
     @cached_property
     def _wrapper_cache_key_(self):
@@ -3639,6 +3689,12 @@ class Mat(DataCarrier):
         """Set a block of values in the :class:`Mat`."""
         raise NotImplementedError(
             "Abstract Mat base class doesn't know how to set values.")
+
+
+    @cached_property
+    def _argtypes_(self):
+        """Ctypes argtype for this :class:`Mat`"""
+        return (ctypes.c_voidp, )
 
     @cached_property
     def _argtype(self):

@@ -566,6 +566,10 @@ class MatBlock(base.Mat):
                                                       iscol=colis)
         self.comm = parent.comm
 
+    @utils.cached_property
+    def _kernel_args_(self):
+        return (self.handle.handle, )
+
     @property
     def assembly_state(self):
         # Track our assembly state only
