@@ -308,7 +308,7 @@ class When(Node):
 
 class Materialise(Node):
     _count = itertools.count()
-    __slots__ = ("children", "name")
+    __slots__ = ("children", "name", "initialise")
 
     def __init__(self, init, indices, *expressions_and_indices):
         assert all(isinstance(i, (Index, FixedIndex)) for i in indices)
@@ -316,9 +316,11 @@ class Materialise(Node):
         self.children = (init, indices) + tuple(expressions_and_indices)
         self.name = "t%d" % next(Materialise._count)
 
+
     def reconstruct(self, *args):
         new = type(self)(*self._cons_args(args))
         new.name = self.name
+        new.initialise = self.initialise
         return new
 
     @classmethod
