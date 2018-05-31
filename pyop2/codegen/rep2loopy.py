@@ -150,7 +150,7 @@ def outer_loop_nesting(instructions, outer_inames, kernel_name):
             else:
                 nesting[insn] = indices
         elif isinstance(insn, FunctionCall):
-            if insn.name == kernel_name:
+            if insn.name in [kernel_name, "MatSetValuesBlockedLocal"]:
                 nesting[insn] = outer_inames
             else:
                 nesting[insn] = indices
