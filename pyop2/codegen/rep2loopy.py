@@ -261,6 +261,7 @@ def generate(builder):
                                 lang_version=(2018, 1),
                                 name="wrap_%s" % builder.kernel.name)
 
+    # from IPython import embed; embed()
     for indices in context.index_ordering:
         wrapper = loopy.prioritize_loops(wrapper, indices)
 
@@ -270,8 +271,7 @@ def generate(builder):
     alignment = 64
 
     # register kernel
-    wrapper = loopy.register_callable_kernel(wrapper, kernel.name, kernel, inline=True)
-    # wrapper = loopy.register_callable_kernel(wrapper, kernel.name, kernel, should_inline=True)
+    wrapper = loopy.register_callable_kernel(wrapper, kernel.name, kernel, should_inline=True)
 
     # register petsc functions
     wrapper = loopy.register_function_lookup(wrapper, petsc_function_lookup)
@@ -337,7 +337,7 @@ def generate(builder):
 
     preamble = "#include <petsc.h>\n"
     preamble = "#include <math.h>\n" + preamble
-    wrapper = wrapper.copy(preambles=[(0, preamble)])
+    wrapper = wrapper.copy(preambles=[("0", preamble)])
 
     # vectorization }}}
 
