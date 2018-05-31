@@ -35,7 +35,7 @@ class Map(object):
 
     __slots__ = ("values", "offset", "boundary_masks", "interior_horizontal",
                  "variable", "vector_bc", "implicit_bcs", "layer_bounds",
-                 "variable_entity_masks")
+                 "variable_entity_masks", "prefetch")
 
     def __init__(self, map_, interior_horizontal, layer_bounds, variable_entity_masks,
                  values=None, offset=None, boundary_masks=None):
@@ -45,6 +45,7 @@ class Map(object):
         self.variable_entity_masks = variable_entity_masks
         self.layer_bounds = layer_bounds
         self.interior_horizontal = interior_horizontal
+        self.prefetch = None
         if values is not None:
             self.values = values
             if map_.offset is not None:
@@ -100,17 +101,24 @@ class Map(object):
 
     def indexed(self, multiindex, layer=None):
         n, i, f = multiindex
-        base = Indexed(self.values, (n, i))
         if layer is not None and self.offset is not None:
-            bottom_layer, _ = self.layer_bounds
-            offset = Product(Sum(layer, Product(Literal(numpy.int32(-1)),
-                                                bottom_layer)),
-                             Indexed(self.offset, (i, )))
-            if f.extent != 1:
-                offset = Product(offset, Sum(f, Literal(numpy.int32(1))))
-            return Sum(base, offset), (f, i)
+            if self.prefetch is None:
+                bottom_layer, _ = self.layer_bounds
+                offset_extent, = self.offset.shape
+                j = Index(offset_extent)
+                base = Indexed(self.values, (n, j))
+                offset = Product(Sum(layer, Product(Literal(numpy.int32(-1)),
+                                                    bottom_layer)),
+                                 Indexed(self.offset, (j, )))
+                if f.extent != 1:
+                    offset = Product(offset, Sum(f, Literal(numpy.int32(1))))
+
+                self.prefetch = Materialise(Sum(base, offset), MultiIndex(j))
+
+            return Indexed(self.prefetch, (i,)), (f, i)
         else:
             assert f.extent == 1 or f.extent is None
+            base = Indexed(self.values, (n, i))
             return base, (f, i)
 
     def indexed_vector(self, n, shape, layer=None):
