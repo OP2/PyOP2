@@ -649,20 +649,12 @@ class WrapperBuilder(object):
         else:
             key = map_
         try:
-            values, offset, boundary_masks = self.maps[key]
-            return Map(map_, interior_horizontal,
-                       (self.bottom_layer, self.top_layer),
-                       self.indexed_variable_entity_masks,
-                       values=values, offset=offset,
-                       boundary_masks=boundary_masks)
+            return self.maps[key]
         except KeyError:
             map_ = Map(map_, interior_horizontal,
                        (self.bottom_layer, self.top_layer),
                        self.indexed_variable_entity_masks)
-            values = map_.values
-            offset = map_.offset
-            boundary_masks = map_.boundary_masks
-            self.maps[key] = values, offset, boundary_masks
+            self.maps[key] = map_
             return map_
 
     @property
@@ -686,8 +678,8 @@ class WrapperBuilder(object):
         # parloop args passed "as is"
         args.extend(self.arguments)
         # maps are refcounted
-        for map_, *_ in self.maps.values():
-            args.append(map_)
+        for map_ in self.maps.values():
+            args.append(map_.values)
         return tuple(args)
 
     def kernel_call(self):
