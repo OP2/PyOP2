@@ -27,7 +27,6 @@ from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
                                           Symbol, Zero,
                                           Sum, Product)
 
-
 class Bag(object):
     pass
 
@@ -80,6 +79,8 @@ class PetscCallable(loopy.ScalarCallable):
 
 def petsc_function_lookup(target, identifier):
     if identifier == 'MatSetValuesBlockedLocal':
+        return PetscCallable(name=identifier)
+    elif identifier == 'MatSetValuesLocal':
         return PetscCallable(name=identifier)
     return None
 
