@@ -773,7 +773,7 @@ PetscErrorCode %(wrapper_name)s(int start,
         if isinstance(self._kernel._ast, loopy.LoopKernel):
             from pyop2.codegen.builder import WrapperBuilder
             from pyop2.codegen.rep2loopy import generate
-            builder = WrapperBuilder(iterset=self._iterset, iteration_region=ALL)
+            builder = WrapperBuilder(iterset=self._iterset, iteration_region=self._iteration_region)
             for arg in self._args:
                 builder.add_argument(arg)
             builder.set_kernel(self._kernel._ast)
