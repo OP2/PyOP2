@@ -45,7 +45,7 @@ class Map(object):
         self.variable_entity_masks = variable_entity_masks
         self.layer_bounds = layer_bounds
         self.interior_horizontal = interior_horizontal
-        self.prefetch = None
+        self.prefetch = {}
         if values is not None:
             self.values = values
             if map_.offset is not None:
@@ -102,20 +102,24 @@ class Map(object):
     def indexed(self, multiindex, layer=None):
         n, i, f = multiindex
         if layer is not None and self.offset is not None:
-            if self.prefetch is None:
+            key = f.extent
+            if key is None:
+                key = 1
+
+            if key not in self.prefetch:
                 bottom_layer, _ = self.layer_bounds
                 offset_extent, = self.offset.shape
                 j = Index(offset_extent)
                 base = Indexed(self.values, (n, j))
-                offset = Product(Sum(layer, Product(Literal(numpy.int32(-1)),
-                                                    bottom_layer)),
-                                 Indexed(self.offset, (j, )))
-                if f.extent != 1:
-                    offset = Product(offset, Sum(f, Literal(numpy.int32(1))))
+                if f.extent:
+                    k = Index(f.extent)
+                else:
+                    k = Index(1)
+                offset = Sum(Sum(layer, Product(Literal(numpy.int32(-1)), bottom_layer)), k)
+                offset = Product(offset, Indexed(self.offset, (j,)))
+                self.prefetch[key] = Materialise(Sum(base, offset), MultiIndex(k, j))
 
-                self.prefetch = Materialise(Sum(base, offset), MultiIndex(j))
-
-            return Indexed(self.prefetch, (i,)), (f, i)
+            return Indexed(self.prefetch[key], (f, i)), (f, i)
         else:
             assert f.extent == 1 or f.extent is None
             base = Indexed(self.values, (n, i))
@@ -154,7 +158,7 @@ class Map(object):
                                                      Product(Literal(self.dtype.type(-1)), j)))))
             discard = LogicalAnd(discard, expr)
 
-        init = Conditional(discard, Literal(self.dtype.type(-1)), Sum(base, j))
+        init = Conditional(discard, Literal(self.dtype.type(-1)), Sum(Product(base, Literal(numpy.int32(j.extent))), j))
         pack = Materialise(init, MultiIndex(f, i, j))
         multiindex = tuple(Index(e) for e in pack.shape)
         return Indexed(pack, multiindex), multiindex
@@ -451,7 +455,10 @@ class WrapperBuilder(object):
         self.indices = []
         self.maps = OrderedDict()
         self.iterset = iterset
-        self.iteration_region = iteration_region
+        if iteration_region is None:
+            self.iteration_region = ALL
+        else:
+            self.iteration_region = iteration_region
         self.pass_layer_to_kernel = False
         self.batch = 1
         if restart:
