@@ -24,8 +24,8 @@ from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
                                           LogicalNot, LogicalAnd, LogicalOr,
                                           Materialise, Accumulate, FunctionCall, When,
                                           Argument, Variable, Literal, NamedLiteral,
-                                          Symbol, Zero,
-                                          Sum, Product)
+                                          Symbol, Zero, Sum, Product)
+from pyop2.codegen.representation import (InstructionLabel, ImplicitBCInst, UnpackInst, KernelCallInst)
 
 class Bag(object):
     pass
@@ -105,6 +105,11 @@ def replace_materialise(node, self):
 replace_materialise.register(Node)(reuse_if_untouched)
 
 
+@replace_materialise.register(InstructionLabel)
+def replace_materialise_instructionlabel(node, self):
+    return node
+
+
 @replace_materialise.register(Materialise)
 def replace_materialise_materialise(node, self):
     v = Variable(node.name, node.shape, node.dtype)
@@ -114,9 +119,9 @@ def replace_materialise_materialise(node, self):
         lvalue = Indexed(v, indices)
         if isinstance(rvalue, When):
             when, rvalue = rvalue.children
-            acc = When(when, Accumulate(lvalue, rvalue))
+            acc = When(when, Accumulate(node.label, lvalue, rvalue))
         else:
-            acc = Accumulate(lvalue, rvalue)
+            acc = Accumulate(node.label, lvalue, rvalue)
         accs.append(acc)
     self.initialisers.append(tuple(accs))
     return v
@@ -151,7 +156,7 @@ def outer_loop_nesting(instructions, outer_inames, kernel_name):
             else:
                 nesting[insn] = indices
         elif isinstance(insn, FunctionCall):
-            if insn.name in [kernel_name, "MatSetValuesBlockedLocal"]:
+            if insn.name in [kernel_name, "MatSetValuesBlockedLocal", "MatSetValuesLocal"]:
                 nesting[insn] = outer_inames
             else:
                 nesting[insn] = indices
@@ -203,6 +208,29 @@ def instruction_dependencies(instructions):
                                   if x is not name)
             depends_on = frozenset(depends_on)
         deps[op] = (name, depends_on)
+    for v in deps.values():
+        print(v[0])
+        print(v[1])
+    # treat implicit bc instructions
+    implicit_bc_insts = [inst for inst in deps if isinstance(inst.label, ImplicitBCInst)]
+    if implicit_bc_insts:
+        kernel_calls = [name for inst, (name, _) in deps.items() if isinstance(inst.label, KernelCallInst)]
+        unpacks = [name for inst, (name, _) in deps.items() if isinstance(inst.label, UnpackInst)]
+        # implicit bc instructions after kernel calls
+        for inst in implicit_bc_insts:
+            name, depends_on = deps[inst]
+            depends_on = depends_on | frozenset(kernel_calls)
+            deps[inst] = (name, depends_on)
+        # implicit bc instructions before unpacking
+        for inst in deps:
+            if isinstance(inst.label, UnpackInst):
+                name, depends_on = deps[inst]
+                depends_on = depends_on | frozenset([deps[inst][0] for inst in implicit_bc_insts])
+                deps[inst] = (name, depends_on)
+    for v in deps.values():
+        print(v[0])
+        print(v[1])
+
     return deps
 
 
