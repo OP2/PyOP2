@@ -10,6 +10,35 @@ from abc import ABCMeta
 from gem.node import Node as NodeBase
 
 
+# {{{ labels for instructions, used for dependency
+
+class InstructionLabel(object):
+    pass
+
+
+class KernelCallInst(InstructionLabel):
+    pass
+
+
+class PackInst(InstructionLabel):
+    pass
+
+
+class UnpackInst(InstructionLabel):
+    pass
+
+
+class ImplicitBCInst(InstructionLabel):
+    pass
+
+
+class OtherInst(InstructionLabel):
+    pass
+
+
+# }}}
+
+
 class Node(NodeBase):
 
     def is_equal(self, other):
@@ -308,19 +337,20 @@ class When(Node):
 
 class Materialise(Node):
     _count = itertools.count()
-    __slots__ = ("children", "name", "initialise")
+    __slots__ = ("children", "name", "label")
+    __front__ = ("label",)
 
-    def __init__(self, init, indices, *expressions_and_indices):
+    def __init__(self, label, init, indices, *expressions_and_indices):
         assert all(isinstance(i, (Index, FixedIndex)) for i in indices)
         assert len(expressions_and_indices) % 2 == 0
+        assert isinstance(label, InstructionLabel)
         self.children = (init, indices) + tuple(expressions_and_indices)
         self.name = "t%d" % next(Materialise._count)
-
+        self.label = label
 
     def reconstruct(self, *args):
         new = type(self)(*self._cons_args(args))
         new.name = self.name
-        new.initialise = self.initialise
         return new
 
     @classmethod
@@ -349,21 +379,26 @@ class Variable(Terminal):
 
 
 class Accumulate(Node):
-    __slots__ = ("children", )
+    __slots__ = ("children", "label")
+    __front__ = ("label",)
 
-    def __init__(self, lvalue, rvalue):
+    def __init__(self, label, lvalue, rvalue):
+        assert isinstance(label, InstructionLabel)
+        self.label = label
         self.children = (lvalue, rvalue)
 
 
 class FunctionCall(Node):
-    __slots__ = ("name", "access", "free_indices", "children")
-    __front__ = ("name", "access", "free_indices")
+    __slots__ = ("name", "access", "free_indices", "label", "children")
+    __front__ = ("name", "access", "free_indices", "label")
 
-    def __init__(self, name, access, free_indices, *arguments):
-        self.children = tuple(arguments)
+    def __init__(self, name, access, free_indices, label, *arguments):
+        self.children = tuple(arguments)  # TODO: + free_indices?
         self.access = tuple(access)
         self.free_indices = free_indices
         self.name = name
+        self.label = label
+        assert isinstance(label, InstructionLabel)
         assert len(self.access) == len(self.children)
 
 
