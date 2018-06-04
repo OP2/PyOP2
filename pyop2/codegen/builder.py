@@ -198,8 +198,8 @@ class Map(object):
                     continue
                 bit = Index(index_array.nrows)
                 when = BitwiseAnd(mask, BitShift("<<", Literal(numpy.int64(1)), bit))
-                off = Materialise(OtherInst(), Indexed(index_array.offset, (bit, )), MultiIndex())
-                dof = Materialise(OtherInst(), Indexed(index_array.dof, (bit, )), MultiIndex())
+                off = Materialise(ImplicitBCInst(), Indexed(index_array.offset, (bit, )), MultiIndex())
+                dof = Materialise(ImplicitBCInst(), Indexed(index_array.dof, (bit, )), MultiIndex())
                 k = RuntimeIndex(off, Sum(off, dof),
                                  LogicalAnd(
                                      Comparison("<=", Zero((), numpy.int32), off),
@@ -221,7 +221,7 @@ class Map(object):
                     bound = self.layer_bounds[0]
                 else:
                     indices = top
-                    bound = self.layer_bounds[1]
+                    bound = Sum(self.layer_bounds[1], Literal(IntType.type(-1)))
                     if self.interior_horizontal:
                         idx = FixedIndex(1)
 
