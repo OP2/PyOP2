@@ -105,11 +105,6 @@ def replace_materialise(node, self):
 replace_materialise.register(Node)(reuse_if_untouched)
 
 
-@replace_materialise.register(InstructionLabel)
-def replace_materialise_instructionlabel(node, self):
-    return node
-
-
 @replace_materialise.register(Materialise)
 def replace_materialise_materialise(node, self):
     v = Variable(node.name, node.shape, node.dtype)
@@ -124,17 +119,29 @@ def replace_materialise_materialise(node, self):
             acc = Accumulate(node.label, lvalue, rvalue)
         accs.append(acc)
     self.initialisers.append(tuple(accs))
+    # dependency of writes to same variable
+    if len(accs) > 1:
+        self.sequential.append(tuple(accs))
     return v
 
 
 def preprocess(instructions):
     mapper = Memoizer(replace_materialise)
     mapper.initialisers = []
-    instructions = list(merge_indices(mapper(i) for i in instructions))
+    mapper.sequential = []
+    instructions = list(instructions)
+    new_instructions = list(merge_indices(mapper(i) for i in instructions))
     prefix_cache = {}
-    initialisers = list(itertools.chain(*(merge_indices(i, cache=prefix_cache)
+    initialisers = list(itertools.chain(*mapper.initialisers))
+    new_initialisers = list(itertools.chain(*(merge_indices(i, cache=prefix_cache)
                                           for i in mapper.initialisers)))
-    return initialisers + instructions
+
+    replace = dict(zip(instructions + initialisers, new_instructions + new_initialisers))
+
+    sequential = [[replace[i] for i in insts] for insts in mapper.sequential]
+    sequential = [[i.children[1] if isinstance(i, When) else i for i in insts] for insts in sequential]
+
+    return new_initialisers + new_instructions, sequential
 
 
 def runtime_indices(expressions):
@@ -165,7 +172,7 @@ def outer_loop_nesting(instructions, outer_inames, kernel_name):
     return nesting
 
 
-def instruction_dependencies(instructions):
+def instruction_dependencies(instructions, sequential):
     def variables(exprs):
         for op in traversal(exprs):
             if isinstance(op, (Argument, Variable)):
@@ -208,28 +215,14 @@ def instruction_dependencies(instructions):
                                   if x is not name)
             depends_on = frozenset(depends_on)
         deps[op] = (name, depends_on)
-    for v in deps.values():
-        print(v[0])
-        print(v[1])
-    # treat implicit bc instructions
-    implicit_bc_insts = [inst for inst in deps if isinstance(inst.label, ImplicitBCInst)]
-    if implicit_bc_insts:
-        kernel_calls = [name for inst, (name, _) in deps.items() if isinstance(inst.label, KernelCallInst)]
-        unpacks = [name for inst, (name, _) in deps.items() if isinstance(inst.label, UnpackInst)]
-        # implicit bc instructions after kernel calls
-        for inst in implicit_bc_insts:
-            name, depends_on = deps[inst]
-            depends_on = depends_on | frozenset(kernel_calls)
-            deps[inst] = (name, depends_on)
-        # implicit bc instructions before unpacking
-        for inst in deps:
-            if isinstance(inst.label, UnpackInst):
-                name, depends_on = deps[inst]
-                depends_on = depends_on | frozenset([deps[inst][0] for inst in implicit_bc_insts])
-                deps[inst] = (name, depends_on)
-    for v in deps.values():
-        print(v[0])
-        print(v[1])
+
+    # Add sequential instructions
+    for seq in sequential:
+        for inst0, inst1 in zip(seq[:-1], seq[1:]):
+            name0, _ = deps[inst0]
+            name, depends_on = deps[inst1]
+            depends_on = depends_on | frozenset([name0])
+            deps[inst1] = (name, depends_on)
 
     return deps
 
@@ -259,7 +252,7 @@ def generate(builder):
     else:
         outer_inames = frozenset([builder._loop_index.name])
 
-    instructions = preprocess(builder.emit_instructions())
+    instructions, sequential = preprocess(builder.emit_instructions())
 
     # generate loopy
     context = Bag()
@@ -270,7 +263,7 @@ def generate(builder):
     context.conditions = []
     context.index_ordering = []
 
-    context.instruction_dependencies = instruction_dependencies(instructions)
+    context.instruction_dependencies = instruction_dependencies(instructions, sequential)
     statements = list(statement(insn, context) for insn in instructions)
 
     domains = list(parameters.domains.values())
