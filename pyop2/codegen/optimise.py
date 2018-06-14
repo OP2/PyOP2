@@ -44,6 +44,9 @@ def merge_indices(instructions, cache=None):
     """
     if cache is None:
         cache = {}
+
+    appeared = {}
+
     index_replacer = MemoizerArg(replace_indices)
 
     for insn in instructions:
@@ -71,4 +74,14 @@ def merge_indices(instructions, cache=None):
         for i in range(len(key), len(full_key) + 1):
             cache[full_key[:i]] = new_indices[:i]
 
-        yield index_replacer(insn, tuple(zip(indices, new_indices)))
+        subst = []
+        for i, ni in zip(indices, new_indices):
+            if i in appeared:
+                subst.append((i, appeared[i]))
+            if i != ni:
+                if i in appeared:
+                    assert appeared[i] == ni
+                appeared[i] = ni
+                subst.append((i, ni))
+                
+        yield index_replacer(insn, tuple(subst))

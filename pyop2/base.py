@@ -853,6 +853,9 @@ class ExtrudedSet(Set):
 
         self.masks = masks
         self._layers = layers
+        if masks:
+            section = self.masks.section
+            self.offset = np.asanyarray([section.getOffset(p) for p in range(*section.getChart())], dtype=IntType)
         self._extruded = True
 
     @cached_property
@@ -860,16 +863,16 @@ class ExtrudedSet(Set):
         if self.constant_layers:
             return (self.layers_array.ctypes.data, )
         else:
-            raise NotImplementedError
-            return (self.layers_array.ctypes.data, self.masks)
+            return (self.layers_array.ctypes.data, self.offset.ctypes.data, self.masks.bottom.ctypes.data, self.masks.top.ctypes.data)
+            # return (self.layers_array.ctypes.data, self.masks.handle)
 
     @cached_property
     def _argtypes_(self):
         if self.constant_layers:
             return (ctypes.c_voidp, )
         else:
-            raise NotImplementedError
-            return (ctypes.c_voidp, ctypes.c_voidp)
+            return (ctypes.c_voidp, ctypes.c_voidp, ctypes.c_voidp, ctypes.c_voidp)
+            # return (ctypes.c_voidp, self.masks._argtype)
 
     @cached_property
     def _wrapper_cache_key_(self):
@@ -957,6 +960,7 @@ class Subset(ExtrudedSet):
         self._sizes = ((self._indices < superset.core_size).sum(),
                        (self._indices < superset.size).sum(),
                        len(self._indices))
+        self._extruded = superset._extruded
 
     @cached_property
     def _kernel_args_(self):
