@@ -415,7 +415,11 @@ class MatPack(Pack):
                 if map_.implicit_bcs:
                     maps.append(map_.indexed_implicit(n, layer=layer))
                 else:
-                    f, i = (Index(), Index())
+                    i = Index()
+                    if self.interior_horizontal:
+                        f = Index(2)
+                    else:
+                        f = Index(1)
                     maps.append(map_.indexed((n, i, f), layer=layer))
         (rmap, cmap), (rindices, cindices) = zip(*maps)
 
