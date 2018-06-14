@@ -129,12 +129,15 @@ def preprocess(instructions):
     mapper = Memoizer(replace_materialise)
     mapper.initialisers = []
     mapper.sequential = []
+
     instructions = list(instructions)
     new_instructions = list(merge_indices(mapper(i) for i in instructions))
+
     prefix_cache = {}
     initialisers = list(itertools.chain(*mapper.initialisers))
-    new_initialisers = list(itertools.chain(*(merge_indices(i, cache=prefix_cache)
-                                          for i in mapper.initialisers)))
+    new_initialisers = list(merge_indices(initialisers, cache=prefix_cache))
+    # new_initialisers = list(itertools.chain(*(merge_indices(i, cache=prefix_cache)
+    #                                       for i in mapper.initialisers)))
 
     replace = dict(zip(instructions + initialisers, new_instructions + new_initialisers))
 
@@ -270,6 +273,12 @@ def generate(builder):
     assumptions, = reduce(operator.and_,
                           parameters.assumptions.values()).params().get_basic_sets()
     options = loopy.Options(check_dep_resolution=True)
+
+    # TODO: sometimes masks are not used
+    for i, arg in enumerate(parameters.wrapper_arguments):
+        if parameters.kernel_data[i] is None:
+            arg = loopy.GlobalArg(arg.name, dtype=arg.dtype, shape=arg.shape)
+            parameters.kernel_data[i] = arg
 
     wrapper = loopy.make_kernel(domains,
                                 statements,
