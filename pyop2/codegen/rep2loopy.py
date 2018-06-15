@@ -25,7 +25,6 @@ from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
                                           Materialise, Accumulate, FunctionCall, When,
                                           Argument, Variable, Literal, NamedLiteral,
                                           Symbol, Zero, Sum, Product)
-from pyop2.codegen.representation import (InstructionLabel, ImplicitBCInst, UnpackInst, KernelCallInst)
 
 class Bag(object):
     pass
@@ -114,9 +113,9 @@ def replace_materialise_materialise(node, self):
         lvalue = Indexed(v, indices)
         if isinstance(rvalue, When):
             when, rvalue = rvalue.children
-            acc = When(when, Accumulate(node.label, lvalue, rvalue))
+            acc = When(when, Accumulate(lvalue, rvalue))
         else:
-            acc = Accumulate(node.label, lvalue, rvalue)
+            acc = Accumulate(lvalue, rvalue)
         accs.append(acc)
     self.initialisers.append(tuple(accs))
     # dependency of writes to same variable
