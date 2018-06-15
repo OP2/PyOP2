@@ -21,6 +21,7 @@ from loopy.types import OpaqueType
 
 
 class PetscMat(OpaqueType):
+
     def __init__(self):
         super(PetscMat, self).__init__(name="Mat")
 
@@ -67,6 +68,7 @@ class Map(object):
 
         if boundary_masks is not None:
             v = {}
+            # FIXME: what is bottom and top, can I always unpack like this
             for method, (section, indices, (*_, bottom, top)) in boundary_masks.items():
                 if iterset.constant_layers:
                     vals = []
