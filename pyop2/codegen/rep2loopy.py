@@ -157,7 +157,16 @@ def runtime_indices(expressions):
 
 
 def outer_loop_nesting(instructions, outer_inames, kernel_name):
+    
+    def collect_variables(node):
+        for n in traversal([node]):
+            if isinstance(n, Variable):
+                yield n
+
     nesting = {}
+    variables = defaultdict(frozenset)  # variable -> within indices
+    deps = defaultdict(frozenset)
+    # FIXME: why need traversal?
     for insn in traversal(instructions):
         indices = runtime_indices([insn])
         if isinstance(insn, Accumulate):
@@ -165,13 +174,26 @@ def outer_loop_nesting(instructions, outer_inames, kernel_name):
                 nesting[insn] = outer_inames
             else:
                 nesting[insn] = indices
+            for v in collect_variables(insn.children[0]):
+                variables[v] = variables[v] | nesting[insn]
+            deps[insn] = frozenset(collect_variables(insn.children[1]))
+
         elif isinstance(insn, FunctionCall):
             if insn.name in [kernel_name, "MatSetValuesBlockedLocal", "MatSetValuesLocal"]:
                 nesting[insn] = outer_inames
             else:
                 nesting[insn] = indices
+        # elif isinstance(insn, Variable):
+        #     variables[insn] = indices
         else:
             continue
+
+    # Take care of dependencies. e.g. t1[i] = A[i], t2[j] = B[t1[j]]
+    for insn, indices in nesting.items():
+        for v in deps[insn]:
+            indices = indices | variables[v]
+        nesting[insn] = indices
+
     return nesting
 
 
@@ -445,6 +467,7 @@ def prepare_cache_key(kernel, iterset, *args):
         for map_ in maps:
             key += (seen[map_], )
     return key
+
 
 
 @singledispatch

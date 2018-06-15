@@ -322,10 +322,11 @@ class Arg(object):
 
     @cached_property
     def _wrapper_cache_key_(self):
-        if isinstance(self.idx, IterationIndex):
-            idx = self.idx._wrapper_cache_key_
+        if isinstance(self.idx, tuple):
+            idxs = self.idx
         else:
-            idx = self.idx
+            idxs = (self.idx,)
+        idx = tuple(i._wrapper_cache_key_ if isinstance(i, IterationIndex) else i for i in idxs)
         if self.map is not None:
             map_ = tuple(m._wrapper_cache_key_ for m in self.map)
         else:
@@ -879,7 +880,7 @@ class ExtrudedSet(Set):
 
     @cached_property
     def _wrapper_cache_key_(self):
-        return (super()._wrapper_cache_key_, self.constant_layers)
+        return self.parent._wrapper_cache_key_ + (self.constant_layers, )
 
     def __getattr__(self, name):
         """Returns a :class:`Set` specific attribute."""
@@ -2546,7 +2547,7 @@ class Global(DataCarrier, _EmptyDataMixin):
 
     @cached_property
     def _wrapper_cache_key_(self):
-        return (type(self), self.shape)
+        return (type(self), self.dtype, self.shape)
 
     @validate_in(('access', _modes, ModeValueError))
     def __call__(self, access, path=None):
@@ -2872,6 +2873,7 @@ class Map(object):
         Map._globalcount += 1
 
     class MapMask(namedtuple("_MapMask_", ["section", "indices", "facet_points"])):
+
         _argtype = ctypes.POINTER(_MapMask)
 
         @cached_property
@@ -2892,7 +2894,14 @@ class Map(object):
     @cached_property
     def _wrapper_cache_key_(self):
         # FIXME: boundary masks
-        return (type(self), self.arity, tuplify(self.offset), self.implicit_bcs, self.vector_index)
+        mask_key = []
+        for location, method in self.implicit_bcs:
+            if location == "bottom":
+                mask_key.append(tuple(self.bottom_mask[method]))
+            else:
+                mask_key.append(tuple(self.top_mask[method]))
+        return (type(self), self.arity, tuplify(self.offset), self.implicit_bcs,
+                tuple(self.iteration_region), self.vector_index, tuple(mask_key))
 
     @validate_type(('index', (int, IterationIndex), IndexTypeError))
     def __getitem__(self, index):
@@ -3877,11 +3886,10 @@ class Kernel(Cached):
         # extracting different functions from the same code
         # Also include the PyOP2 version, since the Kernel class might change
 
-        # HACK: Temporary fix!
         if isinstance(code, Node):
             code = code.gencode()
         if isinstance(code, loopy.kernel.LoopKernel):
-            code = loopy.generate_code_v2(code)
+            code = loopy.generate_code_v2(code)  # FIXME, do this without generate code
         hashee = (str(code) + name + str(sorted(opts.items())) + str(include_dirs) +
                   str(headers) + version + str(configuration['loop_fusion']) +
                   str(ldargs) + str(cpp))
