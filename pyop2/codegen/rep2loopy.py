@@ -323,7 +323,8 @@ def generate(builder):
     alignment = 64
 
     # register kernel
-    wrapper = loopy.register_callable_kernel(wrapper, kernel.name, kernel, should_inline=True)
+    wrapper = loopy.register_callable_kernel(wrapper, kernel.name, kernel)
+    wrapper = loopy.inline_callable_kernel(wrapper, kernel.name)
 
     # register petsc functions
     wrapper = loopy.register_function_lookup(wrapper, petsc_function_lookup)
