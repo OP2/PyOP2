@@ -514,7 +514,9 @@ class WrapperBuilder(object):
     def loop_index(self):
         n = self._loop_index
         if self.subset:
-            return Indexed(self._subset_indices, MultiIndex(n))
+            n = Materialise(Indexed(self._subset_indices, MultiIndex(n)), MultiIndex())
+            return n
+            # return Indexed(self._subset_indices, MultiIndex(n))
         else:
             return n
 

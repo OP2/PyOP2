@@ -164,7 +164,7 @@ def outer_loop_nesting(instructions, outer_inames, kernel_name):
 
     nesting = {}
     variables = defaultdict(frozenset)  # variable -> within indices
-    deps = defaultdict(frozenset)
+    deps = defaultdict(frozenset)  # dependency variable -> variables
     # FIXME: why need traversal?
     for insn in traversal(instructions):
         indices = runtime_indices([insn])
@@ -175,7 +175,7 @@ def outer_loop_nesting(instructions, outer_inames, kernel_name):
                 nesting[insn] = indices
             for v in collect_variables(insn.children[0]):
                 variables[v] = variables[v] | nesting[insn]
-            deps[insn] = frozenset(collect_variables(insn.children[1]))
+                deps[v] = deps[v] | set(collect_variables(insn.children[1])) - set([v])
 
         elif isinstance(insn, FunctionCall):
             if insn.name in [kernel_name, "MatSetValuesBlockedLocal", "MatSetValuesLocal"]:
@@ -188,10 +188,21 @@ def outer_loop_nesting(instructions, outer_inames, kernel_name):
             continue
 
     # Take care of dependencies. e.g. t1[i] = A[i], t2[j] = B[t1[j]]
+    for p in deps:
+        result = []
+        children = set(deps[p])
+        while children:
+            c = children.pop()
+            result.append(c)
+            children = children | deps[c]
+        deps[p] = frozenset(result)
+
     for insn, indices in nesting.items():
-        for v in deps[insn]:
-            indices = indices | variables[v]
-        nesting[insn] = indices
+        if isinstance(insn, Accumulate):
+            for p in collect_variables(insn.children[0]):
+                for v in deps[p]:
+                    indices = indices | variables[v]
+            nesting[insn] = indices
 
     return nesting
 
