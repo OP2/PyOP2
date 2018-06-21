@@ -118,7 +118,7 @@ def replace_materialise_materialise(node, self):
             acc = Accumulate(lvalue, rvalue)
         accs.append(acc)
     self.initialisers.append(tuple(accs))
-    # dependency of writes to same variable
+    # write-after-write dependency of writes to same variable
     if len(accs) > 1:
         self.sequential.append(tuple(accs))
     return v
@@ -302,6 +302,7 @@ def generate(builder):
     statements = list(statement(insn, context) for insn in instructions)
 
     domains = list(parameters.domains.values())
+
     assumptions, = reduce(operator.and_,
                           parameters.assumptions.values()).params().get_basic_sets()
     options = loopy.Options(check_dep_resolution=True)
@@ -335,6 +336,8 @@ def generate(builder):
 
     # register kernel
     wrapper = loopy.register_callable_kernel(wrapper, kernel.name, kernel)
+    # from loopy.transform.register_callable import _match_caller_callee_argument_dimension
+    # wrapper = _match_caller_callee_argument_dimension(wrapper, kernel.name)
     wrapper = loopy.inline_callable_kernel(wrapper, kernel.name)
 
     # register petsc functions
