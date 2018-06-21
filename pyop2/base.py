@@ -63,7 +63,7 @@ from coffee import base as ast
 from functools import reduce
 
 import loopy
-
+import pymbolic.primitives as p
 
 def _make_object(name, *args, **kwargs):
     from pyop2 import sequential
@@ -1836,15 +1836,26 @@ class Dat(DataCarrier, _EmptyDataMixin):
         iterset = subset or self.dataset.set
 
         loop = loops.get(iterset, None)
+
         if loop is None:
-            k = ast.FunDecl("void", "zero",
-                            [ast.Decl(self.ctype, ast.Symbol("self"), pointers=[""])],
-                            body=ast.c_for("n", self.cdim,
-                                           ast.Assign(ast.Symbol("self", ("n", )),
-                                                      ast.Symbol("(%s)0" % self.ctype)),
-                                           pragma=None))
-            k = _make_object('Kernel', k, 'zero')
-            loop = _make_object('ParLoop', k,
+
+            import islpy as isl
+            inames = isl.make_zero_and_vars(["i"])
+            domain = (inames[0].le_set(inames["i"])) & (inames["i"].lt_set(inames[0] + self.cdim))
+            x = p.Variable("dat")
+            i = p.Variable("i")
+            insn = loopy.Assignment(x.index(i), 0, within_inames=frozenset(["i"]))
+            data = loopy.GlobalArg("dat", dtype=self.dtype, shape=(self.cdim,))
+            knl = loopy.make_kernel([domain], [insn], [data], name="zero", lang_version=(2018, 1))
+
+            # k = ast.FunDecl("void", "zero",
+            #                 [ast.Decl(self.ctype, ast.Symbol("self"), pointers=[""])],
+            #                 body=ast.c_for("n", self.cdim,
+            #                                ast.Assign(ast.Symbol("self", ("n", )),
+            #                                           ast.Symbol("(%s)0" % self.ctype)),
+            #                                pragma=None))
+            knl = _make_object('Kernel', knl, 'zero')
+            loop = _make_object('ParLoop', knl,
                                 iterset,
                                 self(WRITE))
             loops[iterset] = loop
@@ -3923,8 +3934,8 @@ class Kernel(Cached):
             }
         else:
             assert isinstance(code, loopy.kernel.LoopKernel)
-            self._ast = code
-            self._code = self._ast_to_c(self._ast, opts)
+            self._code = code
+            # self._code = self._ast_to_c(self._ast, opts)
             self._attached_info = {
                 'fundecl': None,
                 'attached': False,
@@ -3944,6 +3955,8 @@ class Kernel(Cached):
 
     @cached_property
     def num_flops(self):
+        # FIXME
+        return 0
         v = EstimateFlops()
         return v.visit(self._ast)
 

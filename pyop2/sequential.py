@@ -770,13 +770,13 @@ PetscErrorCode %(wrapper_name)s(int start,
 
     @cached_property
     def code_to_compile(self):
-        if isinstance(self._kernel._ast, loopy.LoopKernel):
+        if isinstance(self._kernel._code, loopy.LoopKernel):
             from pyop2.codegen.builder import WrapperBuilder
             from pyop2.codegen.rep2loopy import generate
             builder = WrapperBuilder(iterset=self._iterset, iteration_region=self._iteration_region)
             for arg in self._args:
                 builder.add_argument(arg)
-            builder.set_kernel(self._kernel._ast)
+            builder.set_kernel(self._kernel._code)
             import os
             try:
                 batch_size = int(os.environ['BATCHSIZE'])
@@ -883,7 +883,7 @@ PetscErrorCode %(wrapper_name)s(int start,
         return self._code_dict
 
     def set_argtypes(self, iterset, *args):
-        if isinstance(self._kernel._ast, loopy.LoopKernel):
+        if isinstance(self._kernel._code, loopy.LoopKernel):
             from pyop2.codegen.rep2loopy import set_argtypes
             self._argtypes = set_argtypes(iterset, *args)
         else:
@@ -925,7 +925,7 @@ class ParLoop(petsc_base.ParLoop):
 
     def prepare_arglist(self, iterset, *args):
 
-        if isinstance(self._kernel._ast, loopy.LoopKernel):
+        if isinstance(self._kernel._code, loopy.LoopKernel):
             from pyop2.codegen.rep2loopy import prepare_arglist
             return prepare_arglist(iterset, *args)
 
@@ -964,7 +964,7 @@ class ParLoop(petsc_base.ParLoop):
     @collective
     def _compute(self, part, fun, *arglist):
         lp_str = ""
-        if isinstance(self._kernel._ast, loopy.LoopKernel):
+        if isinstance(self._kernel._code, loopy.LoopKernel):
             lp_str = "_LOOPY"
         with timed_region("ParLoop{0}".format(self.iterset.name) + lp_str):
             # print(["%x" % _ for _ in arglist])
