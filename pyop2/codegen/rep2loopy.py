@@ -117,8 +117,6 @@ def replace_materialise_materialise(node, self):
         else:
             acc = Accumulate(lvalue, rvalue)
         accs.append(acc)
-    self.substitute[node.name] = v
-    self.replace[node.name] = tuple(accs)
     self.initialisers.append(tuple(accs))
     return v
 
@@ -132,137 +130,43 @@ def runtime_indices(expressions):
     return frozenset(indices)
 
 
-def loop_nesting(instructions, deps, outer_inames, names, kernel_name):
+def imperatives(exprs):
+    for op in traversal(exprs):
+        if isinstance(op, (Accumulate, FunctionCall)):
+            yield op
+
+
+def loop_nesting(instructions, deps, outer_inames, kernel_name):
 
     nesting = {}
 
-    for insn in instructions:
-        if isinstance(insn, Accumulate):
-            if isinstance(insn.children[1], (Zero, Literal)):
-                nesting[names[insn]] = outer_inames
-            else:
-                nesting[names[insn]] = runtime_indices([insn])
-        elif isinstance(insn, FunctionCall):
-            if insn.name in [kernel_name, "MatSetValuesBlockedLocal", "MatSetValuesLocal"]:
-                nesting[names[insn]] = outer_inames
-            else:
-                nesting[names[insn]] = runtime_indices([insn])
-        else:
-            assert isinstance(insn, When)
-            nesting[names[insn]] = runtime_indices([insn])
-
-    for insn in instructions:
-        _deps = set(deps[names[insn]])
-        while _deps:
-            d = _deps.pop()
-            nesting[names[insn]] |= nesting[d]
-            _deps |= deps[d]
-
-    return nesting
-
-
-def outer_loop_nesting(instructions, outer_inames, kernel_name):
-    
-    def collect_variables(node):
-        for n in traversal([node]):
-            if isinstance(n, Variable):
-                yield n
-
-    nesting = {}
-    variables = defaultdict(frozenset)  # variable -> within indices
-    deps = defaultdict(frozenset)  # dependency variable -> variables
-    # FIXME: why need traversal?
-    for insn in traversal(instructions):
-        indices = runtime_indices([insn])
+    for insn in imperatives(instructions):
         if isinstance(insn, Accumulate):
             if isinstance(insn.children[1], (Zero, Literal)):
                 nesting[insn] = outer_inames
             else:
-                nesting[insn] = indices
-            for v in collect_variables(insn.children[0]):
-                variables[v] = variables[v] | nesting[insn]
-                deps[v] = deps[v] | set(collect_variables(insn.children[1])) - set([v])
-
-        elif isinstance(insn, FunctionCall):
+                nesting[insn] = runtime_indices([insn])
+        else:
+            assert isinstance(insn, FunctionCall)
             if insn.name in [kernel_name, "MatSetValuesBlockedLocal", "MatSetValuesLocal"]:
                 nesting[insn] = outer_inames
             else:
-                nesting[insn] = indices
-        # elif isinstance(insn, Variable):
-        #     variables[insn] = indices
-        else:
-            continue
+                nesting[insn] = runtime_indices([insn])
 
     # Take care of dependencies. e.g. t1[i] = A[i], t2[j] = B[t1[j]]
-    for p in deps:
-        result = []
-        children = set(deps[p])
-        while children:
-            c = children.pop()
-            result.append(c)
-            children = children | deps[c]
-        deps[p] = frozenset(result)
-
-    for insn, indices in nesting.items():
-        if isinstance(insn, Accumulate):
-            for p in collect_variables(insn.children[0]):
-                for v in deps[p]:
-                    indices = indices | variables[v]
-            nesting[insn] = indices
+    name_to_insn = dict((n, i) for i, (n, _) in deps.items())
+    for insn, (name, _deps) in deps.items():
+        s = set(_deps)
+        while s:
+            d = s.pop()
+            nesting[insn] = nesting[insn] | nesting[name_to_insn[d]]
+            s = s | set(deps[name_to_insn[d]][1])
 
     return nesting
 
-def inst_deps(instructions):
 
-    deps = {}
+def instruction_dependencies(instructions, initialisers):
 
-    # add dependency from subexpressions
-    def imperative(exprs):
-        for op in traversal(exprs):
-            if isinstance(op, (Accumulate, FunctionCall, Materialise)):
-                yield op
-
-    for op in imperative(instructions):
-        deps[op] = frozenset(imperative(op.children)) - frozenset([op])
-
-    # add read-write dependency
-    def variables(exprs):
-        for op in traversal(exprs):
-            if isinstance(op, (Argument, Variable, Materialise)):
-                yield op
-
-    writers = defaultdict(list)
-    names = {}
-
-    for op in traversal(instructions):
-        if isinstance(op, Accumulate):
-            lvalue, _ = op.children
-            # Only writes to the outer-most variable
-            writes = next(variables([lvalue]))
-            writers[writes].append(op)
-        elif isinstance(op, FunctionCall):
-            for access, arg in zip(op.access, op.children):
-                if access is not READ:
-                    writes = next(variables([arg]))
-                    writers[writes].append(op)
-
-    for op in deps:
-        if isinstance(op, Accumulate):
-            _, rvalue = op.children
-            depends_on = frozenset(itertools.chain(*(writers[r] for r in variables([rvalue]))))
-        elif isinstance(op, FunctionCall):
-            depends_on = []
-            for access, arg in zip(op.access, op.children):
-                depends_on.extend(itertools.chain(*(writers[r] for r in variables([arg]))))
-            depends_on = frozenset(depends_on)
-        else:
-            continue
-        deps[op] = deps[op] | depends_on - frozenset([op])
-
-    return deps
-
-
-def instruction_dependencies(instructions, sequential):
     def variables(exprs):
         for op in traversal(exprs):
             if isinstance(op, (Argument, Variable)):
@@ -272,7 +176,7 @@ def instruction_dependencies(instructions, sequential):
     deps = {}
     names = {}
     c = itertools.count()
-    for op in traversal(instructions):
+    for op in imperatives(instructions):
         if isinstance(op, Accumulate):
             name = "statement%d" % next(c)
             lvalue, _ = op.children
@@ -280,7 +184,8 @@ def instruction_dependencies(instructions, sequential):
             writes = next(variables([lvalue]))
             writers[writes].append(name)
             names[op] = name
-        elif isinstance(op, FunctionCall):
+        else:
+            assert isinstance(op, FunctionCall)
             name = "statement%d" % next(c)
             names[op] = name
             for access, arg in zip(op.access, op.children):
@@ -298,7 +203,6 @@ def instruction_dependencies(instructions, sequential):
         else:
             depends_on = []
             for access, arg in zip(op.access, op.children):
-                # if access is not WRITE:  # or True:
                 depends_on.extend(x for x in
                                   itertools.chain(*(writers[r]
                                                     for r in variables([arg])))
@@ -306,13 +210,14 @@ def instruction_dependencies(instructions, sequential):
             depends_on = frozenset(depends_on)
         deps[op] = (name, depends_on)
 
-    # Add sequential instructions
-    for seq in sequential:
-        for inst0, inst1 in zip(seq[:-1], seq[1:]):
-            name0, _ = deps[inst0]
-            name, depends_on = deps[inst1]
-            depends_on = depends_on | frozenset([name0])
-            deps[inst1] = (name, depends_on)
+    # add sequential instructions
+
+    for inits in initialisers:
+        for i, parent in enumerate(inits[1:], 1):
+            for p in imperatives([parent]):
+                name, depends_on = deps[p]
+                depends_on = depends_on | frozenset(names[c] for c in imperatives(inits[:i])) - frozenset([name])
+                deps[p] = (name, depends_on)
 
     return deps
 
@@ -326,67 +231,12 @@ def kernel_mangler(kernel, name, arg_dtypes):
         return loopy.CallMangleInfo(name, tuple(rettypes), arg_dtypes)
 
 
-def instruction_name(instructions):
+def instruction_names(instructions):
     c = itertools.count()
     names = {}
-    for insn in instructions:
+    for insn in traversal(instructions):
         names[insn] = "statement%d" % next(c)
     return names
-
-
-def update_dependency(deps, subst, replace, names):
-    # update dependencies by replacing Materialise nodes and using instruction names
-
-    @singledispatch
-    def substitutor(node, self):
-        raise AssertionError("Unhandled node type %r" % type(node))
-
-    substitutor.register(Node)(reuse_if_untouched)
-
-    @substitutor.register(Materialise)
-    def substitutor_materialise(node, self):
-        return self.subst[node.name]
-
-    mapper = Memoizer(substitutor)
-    mapper.subst = subst
-
-    # map to new non-materialise nodes
-    _deps = {}
-    for parent, children in deps.items():
-        if not isinstance(parent, Materialise):
-            parent = mapper(parent)
-        _deps[parent] = frozenset(c if isinstance(c, Materialise) else mapper(c) for c in children)
-
-    # expand materialise nodes with newly created accumulates
-    deps = _deps
-    _deps = defaultdict(frozenset)
-
-    for parent, children in deps.items():
-        _children = []
-        for c in children:
-            if isinstance(c, Materialise):
-                accs = replace[c.name]
-                _children.extend(accs)
-                if len(accs) > 1:
-                    # add write-after-write dependencies
-                    for i, n in enumerate(accs, 1):
-                        _deps[n] = _deps[n] | frozenset(accs[:i])
-            else:
-                _children.append(c)
-        if isinstance(parent, Materialise):
-            parents = replace[parent.name]
-        else:
-            parents = [parent]
-
-        for p in parents:
-            _deps[p] = _deps[p] | frozenset(_children)
-
-    # rewrite with names
-    result = {}
-    for parent, children in _deps.items():
-        parent = names[parent]
-        result[parent] = frozenset(names[c] for c in children) - frozenset([parent])
-    return result
 
 
 def generate(builder):
@@ -405,34 +255,18 @@ def generate(builder):
     else:
         outer_inames = frozenset([builder._loop_index.name])
 
-    # {{{ preprocess
-
+    # FIXME: instructions = list(merge_indices(builder.emit_instructions()))
     instructions = list(builder.emit_instructions())
-    deps = inst_deps(instructions)
 
     # replace Materialise
     mapper = Memoizer(replace_materialise)
     mapper.initialisers = []
-    mapper.replace = {}  # Materialise -> Accumulates
-    mapper.substitute = {}  # Materialise -> Variable
 
     instructions = list(mapper(i) for i in instructions)
-    instructions = list(itertools.chain(*mapper.initialisers)) + instructions
+    instructions = instructions + list(itertools.chain(*mapper.initialisers))
 
-    instruction_names = instruction_name(instructions)
-
-    deps = update_dependency(deps, mapper.substitute, mapper.replace, instruction_names)
-    within_inames = loop_nesting(instructions, deps, outer_inames, instruction_names, parameters.kernel_name)
-    new_instructions = merge_indices(instructions,
-                                     nesting=dict((i, within_inames[instruction_names[i]]) for i in instructions))
-    _instruction_names = {}
-    for n, ni in zip(instructions, new_instructions):
-        if isinstance(ni, When):
-            _instruction_names[ni.children[1]] = instruction_names[n]
-        else:
-            _instruction_names[ni] = instruction_names[n]
-    instruction_names = _instruction_names
-    instructions = new_instructions
+    deps = instruction_dependencies(instructions, mapper.initialisers)
+    within_inames = loop_nesting(instructions, deps, outer_inames, parameters.kernel_name)
 
     # generate loopy
     context = Bag()
@@ -440,7 +274,6 @@ def generate(builder):
     context.within_inames = within_inames
     context.conditions = []
     context.index_ordering = []
-    context.instruction_names = instruction_names
     context.instruction_dependencies = deps
 
     statements = list(statement(insn, context) for insn in instructions)
@@ -642,18 +475,17 @@ def statement_when(expr, context):
 
 @statement.register(Accumulate)
 def statement_assign(expr, context):
-    name = context.instruction_names[expr]
     lvalue, _ = expr.children
     if isinstance(lvalue, Indexed):
         context.index_ordering.append(tuple(i.name for i in lvalue.index_ordering()))
     lvalue, rvalue = tuple(expression(c, context.parameters) for c in expr.children)
-    within_inames = context.within_inames[name]
+    within_inames = context.within_inames[expr]
 
-    depends_on = context.instruction_dependencies[name]
+    id, depends_on = context.instruction_dependencies[expr]
     predicates = frozenset(context.conditions)
     return loopy.Assignment(lvalue, rvalue, within_inames=within_inames,
                             predicates=predicates,
-                            id=name,
+                            id=id,
                             depends_on=depends_on)
 
 
@@ -690,17 +522,16 @@ def statement_functioncall(expr, context):
         else:
             writes.append(arg)
 
-    name = context.instruction_names[expr]
-    within_inames = context.within_inames[name]
+    within_inames = context.within_inames[expr]
     predicates = frozenset(context.conditions)
-    depends_on = context.instruction_dependencies[name]
+    id, depends_on = context.instruction_dependencies[expr]
 
     call = pym.Call(pym.Variable(expr.name), tuple(reads))
 
     return loopy.CallInstruction(tuple(writes), call,
                                  within_inames=within_inames,
                                  predicates=predicates,
-                                 id=name,
+                                 id=id,
                                  depends_on=depends_on)
 
 
