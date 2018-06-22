@@ -462,6 +462,7 @@ class WrapperBuilder(object):
         self.indices = []
         self.maps = OrderedDict()
         self.iterset = iterset
+        self.within_index = {}
         if iteration_region is None:
             self.iteration_region = ALL
         else:
@@ -532,8 +533,10 @@ class WrapperBuilder(object):
     @cached_property
     def bottom_layer(self):
         if self.iteration_region == ON_TOP:
-            return Materialise(Indexed(self._layers_array, (self._layer_index, FixedIndex(0))),
-                               MultiIndex())
+            bottom = Materialise(Indexed(self._layers_array, (self._layer_index, FixedIndex(0))),
+                                 MultiIndex())
+            if not self.constant_layers:
+                self.within_index[bottom.name] = ()
         else:
             start, _ = self.layer_extents
             return start
