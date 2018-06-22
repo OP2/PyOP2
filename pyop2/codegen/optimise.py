@@ -1,7 +1,8 @@
 from gem.node import traversal, MemoizerArg, reuse_if_untouched_arg
+from collections import defaultdict
 from functools import singledispatch
 from pyop2.codegen.representation import (Index, RuntimeIndex, FixedIndex,
-                                          Node, FunctionCall)
+                                          Node, FunctionCall, When)
 
 
 def collect_indices(expressions):
@@ -32,7 +33,7 @@ def replace_indices_index(node, self, subst):
     return dict(subst).get(node, node)
 
 
-def merge_indices(instructions, cache=None):
+def merge_indices(instructions, cache=None, nesting=None, ignore=()):
     """Merge indices across an instruction stream.
 
     Indices are candidates for merging if they have the same extent as
@@ -49,13 +50,19 @@ def merge_indices(instructions, cache=None):
 
     index_replacer = MemoizerArg(replace_indices)
 
+    new_instructions = []
     for insn in instructions:
         if isinstance(insn, FunctionCall):
-            yield insn.reconstruct(*merge_indices(insn.children))
+            # ni = insn.reconstruct(*merge_indices(insn.children))
+            ni = index_replacer(insn, ())
+            new_instructions.append(ni)
             continue
 
         indices = tuple(i for i in collect_indices([insn]))
-        runtime = tuple(i for i in indices if not isinstance(i, Index))
+        if nesting:
+            runtime = tuple(nesting[insn])
+        else:
+            runtime = tuple(i for i in indices if not isinstance(i, Index))
         free = tuple(i for i in indices if isinstance(i, Index))
 
         indices = runtime + free
@@ -84,4 +91,6 @@ def merge_indices(instructions, cache=None):
                 appeared[i] = ni
                 subst.append((i, ni))
                 
-        yield index_replacer(insn, tuple(subst))
+        ni = index_replacer(insn, tuple(subst))
+        new_instructions.append(ni)
+    return new_instructions
