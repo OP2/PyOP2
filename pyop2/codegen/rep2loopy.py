@@ -15,7 +15,7 @@ from gem.node import traversal, Node, Memoizer, reuse_if_untouched
 from pyop2.base import READ, WRITE
 from pyop2.datatypes import as_ctypes
 
-from pyop2.codegen.optimise import merge_indices
+from pyop2.codegen.optimise import index_merger
 
 from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
                                           MultiIndex, Extent, Indexed,
@@ -255,15 +255,22 @@ def generate(builder):
     else:
         outer_inames = frozenset([builder._loop_index.name])
 
-    # FIXME: instructions = list(merge_indices(builder.emit_instructions()))
     instructions = list(builder.emit_instructions())
+    # instructions = list(builder.emit_instructions())
 
     # replace Materialise
     mapper = Memoizer(replace_materialise)
     mapper.initialisers = []
-
     instructions = list(mapper(i) for i in instructions)
-    instructions = instructions + list(itertools.chain(*mapper.initialisers))
+
+    # merge indices
+    merger = index_merger(instructions)
+    instructions = list(merger(i) for i in instructions)
+    initialiser = list(itertools.chain(*mapper.initialisers))
+    merger = index_merger(initialiser)
+    initialiser = list(merger(i) for i in initialiser)
+    instructions = instructions + initialiser
+    mapper.initialisers = [tuple(merger(i) for i in inits) for inits in mapper.initialisers]
 
     deps = instruction_dependencies(instructions, mapper.initialisers)
     within_inames = loop_nesting(instructions, deps, outer_inames, parameters.kernel_name)
