@@ -1,4 +1,4 @@
-from gem.node import traversal, MemoizerArg, reuse_if_untouched_arg
+from gem.node import traversal, reuse_if_untouched, Memoizer
 from functools import singledispatch
 from pyop2.codegen.representation import (Index, RuntimeIndex, FixedIndex,
                                           Node, FunctionCall)
@@ -18,21 +18,21 @@ def collect_indices(expressions):
 
 
 @singledispatch
-def replace_indices(node, self, subst):
+def replace_indices(node, self):
     raise AssertionError("Unhandled node type %r" % type(node))
 
 
-replace_indices.register(Node)(reuse_if_untouched_arg)
+replace_indices.register(Node)(reuse_if_untouched)
 
 
 @replace_indices.register(Index)
-def replace_indices_index(node, self, subst):
+def replace_indices_index(node, self):
     if node.extent == 1:
         return FixedIndex(0)
-    return dict(subst).get(node, node)
+    return self.subst.get(node, node)
 
 
-def merge_indices(instructions, cache=None):
+def index_merger(instructions, cache=None):
     """Merge indices across an instruction stream.
 
     Indices are candidates for merging if they have the same extent as
@@ -46,12 +46,13 @@ def merge_indices(instructions, cache=None):
         cache = {}
 
     appeared = {}
+    subst = []
 
-    index_replacer = MemoizerArg(replace_indices)
+    index_replacer = Memoizer(replace_indices)
 
     for insn in instructions:
         if isinstance(insn, FunctionCall):
-            yield insn.reconstruct(*merge_indices(insn.children))
+            # yield insn.reconstruct(*merge_indices(insn.children))
             continue
 
         indices = tuple(i for i in collect_indices([insn]))
@@ -74,7 +75,6 @@ def merge_indices(instructions, cache=None):
         for i in range(len(key), len(full_key) + 1):
             cache[full_key[:i]] = new_indices[:i]
 
-        subst = []
         for i, ni in zip(indices, new_indices):
             if i in appeared:
                 subst.append((i, appeared[i]))
@@ -83,5 +83,6 @@ def merge_indices(instructions, cache=None):
                     assert appeared[i] == ni
                 appeared[i] = ni
                 subst.append((i, ni))
-                
-        yield index_replacer(insn, tuple(subst))
+
+    index_replacer.subst = dict(subst)
+    return index_replacer
