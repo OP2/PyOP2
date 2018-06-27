@@ -15,7 +15,7 @@ from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
 from pyop2.utils import cached_property
 from pyop2.datatypes import IntType
 from pyop2.op2 import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL, Subset, DecoratedMap
-from pyop2.op2 import READ, WRITE, INC
+from pyop2.op2 import READ, WRITE, INC, RW
 from loopy.types import OpaqueType
 
 
@@ -311,7 +311,7 @@ class DatPack(Pack):
         if self.view_index is None:
             shape = shape + self.outer.shape[1:]
 
-        if self.access in {INC, WRITE}:
+        if self.access in {INC, WRITE, RW}:
             val = Zero((), self.outer.dtype)
             multiindex = MultiIndex(*(Index(e) for e in shape))
             self._pack = Materialise(val, multiindex)

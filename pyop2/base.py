@@ -1848,12 +1848,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
             data = loopy.GlobalArg("dat", dtype=self.dtype, shape=(self.cdim,))
             knl = loopy.make_kernel([domain], [insn], [data], name="zero", lang_version=(2018, 1))
 
-            # k = ast.FunDecl("void", "zero",
-            #                 [ast.Decl(self.ctype, ast.Symbol("self"), pointers=[""])],
-            #                 body=ast.c_for("n", self.cdim,
-            #                                ast.Assign(ast.Symbol("self", ("n", )),
-            #                                           ast.Symbol("(%s)0" % self.ctype)),
-            #                                pragma=None))
             knl = _make_object('Kernel', knl, 'zero')
             loop = _make_object('ParLoop', knl,
                                 iterset,
@@ -1874,15 +1868,19 @@ class Dat(DataCarrier, _EmptyDataMixin):
     def _copy_parloop(self, other, subset=None):
         """Create the :class:`ParLoop` implementing copy."""
         if not hasattr(self, '_copy_kernel'):
-            k = ast.FunDecl("void", "copy",
-                            [ast.Decl(self.ctype, ast.Symbol("self"),
-                                      qualifiers=["const"], pointers=[""]),
-                             ast.Decl(other.ctype, ast.Symbol("other"), pointers=[""])],
-                            body=ast.c_for("n", self.cdim,
-                                           ast.Assign(ast.Symbol("other", ("n", )),
-                                                      ast.Symbol("self", ("n", ))),
-                                           pragma=None))
-            self._copy_kernel = _make_object('Kernel', k, 'copy')
+
+            import islpy as isl
+            inames = isl.make_zero_and_vars(["i"])
+            domain = (inames[0].le_set(inames["i"])) & (inames["i"].lt_set(inames[0] + self.cdim))
+            _other = p.Variable("other")
+            _self = p.Variable("self")
+            i = p.Variable("i")
+            insn = loopy.Assignment(_other.index(i), _self.index(i), within_inames=frozenset(["i"]))
+            data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
+                    loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,))]
+            knl = loopy.make_kernel([domain], [insn], data, name="copy", lang_version=(2018, 1))
+
+            self._copy_kernel = _make_object('Kernel', knl, 'copy')
         return _make_object('ParLoop', self._copy_kernel,
                             subset or self.dataset.set,
                             self(READ), other(WRITE))
