@@ -160,7 +160,7 @@ def loop_nesting(instructions, deps, outer_inames, kernel_name):
         while s:
             d = s.pop()
             nesting[insn] = nesting[insn] | nesting[name_to_insn[d]]
-            s = s | set(deps[name_to_insn[d]][1])
+            s = s | set(deps[name_to_insn[d]][1]) - set([name])
 
     return nesting
 
@@ -321,7 +321,6 @@ def generate(builder):
     # from loopy.transform.register_callable import _match_caller_callee_argument_dimension
     # wrapper = _match_caller_callee_argument_dimension(wrapper, kernel.name)
     wrapper = loopy.inline_callable_kernel(wrapper, kernel.name)
-
     # register petsc functions
     wrapper = loopy.register_function_lookup(wrapper, petsc_function_lookup)
 
