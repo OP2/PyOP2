@@ -182,7 +182,8 @@ def instruction_dependencies(instructions, initialisers):
             lvalue, _ = op.children
             # Only writes to the outer-most variable
             writes = next(variables([lvalue]))
-            writers[writes].append(name)
+            if isinstance(writes, Variable):
+                writers[writes].append(name)
             names[op] = name
         else:
             assert isinstance(op, FunctionCall)
@@ -191,7 +192,8 @@ def instruction_dependencies(instructions, initialisers):
             for access, arg in zip(op.access, op.children):
                 if access is not READ:
                     writes = next(variables([arg]))
-                    writers[writes].append(name)
+                    if isinstance(writes, Variable):
+                        writers[writes].append(name)
 
     for op, name in names.items():
         if isinstance(op, Accumulate):
@@ -492,7 +494,7 @@ def statement_assign(expr, context):
     return loopy.Assignment(lvalue, rvalue, within_inames=within_inames,
                             predicates=predicates,
                             id=id,
-                            depends_on=depends_on)
+                            depends_on=depends_on, depends_on_is_final=True)
 
 
 @statement.register(FunctionCall)
@@ -538,7 +540,7 @@ def statement_functioncall(expr, context):
                                  within_inames=within_inames,
                                  predicates=predicates,
                                  id=id,
-                                 depends_on=depends_on)
+                                 depends_on=depends_on, depends_on_is_final=True)
 
 
 @singledispatch
