@@ -71,7 +71,6 @@ class PetscCallable(loopy.ScalarCallable):
                     dim_tags=dim_tags
                 )
 
-
         return self.copy(arg_id_to_descr=new_arg_id_to_descr)
 
 
@@ -84,7 +83,69 @@ def petsc_function_lookup(target, identifier):
     return None
 
 
+# PyOP2 Kernel passed in as string
+class PyOP2KernelCallable(loopy.ScalarCallable):
 
+    def with_types(self, arg_id_to_dtype, kernel):
+        new_arg_id_to_dtype = arg_id_to_dtype.copy()
+        return self.copy(
+            name_in_target=self.name,
+            arg_id_to_dtype=new_arg_id_to_dtype
+        )
+
+    def with_descrs(self, arg_id_to_descr):
+        from loopy.kernel.function_interface import ArrayArgDescriptor
+        from loopy.kernel.array import FixedStrideArrayDimTag
+        new_arg_id_to_descr = arg_id_to_descr.copy()
+        for i, des in arg_id_to_descr.items():
+            # FIXME: assume 1D arrays as arguments for now
+            if isinstance(des, ArrayArgDescriptor):
+                dim_tags = tuple(
+                    FixedStrideArrayDimTag(
+                        stride=int(numpy.prod(des.shape[i+1:])),
+                        layout_nesting_level=len(des.shape)-i-1
+                    )
+                    for i in range(len(des.shape))
+                )
+                new_arg_id_to_descr[i] = ArrayArgDescriptor(
+                    shape=des.shape,
+                    mem_scope=des.mem_scope,
+                    dim_tags=dim_tags
+                )
+
+        return self.copy(arg_id_to_descr=new_arg_id_to_descr)
+
+    def emit_call_insn(self, insn, target, expression_to_code_mapper):
+        # f(a,b,c,d) instead of a = f(b,c,d)
+
+        from loopy.kernel.instruction import CallInstruction
+
+        assert self.is_ready_for_codegen()
+        assert isinstance(insn, CallInstruction)
+
+        parameters = insn.assignees + insn.expression.parameters
+        par_dtypes = tuple(expression_to_code_mapper.infer_type(p) for p in parameters)
+        # par_dtype.extend([self.arg_id_to_dtype[i] for i, _ in enumerate(insn.expression.p)])
+
+        from loopy.expression import dtype_to_type_context
+        from pymbolic.mapper.stringifier import PREC_NONE
+        from pymbolic import var
+
+        c_parameters = [
+                expression_to_code_mapper(
+                    par, PREC_NONE, dtype_to_type_context(target, par_dtype), par_dtype
+                ).expr
+            for par, par_dtype in zip(parameters, par_dtypes)]
+
+        assignee_is_returned = False
+        return var(self.name_in_target)(*c_parameters), assignee_is_returned
+
+def pyop2_kernel_lookup(target, identifier):
+    if identifier in ["inject_kernel", "prolong_kernel", "restrict_kernel", "evaluate_kernel",
+                      "injection_dg", "uniform_extrusion_kernel"]:
+        return PyOP2KernelCallable(name=identifier)
+    assert False
+    return None
 
 # def petsc_function_mangler(kernel, name, arg_dtypes):
 #     if name == "CHKERRQ":
@@ -317,19 +378,30 @@ def generate(builder):
 
     kernel = builder.kernel
     alignment = 64
+    headers = set(kernel._headers)
+    headers = headers | set(["#include <petsc.h>", "#include <math.h>"])
+    preamble = "\n".join(sorted(headers))
+    # , "#include <Eigen/Dense>"
 
-    # register kernel
-    wrapper = loopy.register_callable_kernel(wrapper, kernel.name, kernel)
-    # from loopy.transform.register_callable import _match_caller_callee_argument_dimension
-    # wrapper = _match_caller_callee_argument_dimension(wrapper, kernel.name)
-    wrapper = loopy.inline_callable_kernel(wrapper, kernel.name)
+    if isinstance(kernel._code, loopy.LoopKernel):
+        # register kernel
+        knl = kernel._code
+        wrapper = loopy.register_callable_kernel(wrapper, knl.name, knl)
+        # from loopy.transform.register_callable import _match_caller_callee_argument_dimension
+        # wrapper = _match_caller_callee_argument_dimension(wrapper, kernel.name)
+        wrapper = loopy.inline_callable_kernel(wrapper, knl.name)
+        scoped_functions = wrapper.scoped_functions.copy()
+        scoped_functions.update(knl.scoped_functions)
+        wrapper = wrapper.copy(scoped_functions=scoped_functions)
+    else:
+        # kernel is a string
+        wrapper = loopy.register_function_lookup(wrapper, pyop2_kernel_lookup)
+        preamble = preamble + "\n" + kernel._code
+
     # register petsc functions
     wrapper = loopy.register_function_lookup(wrapper, petsc_function_lookup)
 
     # wrapper = loopy.inline_kernel(wrapper, kernel.name)
-    scoped_functions = wrapper.scoped_functions.copy()
-    scoped_functions.update(kernel.scoped_functions)
-    wrapper = wrapper.copy(scoped_functions=scoped_functions)
 
     if builder.batch > 1:
         if builder.extruded:
@@ -385,8 +457,6 @@ def generate(builder):
     #     for iname in innermost_iname:
     #         kernel = loopy.tag_inames(kernel, {iname: "l.0"})
 
-    preamble = "#include <petsc.h>\n"
-    preamble = "#include <math.h>\n" + preamble
     wrapper = wrapper.copy(preambles=[("0", preamble)])
 
     # vectorization }}}
