@@ -770,34 +770,45 @@ PetscErrorCode %(wrapper_name)s(int start,
 
     @cached_property
     def code_to_compile(self):
-        if isinstance(self._kernel._code, loopy.LoopKernel):
-            from pyop2.codegen.builder import WrapperBuilder
-            from pyop2.codegen.rep2loopy import generate
-            builder = WrapperBuilder(iterset=self._iterset, iteration_region=self._iteration_region)
-            for arg in self._args:
-                builder.add_argument(arg)
-            builder.set_kernel(self._kernel._code)
-            import os
-            try:
-                batch_size = int(os.environ['BATCHSIZE'])
-            except:
-                batch_size = 1
-            if batch_size > 1:
-                builder.set_batch(batch_size)
-            wrapper = generate(builder)
-            code = loopy.generate_code_v2(wrapper)
+        # if isinstance(self._kernel._code, loopy.LoopKernel):
+        from pyop2.codegen.builder import WrapperBuilder
+        from pyop2.codegen.rep2loopy import generate
+        builder = WrapperBuilder(iterset=self._iterset, iteration_region=self._iteration_region, pass_layer_to_kernel=self._pass_layer_arg)
+        for arg in self._args:
+            builder.add_argument(arg)
+        builder.set_kernel(self._kernel)
+        import os
+        try:
+            batch_size = int(os.environ['BATCHSIZE'])
+        except:
+            batch_size = 1
+        if batch_size > 1:
+            builder.set_batch(batch_size)
+        wrapper = generate(builder)
+        code = loopy.generate_code_v2(wrapper)
 
-            self.set_argtypes(self._iterset, *self._args)
+        # if not isinstance(self._kernel._code, loopy.LoopKernel):
+        #     print(code.device_code())
 
-            nbytes = 0
-            for arg in self._args:
-                nbytes += arg.data.nbytes
-            for m in builder.maps.keys():
-                nbytes += len(m.values) * 4
-            # print("BYTES= {0}".format(nbytes))
+        self.set_argtypes(self._iterset, *self._args)
 
-            return code.device_code()
+        # nbytes = 0
+        # for arg in self._args:
+        #     nbytes += arg.data.nbytes
+        # for m in builder.maps.keys():
+        #     nbytes += len(m.values) * 4
+        # print("BYTES= {0}".format(nbytes))
+        if self._kernel._cpp:
+            from loopy.codegen.result import process_preambles
+            preamble = "".join(process_preambles(getattr(code, "device_preambles", [])))
+            device_code = "\n\n".join(str(dp.ast) for dp in code.device_programs)
+            return preamble + "\nextern \"C\" {\n" + device_code + "\n}\n"
 
+        return code.device_code()
+
+
+# {{{ Old
+        assert False
         if not hasattr(self, '_args'):
             raise RuntimeError("JITModule has no args associated with it, should never happen")
 
@@ -833,6 +844,7 @@ PetscErrorCode %(wrapper_name)s(int start,
         self._dump_generated_code(code_to_compile)
         return code_to_compile
 
+# }}}
     @collective
     def compile(self):
         if not hasattr(self, '_args'):
@@ -883,77 +895,77 @@ PetscErrorCode %(wrapper_name)s(int start,
         return self._code_dict
 
     def set_argtypes(self, iterset, *args):
-        if isinstance(self._kernel._code, loopy.LoopKernel):
-            from pyop2.codegen.rep2loopy import set_argtypes
-            self._argtypes = set_argtypes(iterset, *args)
-        else:
-            index_type = as_ctypes(IntType)
-            argtypes = [index_type, index_type]
-
-            if iterset.masks is not None:
-                argtypes.append(iterset.masks._argtype)
-            if isinstance(iterset, Subset):
-                argtypes.append(iterset._argtype)
-            for arg in args:
-                if arg._is_mat:
-                    argtypes.append(arg.data._argtype)
-                else:
-                    for d in arg.data:
-                        argtypes.append(d._argtype)
-                if arg._is_indirect or arg._is_mat:
-                    maps = as_tuple(arg.map, Map)
-                    for map in maps:
-                        if map is not None:
-                            for m in map:
-                                argtypes.append(m._argtype)
-                                if m.iterset._extruded and not m.iterset.constant_layers:
-                                    method = None
-                                    for location, method_ in m.implicit_bcs:
-                                        if method is None:
-                                            method = method_
-                                        else:
-                                            assert method == method_, "Mixed implicit bc methods not supported"
-                                    if method is not None:
-                                        argtypes.append(m.boundary_masks[method]._argtype)
-            if iterset._extruded:
-                argtypes.append(ctypes.c_voidp)
-
-            self._argtypes = argtypes
+        # if isinstance(self._kernel._code, loopy.LoopKernel):
+        from pyop2.codegen.rep2loopy import set_argtypes
+        self._argtypes = set_argtypes(iterset, *args)
+        # else:
+        #     index_type = as_ctypes(IntType)
+        #     argtypes = [index_type, index_type]
+        #
+        #     if iterset.masks is not None:
+        #         argtypes.append(iterset.masks._argtype)
+        #     if isinstance(iterset, Subset):
+        #         argtypes.append(iterset._argtype)
+        #     for arg in args:
+        #         if arg._is_mat:
+        #             argtypes.append(arg.data._argtype)
+        #         else:
+        #             for d in arg.data:
+        #                 argtypes.append(d._argtype)
+        #         if arg._is_indirect or arg._is_mat:
+        #             maps = as_tuple(arg.map, Map)
+        #             for map in maps:
+        #                 if map is not None:
+        #                     for m in map:
+        #                         argtypes.append(m._argtype)
+        #                         if m.iterset._extruded and not m.iterset.constant_layers:
+        #                             method = None
+        #                             for location, method_ in m.implicit_bcs:
+        #                                 if method is None:
+        #                                     method = method_
+        #                                 else:
+        #                                     assert method == method_, "Mixed implicit bc methods not supported"
+        #                             if method is not None:
+        #                                 argtypes.append(m.boundary_masks[method]._argtype)
+        #     if iterset._extruded:
+        #         argtypes.append(ctypes.c_voidp)
+        #
+        #     self._argtypes = argtypes
 
 
 class ParLoop(petsc_base.ParLoop):
 
     def prepare_arglist(self, iterset, *args):
 
-        if isinstance(self._kernel._code, loopy.LoopKernel):
-            from pyop2.codegen.rep2loopy import prepare_arglist
-            return prepare_arglist(iterset, *args)
+        # if isinstance(self._kernel._code, loopy.LoopKernel):
+        from pyop2.codegen.rep2loopy import prepare_arglist
+        return prepare_arglist(iterset, *args)
 
-        arglist = []
-        if iterset.masks is not None:
-            arglist.append(iterset.masks.handle)
-        if isinstance(iterset, Subset):
-            arglist.append(iterset._indices.ctypes.data)
-        for arg in args:
-            if arg._is_mat:
-                arglist.append(arg.data.handle.handle)
-            else:
-                for d in arg.data:
-                    # Cannot access a property of the Dat or we will force
-                    # evaluation of the trace
-                    arglist.append(d._data.ctypes.data)
-            if arg._is_indirect or arg._is_mat:
-                for map in arg._map:
-                    if map is not None:
-                        for m in map:
-                            arglist.append(m._values.ctypes.data)
-                            if m.iterset._extruded and not m.iterset.constant_layers:
-                                if m.implicit_bcs:
-                                    _, method = m.implicit_bcs[0]
-                                    arglist.append(m.boundary_masks[method].handle)
-        if iterset._extruded:
-            arglist.append(iterset.layers_array.ctypes.data)
-        return arglist
+        # arglist = []
+        # if iterset.masks is not None:
+        #     arglist.append(iterset.masks.handle)
+        # if isinstance(iterset, Subset):
+        #     arglist.append(iterset._indices.ctypes.data)
+        # for arg in args:
+        #     if arg._is_mat:
+        #         arglist.append(arg.data.handle.handle)
+        #     else:
+        #         for d in arg.data:
+        #             # Cannot access a property of the Dat or we will force
+        #             # evaluation of the trace
+        #             arglist.append(d._data.ctypes.data)
+        #     if arg._is_indirect or arg._is_mat:
+        #         for map in arg._map:
+        #             if map is not None:
+        #                 for m in map:
+        #                     arglist.append(m._values.ctypes.data)
+        #                     if m.iterset._extruded and not m.iterset.constant_layers:
+        #                         if m.implicit_bcs:
+        #                             _, method = m.implicit_bcs[0]
+        #                             arglist.append(m.boundary_masks[method].handle)
+        # if iterset._extruded:
+        #     arglist.append(iterset.layers_array.ctypes.data)
+        # return arglist
 
     @cached_property
     def _jitmodule(self):
