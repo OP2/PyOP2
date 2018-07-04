@@ -454,7 +454,7 @@ class MatPack(Pack):
 
 class WrapperBuilder(object):
 
-    def __init__(self, *, iterset, iteration_region=None, restart=True):
+    def __init__(self, *, iterset, iteration_region=None, restart=True, pass_layer_to_kernel=False):
         super().__init__()
         self.arguments = []
         self.argument_accesses = []
@@ -466,7 +466,7 @@ class WrapperBuilder(object):
             self.iteration_region = ALL
         else:
             self.iteration_region = iteration_region
-        self.pass_layer_to_kernel = False
+        self.pass_layer_to_kernel = pass_layer_to_kernel
         self.batch = 1
         if restart:
             Argument.restart_counter()
@@ -702,9 +702,9 @@ class WrapperBuilder(object):
 
     def kernel_call(self):
         args = self.kernel_args
-        access = self.argument_accesses
+        access = tuple(self.argument_accesses)
         import itertools
-        # assuming every index is free index for now
+        # assuming every index is free index
         free_indices = set(itertools.chain.from_iterable(arg.multiindex for arg in args))
         # remove runtime index
         free_indices = tuple(i for i in free_indices if isinstance(i, Index))
