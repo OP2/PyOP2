@@ -1931,7 +1931,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         else:
             self._check_shape(other)
             rhs = _other.index(i)
-        insn = loopy.Assignment(lhs, op(self.index(i), rhs), within_inames=frozenset(["i"]))
+        insn = loopy.Assignment(lhs, op(_self.index(i), rhs), within_inames=frozenset(["i"]))
         data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
                 loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,)),
                 loopy.GlobalArg("ret", dtype=self.dtype, shape=(self.cdim,))]
@@ -2001,18 +2001,23 @@ class Dat(DataCarrier, _EmptyDataMixin):
         self._check_shape(other)
         ret = _make_object('Global', 1, data=0, dtype=self.dtype)
 
-        k = ast.FunDecl("void", "inner",
-                        [ast.Decl(self.ctype, ast.Symbol("self"),
-                                  qualifiers=["const"], pointers=[""]),
-                         ast.Decl(other.ctype, ast.Symbol("other"),
-                                  qualifiers=["const"], pointers=[""]),
-                         ast.Decl(self.ctype, ast.Symbol("ret"), pointers=[""])],
-                        ast.c_for("n", self.cdim,
-                                  ast.Incr(ast.Symbol("ret", (0, )),
-                                           ast.Prod(ast.Symbol("self", ("n", )),
-                                                    ast.Symbol("other", ("n", )))),
-                                  pragma=None))
-        k = _make_object('Kernel', k, "inner")
+        import islpy as isl
+        import pymbolic.primitives as p
+
+        inames = isl.make_zero_and_vars(["i"])
+        domain = (inames[0].le_set(inames["i"])) & (inames["i"].lt_set(inames[0] + self.cdim))
+        _self = p.Variable("self")
+        _other = p.Variable("other")
+        _ret = p.Variable("ret")
+        i = p.Variable("i")
+
+        insn = loopy.Assignment(_ret.index(0), _ret.index(0) + _self.index(i) * _other.index(i), within_inames=frozenset(["i"]))
+        data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
+                loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,)),
+                loopy.GlobalArg("ret", dtype=ret.dtype, shape=(1,))]
+        knl = loopy.make_kernel([domain], [insn], data, name="inner", lang_version=(2018, 1))
+
+        k = _make_object('Kernel', knl, "inner")
         par_loop(k, self.dataset.set, self(READ), other(READ), ret(INC))
         return ret.data_ro[0]
 
