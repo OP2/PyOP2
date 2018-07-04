@@ -142,7 +142,8 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
 
 def pyop2_kernel_lookup(target, identifier):
     if identifier in ["inject_kernel", "prolong_kernel", "restrict_kernel", "evaluate_kernel",
-                      "injection_dg", "uniform_extrusion_kernel"]:
+                      "injection_dg", "uniform_extrusion_kernel", "radial_extrusion_kernel",
+                      "radial_hedgehog_extrusion_kernel", "pyop2_kernel"]:
         return PyOP2KernelCallable(name=identifier)
     assert False
     return None
