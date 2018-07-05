@@ -347,7 +347,7 @@ class MacCompiler(Compiler):
         if cpp:
             cc = "mpicxx"
             stdargs = []
-        cppargs = stdargs + ['-fPIC', '-fopenmp', '-Wall', '-framework', 'Accelerate'] + \
+        cppargs = stdargs + ['-fPIC', '-Wall', '-framework', 'Accelerate'] + \
             opt_flags + cppargs
         ldargs = ['-dynamiclib'] + ldargs
         super(MacCompiler, self).__init__(cc,
