@@ -141,11 +141,9 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
         return var(self.name_in_target)(*c_parameters), assignee_is_returned
 
 def pyop2_kernel_lookup(target, identifier):
-    if identifier in ["inject_kernel", "prolong_kernel", "restrict_kernel", "evaluate_kernel",
-                      "injection_dg", "uniform_extrusion_kernel", "radial_extrusion_kernel",
-                      "radial_hedgehog_extrusion_kernel", "pyop2_kernel"]:
+    if identifier[:13] == "pyop2_kernel_":
         return PyOP2KernelCallable(name=identifier)
-    assert False
+
     return None
 
 # def petsc_function_mangler(kernel, name, arg_dtypes):
