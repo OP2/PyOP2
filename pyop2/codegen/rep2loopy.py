@@ -120,9 +120,10 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
 
         from loopy.kernel.instruction import CallInstruction
 
-        assert self.is_ready_for_codegen()
+        # assert self.is_ready_for_codegen()
         assert isinstance(insn, CallInstruction)
 
+        # FIXME: this is not totally correct
         parameters = insn.assignees + insn.expression.parameters
         par_dtypes = tuple(expression_to_code_mapper.infer_type(p) for p in parameters)
         # par_dtype.extend([self.arg_id_to_dtype[i] for i, _ in enumerate(insn.expression.p)])
