@@ -384,7 +384,7 @@ class TestExtrudedSetAPI:
         """It should be possible to iterate over an extruded set reading dats
            defined on the base set (indirectly)."""
         e = op2.ExtrudedSet(iterset, 5)
-        k = op2.Kernel('void k() { }', 'k')
+        k = op2.Kernel('void pyop2_kernel_k() { }', 'pyop2_kernel_k')
         dat1, dat2 = dats
         base.ParLoop(k, e, dat1(op2.READ, m_iterset_toset))
         base.ParLoop(k, e, dat2(op2.READ, m_iterset_set))
@@ -393,7 +393,7 @@ class TestExtrudedSetAPI:
         """It should not be possible to iteratve over an extruded set reading
            dats not defined on the base set (indirectly)."""
         e = op2.ExtrudedSet(set, 5)
-        k = op2.Kernel('void k() { }', 'k')
+        k = op2.Kernel('void pyop2_kernel_k() { }', 'pyop2_kernel_k')
         with pytest.raises(exceptions.MapValueError):
             base.ParLoop(k, e, dat(op2.READ, m_iterset_toset))
 
@@ -975,10 +975,6 @@ class TestMixedDatAPI:
     def test_mixed_dat_cdim(self, mdset):
         "MixedDat cdim should return a tuple of the DataSet cdims."
         assert op2.MixedDat(mdset).cdim == mdset.cdim
-
-    def test_mixed_dat_soa(self, mdat):
-        "MixedDat soa should return a tuple of the Dat soa flags."
-        assert mdat.soa == tuple(d.soa for d in mdat)
 
     def test_mixed_dat_data(self, mdat):
         "MixedDat data should return a tuple of the Dat data arrays."
@@ -1673,11 +1669,11 @@ class TestKernelAPI:
     def test_kernel_properties(self):
         "Kernel constructor should correctly set attributes."
         k = op2.Kernel("", 'foo')
-        assert k.name == 'foo'
+        assert k.name == 'pyop2_kernel_foo'
 
     def test_kernel_repr(self, set):
         "Kernel should have the expected repr."
-        k = op2.Kernel("int foo() { return 0; }", 'foo')
+        k = op2.Kernel("int pyop2_kernel_foo() { return 0; }", 'pyop2_kernel_foo')
         assert repr(k) == 'Kernel("""%s""", %r)' % (k.code(), k.name)
 
     def test_kernel_str(self, set):
@@ -1700,7 +1696,7 @@ class TestParLoopAPI:
     def test_illegal_iterset(self, dat, m_iterset_toset):
         """The first ParLoop argument has to be of type op2.Kernel."""
         with pytest.raises(exceptions.SetTypeError):
-            op2.par_loop(op2.Kernel("", "k"), 'illegal_set',
+            op2.par_loop(op2.Kernel("", "pyop2_kernel_k"), 'illegal_set',
                          dat(op2.READ, m_iterset_toset))
 
     def test_illegal_dat_iterset(self):
@@ -1711,7 +1707,7 @@ class TestParLoopAPI:
         dset1 = op2.DataSet(set1, 1)
         dat = op2.Dat(dset1)
         map = op2.Map(set2, set1, 1, [0, 0, 0])
-        kernel = op2.Kernel("void k() { }", "k")
+        kernel = op2.Kernel("void pyop2_kernel_k() { }", "pyop2_kernel_k")
         with pytest.raises(exceptions.MapValueError):
             base.ParLoop(kernel, set1, dat(op2.READ, map))
 
@@ -1721,7 +1717,7 @@ class TestParLoopAPI:
         set1 = op2.Set(2)
         m = op2.Mat(sparsity)
         rmap, cmap = sparsity.maps[0]
-        kernel = op2.Kernel("void k() { }", "k")
+        kernel = op2.Kernel("void pyop2_kernel_k() { }", "pyop2_kernel_k")
         with pytest.raises(exceptions.MapValueError):
             op2.par_loop(kernel, set1,
                          m(op2.INC, (rmap[op2.i[0]], cmap[op2.i[1]])))
@@ -1733,7 +1729,7 @@ class TestParLoopAPI:
         s2 = op2.Set(10)
         m = op2.Map(s1, s2, 3)
         d = op2.Dat(s2 ** 1, [0] * 10, dtype=int)
-        k = op2.Kernel("void k(int *x) {}", "k")
+        k = op2.Kernel("void pyop2_kernel_k(int *x) {}", "pyop2_kernel_k")
         op2.par_loop(k, s1, d(op2.READ, m[0]))
         # Force evaluation otherwise this loop will remain in the trace forever
         # in case of lazy evaluation mode

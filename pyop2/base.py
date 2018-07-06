@@ -3909,7 +3909,7 @@ class Kernel(Cached):
         # Protect against re-initialization when retrieved from cache
         if self._initialized:
             return
-        self._name = name or "kernel_%d" % Kernel._globalcount
+        self._name = name or "pyop2_kernel_%d" % Kernel._globalcount
         self._cpp = cpp
         Kernel._globalcount += 1
         # Record used optimisations
@@ -3918,32 +3918,15 @@ class Kernel(Cached):
         self._ldargs = ldargs if ldargs is not None else []
         self._headers = headers
         self._user_code = user_code
-        if isinstance(code, (str, FlatBlock)):
-            # Got a C string, nothing we can do, just use it as Kernel body
-            self._ast = None
-            self._code = code
-            self._attached_info = {'fundecl': None, 'attached': False}
-        elif isinstance(code, Node):
-            self._ast = code
-            self._code = self._ast_to_c(self._ast, opts)
-            search = Find((ast.FunDecl, ast.FlatBlock)).visit(self._ast)
-            fundecls, flatblocks = search[ast.FunDecl], search[ast.FlatBlock]
-            assert len(fundecls) >= 1, "Illegal Kernel"
-            fundecl, = [fd for fd in fundecls if fd.name == self._name]
-            self._attached_info = {
-                'fundecl': fundecl,
-                'attached': False,
-                'flatblocks': len(flatblocks) > 0
-            }
+        self._code = code
+        if isinstance(code, str):
+            # Only certain name allowed for string kernels
+            if self._name[:13] != "pyop2_kernel_":
+                # FIXME: give warning
+                self._code = self._code.replace(self._name, "pyop2_kernel_" + self._name)
+                self._name = "pyop2_kernel_" + self._name
         else:
             assert isinstance(code, loopy.kernel.LoopKernel)
-            self._code = code
-            # self._code = self._ast_to_c(self._ast, opts)
-            self._attached_info = {
-                'fundecl': None,
-                'attached': False,
-                'flatblocks': True
-            }
         self._initialized = True
 
     @property
@@ -3967,8 +3950,7 @@ class Kernel(Cached):
         return "OP2 Kernel: %s" % self._name
 
     def __repr__(self):
-        code = self._ast.gencode() if self._ast else self._code
-        return 'Kernel("""%s""", %r)' % (code, self._name)
+        return 'Kernel("""%s""", %r)' % (self._code, self._name)
 
     def __eq__(self, other):
         return self.cache_key == other.cache_key
@@ -4156,17 +4138,6 @@ class ParLoop(LazyComputation):
                     if arg2.data is arg1.data and arg2.map is arg1.map:
                         arg2.indirect_position = arg1.indirect_position
 
-        # Attach semantic information to the kernel's AST
-        # Only need to do this once, since the kernel "defines" the
-        # access descriptors, if they were to have changed, the kernel
-        # would be invalid for this par_loop.
-        fundecl = kernel._attached_info['fundecl']
-        attached = kernel._attached_info['attached']
-        if fundecl and not attached:
-            for arg, f_arg in zip(self._actual_args, fundecl.args):
-                if arg._uses_itspace and arg._is_INC:
-                    f_arg.pragma = set([ast.WRITE])
-            kernel._attached_info['attached'] = True
         self.arglist = self.prepare_arglist(iterset, *self.args)
 
     def _run(self):
