@@ -505,10 +505,10 @@ void pyop2_kernel_swap(unsigned int* x)
     def test_same_iteration_space_works(self, iterset, x2, iter2ind2):
         self.cache.clear()
         assert len(self.cache) == 0
-        kernel_code = FunDecl("void", "k",
+        kernel_code = FunDecl("void", "pyop2_kernel_k",
                               [Decl("int*", c_sym("x"), qualifiers=["unsigned"])],
                               c_for("i", 1, ""))
-        k = op2.Kernel(kernel_code.gencode(), 'k')
+        k = op2.Kernel(kernel_code.gencode(), 'pyop2_kernel_k')
 
         op2.par_loop(k, iterset,
                      x2(op2.INC, iter2ind2[op2.i[0]]))
@@ -527,7 +527,7 @@ void pyop2_kernel_swap(unsigned int* x)
         self.cache.clear()
         assert len(self.cache) == 0
 
-        k = op2.Kernel("""void k(void *x) {}""", 'k')
+        k = op2.Kernel("""void pyop2_kernel_k(void *x) {}""", 'pyop2_kernel_k')
 
         op2.par_loop(k, iterset, d(op2.WRITE))
 
@@ -569,35 +569,35 @@ class TestKernelCache:
 
     def test_kernels_same_code_same_name(self):
         """Kernels with same code and name should be retrieved from cache."""
-        code = "void k(void *x) {}"
+        code = "void pyop2_kernel_k(void *x) {}"
         self.cache.clear()
-        k1 = op2.Kernel(code, 'k')
-        k2 = op2.Kernel(code, 'k')
+        k1 = op2.Kernel(code, 'pyop2_kernel_k')
+        k2 = op2.Kernel(code, 'pyop2_kernel_k')
         assert k1 is k2 and len(self.cache) == 1
 
     def test_kernels_same_code_differing_name(self):
         """Kernels with same code and different name should not be retrieved
         from cache."""
         self.cache.clear()
-        code = "void k(void *x) {}"
-        k1 = op2.Kernel(code, 'k')
-        k2 = op2.Kernel(code, 'l')
+        code = "void pyop2_kernel_k(void *x) {}"
+        k1 = op2.Kernel(code, 'pyop2_kernel_k')
+        k2 = op2.Kernel(code, 'pyop2_kernel_l')
         assert k1 is not k2 and len(self.cache) == 2
 
     def test_kernels_differing_code_same_name(self):
         """Kernels with different code and same name should not be retrieved
         from cache."""
         self.cache.clear()
-        k1 = op2.Kernel("void k(void *x) {}", 'k')
-        k2 = op2.Kernel("void l(void *x) {}", 'k')
+        k1 = op2.Kernel("void pyop2_kernel_k(void *x) {}", 'pyop2_kernel_k')
+        k2 = op2.Kernel("void pyop2_kernel_l(void *x) {}", 'pyop2_kernel_k')
         assert k1 is not k2 and len(self.cache) == 2
 
     def test_kernels_differing_code_differing_name(self):
         """Kernels with different code and different name should not be
         retrieved from cache."""
         self.cache.clear()
-        k1 = op2.Kernel("void k(void *x) {}", 'k')
-        k2 = op2.Kernel("void l(void *x) {}", 'l')
+        k1 = op2.Kernel("void pyop2_kernel_k(void *x) {}", 'pyop2_kernel_k')
+        k2 = op2.Kernel("void pyop2_kernel_l(void *x) {}", 'pyop2_kernel_l')
         assert k1 is not k2 and len(self.cache) == 2
 
 
