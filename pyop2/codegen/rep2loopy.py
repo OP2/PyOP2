@@ -347,6 +347,11 @@ def generate(builder):
     context.instruction_dependencies = deps
 
     statements = list(statement(insn, context) for insn in instructions)
+    if not parameters.domains:
+        # No nodes use runtime index, e.g. when kernel is only on globals
+        expression(builder._loop_index, context.parameters)
+        if builder.layer_index:
+            expression(builder.layer_index, context.parameters)
     domains = list(parameters.domains.values())
     assumptions, = reduce(operator.and_,
                           parameters.assumptions.values()).params().get_basic_sets()
