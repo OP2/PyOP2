@@ -1621,8 +1621,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
     @validate_type(('dataset', (DataCarrier, DataSet, Set), DataSetTypeError),
                    ('name', str, NameTypeError))
     @validate_dtype(('dtype', None, DataTypeError))
-    def __init__(self, dataset, data=None, dtype=None, name=None,
-                 uid=None):
+    def __init__(self, dataset, data=None, dtype=None, name=None, uid=None):
 
         if isinstance(dataset, Dat):
             self.__init__(dataset.dataset, None, dtype=dataset.dtype,
