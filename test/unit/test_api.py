@@ -41,7 +41,6 @@ from numpy.testing import assert_equal
 
 from pyop2 import op2
 from pyop2 import exceptions
-from pyop2 import sequential
 from pyop2 import base
 
 
@@ -168,17 +167,17 @@ def sparsity(m_iterset_toset, dtoset):
 
 @pytest.fixture
 def mat(sparsity):
-    return op2.Mat(sparsity)
+    return op2.Mat(sparsity.dsets, sparsity.maps)
 
 
 @pytest.fixture
 def diag_mat(toset):
-    return op2.Mat(op2.Sparsity(toset, op2.Map(toset, toset, 1, np.arange(toset.size))))
+    return op2.Mat(toset, op2.Map(toset, toset, 1, np.arange(toset.size)))
 
 
 @pytest.fixture
 def mmat(ms):
-    return op2.Mat(ms)
+    return op2.Mat(ms.dsets, ms.maps)
 
 
 @pytest.fixture
@@ -1259,18 +1258,13 @@ class TestMatAPI:
         with pytest.raises(TypeError):
             op2.Mat('illegalsparsity')
 
-    def test_mat_illegal_name(self, sparsity):
-        "Mat name should be string."
-        with pytest.raises(sequential.NameTypeError):
-            op2.Mat(sparsity, name=2)
-
     def test_mat_dtype(self, mat):
         "Default data type should be numpy.float64."
         assert mat.dtype == np.double
 
     def test_mat_properties(self, sparsity):
         "Mat constructor should correctly set attributes."
-        m = op2.Mat(sparsity, 'double', 'bar')
+        m = op2.Mat(sparsity.dsets, sparsity.maps, dtype='double', name='bar')
         assert m.sparsity == sparsity and  \
             m.dtype == np.float64 and m.name == 'bar'
 
@@ -1719,7 +1713,7 @@ class TestParLoopAPI:
         """ParLoop should reject a Mat argument using a different iteration
         set from the par_loop's."""
         set1 = op2.Set(2)
-        m = op2.Mat(sparsity)
+        m = op2.Mat(sparsity.dsets, sparsity.maps)
         rmap, cmap = sparsity.maps[0]
         kernel = op2.Kernel("void k() { }", "k")
         with pytest.raises(exceptions.MapValueError):

@@ -3308,9 +3308,9 @@ class Sparsity(ObjectCached):
         else:
             cache = dsets[0].set
         if nest is None:
-            nest = configuration["matnest"]
+            nest = configuration["default_matrix_type"] == "nest"
         if block_sparse is None:
-            block_sparse = configuration["block_sparsity"]
+            block_sparse = configuration["default_sub_matrix_type"] == "baij"
         return (cache,) + (tuple(dsets), frozenset(maps), name, nest, block_sparse), {}
 
     @classmethod
@@ -3508,13 +3508,29 @@ class Mat(DataCarrier):
     _globalcount = 0
     _modes = [WRITE, INC]
 
-    @validate_type(('sparsity', Sparsity, SparsityTypeError),
-                   ('name', str, NameTypeError))
-    def __init__(self, sparsity, dtype=None, name=None):
+    def __init__(self, dsets, maps, mat_type=None, sub_mat_type=None,
+                 dtype=None, name=None):
+        mat_type = mat_type or configuration["default_matrix_type"]
+        sub_mat_type = sub_mat_type or configuration["default_sub_matrix_type"]
+        if mat_type not in {"aij", "baij", "is", "nest"}:
+            raise ValueError("Unsupported mat_type '%s'" % mat_type)
+        if sub_mat_type not in {"aij", "baij", "is"}:
+            raise ValueError("Unsupported sub_mat_type '%s'" % sub_mat_type)
+
+        nest = mat_type == "nest"
+        if nest:
+            block = sub_mat_type == "baij"
+        else:
+            block = mat_type == "baij"
+        sparsity = Sparsity(dsets, maps, nest=nest, block_sparse=block)
+        if mat_type == "nest" and sparsity.shape == (1, 1):
+            mat_type = sub_mat_type
         self._sparsity = sparsity
         self.lcomm = sparsity.lcomm
         self.rcomm = sparsity.rcomm
         self.comm = sparsity.comm
+        self.mat_type = mat_type
+        self.sub_mat_type = sub_mat_type
         self._datatype = np.dtype(dtype)
         self._name = name or "mat_%d" % Mat._globalcount
         self.assembly_state = Mat.ASSEMBLED

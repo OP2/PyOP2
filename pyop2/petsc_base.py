@@ -74,6 +74,8 @@ class DataSet(base.DataSet):
         """A PETSc LGMap mapping process-local indices to global
         indices for this :class:`DataSet` with a block size of 1.
         """
+        if self.cdim == 1:
+            return self.lgmap
         indices = self.lgmap.indices
         lgmap = PETSc.LGMap().create(indices=indices,
                                      bsize=1, comm=self.lgmap.comm)
@@ -672,7 +674,7 @@ class Mat(base.Mat):
                                % (PETSc.ScalarType, self.dtype))
         # If the Sparsity is defined on MixedDataSets, we need to build a MatNest
         if self.sparsity.shape > (1, 1):
-            if self.sparsity.nested:
+            if self.mat_type == "nest":
                 self._init_nest()
                 self._nested = True
             else:
@@ -681,21 +683,22 @@ class Mat(base.Mat):
             self._init_block()
 
     def _init_monolithic(self):
+        if self.mat_type not in {"aij", "is"}:
+            raise ValueError("Invalid mat_type '%s'" % self.mat_type)
         mat = PETSc.Mat()
         rset, cset = self.sparsity.dsets
-        if rset.cdim != 1:
-            rlgmap = rset.unblocked_lgmap
-        else:
-            rlgmap = rset.lgmap
-        if cset.cdim != 1:
-            clgmap = cset.unblocked_lgmap
-        else:
-            clgmap = cset.lgmap
-        mat.createAIJ(size=((self.nrows, None), (self.ncols, None)),
-                      nnz=(self.sparsity.nnz, self.sparsity.onnz),
-                      bsize=1,
-                      comm=self.comm)
+        rlgmap = rset.unblocked_lgmap
+        clgmap = cset.unblocked_lgmap
+        mat.create(comm=self.comm)
+        mat.setSizes((rset.layout_vec.getSizes(), cset.layout_vec.getSizes()))
+        mat.setBlockSize(1)
+        typ = {"aij": mat.Type.AIJ,
+               "is": mat.Type.IS}[self.mat_type]
+        mat.setType(typ)
+        mat.fixISLocalEmpty(True)
         mat.setLGMap(rmap=rlgmap, cmap=clgmap)
+        mat.setPreallocationNNZ((self.sparsity.nnz, self.sparsity.onnz))
+        mat.setPreallocationIS(self.sparsity.nnz, self.sparsity.onnz)
         self.handle = mat
         self._blocks = []
         rows, cols = self.sparsity.shape
@@ -704,11 +707,12 @@ class Mat(base.Mat):
             for j in range(cols):
                 row.append(MatBlock(self, i, j))
             self._blocks.append(row)
-        mat.setOption(mat.Option.IGNORE_ZERO_ENTRIES, False)
         mat.setOption(mat.Option.KEEP_NONZERO_PATTERN, True)
         # We completely fill the allocated matrix when zeroing the
         # entries, so raise an error if we "missed" one.
-        mat.setOption(mat.Option.UNUSED_NONZERO_LOCATION_ERR, True)
+        if typ != mat.Type.IS:
+            # Preallocation is only exact for AIJ matrices
+            mat.setOption(mat.Option.UNUSED_NONZERO_LOCATION_ERR, True)
         mat.setOption(mat.Option.IGNORE_OFF_PROC_ENTRIES, False)
         mat.setOption(mat.Option.NEW_NONZERO_ALLOCATION_ERR, True)
         # The first assembly (filling with zeros) sets all possible entries.
@@ -717,13 +721,14 @@ class Mat(base.Mat):
         with timed_region("MatZeroInitial"):
             for i in range(rows):
                 for j in range(cols):
-                    sparsity.fill_with_zeros(self[i, j].handle,
-                                             self[i, j].sparsity.dims[0][0],
-                                             self[i, j].sparsity.maps,
-                                             set_diag=self[i, j].sparsity._has_diagonal)
+                    sparsity.fill(self[i, j].handle, 1.0,
+                                  self[i, j].sparsity.dims[0][0],
+                                  self[i, j].sparsity.maps,
+                                  set_diag=self[i, j].sparsity._has_diagonal)
                     self[i, j].handle.assemble()
 
         mat.assemble()
+        mat.zeroEntries()
         mat.setOption(mat.Option.NEW_NONZERO_LOCATION_ERR, True)
         mat.setOption(mat.Option.IGNORE_ZERO_ENTRIES, True)
 
@@ -735,8 +740,10 @@ class Mat(base.Mat):
         for i in range(rows):
             row = []
             for j in range(cols):
-                row.append(Mat(self.sparsity[i, j], self.dtype,
-                           '_'.join([self.name, str(i), str(j)])))
+                row.append(Mat(self.sparsity[i, j].dsets,
+                               self.sparsity[i, j].maps,
+                               mat_type=self.sub_mat_type,
+                               dtype=self.dtype))
             self._blocks.append(row)
         # PETSc Mat.createNest wants a flattened list of Mats
         mat.createNest([[m.handle for m in row_] for row_ in self._blocks],
@@ -753,50 +760,47 @@ class Mat(base.Mat):
             return
 
         mat = PETSc.Mat()
-        row_lg = rset.lgmap
-        col_lg = cset.lgmap
         rdim, cdim = self.dims[0][0]
 
-        if rdim == cdim and rdim > 1 and self.sparsity._block_sparse:
-            # Size is total number of rows and columns, but the
-            # /sparsity/ is the block sparsity.
-            block_sparse = True
-            create = mat.createBAIJ
+        mat = mat.create(comm=self.comm)
+        mat.setSizes((rset.layout_vec.getSizes(), cset.layout_vec.getSizes()))
+        mat.setBlockSizes(rdim, cdim)
+        if rdim == cdim and rdim > 1 and self.mat_type == "baij":
+            typ = mat.Type.BAIJ
         else:
-            # Size is total number of rows and columns, sparsity is
-            # the /dof/ sparsity.
-            block_sparse = False
-            create = mat.createAIJ
-        create(size=((self.nrows, None),
-                     (self.ncols, None)),
-               nnz=(self.sparsity.nnz, self.sparsity.onnz),
-               bsize=(rdim, cdim),
-               comm=self.comm)
-        mat.setLGMap(rmap=row_lg, cmap=col_lg)
+            typ = {"aij": mat.Type.AIJ,
+                   "baij": mat.Type.AIJ,
+                   "is": mat.Type.IS}[self.mat_type]
+        if (rdim > 1 or cdim > 1) and self.mat_type == "is":
+            raise NotImplementedError("Block size > 1 not yet supported for MATIS")
+        mat.setType(typ)
+        mat.fixISLocalEmpty(True)
+        mat.setLGMap(rmap=rset.lgmap, cmap=cset.lgmap)
+        mat.setPreallocationNNZ((self.sparsity.nnz, self.sparsity.onnz))
+        mat.setPreallocationIS(self.sparsity.nnz, self.sparsity.onnz)
         # Stash entries destined for other processors
         mat.setOption(mat.Option.IGNORE_OFF_PROC_ENTRIES, False)
         # Any add or insertion that would generate a new entry that has not
         # been preallocated will raise an error
-        mat.setOption(mat.Option.NEW_NONZERO_ALLOCATION_ERR, True)
-        # Do not ignore zeros while we fill the initial matrix so that
-        # petsc doesn't compress things out.
-        if not block_sparse:
-            mat.setOption(mat.Option.IGNORE_ZERO_ENTRIES, False)
+        if typ != mat.Type.IS:
+            # Preallocation is only exact for AIJ matrices
+            mat.setOption(mat.Option.NEW_NONZERO_ALLOCATION_ERR, True)
         # When zeroing rows (e.g. for enforcing Dirichlet bcs), keep those in
         # the nonzero structure of the matrix. Otherwise PETSc would compact
         # the sparsity and render our sparsity caching useless.
         mat.setOption(mat.Option.KEEP_NONZERO_PATTERN, True)
         # We completely fill the allocated matrix when zeroing the
         # entries, so raise an error if we "missed" one.
-        mat.setOption(mat.Option.UNUSED_NONZERO_LOCATION_ERR, True)
+        # mat.setOption(mat.Option.UNUSED_NONZERO_LOCATION_ERR, True)
         # Put zeros in all the places we might eventually put a value.
         with timed_region("MatZeroInitial"):
-            sparsity.fill_with_zeros(mat, self.sparsity.dims[0][0], self.sparsity.maps, set_diag=self.sparsity._has_diagonal)
+            sparsity.fill(mat, 1.0, self.sparsity.dims[0][0], self.sparsity.maps, set_diag=self.sparsity._has_diagonal)
         mat.assemble()
+        mat.zeroEntries()
         mat.setOption(mat.Option.NEW_NONZERO_LOCATION_ERR, True)
         # Now we've filled up our matrix, so the sparsity is
         # "complete", we can ignore subsequent zero entries.
-        if not block_sparse:
+        if typ != mat.Type.BAIJ:
             mat.setOption(mat.Option.IGNORE_ZERO_ENTRIES, True)
         self.handle = mat
 

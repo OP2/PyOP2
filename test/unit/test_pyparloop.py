@@ -70,7 +70,7 @@ def m2(s1, s2):
 
 @pytest.fixture
 def mat(s2, m2):
-    return op2.Mat(op2.Sparsity((s2, s2), (m2, m2)))
+    return op2.Mat((s2, s2), (m2, m2))
 
 
 class TestPyParLoop:

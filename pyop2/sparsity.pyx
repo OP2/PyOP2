@@ -144,9 +144,8 @@ def build_sparsity(sparsity):
                                 (m.split[j] for m in sparsity.cmaps)))
                 mat = preallocator.getLocalSubMatrix(isrow=rset.local_ises[i],
                                                      iscol=cset.local_ises[j])
-                fill_with_zeros(mat, (r.cdim, c.cdim),
-                                maps,
-                                set_diag=((i == j) and sparsity._has_diagonal))
+                fill(mat, 1.0, (r.cdim, c.cdim), maps,
+                     set_diag=((i == j) and sparsity._has_diagonal))
                 mat.assemble()
                 preallocator.restoreLocalSubMatrix(isrow=rset.local_ises[i],
                                                    iscol=cset.local_ises[j],
@@ -154,7 +153,7 @@ def build_sparsity(sparsity):
         preallocator.assemble()
         nnz, onnz = get_preallocation(preallocator, nrows)
     else:
-        fill_with_zeros(preallocator, (1, 1), sparsity.maps, set_diag=sparsity._has_diagonal)
+        fill(preallocator, 1.0, (1, 1), sparsity.maps, set_diag=sparsity._has_diagonal)
         preallocator.assemble()
         nnz, onnz = get_preallocation(preallocator, nrows)
         if not (sparsity._block_sparse and rset.cdim == cset.cdim):
@@ -167,10 +166,11 @@ def build_sparsity(sparsity):
     return nnz, onnz
 
 
-def fill_with_zeros(PETSc.Mat mat not None, dims, maps, set_diag=True):
-    """Fill a PETSc matrix with zeros in all slots we might end up inserting into
+def fill(PETSc.Mat mat not None, PetscScalar val, dims, maps, set_diag=True):
+    """Fill a PETSc matrix with a specified value in all slots we might end up inserting into
 
     :arg mat: the PETSc Mat (must already be preallocated)
+    :arg val: the value to use.
     :arg dims: the dimensions of the sparsity (block size)
     :arg maps: the pairs of maps defining the sparsity pattern
 
@@ -185,7 +185,6 @@ def fill_with_zeros(PETSc.Mat mat not None, dims, maps, set_diag=True):
         PetscInt layer_start, layer_end, layer_bottom
         PetscInt[:, ::1] layers
         PetscInt i
-        PetscScalar zero = 0.0
         PetscInt nrow, ncol
         PetscInt rarity, carity, tmp_rarity, tmp_carity
         PetscInt[:, ::1] rmap, cmap
@@ -200,7 +199,7 @@ def fill_with_zeros(PETSc.Mat mat not None, dims, maps, set_diag=True):
     if set_diag:
         for i in range(nrow):
             if i < ncol:
-                CHKERR(MatSetValuesLocal(mat.mat, 1, &i, 1, &i, &zero, PETSC_INSERT_VALUES))
+                CHKERR(MatSetValuesLocal(mat.mat, 1, &i, 1, &i, &val, PETSC_INSERT_VALUES))
     extruded = maps[0][0].iterset._extruded
     for pair in maps:
         # Iterate over row map values including value entries
@@ -221,6 +220,8 @@ def fill_with_zeros(PETSc.Mat mat not None, dims, maps, set_diag=True):
             # The non-extruded case is easy, we just walk over the
             # rmap and cmap entries and set a block of values.
             CHKERR(PetscCalloc1(rarity*carity*rdim*cdim, &values))
+            for i in range(rarity*carity*rdim*cdim):
+                values[i] = val
             for set_entry in range(set_size):
                 CHKERR(MatSetValuesBlockedLocal(mat.mat, rarity, &rmap[set_entry, 0],
                                                 carity, &cmap[set_entry, 0],
@@ -233,6 +234,8 @@ def fill_with_zeros(PETSc.Mat mat not None, dims, maps, set_diag=True):
             # iteration region, but it doesn't hurt to make them all
             # bigger, since we can special case less code below.
             CHKERR(PetscCalloc1(4*rarity*carity*rdim*cdim, &values))
+            for i in range(4*rarity*carity*rdim*cdim):
+                values[i] = val
             # Row values (generally only rarity of these)
             CHKERR(PetscMalloc1(2 * rarity, &rvals))
             # Col values (generally only rarity of these)
@@ -242,7 +245,7 @@ def fill_with_zeros(PETSc.Mat mat not None, dims, maps, set_diag=True):
             CHKERR(PetscMalloc1(carity, &coffset))
             # Walk over the iteration regions on this map.
             if pair[0].iteration_region != pair[1].iteration_region:
-                raise NotImplementedError("fill_with_zeros: iteration regions of row and col maps don't match")
+                raise NotImplementedError("fill: iteration regions of row and col maps don't match")
             for r in pair[0].iteration_region:
                 region_selector = -1
                 tmp_rarity = rarity

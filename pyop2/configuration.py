@@ -104,8 +104,8 @@ class Configuration(dict):
         "print_summary": ("PYOP2_PRINT_SUMMARY", bool, False),
         "dump_gencode_path": ("PYOP2_DUMP_GENCODE_PATH", str,
                               os.path.join(gettempdir(), "pyop2-gencode")),
-        "matnest": ("PYOP2_MATNEST", bool, True),
-        "block_sparsity": ("PYOP2_BLOCK_SPARSITY", bool, True),
+        "default_matrix_type": ("PYOP2_DEFAULT_MATRIX_TYPE", str, "nest"),
+        "default_sub_matrix_type": ("PYOP2_DEFAULT_SUB_MATRIX_TYPE", str, "baij"),
     }
     """Default values for PyOP2 configuration parameters"""
 

@@ -89,8 +89,7 @@ def elem_node(elements, nodes):
 
 @pytest.fixture(scope='module')
 def mat(elem_node, dnodes):
-    sparsity = op2.Sparsity((dnodes, dnodes), (elem_node, elem_node), "sparsity")
-    return op2.Mat(sparsity, valuetype, "mat")
+    return op2.Mat((dnodes, dnodes), (elem_node, elem_node), dtype=valuetype, name="mat")
 
 
 @pytest.fixture
@@ -579,7 +578,7 @@ class TestMatrices:
     @pytest.mark.parametrize('n', [1, 2])
     def test_mat_set_diagonal(self, nodes, elem_node, n):
         "Set the diagonal of the entire matrix to 1.0"
-        mat = op2.Mat(op2.Sparsity(nodes**n, elem_node), valuetype)
+        mat = op2.Mat(nodes**n, elem_node, dtype=valuetype)
         nrows = mat.sparsity.nrows
         mat.set_local_diagonal_entries(list(range(nrows)))
         mat.assemble()
@@ -588,7 +587,7 @@ class TestMatrices:
     @pytest.mark.parametrize('n', [1, 2])
     def test_mat_repeated_set_diagonal(self, nodes, elem_node, n):
         "Set the diagonal of the entire matrix to 1.0"
-        mat = op2.Mat(op2.Sparsity(nodes**n, elem_node), valuetype)
+        mat = op2.Mat(nodes**n, elem_node, dtype=valuetype)
         nrows = mat.sparsity.nrows
         mat.set_local_diagonal_entries(list(range(nrows)))
         mat.assemble()
@@ -604,13 +603,12 @@ class TestMatrices:
         m = op2.Map(s, d, 1, [2])
         d2 = op2.Set(3)
         m2 = op2.Map(s, d2, 1, [1])
-        sparsity = op2.Sparsity((d, d2), (m, m2))
 
         from petsc4py import PETSc
         # petsc4py default error handler swallows SETERRQ, so just
         # install the abort handler to notice an error.
         PETSc.Sys.pushErrorHandler("abort")
-        mat = op2.Mat(sparsity)
+        mat = op2.Mat((d, d2), (m, m2))
         PETSc.Sys.popErrorHandler()
 
         assert np.allclose(mat.handle.getDiagonal().array, 0.0)
@@ -628,8 +626,7 @@ class TestMatrices:
         nelems = 128
         set = op2.Set(nelems)
         map = op2.Map(set, set, 1, np.array(list(range(nelems)), np.uint32))
-        sparsity = op2.Sparsity((set, set), (map, map))
-        mat = op2.Mat(sparsity, np.float64)
+        mat = op2.Mat((set, set), (map, map), dtype=np.float64)
         kernel = op2.Kernel(zero_mat_code, "zero_mat")
         op2.par_loop(kernel, set,
                      mat(op2.WRITE, (map[op2.i[0]], map[op2.i[1]])))
@@ -776,13 +773,9 @@ class TestMatrixStateChanges:
     Test that matrix state changes are correctly tracked.
     """
 
-    @pytest.fixture(params=[False, True],
-                    ids=["Non-nested", "Nested"])
+    @pytest.fixture(params=["nest", "aij"])
     def mat(self, request, msparsity, non_nest_mixed_sparsity):
-        if request.param:
-            mat = op2.Mat(msparsity)
-        else:
-            mat = op2.Mat(non_nest_mixed_sparsity)
+        mat = op2.Mat(msparsity.dsets, msparsity.maps, mat_type=request.param)
 
         opt = mat.handle.Option.NEW_NONZERO_ALLOCATION_ERR
         opt2 = mat.handle.Option.UNUSED_NONZERO_LOCATION_ERR
@@ -883,7 +876,7 @@ class TestMixedMatrices:
 
     @pytest.fixture
     def mat(self, msparsity, mmap, mdat):
-        mat = op2.Mat(msparsity)
+        mat = op2.Mat(msparsity.dsets, msparsity.maps)
 
         code = c_for("i", 3,
                      c_for("j", 3,
