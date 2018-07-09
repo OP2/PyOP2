@@ -60,7 +60,7 @@ from pyop2.version import __version__ as version
 from coffee.base import Node, FlatBlock
 from coffee.visitors import Find, EstimateFlops
 from coffee import base as ast
-from functools import reduce
+from functools import reduce, partial
 
 import loopy
 
@@ -1976,6 +1976,8 @@ class Dat(DataCarrier, _EmptyDataMixin):
     def _uop(self, op):
         name = "uop_%s" % op.__name__
 
+        _op = {operator.sub: partial(operator.sub, 0)}[op]
+
         import islpy as isl
         import pymbolic.primitives as p
 
@@ -1984,7 +1986,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         _self = p.Variable("self")
         i = p.Variable("i")
 
-        insn = loopy.Assignment(_self.index(i), op(_self.index(i)), within_inames=frozenset(["i"]))
+        insn = loopy.Assignment(_self.index(i), _op(_self.index(i)), within_inames=frozenset(["i"]))
         data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,))]
         knl = loopy.make_kernel([domain], [insn], data, name=name, lang_version=(2018, 1))
         k = _make_object('Kernel', knl, name)
@@ -2273,7 +2275,7 @@ class MixedDat(Dat):
 
     @cached_property
     def _wrapper_cache_key_(self):
-        raise NotImplementedError
+        return (type(self),) + tuple(d._wrapper_cache_key_ for d in self)
 
     def __getitem__(self, idx):
         """Return :class:`Dat` with index ``idx`` or a given slice of Dats."""
