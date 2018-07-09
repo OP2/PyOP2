@@ -472,15 +472,24 @@ class Global(base.Global):
             # But use getSizes to save an Allreduce in computing the
             # global size.
             size = self.dataset.layout_vec.getSizes()
-            if self.comm.rank == 0:
-                self._vec = PETSc.Vec().createWithArray(data, size=size,
-                                                        bsize=self.cdim,
-                                                        comm=self.comm)
+            use_opencl = 1
+            if use_opencl:
+                print(self.comm)
+                1/0
+                self._vec = PETSc.Vec().create(self.comm)
+                self._vec.setSizes(size=size, bsize=self.cdim)
+                self._vec.setType('viennacl')
+                self._vec.setArray(data)
             else:
-                self._vec = PETSc.Vec().createWithArray(np.empty(0, dtype=self.dtype),
-                                                        size=size,
-                                                        bsize=self.cdim,
-                                                        comm=self.comm)
+                if self.comm.rank == 0:
+                    self._vec = PETSc.Vec().createWithArray(data, size=size,
+                                                            bsize=self.cdim,
+                                                            comm=self.comm)
+                else:
+                    self._vec = PETSc.Vec().createWithArray(np.empty(0, dtype=self.dtype),
+                                                            size=size,
+                                                            bsize=self.cdim,
+                                                            comm=self.comm)
         # PETSc Vecs have a state counter and cache norm computations
         # to return immediately if the state counter is unchanged.
         # Since we've updated the data behind their back, we need to
