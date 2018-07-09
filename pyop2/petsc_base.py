@@ -474,8 +474,6 @@ class Global(base.Global):
             size = self.dataset.layout_vec.getSizes()
             use_opencl = 1
             if use_opencl:
-                print(self.comm)
-                1/0
                 self._vec = PETSc.Vec().create(self.comm)
                 self._vec.setSizes(size=size, bsize=self.cdim)
                 self._vec.setType('viennacl')
@@ -496,8 +494,9 @@ class Global(base.Global):
         # change that state counter.
         self._vec.stateIncrease()
         yield self._vec
-        if access is not base.READ:
-            self.comm.Bcast(data, 0)
+        if not use_opencl:
+            if access is not base.READ:
+                self.comm.Bcast(data, 0)
 
     @property
     @collective
