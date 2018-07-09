@@ -336,7 +336,7 @@ area = area * (-1.0);
                                Decl("double", Symbol("x", (6, 3))),
                                Decl("int", Symbol("y", (1,)))],
                               Block([init, assembly], open_scope=False))
-        return op2.Kernel(kernel_code, "pyop2_kernel_vol_comp_rhs")
+        return op2.Kernel(kernel_code.gencode(), "pyop2_kernel_vol_comp_rhs")
 
 
 class TestExtrusion:
@@ -367,13 +367,15 @@ void pyop2_kernel_comp_vol(double A[1], double x[6][2], double y[1])
         """Nbytes computes the number of bytes occupied by an extruded Dat."""
         assert dat_field.nbytes == nums[2] * wedges * 8
 
-    # def test_direct_loop_inc(self, xtr_nodes):
-    #     dat = op2.Dat(xtr_nodes)
-    #     k = 'void pyop2_kernel_k(double *x) { *x += 1.0; }'
-    #     dat.data[:] = 0
-    #     op2.par_loop(op2.Kernel(k, 'pyop2_kernel_k'),
-    #                  dat.dataset.set, dat(op2.INC))
-    #     assert numpy.allclose(dat.data[:], 1.0)
+    # FIXME: layer argument for direct loops on extruded mess
+    @pytest.mark.skip
+    def test_direct_loop_inc(self, xtr_nodes):
+        dat = op2.Dat(xtr_nodes)
+        k = 'void pyop2_kernel_k(double *x) { *x += 1.0; }'
+        dat.data[:] = 0
+        op2.par_loop(op2.Kernel(k, 'pyop2_kernel_k'),
+                     dat.dataset.set, dat(op2.INC))
+        assert numpy.allclose(dat.data[:], 1.0)
 
     def test_extruded_layer_arg(self, elements, field_map, dat_f):
         """Tests that the layer argument is being passed when prompted
@@ -394,23 +396,24 @@ void pyop2_kernel_comp_vol(double A[1], double x[6][2], double y[1])
                 for n in range(len(dat_f.data) + 1)]
 
     def test_write_data_field(self, elements, dat_coords, dat_field, coords_map, field_map, dat_f):
-        kernel_wo = "void kernel_wo(double* x[]) { x[0][0] = 42.0; }\n"
+        kernel_wo = "void pyop2_kernel_wo(double* x) { x[0] = 42.0; }\n"
 
-        op2.par_loop(op2.Kernel(kernel_wo, "kernel_wo"),
+        op2.par_loop(op2.Kernel(kernel_wo, "pyop2_kernel_wo"),
                      elements, dat_f(op2.WRITE, field_map))
 
         assert all(map(lambda x: x == 42, dat_f.data))
 
     def test_write_data_coords(self, elements, dat_coords, dat_field, coords_map, field_map, dat_c):
-        kernel_wo_c = """void kernel_wo_c(double* x[]) {
-                                                               x[0][0] = 42.0; x[0][1] = 42.0;
-                                                               x[1][0] = 42.0; x[1][1] = 42.0;
-                                                               x[2][0] = 42.0; x[2][1] = 42.0;
-                                                               x[3][0] = 42.0; x[3][1] = 42.0;
-                                                               x[4][0] = 42.0; x[4][1] = 42.0;
-                                                               x[5][0] = 42.0; x[5][1] = 42.0;
-                                                            }\n"""
-        op2.par_loop(op2.Kernel(kernel_wo_c, "kernel_wo_c"),
+        kernel_wo_c = """
+        void pyop2_kernel_wo_c(double x[6][2]) {
+           x[0][0] = 42.0; x[0][1] = 42.0;
+           x[1][0] = 42.0; x[1][1] = 42.0;
+           x[2][0] = 42.0; x[2][1] = 42.0;
+           x[3][0] = 42.0; x[3][1] = 42.0;
+           x[4][0] = 42.0; x[4][1] = 42.0;
+           x[5][0] = 42.0; x[5][1] = 42.0;
+        }"""
+        op2.par_loop(op2.Kernel(kernel_wo_c, "pyop2_kernel_wo_c"),
                      elements, dat_c(op2.WRITE, coords_map))
 
         assert all(map(lambda x: x[0] == 42 and x[1] == 42, dat_c.data))
@@ -418,32 +421,35 @@ void pyop2_kernel_comp_vol(double A[1], double x[6][2], double y[1])
     def test_read_coord_neighbours_write_to_field(
         self, elements, dat_coords, dat_field,
             coords_map, field_map, dat_c, dat_f):
-        kernel_wtf = """void kernel_wtf(double* x[], double* y[]) {
-                                                               double sum = 0.0;
-                                                               for (int i=0; i<6; i++){
-                                                                    sum += x[i][0] + x[i][1];
-                                                               }
-                                                               y[0][0] = sum;
-                                                            }\n"""
-        op2.par_loop(op2.Kernel(kernel_wtf, "kernel_wtf"), elements,
-                     dat_coords(op2.READ, coords_map),
-                     dat_f(op2.WRITE, field_map))
+        kernel_wtf = """
+        void pyop2_kernel_wtf(double* y, double x[6][2]) {
+           double sum = 0.0;
+           for (int i=0; i<6; i++){
+                sum += x[i][0] + x[i][1];
+           }
+           y[0] = sum;
+        }"""
+        op2.par_loop(op2.Kernel(kernel_wtf, "pyop2_kernel_wtf"), elements,
+                     dat_f(op2.WRITE, field_map),
+                     dat_coords(op2.READ, coords_map),)
         assert all(dat_f.data >= 0)
 
     def test_indirect_coords_inc(self, elements, dat_coords,
                                  dat_field, coords_map, field_map, dat_c,
                                  dat_f):
-        kernel_inc = """void kernel_inc(double* x[], double* y[]) {
-                                                               for (int i=0; i<6; i++){
-                                                                 if (y[i][0] == 0){
-                                                                    y[i][0] += 1;
-                                                                    y[i][1] += 1;
-                                                                 }
-                                                               }
-                                                            }\n"""
-        op2.par_loop(op2.Kernel(kernel_inc, "kernel_inc"), elements,
-                     dat_coords(op2.READ, coords_map),
-                     dat_c(op2.INC, coords_map))
+        kernel_inc = """
+        void pyop2_kernel_inc(double y[6][2], double x[6][2]) {
+           for (int i=0; i<6; i++){
+             if (y[i][0] == 0){
+                y[i][0] += 1;
+                y[i][1] += 1;
+             }
+           }
+        }"""
+        op2.par_loop(op2.Kernel(kernel_inc, "pyop2_kernel_inc"), elements,
+                     dat_c(op2.RW, coords_map),
+                     dat_coords(op2.READ, coords_map))
+
 
         assert sum(sum(dat_c.data)) == nums[0] * layers * 2
 
