@@ -25,6 +25,7 @@ from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
                                           Materialise, Accumulate, FunctionCall, When,
                                           Argument, Variable, Literal, NamedLiteral,
                                           Symbol, Zero, Sum, Product)
+from pyop2.codegen.representation import (PackInst, UnpackInst, KernelInst)
 
 class Bag(object):
     pass
@@ -169,14 +170,15 @@ replace_materialise.register(Node)(reuse_if_untouched)
 def replace_materialise_materialise(node, self):
     v = Variable(node.name, node.shape, node.dtype)
     inits = list(map(self, node.children))
+    label = node.label
     accs = []
     for rvalue, indices in zip(*(inits[0::2], inits[1::2])):
         lvalue = Indexed(v, indices)
         if isinstance(rvalue, When):
             when, rvalue = rvalue.children
-            acc = When(when, Accumulate(lvalue, rvalue))
+            acc = When(when, Accumulate(label, lvalue, rvalue))
         else:
-            acc = Accumulate(lvalue, rvalue)
+            acc = Accumulate(label, lvalue, rvalue)
         accs.append(acc)
     self.initialisers.append(tuple(accs))
     return v
@@ -228,53 +230,29 @@ def loop_nesting(instructions, deps, outer_inames, kernel_name):
 
 def instruction_dependencies(instructions, initialisers):
 
-    def variables(exprs):
-        for op in traversal(exprs):
-            if isinstance(op, (Argument, Variable)):
-                yield op
-
-    writers = defaultdict(list)
     deps = {}
     names = {}
+    instructions_by_type = defaultdict(list)
     c = itertools.count()
     for op in imperatives(instructions):
-        if isinstance(op, Accumulate):
-            name = "statement%d" % next(c)
-            lvalue, _ = op.children
-            # Only writes to the outer-most variable
-            writes = next(variables([lvalue]))
-            if isinstance(writes, Variable):
-                writers[writes].append(name)
-            names[op] = name
-        else:
-            assert isinstance(op, FunctionCall)
-            name = "statement%d" % next(c)
-            names[op] = name
-            for access, arg in zip(op.access, op.children):
-                if access is not READ:
-                    writes = next(variables([arg]))
-                    if isinstance(writes, Variable):
-                        writers[writes].append(name)
+        name = "statement%d" % next(c)
+        names[op] = name
+        instructions_by_type[type(op.label)].append(op)
+        deps[op] = (name, frozenset())
 
-    for op, name in names.items():
-        if isinstance(op, Accumulate):
-            _, rvalue = op.children
-            depends_on = frozenset(x for x in
-                                   itertools.chain(*(writers[r]
-                                                     for r in variables([rvalue])))
-                                   if x is not name)
-        else:
-            depends_on = []
-            for access, arg in zip(op.access, op.children):
-                depends_on.extend(x for x in
-                                  itertools.chain(*(writers[r]
-                                                    for r in variables([arg])))
-                                  if x is not name)
-            depends_on = frozenset(depends_on)
+    # kernel instructions depends on packing instructions
+    for op in instructions_by_type[KernelInst]:
+        name, depends_on = deps[op]
+        depends_on = depends_on | frozenset(names[o] for o in instructions_by_type[PackInst])
+        deps[op] = (name, depends_on)
+
+    # unpacking instructions depends on kernel instructions
+    for op in instructions_by_type[UnpackInst]:
+        name, depends_on = deps[op]
+        depends_on = depends_on | frozenset(names[o] for o in instructions_by_type[KernelInst])
         deps[op] = (name, depends_on)
 
     # add sequential instructions
-
     for inits in initialisers:
         for i, parent in enumerate(inits[1:], 1):
             for p in imperatives([parent]):

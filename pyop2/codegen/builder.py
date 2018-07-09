@@ -11,6 +11,7 @@ from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
                                           Materialise, Accumulate, FunctionCall, When,
                                           Symbol, Zero, Variable,
                                           Sum, Product, view)
+from pyop2.codegen.representation import (PackInst, UnpackInst, KernelInst)
 
 from pyop2.utils import cached_property
 from pyop2.datatypes import IntType
@@ -119,7 +120,7 @@ class Map(object):
                     k = Index(1)
                 offset = Sum(Sum(layer, Product(Literal(numpy.int32(-1)), bottom_layer)), k)
                 offset = Product(offset, Indexed(self.offset, (j,)))
-                self.prefetch[key] = Materialise(Sum(base, offset), MultiIndex(k, j))
+                self.prefetch[key] = Materialise(PackInst(), Sum(base, offset), MultiIndex(k, j))
 
             return Indexed(self.prefetch[key], (f, i)), (f, i)
         else:
@@ -161,7 +162,7 @@ class Map(object):
             discard = LogicalAnd(discard, expr)
 
         init = Conditional(discard, Literal(self.dtype.type(-1)), Sum(Product(base, Literal(numpy.int32(j.extent))), j))
-        pack = Materialise(init, MultiIndex(f, i, j))
+        pack = Materialise(PackInst(), init, MultiIndex(f, i, j))
         multiindex = tuple(Index(e) for e in pack.shape)
         return Indexed(pack, multiindex), multiindex
 
@@ -176,7 +177,7 @@ class Map(object):
         f, i = (Index(e) for e in shape)
         base, (f, i) = self.indexed((n, i, f), layer=layer)
 
-        expressions = [base, MultiIndex(f, i)]
+        expressions = [PackInst(), base, MultiIndex(f, i)]
         if self.variable:
             for location, method in self.implicit_bcs:
                 index_array = self.boundary_masks[method]
@@ -199,8 +200,8 @@ class Map(object):
                     continue
                 bit = Index(index_array.nrows)
                 when = BitwiseAnd(mask, BitShift("<<", Literal(numpy.int64(1)), bit))
-                off = Materialise(Indexed(index_array.offset, (bit, )), MultiIndex())
-                dof = Materialise(Indexed(index_array.dof, (bit, )), MultiIndex())
+                off = Materialise(PackInst(), Indexed(index_array.offset, (bit, )), MultiIndex())
+                dof = Materialise(PackInst(), Indexed(index_array.dof, (bit, )), MultiIndex())
                 k = RuntimeIndex(off, Sum(off, dof),
                                  LogicalAnd(
                                      Comparison("<=", Zero((), numpy.int32), off),
@@ -314,10 +315,11 @@ class DatPack(Pack):
         if self.access in {INC, WRITE}:
             val = Zero((), self.outer.dtype)
             multiindex = MultiIndex(*(Index(e) for e in shape))
-            self._pack = Materialise(val, multiindex)
+            self._pack = Materialise(PackInst(), val, multiindex)
         else:
             multiindex = MultiIndex(*(Index(e) for e in shape))
-            self._pack = Materialise(self._rvalue(multiindex, loop_indices=loop_indices),
+            self._pack = Materialise(PackInst(),
+                                     self._rvalue(multiindex, loop_indices=loop_indices),
                                      multiindex)
         return self._pack
 
@@ -353,11 +355,13 @@ class DatPack(Pack):
         elif self.access is INC:
             multiindex = tuple(Index(e) for e in pack.shape)
             rvalue = self._rvalue(multiindex, loop_indices=loop_indices)
-            return Accumulate(rvalue,
+            return Accumulate(UnpackInst(),
+                              rvalue,
                               Sum(rvalue, view(pack, tuple((0, i) for i in multiindex))))
         else:
             multiindex = tuple(Index(e) for e in pack.shape)
-            return Accumulate(self._rvalue(multiindex, loop_indices=loop_indices),
+            return Accumulate(UnpackInst(),
+                              self._rvalue(multiindex, loop_indices=loop_indices),
                               view(pack, tuple((0, i) for i in multiindex)))
 
 
@@ -384,7 +388,7 @@ class MatPack(Pack):
         if self.access in {WRITE, INC}:
             val = Zero((), self.dtype)
             multiindex = MultiIndex(*(Index(e) for e in (rshape + cshape)))
-            pack = Materialise(val, multiindex)
+            pack = Materialise(PackInst(), val, multiindex)
             self._pack = pack
             return pack
         else:
@@ -439,6 +443,7 @@ class MatPack(Pack):
         cextent = Extent(MultiIndex(*cindices))
 
         call = FunctionCall(name,
+                            UnpackInst(),
                             (self.access, READ, READ, READ, READ, READ, READ),
                             free_indices,
                             self.outer,
@@ -514,7 +519,7 @@ class WrapperBuilder(object):
     def loop_index(self):
         n = self._loop_index
         if self.subset:
-            n = Materialise(Indexed(self._subset_indices, MultiIndex(n)), MultiIndex())
+            n = Materialise(PackInst(), Indexed(self._subset_indices, MultiIndex(n)), MultiIndex())
             return n
             # return Indexed(self._subset_indices, MultiIndex(n))
         else:
@@ -530,7 +535,8 @@ class WrapperBuilder(object):
     @cached_property
     def bottom_layer(self):
         if self.iteration_region == ON_TOP:
-            return Materialise(Indexed(self._layers_array, (self._layer_index, FixedIndex(0))),
+            return Materialise(PackInst(),
+                               Indexed(self._layers_array, (self._layer_index, FixedIndex(0))),
                                MultiIndex())
         else:
             start, _ = self.layer_extents
@@ -539,7 +545,8 @@ class WrapperBuilder(object):
     @cached_property
     def top_layer(self):
         if self.iteration_region == ON_BOTTOM:
-            return Materialise(Sum(Indexed(self._layers_array, (self._layer_index, FixedIndex(1))),
+            return Materialise(PackInst(),
+                               Sum(Indexed(self._layers_array, (self._layer_index, FixedIndex(1))),
                                    Literal(IntType.type(-1))),
                                MultiIndex())
         else:
@@ -591,8 +598,8 @@ class WrapperBuilder(object):
                       Literal(IntType.type(-1)))
         else:
             raise ValueError("Unknown iteration region")
-        return (Materialise(start, MultiIndex()),
-                Materialise(end, MultiIndex()))
+        return (Materialise(PackInst(), start, MultiIndex()),
+                Materialise(PackInst(), end, MultiIndex()))
 
     @cached_property
     def _layer_index(self):
@@ -711,7 +718,7 @@ class WrapperBuilder(object):
         if self.pass_layer_to_kernel:
             args = args + (self.layer_index, )
             access = access + (READ,)
-        return FunctionCall(self.kernel.name, access, free_indices, *args)
+        return FunctionCall(self.kernel.name, KernelInst(), access, free_indices, *args)
 
     def emit_instructions(self):
         yield self.kernel_call()

@@ -10,6 +10,23 @@ from abc import ABCMeta
 from gem.node import Node as NodeBase
 
 
+class InstructionLabel(object):
+    pass
+
+
+class PackInst(InstructionLabel):
+    pass
+
+
+class UnpackInst(InstructionLabel):
+    pass
+
+
+class KernelInst(InstructionLabel):
+    pass
+
+
+
 class Node(NodeBase):
 
     def is_equal(self, other):
@@ -308,11 +325,14 @@ class When(Node):
 
 class Materialise(Node):
     _count = itertools.count()
-    __slots__ = ("children", "name")
+    __slots__ = ("children", "name", "label")
+    __front__ = ("label",)
 
-    def __init__(self, init, indices, *expressions_and_indices):
+    def __init__(self, label, init, indices, *expressions_and_indices):
         assert all(isinstance(i, (Index, FixedIndex)) for i in indices)
         assert len(expressions_and_indices) % 2 == 0
+        assert isinstance(label, InstructionLabel)
+        self.label = label
         self.children = (init, indices) + tuple(expressions_and_indices)
         self.name = "t%d" % next(Materialise._count)
 
@@ -348,20 +368,27 @@ class Variable(Terminal):
 
 class Accumulate(Node):
     __slots__ = ("children",)
+    __front__ = ("label",)
 
-    def __init__(self, lvalue, rvalue):
+    def __init__(self, label, lvalue, rvalue):
         self.children = (lvalue, rvalue)
+        self.label = label
+
+    def reconstruct(self, *args):
+        new = type(self)(*self._cons_args(args))
+        return new
 
 
 class FunctionCall(Node):
-    __slots__ = ("name", "access", "free_indices", "children")
-    __front__ = ("name", "access", "free_indices")
+    __slots__ = ("name", "access", "free_indices", "label", "children")
+    __front__ = ("name", "label", "access", "free_indices")
 
-    def __init__(self, name, access, free_indices, *arguments):
+    def __init__(self, name, label, access, free_indices, *arguments):
         self.children = tuple(arguments)  # TODO: + free_indices?
         self.access = tuple(access)
         self.free_indices = free_indices
         self.name = name
+        self.label = label
         assert len(self.access) == len(self.children)
 
 
