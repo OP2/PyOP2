@@ -653,8 +653,14 @@ def generate_viennacl_code(kernel):
                 // declaring the int arrays(if any..)
                 % for arg in args:
                 % if isinstance(arg, lp.ArrayArg) and arg.dtype.is_integral():
-                viennacl::vector<cl_int> ${arg.name}_viennacl(3*(end-start), ctx);
-                copy(${arg.name}, &(${arg.name}[3*(end-start)]), ${arg.name}_viennacl.begin());
+                cl_mem ${arg.name}_opencl = clCreateBuffer(ctx.handle().get(),
+                                                CL_MEM_READ_ONLY,
+                                                3*(end-start)*sizeof(cl_int)+1,
+                                                NULL, NULL);
+                clEnqueueWriteBuffer(ctx.get_queue().handle().get(), ${arg.name}_opencl, CL_TRUE, 0, 3*(end-start)*sizeof(cl_int), ${arg.name},
+                                        0, NULL, NULL);
+                viennacl::vector<cl_int>
+                ${arg.name}_viennacl(${arg.name}_opencl, 3*(end-start)+1);
                 % endif
                 % endfor
 
