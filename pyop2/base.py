@@ -62,6 +62,7 @@ from coffee.visitors import EstimateFlops
 from functools import reduce, partial
 
 import loopy
+import pymbolic.primitives as p
 
 
 def _make_object(name, *args, **kwargs):
@@ -308,6 +309,11 @@ class Arg(object):
 
     @cached_property
     def _kernel_args_(self):
+        use_opencl = 1
+        if use_opencl:
+            with self.data.vec as v:
+                return (v.handle, )
+
         return self.data._kernel_args_
 
     @cached_property
@@ -1768,8 +1774,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
         if loop is None:
 
             import islpy as isl
-            import pymbolic.primitives as p
-
             inames = isl.make_zero_and_vars(["i"])
             domain = (inames[0].le_set(inames["i"])) & (inames["i"].lt_set(inames[0] + self.cdim))
             x = p.Variable("dat")
@@ -1800,8 +1804,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
         if not hasattr(self, '_copy_kernel'):
 
             import islpy as isl
-            import pymbolic.primitives as p
-
             inames = isl.make_zero_and_vars(["i"])
             domain = (inames[0].le_set(inames["i"])) & (inames["i"].lt_set(inames[0] + self.cdim))
             _other = p.Variable("other")
@@ -1839,69 +1841,79 @@ class Dat(DataCarrier, _EmptyDataMixin):
                              self.dataset.dim, other.dataset.dim)
 
     def _op(self, other, op):
-
+        ops = {operator.add: ast.Sum,
+               operator.sub: ast.Sub,
+               operator.mul: ast.Prod,
+               operator.truediv: ast.Div}
         ret = _make_object('Dat', self.dataset, None, self.dtype)
         name = "binop_%s" % op.__name__
-
-        import islpy as isl
-        import pymbolic.primitives as p
-
-        inames = isl.make_zero_and_vars(["i"])
-        domain = (inames[0].le_set(inames["i"])) & (inames["i"].lt_set(inames[0] + self.cdim))
-        _other = p.Variable("other")
-        _self = p.Variable("self")
-        _ret = p.Variable("ret")
-        i = p.Variable("i")
-
-        lhs = _ret.index(i)
         if np.isscalar(other):
             other = _make_object('Global', 1, data=other)
-            rhs = _other.index(0)
+            k = ast.FunDecl("void", name,
+                            [ast.Decl(self.ctype, ast.Symbol("self"),
+                                      qualifiers=["const"], pointers=[""]),
+                             ast.Decl(other.ctype, ast.Symbol("other"),
+                                      qualifiers=["const"], pointers=[""]),
+                             ast.Decl(self.ctype, ast.Symbol("ret"), pointers=[""])],
+                            ast.c_for("n", self.cdim,
+                                      ast.Assign(ast.Symbol("ret", ("n", )),
+                                                 ops[op](ast.Symbol("self", ("n", )),
+                                                         ast.Symbol("other", ("0", )))),
+                                      pragma=None))
+
+            k = _make_object('Kernel', k, name)
         else:
             self._check_shape(other)
-            rhs = _other.index(i)
-        insn = loopy.Assignment(lhs, op(_self.index(i), rhs), within_inames=frozenset(["i"]))
-        data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
-                loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,)),
-                loopy.GlobalArg("ret", dtype=self.dtype, shape=(self.cdim,))]
-        knl = loopy.make_kernel([domain], [insn], data, name=name, lang_version=(2018, 1))
-        k = _make_object('Kernel', knl, name)
+            k = ast.FunDecl("void", name,
+                            [ast.Decl(self.ctype, ast.Symbol("self"),
+                                      qualifiers=["const"], pointers=[""]),
+                             ast.Decl(other.ctype, ast.Symbol("other"),
+                                      qualifiers=["const"], pointers=[""]),
+                             ast.Decl(self.ctype, ast.Symbol("ret"), pointers=[""])],
+                            ast.c_for("n", self.cdim,
+                                      ast.Assign(ast.Symbol("ret", ("n", )),
+                                                 ops[op](ast.Symbol("self", ("n", )),
+                                                         ast.Symbol("other", ("n", )))),
+                                      pragma=None))
 
+            k = _make_object('Kernel', k, name)
         par_loop(k, self.dataset.set, self(READ), other(READ), ret(WRITE))
-
         return ret
 
     def _iop(self, other, op):
-
+        ops = {operator.iadd: ast.Incr,
+               operator.isub: ast.Decr,
+               operator.imul: ast.IMul,
+               operator.itruediv: ast.IDiv}
         name = "iop_%s" % op.__name__
-
-        import islpy as isl
-        import pymbolic.primitives as p
-
-        inames = isl.make_zero_and_vars(["i"])
-        domain = (inames[0].le_set(inames["i"])) & (inames["i"].lt_set(inames[0] + self.cdim))
-        _other = p.Variable("other")
-        _self = p.Variable("self")
-        i = p.Variable("i")
-
-        lhs = _self.index(i)
         if np.isscalar(other):
             other = _make_object('Global', 1, data=other)
-            rhs = _other.index(0)
+            k = ast.FunDecl("void", name,
+                            [ast.Decl(self.ctype, ast.Symbol("self"), pointers=[""]),
+                             ast.Decl(other.ctype, ast.Symbol("other"),
+                                      qualifiers=["const"], pointers=[""])],
+                            ast.c_for("n", self.cdim,
+                                      ops[op](ast.Symbol("self", ("n", )),
+                                              ast.Symbol("other", ("0", ))),
+                                      pragma=None))
+            k = _make_object('Kernel', k, name)
         else:
             self._check_shape(other)
-            rhs = _other.index(i)
-        insn = loopy.Assignment(lhs, op(lhs, rhs), within_inames=frozenset(["i"]))
-        data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
-                loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,))]
-        knl = loopy.make_kernel([domain], [insn], data, name=name, lang_version=(2018, 1))
-        k = _make_object('Kernel', knl, name)
-
+            quals = ["const"] if self is not other else []
+            k = ast.FunDecl("void", name,
+                            [ast.Decl(self.ctype, ast.Symbol("self"), pointers=[""]),
+                             ast.Decl(other.ctype, ast.Symbol("other"),
+                                      qualifiers=quals, pointers=[""])],
+                            ast.c_for("n", self.cdim,
+                                      ops[op](ast.Symbol("self", ("n", )),
+                                              ast.Symbol("other", ("n", ))),
+                                      pragma=None))
+            k = _make_object('Kernel', k, name)
         par_loop(k, self.dataset.set, self(INC), other(READ))
-
         return self
 
     def _uop(self, op):
+        ops = {operator.sub: ast.Neg}
         name = "uop_%s" % op.__name__
 
         _op = {operator.sub: partial(operator.sub, 0)}[op]
@@ -1932,23 +1944,18 @@ class Dat(DataCarrier, _EmptyDataMixin):
         self._check_shape(other)
         ret = _make_object('Global', 1, data=0, dtype=self.dtype)
 
-        import islpy as isl
-        import pymbolic.primitives as p
-
-        inames = isl.make_zero_and_vars(["i"])
-        domain = (inames[0].le_set(inames["i"])) & (inames["i"].lt_set(inames[0] + self.cdim))
-        _self = p.Variable("self")
-        _other = p.Variable("other")
-        _ret = p.Variable("ret")
-        i = p.Variable("i")
-
-        insn = loopy.Assignment(_ret.index(0), _ret.index(0) + _self.index(i) * _other.index(i), within_inames=frozenset(["i"]))
-        data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
-                loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,)),
-                loopy.GlobalArg("ret", dtype=ret.dtype, shape=(1,))]
-        knl = loopy.make_kernel([domain], [insn], data, name="inner", lang_version=(2018, 1))
-
-        k = _make_object('Kernel', knl, "inner")
+        k = ast.FunDecl("void", "inner",
+                        [ast.Decl(self.ctype, ast.Symbol("self"),
+                                  qualifiers=["const"], pointers=[""]),
+                         ast.Decl(other.ctype, ast.Symbol("other"),
+                                  qualifiers=["const"], pointers=[""]),
+                         ast.Decl(self.ctype, ast.Symbol("ret"), pointers=[""])],
+                        ast.c_for("n", self.cdim,
+                                  ast.Incr(ast.Symbol("ret", (0, )),
+                                           ast.Prod(ast.Symbol("self", ("n", )),
+                                                    ast.Symbol("other", ("n", )))),
+                                  pragma=None))
+        k = _make_object('Kernel', k, "inner")
         par_loop(k, self.dataset.set, self(READ), other(READ), ret(INC))
         return ret.data_ro[0]
 
@@ -3758,7 +3765,13 @@ class Kernel(Cached):
         # Protect against re-initialization when retrieved from cache
         if self._initialized:
             return
+
         self._name = name or "pyop2_kernel_%d" % Kernel._globalcount
+
+        use_opencl = 1
+        if use_opencl:
+            cpp = True
+
         self._cpp = cpp
         Kernel._globalcount += 1
         # Record used optimisations

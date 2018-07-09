@@ -130,6 +130,12 @@ class JITModule(base.JITModule):
         if batch_size > 1:
             builder.set_batch(batch_size)
         wrapper = generate(builder)
+
+        if use_opencl:
+            code = generate_viennacl_code(wrapper)
+            print(code)
+            return code
+
         code = loopy.generate_code_v2(wrapper)
 
         self.set_argtypes(self._iterset, *self._args)
@@ -140,6 +146,7 @@ class JITModule(base.JITModule):
         # for m in builder.maps.keys():
         #     nbytes += len(m.values) * 4
         # print("BYTES= {0}".format(nbytes))
+
 
         if self._kernel._cpp:
             from loopy.codegen.result import process_preambles
@@ -221,6 +228,7 @@ class ParLoop(petsc_base.ParLoop):
                         continue
                     arglist += (k,)
                     seen.add(k)
+
         return arglist
 
     @cached_property
@@ -233,6 +241,7 @@ class ParLoop(petsc_base.ParLoop):
     def _compute(self, part, fun, *arglist):
         with timed_region("ParLoop{0}".format(self.iterset.name)):
             fun(part.offset, part.offset + part.size, *arglist)
+
             self.log_flops(self.num_flops * part.size)
 
 

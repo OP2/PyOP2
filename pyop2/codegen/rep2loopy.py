@@ -69,6 +69,7 @@ class PetscCallable(loopy.ScalarCallable):
                     dim_tags=dim_tags
                 )
 
+
         return self.copy(arg_id_to_descr=new_arg_id_to_descr)
 
 
@@ -261,6 +262,7 @@ def instruction_dependencies(instructions, initialisers):
                 yield op
 
     writers = defaultdict(list)
+
     for op in instructions_by_type[PackInst]:
         assert isinstance(op, Accumulate)
         lvalue, _ = op.children
@@ -403,6 +405,7 @@ def generate(builder, wrapper_name=None):
 
     kernel = builder.kernel
     alignment = 64
+
     headers = set(kernel._headers)
     headers = headers | set(["#include <petsc.h>", "#include <math.h>"])
     preamble = "\n".join(sorted(headers))
@@ -427,9 +430,6 @@ def generate(builder, wrapper_name=None):
             code = kernel._code
         wrapper = loopy.register_function_lookup(wrapper, PyOP2_Kernel_Lookup(kernel.name, code, tuple(builder.argument_accesses)))
         preamble = preamble + "\n" + code
-
-    # register petsc functions
-    wrapper = loopy.register_function_lookup(wrapper, petsc_function_lookup)
 
     if builder.batch > 1:
         if builder.extruded:
@@ -464,7 +464,9 @@ def generate(builder, wrapper_name=None):
         # kernel = loopy.tag_inames(kernel, {"elem": "ilp.seq"})
     for name in wrapper.temporary_variables:
         tv = wrapper.temporary_variables[name]
-        wrapper.temporary_variables[name] = tv.copy(alignment=alignment)
+        use_opencl = 1
+        if not use_opencl:
+            wrapper.temporary_variables[name] = tv.copy(alignment=alignment)
 
     # mark inner most loop as omp simd
     # import os
@@ -485,7 +487,12 @@ def generate(builder, wrapper_name=None):
     #     for iname in innermost_iname:
     #         kernel = loopy.tag_inames(kernel, {iname: "l.0"})
 
-    wrapper = wrapper.copy(preambles=[("0", preamble)])
+    use_opencl = 1
+
+    if not use_opencl:
+        preamble = "#include <petsc.h>\n"
+        preamble = "#include <math.h>\n" + preamble
+        wrapper = wrapper.copy(preambles=[("0", preamble)])
 
     # vectorization }}}
 
@@ -510,6 +517,192 @@ def argtypes(kernel):
         else:
             raise ValueError("Unhandled arg type '%s'" % type(arg))
     return args
+
+
+def prepare_arglist(iterset, *args):
+    arglist = iterset._kernel_args_
+    for arg in args:
+        arglist += arg._kernel_args_
+    seen = set()
+    for arg in args:
+        maps = arg.map_tuple
+        for map_ in maps:
+            for k in map_._kernel_args_:
+                if k in seen:
+                    continue
+                arglist += (k, )
+                seen.add(k)
+    return arglist
+
+
+def set_argtypes(iterset, *args):
+    from pyop2.datatypes import IntType, as_ctypes
+    index_type = as_ctypes(IntType)
+    argtypes = (index_type, index_type)
+    argtypes += iterset._argtypes_
+    for arg in args:
+        argtypes += arg._argtypes_
+    seen = set()
+    for arg in args:
+        maps = arg.map_tuple
+        for map_ in maps:
+            for k, t in zip(map_._kernel_args_, map_._argtypes_):
+                if k in seen:
+                    continue
+                argtypes += (t, )
+                seen.add(k)
+    return argtypes
+
+
+def prepare_cache_key(kernel, iterset, *args):
+    from pyop2 import Subset
+    counter = itertools.count()
+    seen = defaultdict(lambda: next(counter))
+    key = (
+            kernel._wrapper_cache_key_
+            + iterset._wrapper_cache_key_
+            + (iterset._extruded, (iterset._extruded and iterset.constant_layers), isinstance(iterset, Subset))
+    )
+
+    for arg in args:
+        key += arg._wrapper_cache_key_
+        maps = arg.map_tuple
+        for map_ in maps:
+            key += (seen[map_], )
+    return key
+
+
+def get_grid_sizes(kernel):
+    parameters = {}
+    for arg in kernel.args:
+        if isinstance(arg, loopy.ValueArg) and arg.approximately is not None:
+            parameters[arg.name] = arg.approximately
+
+    glens, llens = kernel.get_grid_size_upper_bounds_as_exprs()
+
+    from pymbolic import evaluate
+    from pymbolic.mapper.evaluator import UnknownVariableError
+    try:
+        glens = evaluate(glens, parameters)
+        llens = evaluate(llens, parameters)
+    except UnknownVariableError as name:
+        from warnings import warn
+        warn("could not check axis bounds because no value "
+                "for variable '%s' was passed to check_kernels()"
+                % name)
+
+    return llens, glens
+
+
+def generate_viennacl_code(kernel):
+    import pyopencl as cl
+    import re
+    from mako.template import Template
+    lsize, gsize = get_grid_sizes(kernel)
+    if not lsize:
+        lsize = (1, )
+    if not gsize:
+        gsize = (1, )
+    ctx = cl.create_some_context()
+    # TODO: somehow pull the device from the petsc vec
+    kernel = kernel.copy(
+            target=loopy.PyOpenCLTarget(ctx.devices[0]))
+
+    c_code_str = r'''#include <CL/cl.h>
+            #include "petsc.h"
+            #include "petscvec.h"
+            #include "petscviennacl.h"
+            #include <iostream>
+            <%! import loopy as lp %>
+
+            // ViennaCL Headers
+            #include "viennacl/ocl/backend.hpp"
+            #include "viennacl/vector.hpp"
+            #include "viennacl/backend/memory.hpp"
+
+            char kernel_source[] = "${kernel_src}";
+
+            extern "C" void ${kernel_name}(${", ".join(
+                                [('Vec ' + arg.name)  if isinstance(arg,
+                                lp.ArrayArg) and not arg.dtype.is_integral() else
+                                ('int const* ' + arg.name) if isinstance(arg,
+                                lp.ArrayArg) and arg.dtype.is_integral() else
+                                str(arg.get_arg_decl(ast_builder))[:-1]
+                                for arg in args])})
+            {
+                // viennacl vector declarations
+                % for arg in args:
+                % if isinstance(arg, lp.ArrayArg) and not arg.dtype.is_integral():
+                viennacl::vector<PetscScalar> *${arg.name}_viennacl;
+                % endif
+                % endfor
+
+                // getting the array from the petsc vecs
+                % for arg in args:
+                % if isinstance(arg, lp.ArrayArg) and not arg.dtype.is_integral():
+                VecViennaCLGetArrayReadWrite(${arg.name}, &${arg.name}_viennacl);
+                % endif
+                % endfor
+
+                // defining the context
+                viennacl::ocl::context ctx =
+                        ${[arg for arg in args if isinstance(arg,
+                        lp.ArrayArg) and not
+                        arg.dtype.is_integral()][0].name}_viennacl->handle().opencl_handle().context();
+
+                // declaring the int arrays(if any..)
+                % for arg in args:
+                % if isinstance(arg, lp.ArrayArg) and arg.dtype.is_integral():
+                viennacl::vector<cl_int> ${arg.name}_viennacl(3*(end-start), ctx);
+                copy(${arg.name}, &(${arg.name}[3*(end-start)]), ${arg.name}_viennacl.begin());
+                % endif
+                % endfor
+
+                viennacl::ocl::program & my_prog =
+                            ctx.add_program(kernel_source, "kernel_program");
+                viennacl::ocl::kernel &viennacl_kernel =
+                        my_prog.get_kernel("${kernel_name}");
+
+                // set work group sizes
+                % for i, ls in enumerate(lsize):
+                viennacl_kernel.local_work_size(${i}, ${ls});
+                % endfor
+                % for i, gs in enumerate(gsize):
+                viennacl_kernel.global_work_size(${i}, ${gs});
+                % endfor
+
+                // enqueueing the kernel
+                viennacl::ocl::enqueue(viennacl_kernel(${", ". join(
+                                ['*' + arg.name + '_viennacl' if
+                                isinstance(arg, lp.ArrayArg) and not
+                                arg.dtype.is_integral() else arg.name + '_viennacl'
+                                if isinstance(arg, lp.ArrayArg) and
+                                arg.dtype.is_integral() else 'cl_int('+arg.name+')'
+                                for arg in args])}));
+
+                // restoring the arrays to the petsc vecs
+                % for arg in args:
+                % if isinstance(arg, lp.ArrayArg) and not arg.dtype.is_integral():
+                VecViennaCLRestoreArrayReadWrite(${arg.name}, &${arg.name}_viennacl);
+                %endif
+                % endfor
+
+            }
+            '''
+
+    # remove the whitespaces for pretty printing
+    c_code_str = re.sub("\\n            ", "\n", c_code_str)
+
+    c_code = Template(c_code_str)
+
+    return c_code.render(
+        kernel_src=loopy.generate_code_v2(kernel).device_code().replace('\n',
+            '\\n"\n"'),
+        kernel_name=kernel.name,
+        ast_builder=kernel.target.get_device_ast_builder(),
+        args=kernel.args,
+        lsize=lsize,
+        gsize=gsize)
 
 
 @singledispatch
@@ -545,7 +738,7 @@ def statement_assign(expr, context):
     return loopy.Assignment(lvalue, rvalue, within_inames=within_inames,
                             predicates=predicates,
                             id=id,
-                            depends_on=depends_on, depends_on_is_final=True)
+                            depends_on=depends_on)
 
 
 @statement.register(FunctionCall)
@@ -591,7 +784,7 @@ def statement_functioncall(expr, context):
                                  within_inames=within_inames,
                                  predicates=predicates,
                                  id=id,
-                                 depends_on=depends_on, depends_on_is_final=True)
+                                 depends_on=depends_on)
 
 
 @singledispatch
