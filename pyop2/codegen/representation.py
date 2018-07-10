@@ -26,7 +26,6 @@ class KernelInst(InstructionLabel):
     pass
 
 
-
 class Node(NodeBase):
 
     def is_equal(self, other):

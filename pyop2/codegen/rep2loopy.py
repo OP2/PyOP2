@@ -12,7 +12,7 @@ import operator
 
 from gem.node import traversal, Node, Memoizer, reuse_if_untouched
 
-from pyop2.base import READ, WRITE
+from pyop2.base import READ
 from pyop2.datatypes import as_ctypes
 
 from pyop2.codegen.optimise import index_merger
@@ -27,15 +27,12 @@ from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
                                           Symbol, Zero, Sum, Product)
 from pyop2.codegen.representation import (PackInst, UnpackInst, KernelInst)
 
+
 class Bag(object):
     pass
 
 
 # {{{ manglers
-
-
-from loopy.types import NumpyType
-from loopy import LoopyError
 
 def symbol_mangler(kernel, name):
     if name in {"ADD_VALUES", "INSERT_VALUES"}:
@@ -73,7 +70,6 @@ class PetscCallable(loopy.ScalarCallable):
                 )
 
         return self.copy(arg_id_to_descr=new_arg_id_to_descr)
-
 
 
 def petsc_function_lookup(target, identifier):
@@ -134,13 +130,14 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
         from pymbolic import var
 
         c_parameters = [
-                expression_to_code_mapper(
-                    par, PREC_NONE, dtype_to_type_context(target, par_dtype), par_dtype
-                ).expr
+            expression_to_code_mapper(
+                par, PREC_NONE, dtype_to_type_context(target, par_dtype),
+                par_dtype).expr
             for par, par_dtype in zip(parameters, par_dtypes)]
 
         assignee_is_returned = False
         return var(self.name_in_target)(*c_parameters), assignee_is_returned
+
 
 def pyop2_kernel_lookup(target, identifier):
     if identifier[:13] == "pyop2_kernel_":
@@ -261,15 +258,6 @@ def instruction_dependencies(instructions, initialisers):
                 deps[p] = (name, depends_on)
 
     return deps
-
-
-def kernel_mangler(kernel, name, arg_dtypes):
-    rettypes = []
-    if name == builder.kernel.name:
-        for arg, access in zip(builder.arguments, builder.argument_accesses):
-            if access is not READ:
-                rettypes.append(loopy.types.to_loopy_type(arg.dtype))
-        return loopy.CallMangleInfo(name, tuple(rettypes), arg_dtypes)
 
 
 def instruction_names(instructions):
@@ -482,8 +470,9 @@ def prepare_arglist(iterset, *args):
                 seen.add(k)
     return arglist
 
+
 def set_argtypes(iterset, *args):
-    from pyop2.datatypes import IntType, as_cstr, as_ctypes
+    from pyop2.datatypes import IntType, as_ctypes
     index_type = as_ctypes(IntType)
     argtypes = (index_type, index_type)
     argtypes += iterset._argtypes_
@@ -505,11 +494,8 @@ def prepare_cache_key(kernel, iterset, *args):
     from pyop2 import Subset
     counter = itertools.count()
     seen = defaultdict(lambda: next(counter))
-    key = (
-            kernel._wrapper_cache_key_
-            + iterset._wrapper_cache_key_
-            + (iterset._extruded, (iterset._extruded and iterset.constant_layers), isinstance(iterset, Subset))
-    )
+    key = (kernel._wrapper_cache_key_ + iterset._wrapper_cache_key_ +
+           (iterset._extruded, (iterset._extruded and iterset.constant_layers), isinstance(iterset, Subset)))
 
     for arg in args:
         key += arg._wrapper_cache_key_
@@ -517,7 +503,6 @@ def prepare_cache_key(kernel, iterset, *args):
         for map_ in maps:
             key += (seen[map_], )
     return key
-
 
 
 @singledispatch

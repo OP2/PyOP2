@@ -9,24 +9,24 @@ from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
                                           LogicalNot, LogicalAnd, LogicalOr,
                                           Argument, Literal, NamedLiteral,
                                           Materialise, Accumulate, FunctionCall, When,
-                                          Symbol, Zero, Variable,
-                                          Sum, Product, view)
+                                          Symbol, Zero, Sum, Product, view)
 from pyop2.codegen.representation import (PackInst, UnpackInst, KernelInst)
 
 from pyop2.utils import cached_property
 from pyop2.datatypes import IntType
 from pyop2.op2 import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL, Subset, DecoratedMap
-from pyop2.op2 import READ, WRITE, INC, RW
+from pyop2.op2 import READ, INC, WRITE
 from loopy.types import OpaqueType
 
 
 class PetscMat(OpaqueType):
-    
+
     def __init__(self):
         super(PetscMat, self).__init__(name="Mat")
 
 
 class SparseArray(namedtuple("SparseArray", ("values", "dof", "offset"))):
+
     @cached_property
     def nrows(self):
         extent, = self.offset.shape
