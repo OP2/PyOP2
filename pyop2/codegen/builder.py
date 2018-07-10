@@ -17,6 +17,7 @@ from pyop2.datatypes import IntType
 from pyop2.op2 import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL, Subset, DecoratedMap
 from pyop2.op2 import READ, INC, WRITE
 from loopy.types import OpaqueType
+from functools import reduce
 
 
 class PetscMat(OpaqueType):
@@ -270,7 +271,7 @@ class GlobalPack(Pack):
 
     def emit_unpack_instruction(self, *,
                                 loop_indices=None):
-        return None
+        yield None
 
 
 class DatPack(Pack):
@@ -349,20 +350,97 @@ class DatPack(Pack):
                                 loop_indices=None):
         pack = self.pack(loop_indices)
         if pack is None:
-            return None
+            yield None
         elif self.access is READ:
-            return None
+            yield None
         elif self.access is INC:
             multiindex = tuple(Index(e) for e in pack.shape)
             rvalue = self._rvalue(multiindex, loop_indices=loop_indices)
-            return Accumulate(UnpackInst(),
-                              rvalue,
-                              Sum(rvalue, view(pack, tuple((0, i) for i in multiindex))))
+            yield Accumulate(UnpackInst(),
+                             rvalue,
+                             Sum(rvalue, view(pack, tuple((0, i) for i in multiindex))))
         else:
             multiindex = tuple(Index(e) for e in pack.shape)
-            return Accumulate(UnpackInst(),
-                              self._rvalue(multiindex, loop_indices=loop_indices),
-                              view(pack, tuple((0, i) for i in multiindex)))
+            yield Accumulate(UnpackInst(),
+                             self._rvalue(multiindex, loop_indices=loop_indices),
+                             view(pack, tuple((0, i) for i in multiindex)))
+
+
+class MixedDatPack(Pack):
+    def __init__(self, packs, access, dtype, interior_horizontal):
+        self.packs = packs
+        self.access = access
+        self.dtype = dtype
+        self.interior_horizontal = interior_horizontal
+
+    def pack(self, loop_indices=None):
+        if hasattr(self, "_pack"):
+            return self._pack
+
+        flat_shape = numpy.sum(tuple(numpy.prod(p.map_.shape[1:]) for p in self.packs))
+
+        if self.interior_horizontal:
+            _shape = (2,)
+            flat_shape *= 2
+        else:
+            _shape = (1,)
+
+        if self.access in {INC, WRITE}:
+            val = Zero((), self.dtype)
+            multiindex = MultiIndex(Index(flat_shape))
+            self._pack = Materialise(PackInst(), val, multiindex)
+        else:
+            multiindex = MultiIndex(Index(flat_shape))
+            val = Zero((), self.dtype)
+            expressions = []
+            offset = 0
+            for p in self.packs:
+                shape = _shape + p.map_.shape[1:]
+                mi = MultiIndex(*(Index(e) for e in shape))
+                expr = p._rvalue(mi, loop_indices)
+                extents = [numpy.prod(shape[i+1:]) for i in range(len(shape))]
+                index = reduce(Sum, [Product(i, Literal(numpy.int32(e))) for i, e in zip(mi, extents)], Literal(numpy.int32(0)))
+                indices = MultiIndex(Sum(index, Literal(numpy.int32(offset))),)
+                offset += numpy.prod(shape)
+                expressions.append(expr)
+                expressions.append(indices)
+
+            self._pack = Materialise(PackInst(), val, multiindex, *expressions)
+
+        return self._pack
+
+    def kernel_arg(self, loop_indices=None):
+        pack = self.pack(loop_indices)
+        shape = pack.shape
+        return Indexed(pack, (Index(e) for e in shape))
+
+    def emit_unpack_instruction(self, *,
+                                loop_indices=None):
+        pack = self.pack(loop_indices)
+        if pack is None:
+            yield None
+        elif self.access is READ:
+            yield None
+        else:
+            if self.interior_horizontal:
+                _shape = (2,)
+            else:
+                _shape = (1,)
+            offset = 0
+            for p in self.packs:
+                shape = _shape + p.map_.shape[1:]
+                mi = MultiIndex(*(Index(e) for e in shape))
+                rvalue = p._rvalue(mi, loop_indices)
+                extents = [numpy.prod(shape[i+1:]) for i in range(len(shape))]
+                index = reduce(Sum, [Product(i, Literal(numpy.int32(e))) for i, e in zip(mi, extents)], Literal(numpy.int32(0)))
+                indices = MultiIndex(Sum(index, Literal(numpy.int32(offset))),)
+                rhs = Indexed(pack, indices)
+                offset += numpy.prod(shape)
+
+                if self.access is INC:
+                    rhs = Sum(rvalue, rhs)
+
+                yield Accumulate(UnpackInst(), rvalue, rhs)
 
 
 class MatPack(Pack):
@@ -454,7 +532,7 @@ class MatPack(Pack):
                             pack,
                             access)
 
-        return call
+        yield call
 
 
 class WrapperBuilder(object):
@@ -633,6 +711,18 @@ class WrapperBuilder(object):
     def add_argument(self, arg):
         interior_horizontal = self.iteration_region == ON_INTERIOR_FACETS
         if arg._is_dat:
+            if arg._is_mixed:
+                packs = []
+                for a in arg:
+                    shape = (None, *a.data.shape[1:])
+                    argument = Argument(shape, a.data.dtype, pfx="mdat")
+                    packs.append(DatPack(argument, arg.access, self.map_(a.map),
+                                         interior_horizontal=interior_horizontal))
+                    self.arguments.append(argument)
+                pack = MixedDatPack(packs, arg.access, arg.dtype, interior_horizontal=interior_horizontal)
+                self.packed_args.append(pack)
+                self.argument_accesses.append(arg.access)
+                return
             if arg._is_dat_view:
                 view_index = arg.data.index
                 data = arg.data._parent
@@ -723,6 +813,7 @@ class WrapperBuilder(object):
     def emit_instructions(self):
         yield self.kernel_call()
         for pack in self.packed_args:
-            insn = pack.emit_unpack_instruction(loop_indices=self.loop_indices)
-            if insn is not None:
-                yield insn
+            insns = pack.emit_unpack_instruction(loop_indices=self.loop_indices)
+            for insn in insns:
+                if insn is not None:
+                    yield insn
