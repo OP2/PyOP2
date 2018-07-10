@@ -451,7 +451,6 @@ void pyop2_kernel_comp_vol(double A[1], double x[6][2], double y[1])
                      dat_c(op2.RW, coords_map),
                      dat_coords(op2.READ, coords_map))
 
-
         assert sum(sum(dat_c.data)) == nums[0] * layers * 2
 
     def test_extruded_assemble_mat(

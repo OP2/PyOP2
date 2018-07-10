@@ -40,7 +40,7 @@ from collections import OrderedDict
 
 import ctypes
 
-from pyop2.datatypes import IntType, as_cstr, as_ctypes
+from pyop2.datatypes import IntType, as_cstr
 from pyop2 import base
 from pyop2 import compilation
 from pyop2 import petsc_base
@@ -780,7 +780,7 @@ PetscErrorCode %(wrapper_name)s(int start,
         import os
         try:
             batch_size = int(os.environ['BATCHSIZE'])
-        except:
+        except Exception:
             batch_size = 1
         if batch_size > 1:
             builder.set_batch(batch_size)

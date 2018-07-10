@@ -57,12 +57,12 @@ from pyop2.profiling import timed_region, timed_function
 from pyop2.sparsity import build_sparsity
 from pyop2.version import __version__ as version
 
-from coffee.base import Node, FlatBlock
-from coffee.visitors import Find, EstimateFlops
-from coffee import base as ast
+from coffee.base import Node
+from coffee.visitors import EstimateFlops
 from functools import reduce, partial
 
 import loopy
+
 
 def _make_object(name, *args, **kwargs):
     from pyop2 import sequential
@@ -2769,6 +2769,7 @@ class IterationIndex(object):
     ``op2.i`` instead."""
 
     _cache = {}
+
     def __new__(cls, index=None):
         assert index is None or isinstance(index, int), "i must be an int"
         try:
@@ -3717,7 +3718,6 @@ class Mat(DataCarrier):
         """Set a block of values in the :class:`Mat`."""
         raise NotImplementedError(
             "Abstract Mat base class doesn't know how to set values.")
-
 
     @cached_property
     def _argtypes_(self):
