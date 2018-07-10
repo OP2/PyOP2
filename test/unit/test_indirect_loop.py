@@ -230,8 +230,6 @@ def mmap(iterset2indset, iterset2unitset):
     return op2.MixedMap((iterset2indset, iterset2unitset))
 
 
-# FIXME: Mixed dat packing, reshape?
-@pytest.mark.skip
 class TestMixedIndirectLoop:
     """Mixed indirect loop tests."""
 

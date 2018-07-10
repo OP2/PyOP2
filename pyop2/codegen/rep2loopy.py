@@ -710,7 +710,9 @@ def expression_zero(expr, parameters):
 @expression.register(Literal)
 def expression_literal(expr, parameters):
     assert expr.shape == ()
-    return loopy.symbolic.TypeCast(expr.dtype, expr.value)
+    if expr.casting:
+        return loopy.symbolic.TypeCast(expr.dtype, expr.value)
+    return expr.value
 
 
 @expression.register(NamedLiteral)
