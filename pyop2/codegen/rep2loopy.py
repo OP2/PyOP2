@@ -372,8 +372,6 @@ def generate(builder):
     # register petsc functions
     wrapper = loopy.register_function_lookup(wrapper, petsc_function_lookup)
 
-    # wrapper = loopy.inline_kernel(wrapper, kernel.name)
-
     if builder.batch > 1:
         if builder.extruded:
             outer = "layer"
