@@ -904,8 +904,8 @@ class TestMixedMatrices:
         dat = op2.MixedDat(mset)
         kernel_code = FunDecl("void", "pyop2_kernel_addone_rhs",
                               [Decl("double", Symbol("v", (3,))),
-                               Decl("double**", c_sym("d"))],
-                              c_for("i", 3, Incr(Symbol("v", ("i")), FlatBlock("d[i][0]"))))
+                               Decl("double", Symbol("d", (3,)))],
+                              c_for("i", 3, Incr(Symbol("v", ("i")), FlatBlock("d[i]"))))
         addone = op2.Kernel(kernel_code.gencode(), "pyop2_kernel_addone_rhs")
         op2.par_loop(addone, mmap.iterset,
                      dat(op2.INC, mmap[op2.i[0]]),
@@ -921,27 +921,23 @@ class TestMixedMatrices:
         assert_allclose(mat[1, 0].values, self.od.T, eps)
         assert_allclose(mat[1, 1].values, self.ll, eps)
 
-    # FIXME: gathering for mixed dat
-    @pytest.mark.skip
     def test_assemble_mixed_rhs(self, dat):
         """Assemble a simple right-hand side over a mixed space and check result."""
         eps = 1.e-12
         assert_allclose(dat[0].data_ro, rdata(3), eps)
         assert_allclose(dat[1].data_ro, [1.0, 4.0, 6.0, 4.0], eps)
 
-    # FIXME: gathering for mixed dat
-    @pytest.mark.skip
     def test_assemble_mixed_rhs_vector(self, mset, mmap, mvdat):
         """Assemble a simple right-hand side over a mixed space and check result."""
         dat = op2.MixedDat(mset ** 2)
         assembly = Block(
             [Incr(Symbol("v", ("i"), ((2, 0),)), FlatBlock("d[i][0]")),
              Incr(Symbol("v", ("i"), ((2, 1),)), FlatBlock("d[i][1]"))], open_scope=True)
-        kernel_code = FunDecl("void", "addone_rhs_vec",
+        kernel_code = FunDecl("void", "pyop2_kernel_addone_rhs_vec",
                               [Decl("double", Symbol("v", (6,))),
-                               Decl("double**", c_sym("d"))],
+                               Decl("double", Symbol("d", (3, 2)))],
                               c_for("i", 3, assembly))
-        addone = op2.Kernel(kernel_code, "addone_rhs_vec")
+        addone = op2.Kernel(kernel_code.gencode(), "pyop2_kernel_addone_rhs_vec")
         op2.par_loop(addone, mmap.iterset,
                      dat(op2.INC, mmap[op2.i[0]]),
                      mvdat(op2.READ, mmap))

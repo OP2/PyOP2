@@ -377,7 +377,7 @@ class MixedDatPack(Pack):
         if hasattr(self, "_pack"):
             return self._pack
 
-        flat_shape = numpy.sum(tuple(numpy.prod(p.map_.shape[1:]) for p in self.packs))
+        flat_shape = numpy.sum(tuple(numpy.prod(p.map_.shape[1:] + p.outer.shape[1:]) for p in self.packs))
 
         if self.interior_horizontal:
             _shape = (2,)
@@ -395,13 +395,13 @@ class MixedDatPack(Pack):
             expressions = []
             offset = 0
             for p in self.packs:
-                shape = _shape + p.map_.shape[1:]
+                shape = _shape + p.map_.shape[1:] + p.outer.shape[1:]
                 mi = MultiIndex(*(Index(e) for e in shape))
                 expr = p._rvalue(mi, loop_indices)
-                extents = [numpy.prod(shape[i+1:]) for i in range(len(shape))]
-                index = reduce(Sum, [Product(i, Literal(numpy.int32(e))) for i, e in zip(mi, extents)], Literal(numpy.int32(0)))
-                indices = MultiIndex(Sum(index, Literal(numpy.int32(offset))),)
-                offset += numpy.prod(shape)
+                extents = [numpy.prod(shape[i+1:], dtype=numpy.int32) for i in range(len(shape))]
+                index = reduce(Sum, [Product(i, Literal(IntType.type(e), casting=False)) for i, e in zip(mi, extents)], Literal(IntType.type(0), casting=False))
+                indices = MultiIndex(Sum(index, Literal(IntType.type(offset, casting=False))),)
+                offset += numpy.prod(shape, dtype=numpy.int32)
                 expressions.append(expr)
                 expressions.append(indices)
 
@@ -428,14 +428,14 @@ class MixedDatPack(Pack):
                 _shape = (1,)
             offset = 0
             for p in self.packs:
-                shape = _shape + p.map_.shape[1:]
+                shape = _shape + p.map_.shape[1:] + p.outer.shape[1:]
                 mi = MultiIndex(*(Index(e) for e in shape))
                 rvalue = p._rvalue(mi, loop_indices)
-                extents = [numpy.prod(shape[i+1:]) for i in range(len(shape))]
-                index = reduce(Sum, [Product(i, Literal(numpy.int32(e))) for i, e in zip(mi, extents)], Literal(numpy.int32(0)))
-                indices = MultiIndex(Sum(index, Literal(numpy.int32(offset))),)
+                extents = [numpy.prod(shape[i+1:], dtype=numpy.int32) for i in range(len(shape))]
+                index = reduce(Sum, [Product(i, Literal(IntType.type(e), casting=False)) for i, e in zip(mi, extents)], Literal(IntType.type(0), casting=False))
+                indices = MultiIndex(Sum(index, Literal(IntType.type(offset), casting=False)),)
                 rhs = Indexed(pack, indices)
-                offset += numpy.prod(shape)
+                offset += numpy.prod(shape, dtype=numpy.int32)
 
                 if self.access is INC:
                     rhs = Sum(rvalue, rhs)
