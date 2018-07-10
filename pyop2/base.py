@@ -4091,7 +4091,12 @@ class ParLoop(LazyComputation):
             # data back from the device if necessary.
             # In fact we can't access the properties directly because
             # that forces an infinite loop.
-            glob._data += tmp._data
+            use_opencl = 1
+            if use_opencl:
+                with tmp.vec as v:
+                    glob._data += v.array_r
+            else:
+                glob._data += tmp._data
 
     @collective
     def update_arg_data_state(self):
@@ -4105,6 +4110,8 @@ class ParLoop(LazyComputation):
                 state = {WRITE: Mat.INSERT_VALUES,
                          INC: Mat.ADD_VALUES}[arg.access]
                 arg.data.assembly_state = state
+            if arg._is_global and arg.access is not READ:
+                pass
 
     @cached_property
     def dat_args(self):

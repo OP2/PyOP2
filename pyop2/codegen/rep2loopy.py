@@ -659,8 +659,7 @@ def generate_viennacl_code(kernel):
                                                 NULL, NULL);
                 clEnqueueWriteBuffer(ctx.get_queue().handle().get(), ${arg.name}_opencl, CL_TRUE, 0, 3*(end-start)*sizeof(cl_int), ${arg.name},
                                         0, NULL, NULL);
-                viennacl::vector<cl_int>
-                ${arg.name}_viennacl(${arg.name}_opencl, 3*(end-start)+1);
+                viennacl::vector<cl_int> ${arg.name}_viennacl(${arg.name}_opencl, 3*(end-start)+1);
                 % endif
                 % endfor
 

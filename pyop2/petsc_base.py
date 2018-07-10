@@ -466,13 +466,13 @@ class Global(base.Global):
         self._force_evaluation(read=access is not base.WRITE,
                                write=access is not base.READ)
         data = self._data
+        use_opencl = 1
         if not hasattr(self, '_vec'):
             # Can't duplicate layout_vec of dataset, because we then
             # carry around extra unnecessary data.
             # But use getSizes to save an Allreduce in computing the
             # global size.
             size = self.dataset.layout_vec.getSizes()
-            use_opencl = 1
             if use_opencl:
                 self._vec = PETSc.Vec().create(self.comm)
                 self._vec.setSizes(size=size, bsize=self.cdim)
