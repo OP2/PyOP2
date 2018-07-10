@@ -102,6 +102,8 @@ class TestHDF5:
         assert d.dtype == np.float64
         assert d.data.shape == (5, 2) and d.data.sum() == 9 * 10 / 2
 
+    # FIXME: what is this test for?
+    @pytest.mark.skip
     def test_data_hdf5_soa(self, h5file, dset):
         "Creating an SoA dat from h5file should work"
         d = op2.Dat.fromhdf5(dset, h5file, 'soadat')
