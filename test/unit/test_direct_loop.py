@@ -85,10 +85,6 @@ class TestDirectLoop:
     def h(cls):
         return op2.Global(1, 1, np.uint32, "h")
 
-    @pytest.fixture
-    def soa(cls, delems2):
-        return op2.Dat(delems2, [xarray(), xarray()], np.uint32, "x", soa=True)
-
     def test_wo(self, elems, x):
         """Set a Dat to a scalar value with op2.WRITE."""
         kernel_wo = """void pyop2_kernel_wo(unsigned int* x) { *x = 42; }"""
