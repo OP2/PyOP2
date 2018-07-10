@@ -195,7 +195,7 @@ class Literal(Terminal, Scalar):
     __front__ = ("value", )
     shape = ()
 
-    def __new__(cls, value):
+    def __new__(cls, value, casting=True):
         assert value.shape == ()
         assert isinstance(value, numpy.number)
         if value == 0:
@@ -204,8 +204,9 @@ class Literal(Terminal, Scalar):
         else:
             return super().__new__(cls)
 
-    def __init__(self, value):
+    def __init__(self, value, casting=True):
         self.value = value
+        self.casting = casting
 
     def is_equal(self, other):
         if type(self) != type(other):
