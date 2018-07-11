@@ -139,6 +139,7 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
         return var(self.name_in_target)(*c_parameters), assignee_is_returned
 
 
+# FIXME: use class
 def pyop2_kernel_lookup(target, identifier):
     if identifier[:13] == "pyop2_kernel_":
         return PyOP2KernelCallable(name=identifier)
@@ -278,7 +279,8 @@ def generate(builder):
     parameters.temporaries = OrderedDict()
     parameters.kernel_name = builder.kernel.name
 
-    if builder.layer_index is not None:
+    if builder.layer_index is not None and builder.maps:
+        # indirect loop on extruded mesh
         outer_inames = frozenset([builder._loop_index.name,
                                   builder.layer_index.name])
     else:

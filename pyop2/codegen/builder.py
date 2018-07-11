@@ -417,9 +417,8 @@ class MixedDatPack(Pack):
     def emit_unpack_instruction(self, *,
                                 loop_indices=None):
         pack = self.pack(loop_indices)
-        if pack is None:
-            yield None
-        elif self.access is READ:
+
+        if self.access is READ:
             yield None
         else:
             if self.interior_horizontal:
