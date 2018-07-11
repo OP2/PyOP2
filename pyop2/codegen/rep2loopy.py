@@ -83,6 +83,13 @@ def petsc_function_lookup(target, identifier):
 # PyOP2 Kernel passed in as string
 class PyOP2KernelCallable(loopy.ScalarCallable):
 
+    fields = set(["name", "access", "arg_id_to_dtype", "arg_id_to_descr", "name_in_target"])
+    init_arg_names = ("name", "access", "arg_id_to_dtype", "arg_id_to_descr", "name_in_target")
+
+    def __init__(self, name, access, arg_id_to_dtype=None, arg_id_to_descr=None, name_in_target=None):
+        super(PyOP2KernelCallable, self).__init__(name, arg_id_to_dtype, arg_id_to_descr, name_in_target)
+        self.access = access
+
     def with_types(self, arg_id_to_dtype, kernel):
         new_arg_id_to_dtype = arg_id_to_dtype.copy()
         return self.copy(
@@ -95,7 +102,7 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
         from loopy.kernel.array import FixedStrideArrayDimTag
         new_arg_id_to_descr = arg_id_to_descr.copy()
         for i, des in arg_id_to_descr.items():
-            # FIXME: assume 1D arrays as arguments for now
+            # 1D arrays
             if isinstance(des, ArrayArgDescriptor):
                 dim_tags = tuple(
                     FixedStrideArrayDimTag(
@@ -113,17 +120,18 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
         return self.copy(arg_id_to_descr=new_arg_id_to_descr)
 
     def emit_call_insn(self, insn, target, expression_to_code_mapper):
-        # f(a,b,c,d) instead of a = f(b,c,d)
 
-        from loopy.kernel.instruction import CallInstruction
+        # reorder arguments, e.g. a,c = f(b,d) to f(a,b,c,d)
+        parameters = []
+        reads = iter(insn.expression.parameters)
+        writes = iter(insn.assignees)
+        for ac in self.access:
+            if ac is READ:
+                parameters.append(next(reads))
+            else:
+                parameters.append(next(writes))
 
-        # assert self.is_ready_for_codegen()
-        assert isinstance(insn, CallInstruction)
-
-        # FIXME: this is not totally correct
-        parameters = insn.assignees + insn.expression.parameters
         par_dtypes = tuple(expression_to_code_mapper.infer_type(p) for p in parameters)
-        # par_dtype.extend([self.arg_id_to_dtype[i] for i, _ in enumerate(insn.expression.p)])
 
         from loopy.expression import dtype_to_type_context
         from pymbolic.mapper.stringifier import PREC_NONE
@@ -139,12 +147,29 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
         return var(self.name_in_target)(*c_parameters), assignee_is_returned
 
 
-# FIXME: use class
-def pyop2_kernel_lookup(target, identifier):
-    if identifier[:13] == "pyop2_kernel_":
-        return PyOP2KernelCallable(name=identifier)
+class PyOP2_Kernel_Lookup(object):
 
-    return None
+    def __init__(self, name, code, access):
+        self.name = name
+        self.code = code
+        self.access = access
+
+    def __eq__(self, other):
+        if isinstance(other, PyOP2_Kernel_Lookup):
+            return self.name == other.name and self.code == other.code
+        return False
+
+    def __call__(self, target, identifier):
+        if identifier == self.name:
+            return PyOP2KernelCallable(name=identifier, access=self.access)
+        return None
+
+# # FIXME: use class
+# def pyop2_kernel_lookup(target, identifier):
+#     if identifier[:13] == "pyop2_kernel_":
+#         return PyOP2KernelCallable(name=identifier)
+#
+#     return None
 
 # def petsc_function_mangler(kernel, name, arg_dtypes):
 #     if name == "CHKERRQ":
@@ -368,7 +393,7 @@ def generate(builder):
         wrapper = wrapper.copy(scoped_functions=scoped_functions)
     else:
         # kernel is a string
-        wrapper = loopy.register_function_lookup(wrapper, pyop2_kernel_lookup)
+        wrapper = loopy.register_function_lookup(wrapper, PyOP2_Kernel_Lookup(kernel.name, kernel._code, tuple(builder.argument_accesses)))
         preamble = preamble + "\n" + kernel._code
 
     # register petsc functions
