@@ -208,6 +208,7 @@ class TestDirectLoop:
 
         x.data[:] = 2
         g.data[:] = 0
+        kernel = """void pyop2_kernel_k(unsigned int *x, unsigned int *g) { *g += *x; }"""
         op2.par_loop(op2.Kernel(kernel, 'pyop2_kernel_k'), elems,
                      x(op2.READ), g(op2.INC))
         assert g.data[0] == 2 * _nelems
