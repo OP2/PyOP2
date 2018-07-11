@@ -131,6 +131,10 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
             else:
                 parameters.append(next(writes))
 
+        # pass layer argument if needed
+        for layer in reads:
+            parameters.append(layer)
+
         par_dtypes = tuple(expression_to_code_mapper.infer_type(p) for p in parameters)
 
         from loopy.expression import dtype_to_type_context
