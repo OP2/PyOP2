@@ -368,8 +368,6 @@ void pyop2_kernel_comp_vol(double A[1], double x[6][2], double y[1])
         """Nbytes computes the number of bytes occupied by an extruded Dat."""
         assert dat_field.nbytes == nums[2] * wedges * 8
 
-    # FIXME: layer argument for direct loops on extruded mess
-    @pytest.mark.skip
     def test_direct_loop_inc(self, xtr_nodes):
         dat = op2.Dat(xtr_nodes)
         k = 'void pyop2_kernel_k(double *x) { *x += 1.0; }'
