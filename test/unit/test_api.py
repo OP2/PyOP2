@@ -1669,7 +1669,7 @@ class TestKernelAPI:
     def test_kernel_properties(self):
         "Kernel constructor should correctly set attributes."
         k = op2.Kernel("", 'foo')
-        assert k.name == 'pyop2_kernel_foo'
+        assert k.name == 'foo'
 
     def test_kernel_repr(self, set):
         "Kernel should have the expected repr."
