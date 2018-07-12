@@ -872,7 +872,6 @@ class ExtrudedSet(Set):
             return (ctypes.c_voidp, )
         else:
             return (ctypes.c_voidp, ctypes.c_voidp, ctypes.c_voidp, ctypes.c_voidp)
-            # return (ctypes.c_voidp, self.masks._argtype)
 
     @cached_property
     def _wrapper_cache_key_(self):
@@ -1175,6 +1174,8 @@ class DataSet(ObjectCached):
                    ('dim', (numbers.Integral, tuple, list), DimTypeError),
                    ('name', str, NameTypeError))
     def __init__(self, iter_set, dim=1, name=None):
+        if isinstance(iter_set, ExtrudedSet):
+            raise NotImplementedError("Not allowed!")
         if self._initialized:
             return
         if isinstance(iter_set, Subset):
@@ -3900,11 +3901,6 @@ class Kernel(Cached):
     def _wrapper_cache_key_(self):
         return (self._key, )
 
-    def _ast_to_c(self, ast, opts={}):
-        """Transform an Abstract Syntax Tree representing the kernel into a
-        string of C code."""
-        return ast.gencode()
-
     def __init__(self, code, name, opts={}, include_dirs=[], headers=[],
                  user_code="", ldargs=None, cpp=False):
         # Protect against re-initialization when retrieved from cache
@@ -4146,6 +4142,7 @@ class ParLoop(LazyComputation):
         :arg args: A list of :class:`Args`, the argument to the :fn:`par_loop`.
         """
         return ()
+        # raise NotImplementedError
 
     @cached_property
     def num_flops(self):
@@ -4334,7 +4331,11 @@ def check_iterset(args, iterset):
             if arg._is_global:
                 continue
             if arg._is_direct:
-                if arg.data.dataset.set != _iterset:
+                if isinstance(_iterset, ExtrudedSet):
+                    if arg.data.dataset.set != _iterset.parent:
+                        raise MapValueError(
+                            "Iterset of direct arg %s doesn't match ParLoop iterset." % i)
+                elif arg.data.dataset.set != _iterset:
                     raise MapValueError(
                         "Iterset of direct arg %s doesn't match ParLoop iterset." % i)
                 continue
