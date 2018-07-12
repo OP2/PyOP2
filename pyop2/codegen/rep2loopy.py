@@ -20,7 +20,7 @@ from pyop2.codegen.optimise import index_merger
 from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
                                           MultiIndex, Extent, Indexed,
                                           BitShift, BitwiseNot, BitwiseAnd, BitwiseOr,
-                                          Conditional, Comparison,
+                                          Conditional, Comparison, DummyInstruction,
                                           LogicalNot, LogicalAnd, LogicalOr,
                                           Materialise, Accumulate, FunctionCall, When,
                                           Argument, Variable, Literal, NamedLiteral,
@@ -311,15 +311,13 @@ def generate(builder):
     parameters.temporaries = OrderedDict()
     parameters.kernel_name = builder.kernel.name
 
-    if builder.layer_index is not None and builder.maps:
-        # indirect loop on extruded mesh
+    if builder.layer_index is not None:
         outer_inames = frozenset([builder._loop_index.name,
                                   builder.layer_index.name])
     else:
         outer_inames = frozenset([builder._loop_index.name])
 
     instructions = list(builder.emit_instructions())
-    # instructions = list(builder.emit_instructions())
 
     # replace Materialise
     mapper = Memoizer(replace_materialise)
@@ -347,11 +345,8 @@ def generate(builder):
     context.instruction_dependencies = deps
 
     statements = list(statement(insn, context) for insn in instructions)
-    if not parameters.domains:
-        # No nodes use runtime index, e.g. when kernel is only on globals
-        expression(builder._loop_index, context.parameters)
-        if builder.layer_index:
-            expression(builder.layer_index, context.parameters)
+    statements = list(s for s in statements if not isinstance(s, DummyInstruction))
+
     domains = list(parameters.domains.values())
     assumptions, = reduce(operator.and_,
                           parameters.assumptions.values()).params().get_basic_sets()
@@ -375,7 +370,6 @@ def generate(builder):
                                 lang_version=(2018, 1),
                                 name="wrap_%s" % builder.kernel.name)
 
-    # from IPython import embed; embed()
     for indices in context.index_ordering:
         wrapper = loopy.prioritize_loops(wrapper, indices)
 
@@ -540,6 +534,12 @@ def prepare_cache_key(kernel, iterset, *args):
 @singledispatch
 def statement(expr, context):
     raise AssertionError("Unhandled statement type '%s'" % type(expr))
+
+
+@statement.register(DummyInstruction)
+def statement_dummy(expr, context):
+    new_children = tuple(expression(c, context.parameters) for c in expr.children)
+    return DummyInstruction(expr.label, new_children)
 
 
 @statement.register(When)

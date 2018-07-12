@@ -5,7 +5,7 @@ import numpy
 from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
                                           MultiIndex, Extent, Indexed,
                                           BitShift, BitwiseNot, BitwiseAnd,
-                                          Conditional, Comparison,
+                                          Conditional, Comparison, DummyInstruction,
                                           LogicalNot, LogicalAnd, LogicalOr,
                                           Argument, Literal, NamedLiteral,
                                           Materialise, Accumulate, FunctionCall, When,
@@ -810,6 +810,7 @@ class WrapperBuilder(object):
         return FunctionCall(self.kernel.name, KernelInst(), access, free_indices, *args)
 
     def emit_instructions(self):
+        yield DummyInstruction(PackInst(), *self.loop_indices)
         yield self.kernel_call()
         for pack in self.packed_args:
             insns = pack.emit_unpack_instruction(loop_indices=self.loop_indices)
