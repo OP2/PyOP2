@@ -366,6 +366,15 @@ class Variable(Terminal):
         self.dtype = dtype
 
 
+class DummyInstruction(Node):
+    __slots__ = ("children",)
+    __front__ = ("label",)
+
+    def __init__(self, label, *children):
+        self.children = children
+        self.label = label
+
+
 class Accumulate(Node):
     __slots__ = ("children",)
     __front__ = ("label",)
