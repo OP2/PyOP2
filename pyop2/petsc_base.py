@@ -35,6 +35,7 @@ from contextlib import contextmanager
 from petsc4py import PETSc
 from functools import partial
 import numpy as np
+import abc
 
 from pyop2.datatypes import IntType
 from pyop2 import base
@@ -214,31 +215,6 @@ class MixedDataSet(DataSet, base.MixedDataSet):
         return vec
 
     @utils.cached_property
-    def vecscatters(self):
-        """Get the vecscatters from the dof layout of this dataset to a PETSc Vec."""
-        # To be compatible with a MatNest (from a MixedMat) the
-        # ordering of a MixedDat constructed of Dats (x_0, ..., x_k)
-        # on P processes is:
-        # (x_0_0, x_1_0, ..., x_k_0, x_0_1, x_1_1, ..., x_k_1, ..., x_k_P)
-        # That is, all the Dats from rank 0, followed by those of
-        # rank 1, ...
-        # Hence the offset into the global Vec is the exclusive
-        # prefix sum of the local size of the mixed dat.
-        size = sum(d.size * d.cdim for d in self)
-        offset = self.comm.exscan(size)
-        if offset is None:
-            offset = 0
-        scatters = []
-        for d in self:
-            size = d.size * d.cdim
-            vscat = PETSc.Scatter().createWithData(d.layout_vec, None, self.layout_vec,
-                                                   PETSc.IS().createStride(size, offset, 1,
-                                                                           comm=d.comm))
-            offset += size
-            scatters.append(vscat)
-        return tuple(scatters)
-
-    @utils.cached_property
     def lgmap(self):
         """A PETSc LGMap mapping process-local indices to global
         indices for this :class:`MixedDataSet`.
@@ -317,38 +293,14 @@ class MixedDataSet(DataSet, base.MixedDataSet):
         return self.lgmap
 
 
-class Dat(base.Dat):
-
-    @contextmanager
+class VecAccessMixin(metaclass=abc.ABCMeta):
+    @abc.abstractmethod
     def vec_context(self, access):
-        """A context manager for a :class:`PETSc.Vec` from a :class:`Dat`.
+        pass
 
-        :param access: Access descriptor: READ, WRITE, or RW."""
-
-        assert self.dtype == PETSc.ScalarType, \
-            "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
-        # Getting the Vec needs to ensure we've done all current
-        # necessary computation.
-        self._force_evaluation(read=access is not base.WRITE,
-                               write=access is not base.READ)
-        if not hasattr(self, '_vec'):
-            # Can't duplicate layout_vec of dataset, because we then
-            # carry around extra unnecessary data.
-            # But use getSizes to save an Allreduce in computing the
-            # global size.
-            size = self.dataset.layout_vec.getSizes()
-            data = self._data[:size[0]]
-            self._vec = PETSc.Vec().createWithArray(data, size=size,
-                                                    bsize=self.cdim,
-                                                    comm=self.comm)
-        # PETSc Vecs have a state counter and cache norm computations
-        # to return immediately if the state counter is unchanged.
-        # Since we've updated the data behind their back, we need to
-        # change that state counter.
-        self._vec.stateIncrease()
-        yield self._vec
-        if access is not base.READ:
-            self.halo_valid = False
+    @abc.abstractproperty
+    def _vec(self):
+        pass
 
     @property
     @collective
@@ -376,10 +328,49 @@ class Dat(base.Dat):
         return self.vec_context(access=base.READ)
 
 
-class MixedDat(base.MixedDat):
+class Dat(base.Dat, VecAccessMixin):
+    @utils.cached_property
+    def _vec(self):
+        assert self.dtype == PETSc.ScalarType, \
+            "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
+        # Can't duplicate layout_vec of dataset, because we then
+        # carry around extra unnecessary data.
+        # But use getSizes to save an Allreduce in computing the
+        # global size.
+        size = self.dataset.layout_vec.getSizes()
+        data = self._data[:size[0]]
+        return PETSc.Vec().createWithArray(data, size=size, bsize=self.cdim, comm=self.comm)
 
     @contextmanager
-    def vecscatter(self, access):
+    def vec_context(self, access):
+        r"""A context manager for a :class:`PETSc.Vec` from a :class:`Dat`.
+
+        :param access: Access descriptor: READ, WRITE, or RW."""
+        # Getting the Vec needs to ensure we've done all current
+        # necessary computation.
+        self._force_evaluation(read=access is not base.WRITE,
+                               write=access is not base.READ)
+        # PETSc Vecs have a state counter and cache norm computations
+        # to return immediately if the state counter is unchanged.
+        # Since we've updated the data behind their back, we need to
+        # change that state counter.
+        self._vec.stateIncrease()
+        yield self._vec
+        if access is not base.READ:
+            self.halo_valid = False
+
+
+class MixedDat(base.MixedDat, VecAccessMixin):
+    @utils.cached_property
+    def _vec(self):
+        assert self.dtype == PETSc.ScalarType, \
+            "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
+        # In this case we can just duplicate the layout vec
+        # because we're not placing an array.
+        return self.dataset.layout_vec.duplicate()
+
+    @contextmanager
+    def vec_context(self, access):
         r"""A context manager scattering the arrays of all components of this
         :class:`MixedDat` into a contiguous :class:`PETSc.Vec` and reverse
         scattering to the original arrays when exiting the context.
@@ -392,90 +383,60 @@ class MixedDat(base.MixedDat):
            the correct order to be left multiplied by a compatible
            :class:`MixedMat`.  In parallel it is *not* just a
            concatenation of the underlying :class:`Dat`\s."""
-
-        assert self.dtype == PETSc.ScalarType, \
-            "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
-        # Allocate memory for the contiguous vector
-        if not hasattr(self, '_vec'):
-            # In this case we can just duplicate the layout vec
-            # because we're not placing an array.
-            self._vec = self.dataset.layout_vec.duplicate()
-
-        scatters = self.dataset.vecscatters
         # Do the actual forward scatter to fill the full vector with
         # values
         if access is not base.WRITE:
-            for d, vscat in zip(self, scatters):
+            offset = 0
+            array = self._vec.array
+            for d in self:
                 with d.vec_ro as v:
-                    vscat.scatterBegin(v, self._vec, addv=PETSc.InsertMode.INSERT_VALUES)
-                    vscat.scatterEnd(v, self._vec, addv=PETSc.InsertMode.INSERT_VALUES)
+                    size = v.local_size
+                    array[offset:offset+size] = v.array_r[:]
+                    offset += size
+        self._vec.stateIncrease()
         yield self._vec
         if access is not base.READ:
             # Reverse scatter to get the values back to their original locations
-            for d, vscat in zip(self, scatters):
+            offset = 0
+            array = self._vec.array_r
+            for d in self:
                 with d.vec_wo as v:
-                    vscat.scatterBegin(self._vec, v, addv=PETSc.InsertMode.INSERT_VALUES,
-                                       mode=PETSc.ScatterMode.REVERSE)
-                    vscat.scatterEnd(self._vec, v, addv=PETSc.InsertMode.INSERT_VALUES,
-                                     mode=PETSc.ScatterMode.REVERSE)
+                    size = v.local_size
+                    v.array[:] = array[offset:offset+size]
+                    offset += size
             self.halo_valid = False
 
-    @property
-    @collective
-    def vec(self):
-        """Context manager for a PETSc Vec appropriate for this Dat.
 
-        You're allowed to modify the data you get back from this view."""
-        return self.vecscatter(access=base.RW)
-
-    @property
-    @collective
-    def vec_wo(self):
-        """Context manager for a PETSc Vec appropriate for this Dat.
-
-        You're allowed to modify the data you get back from this view,
-        but you cannot read from it."""
-        return self.vecscatter(access=base.WRITE)
-
-    @property
-    @collective
-    def vec_ro(self):
-        """Context manager for a PETSc Vec appropriate for this Dat.
-
-        You're not allowed to modify the data you get back from this view."""
-        return self.vecscatter(access=base.READ)
-
-
-class Global(base.Global):
+class Global(base.Global, VecAccessMixin):
+    @utils.cached_property
+    def _vec(self):
+        assert self.dtype == PETSc.ScalarType, \
+            "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
+        # Can't duplicate layout_vec of dataset, because we then
+        # carry around extra unnecessary data.
+        # But use getSizes to save an Allreduce in computing the
+        # global size.
+        data = self._data
+        size = self.dataset.layout_vec.getSizes()
+        if self.comm.rank == 0:
+            return PETSc.Vec().createWithArray(data, size=size,
+                                               bsize=self.cdim,
+                                               comm=self.comm)
+        else:
+            return PETSc.Vec().createWithArray(np.empty(0, dtype=self.dtype),
+                                               size=size,
+                                               bsize=self.cdim,
+                                               comm=self.comm)
 
     @contextmanager
     def vec_context(self, access):
         """A context manager for a :class:`PETSc.Vec` from a :class:`Global`.
 
         :param access: Access descriptor: READ, WRITE, or RW."""
-
-        assert self.dtype == PETSc.ScalarType, \
-            "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
         # Getting the Vec needs to ensure we've done all current
         # necessary computation.
         self._force_evaluation(read=access is not base.WRITE,
                                write=access is not base.READ)
-        data = self._data
-        if not hasattr(self, '_vec'):
-            # Can't duplicate layout_vec of dataset, because we then
-            # carry around extra unnecessary data.
-            # But use getSizes to save an Allreduce in computing the
-            # global size.
-            size = self.dataset.layout_vec.getSizes()
-            if self.comm.rank == 0:
-                self._vec = PETSc.Vec().createWithArray(data, size=size,
-                                                        bsize=self.cdim,
-                                                        comm=self.comm)
-            else:
-                self._vec = PETSc.Vec().createWithArray(np.empty(0, dtype=self.dtype),
-                                                        size=size,
-                                                        bsize=self.cdim,
-                                                        comm=self.comm)
         # PETSc Vecs have a state counter and cache norm computations
         # to return immediately if the state counter is unchanged.
         # Since we've updated the data behind their back, we need to
@@ -483,32 +444,8 @@ class Global(base.Global):
         self._vec.stateIncrease()
         yield self._vec
         if access is not base.READ:
+            data = self._data
             self.comm.Bcast(data, 0)
-
-    @property
-    @collective
-    def vec(self):
-        """Context manager for a PETSc Vec appropriate for this Dat.
-
-        You're allowed to modify the data you get back from this view."""
-        return self.vec_context(access=base.RW)
-
-    @property
-    @collective
-    def vec_wo(self):
-        """Context manager for a PETSc Vec appropriate for this Dat.
-
-        You're allowed to modify the data you get back from this view,
-        but you cannot read from it."""
-        return self.vec_context(access=base.WRITE)
-
-    @property
-    @collective
-    def vec_ro(self):
-        """Context manager for a PETSc Vec appropriate for this Dat.
-
-        You're not allowed to modify the data you get back from this view."""
-        return self.vec_context(access=base.READ)
 
 
 class SparsityBlock(base.Sparsity):
