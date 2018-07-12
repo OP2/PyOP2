@@ -158,6 +158,9 @@ class PyOP2_Kernel_Lookup(object):
         self.code = code
         self.access = access
 
+    def __hash__(self):
+        return hash(self.name + self.code)
+
     def __eq__(self, other):
         if isinstance(other, PyOP2_Kernel_Lookup):
             return self.name == other.name and self.code == other.code
@@ -167,22 +170,6 @@ class PyOP2_Kernel_Lookup(object):
         if identifier == self.name:
             return PyOP2KernelCallable(name=identifier, access=self.access)
         return None
-
-# # FIXME: use class
-# def pyop2_kernel_lookup(target, identifier):
-#     if identifier[:13] == "pyop2_kernel_":
-#         return PyOP2KernelCallable(name=identifier)
-#
-#     return None
-
-# def petsc_function_mangler(kernel, name, arg_dtypes):
-#     if name == "CHKERRQ":
-#         return loopy.CallMangleInfo(name, (), arg_dtypes)
-#     if name in {"MatSetValuesBlockedLocal", "MatSetValuesLocal"}:
-#         return loopy.CallMangleInfo(name, (), arg_dtypes)
-
-
-# }}}
 
 
 @singledispatch
@@ -243,7 +230,7 @@ def loop_nesting(instructions, deps, outer_inames, kernel_name):
             else:
                 nesting[insn] = runtime_indices([insn])
 
-    # Take care of dependencies. e.g. t1[i] = A[i], t2[j] = B[t1[j]]
+    # Take care of dependencies. e.g. t1[i] = A[i], t2[j] = B[t1[j]], then t2 should depends on {i, j}
     name_to_insn = dict((n, i) for i, (n, _) in deps.items())
     for insn, (name, _deps) in deps.items():
         s = set(_deps)
@@ -265,28 +252,44 @@ def instruction_dependencies(instructions, initialisers):
         name = "statement%d" % next(c)
         names[op] = name
         instructions_by_type[type(op.label)].append(op)
-        deps[op] = (name, frozenset())
+        deps[op] = frozenset()
+
+    # read-write dependencies in packing instructions
+    def variables(exprs):
+        for op in traversal(exprs):
+            if isinstance(op, (Argument, Variable)):
+                yield op
+
+    writers = defaultdict(list)
+    for op in instructions_by_type[PackInst]:
+        assert isinstance(op, Accumulate)
+        lvalue, _ = op.children
+        # Only writes to the outer-most variable
+        writes = next(variables([lvalue]))
+        if isinstance(writes, Variable):
+            writers[writes].append(names[op])
+
+    for op in instructions_by_type[PackInst]:
+        _, rvalue = op.children
+        deps[op] |= frozenset(x for x in itertools.chain(*(writers[r]for r in variables([rvalue]))))
+        deps[op] -= frozenset(names[op])
 
     # kernel instructions depends on packing instructions
     for op in instructions_by_type[KernelInst]:
-        name, depends_on = deps[op]
-        depends_on = depends_on | frozenset(names[o] for o in instructions_by_type[PackInst])
-        deps[op] = (name, depends_on)
+        deps[op] |= frozenset(names[o] for o in instructions_by_type[PackInst])
 
     # unpacking instructions depends on kernel instructions
     for op in instructions_by_type[UnpackInst]:
-        name, depends_on = deps[op]
-        depends_on = depends_on | frozenset(names[o] for o in instructions_by_type[KernelInst])
-        deps[op] = (name, depends_on)
+        deps[op] |= frozenset(names[o] for o in instructions_by_type[KernelInst])
 
     # add sequential instructions
     for inits in initialisers:
         for i, parent in enumerate(inits[1:], 1):
             for p in imperatives([parent]):
-                name, depends_on = deps[p]
-                depends_on = depends_on | frozenset(names[c] for c in imperatives(inits[:i])) - frozenset([name])
-                deps[p] = (name, depends_on)
+                deps[p] |= frozenset(names[c] for c in imperatives(inits[:i])) - frozenset([name])
 
+    # add name to deps
+    deps = dict((op, (names[op], dep)) for op, dep in deps.items())
     return deps
 
 
