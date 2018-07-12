@@ -519,6 +519,101 @@ def argtypes(kernel):
     return args
 
 
+def map_to_viennacl_vector(arg_handle, map_to_transfer):
+    import re
+
+    c_code_str = r"""#include "petsc.h"
+    #include "petscviennacl.h"
+    #include <CL/cl.h>
+
+    using namespace std;
+
+    extern "C" cl_mem int_array_to_viennacl_vector(int * __restrict__ map_array, const int map_size, Vec arg)
+    {
+        viennacl::vector<PetscScalar> *arg_viennacl;
+        VecViennaCLGetArrayReadWrite(arg, &arg_viennacl);
+
+        viennacl::ocl::context ctx = arg_viennacl->handle().opencl_handle().context();
+
+        cl_mem map_opencl = clCreateBuffer(ctx.handle().get(), CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, map_size*sizeof(cl_int), map_array, NULL);
+
+        clFinish(ctx.get_queue().handle().get());
+
+        cout << "Hey ya" << endl;
+
+        viennacl::vector<cl_int> map_vcl(map_opencl, map_size);
+        cout << map_vcl << endl;
+
+        VecViennaCLRestoreArrayReadWrite(arg, &arg_viennacl);
+        return map_opencl;
+    }
+    """
+
+    c_test = r"""#include "petsc.h"
+    #include  "petscviennacl.h"
+    #include <CL/cl.h>
+    #include <iostream>
+
+    using namespace std;
+
+    extern "C" int print_viennacl_array(cl_mem map_opencl, const int map_size)
+    {
+        viennacl::vector<int> map_vcl(map_opencl, map_size);
+        cout << map_vcl << endl;
+
+        return 0;
+    }
+    """
+
+    # remove the whitespaces for pretty printing
+    code_to_compile = re.sub("\\n    ", "\n", c_code_str)
+    c_test = re.sub("\\n    ", "\n", c_test)
+
+    # If we weren't in the cache we /must/ have arguments
+    from pyop2.utils import get_petsc_dir
+    import coffee.system
+    from pyop2.sequential import JITModule
+    from pyop2 import compilation
+    import os
+    import ctypes
+    import numpy as np
+
+    compiler = coffee.system.compiler
+    extension = "cpp"
+    cppargs = JITModule._cppargs
+    cppargs += ["-I%s/include" % d for d in get_petsc_dir()] + \
+               ["-I%s" % os.path.abspath(os.path.dirname(__file__))]
+    if compiler:
+        cppargs += [compiler[coffee.system.isa['inst_set']]]
+    ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
+             ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()] + \
+             ["-lpetsc", "-lm"]
+    fun = compilation.load(code_to_compile,
+                                 extension,
+                                 'int_array_to_viennacl_vector',
+                                 cppargs=cppargs,
+                                 ldargs=ldargs,
+                                 argtypes=(ctypes.c_void_p, ctypes.c_int,
+                                     ctypes.c_void_p),
+                                 restype=ctypes.c_void_p,
+                                 compiler=compiler.get('name'),
+                                 comm=None)
+    map_ocl = fun(map_to_transfer._kernel_args_[0],
+            np.int32(np.product(map_to_transfer.shape)), arg_handle)
+    1/0
+    fun = compilation.load(c_test,
+                             extension,
+                             'print_viennacl_array',
+                             cppargs=cppargs,
+                             ldargs=ldargs,
+                             argtypes=(ctypes.c_void_p, ctypes.c_int),
+                             restype=ctypes.c_int,
+                             compiler=compiler.get('name'),
+                             comm=None)
+    fun(map_ocl, np.int32(np.product(map_to_transfer.shape)))
+    1/0
+
+
 def prepare_arglist(iterset, *args):
     arglist = iterset._kernel_args_
     for arg in args:
@@ -530,6 +625,10 @@ def prepare_arglist(iterset, *args):
             for k in map_._kernel_args_:
                 if k in seen:
                     continue
+                # if not map_.viennacl_handle:
+                #    map_.viennacl_handle = map_to_viennacl_vector(arg._kernel_args_[0], map_)
+
+                # arglist += (map_.viennacl_handle, )
                 arglist += (k, )
                 seen.add(k)
     return arglist
@@ -660,8 +759,10 @@ def generate_viennacl_code(kernel):
                 clEnqueueWriteBuffer(ctx.get_queue().handle().get(), ${arg.name}_opencl, CL_TRUE, 0, 3*(end-start)*sizeof(cl_int), ${arg.name},
                                         0, NULL, NULL);
                 viennacl::vector<cl_int> ${arg.name}_viennacl(${arg.name}_opencl, 3*(end-start)+1);
+                std::cout <<  ${arg.name}_viennacl << std :: endl;
                 % endif
                 % endfor
+
 
                 viennacl::ocl::program & my_prog =
                             ctx.add_program(kernel_source, "kernel_program");
@@ -691,7 +792,6 @@ def generate_viennacl_code(kernel):
                 VecViennaCLRestoreArrayReadWrite(${arg.name}, &${arg.name}_viennacl);
                 %endif
                 % endfor
-
             }
             '''
 
