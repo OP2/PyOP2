@@ -3933,15 +3933,10 @@ class Kernel(Cached):
         self._ldargs = ldargs if ldargs is not None else []
         self._headers = headers
         self._user_code = user_code
+        if isinstance(code, Node):
+            code = code.gencode()
+        assert isinstance(code, (str, loopy.kernel.LoopKernel))
         self._code = code
-        if isinstance(code, str):
-            # Only certain name allowed for string kernels
-            if self._name[:13] != "pyop2_kernel_":
-                # FIXME: give warning
-                self._code = self._code.replace(self._name, "pyop2_kernel_" + self._name)
-                self._name = "pyop2_kernel_" + self._name
-        else:
-            assert isinstance(code, loopy.kernel.LoopKernel)
         self._initialized = True
 
     @property
