@@ -537,37 +537,13 @@ def map_to_viennacl_vector(arg_handle, map_to_transfer):
 
         cl_mem map_opencl = clCreateBuffer(ctx.handle().get(), CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, map_size*sizeof(cl_int), map_array, NULL);
 
-        clFinish(ctx.get_queue().handle().get());
-
-        cout << "Hey ya" << endl;
-
-        viennacl::vector<cl_int> map_vcl(map_opencl, map_size);
-        cout << map_vcl << endl;
-
         VecViennaCLRestoreArrayReadWrite(arg, &arg_viennacl);
         return map_opencl;
     }
     """
 
-    c_test = r"""#include "petsc.h"
-    #include  "petscviennacl.h"
-    #include <CL/cl.h>
-    #include <iostream>
-
-    using namespace std;
-
-    extern "C" int print_viennacl_array(cl_mem map_opencl, const int map_size)
-    {
-        viennacl::vector<int> map_vcl(map_opencl, map_size);
-        cout << map_vcl << endl;
-
-        return 0;
-    }
-    """
-
     # remove the whitespaces for pretty printing
     code_to_compile = re.sub("\\n    ", "\n", c_code_str)
-    c_test = re.sub("\\n    ", "\n", c_test)
 
     # If we weren't in the cache we /must/ have arguments
     from pyop2.utils import get_petsc_dir
@@ -600,21 +576,12 @@ def map_to_viennacl_vector(arg_handle, map_to_transfer):
                                  comm=None)
     map_ocl = fun(map_to_transfer._kernel_args_[0],
             np.int32(np.product(map_to_transfer.shape)), arg_handle)
-    1/0
-    fun = compilation.load(c_test,
-                             extension,
-                             'print_viennacl_array',
-                             cppargs=cppargs,
-                             ldargs=ldargs,
-                             argtypes=(ctypes.c_void_p, ctypes.c_int),
-                             restype=ctypes.c_int,
-                             compiler=compiler.get('name'),
-                             comm=None)
-    fun(map_ocl, np.int32(np.product(map_to_transfer.shape)))
-    1/0
+
+    return map_ocl
 
 
 def prepare_arglist(iterset, *args):
+    use_opencl = 1
     arglist = iterset._kernel_args_
     for arg in args:
         arglist += arg._kernel_args_
@@ -625,16 +592,19 @@ def prepare_arglist(iterset, *args):
             for k in map_._kernel_args_:
                 if k in seen:
                     continue
-                # if not map_.viennacl_handle:
-                #    map_.viennacl_handle = map_to_viennacl_vector(arg._kernel_args_[0], map_)
-
-                # arglist += (map_.viennacl_handle, )
-                arglist += (k, )
+                if not map_.viennacl_handle:
+                    map_.viennacl_handle = map_to_viennacl_vector(arg._kernel_args_[0], map_)
+                if use_opencl:
+                    import numpy as np
+                    arglist += (map_.viennacl_handle, np.int32(np.product(map_.shape)))
+                else:
+                    arglist += (k, )
                 seen.add(k)
     return arglist
 
 
 def set_argtypes(iterset, *args):
+    use_opencl = 1
     from pyop2.datatypes import IntType, as_ctypes
     index_type = as_ctypes(IntType)
     argtypes = (index_type, index_type)
@@ -648,7 +618,11 @@ def set_argtypes(iterset, *args):
             for k, t in zip(map_._kernel_args_, map_._argtypes_):
                 if k in seen:
                     continue
-                argtypes += (t, )
+                if use_opencl:
+                    argtypes += (ctypes.c_void_p, ctypes.c_int)
+                else:
+                    argtypes += (t, )
+
                 seen.add(k)
     return argtypes
 
@@ -721,10 +695,13 @@ def generate_viennacl_code(kernel):
 
             char kernel_source[] = "${kernel_src}";
 
+            using namespace std;
+
             extern "C" void ${kernel_name}(${", ".join(
                                 [('Vec ' + arg.name)  if isinstance(arg,
                                 lp.ArrayArg) and not arg.dtype.is_integral() else
-                                ('int const* ' + arg.name) if isinstance(arg,
+                                ('cl_mem ' + arg.name + ', const int ' +
+                                arg.name + '_size') if isinstance(arg,
                                 lp.ArrayArg) and arg.dtype.is_integral() else
                                 str(arg.get_arg_decl(ast_builder))[:-1]
                                 for arg in args])})
@@ -752,17 +729,9 @@ def generate_viennacl_code(kernel):
                 // declaring the int arrays(if any..)
                 % for arg in args:
                 % if isinstance(arg, lp.ArrayArg) and arg.dtype.is_integral():
-                cl_mem ${arg.name}_opencl = clCreateBuffer(ctx.handle().get(),
-                                                CL_MEM_READ_ONLY,
-                                                3*(end-start)*sizeof(cl_int)+1,
-                                                NULL, NULL);
-                clEnqueueWriteBuffer(ctx.get_queue().handle().get(), ${arg.name}_opencl, CL_TRUE, 0, 3*(end-start)*sizeof(cl_int), ${arg.name},
-                                        0, NULL, NULL);
-                viennacl::vector<cl_int> ${arg.name}_viennacl(${arg.name}_opencl, 3*(end-start)+1);
-                std::cout <<  ${arg.name}_viennacl << std :: endl;
+                viennacl::vector<cl_int> ${arg.name}_viennacl(${arg.name}, ${arg.name}_size);
                 % endif
                 % endfor
-
 
                 viennacl::ocl::program & my_prog =
                             ctx.add_program(kernel_source, "kernel_program");
