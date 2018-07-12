@@ -386,8 +386,8 @@ class TestExtrudedSetAPI:
         e = op2.ExtrudedSet(iterset, 5)
         k = op2.Kernel('void pyop2_kernel_k() { }', 'pyop2_kernel_k')
         dat1, dat2 = dats
-        base.ParLoop(k, e, dat1(op2.READ, m_iterset_toset))
-        base.ParLoop(k, e, dat2(op2.READ, m_iterset_set))
+        op2.par_loop(k, e, dat1(op2.READ, m_iterset_toset))
+        op2.par_loop(k, e, dat2(op2.READ, m_iterset_set))
 
     def test_iteration_incompatibility(self, set, m_iterset_toset, dat):
         """It should not be possible to iteratve over an extruded set reading
