@@ -301,7 +301,7 @@ def instruction_names(instructions):
     return names
 
 
-def generate(builder):
+def generate(builder, wrapper_name=None):
     parameters = Bag()
     parameters.domains = OrderedDict()
     parameters.assumptions = OrderedDict()
@@ -348,6 +348,26 @@ def generate(builder):
     statements = list(s for s in statements if not isinstance(s, DummyInstruction))
 
     domains = list(parameters.domains.values())
+    if builder.single_cell:
+        new_domains = []
+        for d in domains:
+            if d.get_dim_name(isl.dim_type.set, 0) == "n":
+                # n = start
+                new_domains.append(d.add_constraint(isl.Constraint.eq_from_names(d.space, {"n": 1, "start": -1})))
+            else:
+                new_domains.append(d)
+        domains = new_domains
+        if builder.extruded:
+            new_domains = []
+            for d in domains:
+                if d.get_dim_name(isl.dim_type.set, 0) == "layer":
+                    # layer = t1 - 1
+                    t1 = builder.layer_extents[1].name
+                    new_domains.append(d.add_constraint(isl.Constraint.eq_from_names(d.space, {"layer": 1, t1: -1, 1: 1})))
+                else:
+                    new_domains.append(d)
+        domains = new_domains
+
     assumptions, = reduce(operator.and_,
                           parameters.assumptions.values()).params().get_basic_sets()
     options = loopy.Options(check_dep_resolution=True)
@@ -358,6 +378,8 @@ def generate(builder):
             arg = loopy.GlobalArg(arg.name, dtype=arg.dtype, shape=arg.shape)
             parameters.kernel_data[i] = arg
 
+    if wrapper_name is None:
+        wrapper_name = "wrap_%s" % builder.kernel.name
     wrapper = loopy.make_kernel(domains,
                                 statements,
                                 kernel_data=parameters.kernel_data,
@@ -368,7 +390,11 @@ def generate(builder):
                                 options=options,
                                 assumptions=assumptions,
                                 lang_version=(2018, 1),
-                                name="wrap_%s" % builder.kernel.name)
+                                name=wrapper_name)
+    wrapper = loopy.assume(wrapper, "start < end")
+    if builder.extruded:
+        t0, t1 = builder.layer_extents
+        wrapper = loopy.assume(wrapper, "{0} < {1}".format(t0.name, t1.name))
 
     for indices in context.index_ordering:
         wrapper = loopy.prioritize_loops(wrapper, indices)
