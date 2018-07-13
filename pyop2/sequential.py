@@ -1293,6 +1293,20 @@ def generate_cell_wrapper(iterset, args, forward_args=(), kernel_name=None, wrap
 
     :return: string containing the C code for the single-cell wrapper
     """
+    from pyop2.codegen.builder import WrapperBuilder
+    from pyop2.codegen.rep2loopy import generate
+    from loopy.types import OpaqueType
+
+    forward_arg_types = [OpaqueType(fa) for fa in forward_args]
+    builder = WrapperBuilder(iterset=iterset, single_cell=True, forward_arg_types=forward_arg_types, restart=False)
+    for arg in args:
+        builder.add_argument(arg)
+    builder.set_kernel(Kernel("", kernel_name))
+    wrapper = generate(builder, wrapper_name)
+    code = loopy.generate_code_v2(wrapper)
+    return code.device_code()
+
+    assert False
 
     direct = all(a.map is None for a in args)
     snippets = wrapper_snippets(iterset, args, kernel_name=kernel_name, wrapper_name=wrapper_name)

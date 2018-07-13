@@ -536,7 +536,8 @@ class MatPack(Pack):
 
 class WrapperBuilder(object):
 
-    def __init__(self, *, iterset, iteration_region=None, restart=True, pass_layer_to_kernel=False):
+    def __init__(self, *, iterset, iteration_region=None, single_cell=False,
+                 restart=True, pass_layer_to_kernel=False, forward_arg_types=()):
         super().__init__()
         self.arguments = []
         self.argument_accesses = []
@@ -549,6 +550,8 @@ class WrapperBuilder(object):
         else:
             self.iteration_region = iteration_region
         self.pass_layer_to_kernel = pass_layer_to_kernel
+        self.single_cell = single_cell
+        self.forward_arguments = tuple(Argument((), fa, pfx="farg") for fa in forward_arg_types)
         self.batch = 1
         if restart:
             Argument.restart_counter()
@@ -778,7 +781,8 @@ class WrapperBuilder(object):
     @property
     def wrapper_args(self):
         # Loop extents come from here.
-        args = list(self._loop_index.extents)
+        args = list(self.forward_arguments)
+        args.extend(self._loop_index.extents)
         if self.extruded:
             args.append(self._layers_array)
             if not self.constant_layers:
@@ -807,6 +811,9 @@ class WrapperBuilder(object):
         if self.pass_layer_to_kernel:
             args = args + (self.layer_index, )
             access = access + (READ,)
+        if self.forward_arguments:
+            args = self.forward_arguments + args
+            access = tuple([WRITE] * len(self.forward_arguments)) + access
         return FunctionCall(self.kernel.name, KernelInst(), access, free_indices, *args)
 
     def emit_instructions(self):
