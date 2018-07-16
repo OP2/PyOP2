@@ -147,7 +147,7 @@ class TestSubSet:
         d = op2.Dat(indset ** 1, data=None, dtype=np.uint32)
 
         k = op2.Kernel("void pyop2_kernel_inc(unsigned int* v) { *v += 1;}", "pyop2_kernel_inc")
-        op2.par_loop(k, ss, d(op2.INC, map[0]))
+        op2.par_loop(k, ss, d(op2.INC, map))
 
         assert d.data[0] == nelems // 2
 
@@ -161,7 +161,7 @@ class TestSubSet:
 
         k = op2.Kernel("void pyop2_kernel_inc(unsigned int* v) { *v += 1;}", "pyop2_kernel_inc")
         d.data[:] = 0
-        op2.par_loop(k, ss, d(op2.INC, map[0]))
+        op2.par_loop(k, ss, d(op2.INC, map))
 
         assert (d.data == 0).all()
 
@@ -179,7 +179,7 @@ class TestSubSet:
         dat2 = op2.Dat(indset ** 1, data=None, dtype=np.uint32)
 
         k = op2.Kernel("void pyop2_kernel_inc(unsigned* d, unsigned int* s) { *d += *s;}", "pyop2_kernel_inc")
-        op2.par_loop(k, ss, dat2(op2.INC, map[0]), dat1(op2.READ))
+        op2.par_loop(k, ss, dat2(op2.INC, map), dat1(op2.READ))
 
         assert dat2.data[0] == sum(values[::2])
 
@@ -202,8 +202,8 @@ void pyop2_kernel_inc(unsigned int* v1, unsigned int* v2) {
   *v2 += 1;
 }
 """, "pyop2_kernel_inc")
-        op2.par_loop(k, sseven, dat1(op2.RW), dat2(op2.INC, map[0]))
-        op2.par_loop(k, ssodd, dat1(op2.RW), dat2(op2.INC, map[0]))
+        op2.par_loop(k, sseven, dat1(op2.RW), dat2(op2.INC, map))
+        op2.par_loop(k, ssodd, dat1(op2.RW), dat2(op2.INC, map))
 
         assert np.sum(dat1.data) == nelems
         assert np.sum(dat2.data) == nelems
@@ -239,15 +239,15 @@ void pyop2_kernel_inc(unsigned int* v1, unsigned int* v2) {
 
         op2.par_loop(k, iterset,
                      mat(op2.INC, (map, map)),
-                     dat(op2.READ, idmap[0]))
+                     dat(op2.READ, idmap))
         mat.assemble()
         op2.par_loop(k, ss01,
                      mat01(op2.INC, (map, map)),
-                     dat(op2.READ, idmap[0]))
+                     dat(op2.READ, idmap))
         mat01.assemble()
         op2.par_loop(k, ss10,
                      mat10(op2.INC, (map, map)),
-                     dat(op2.READ, idmap[0]))
+                     dat(op2.READ, idmap))
         mat10.assemble()
 
         assert (mat01.values == mat.values).all()
