@@ -1654,9 +1654,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
 
     @validate_in(('access', _modes, ModeValueError))
     def __call__(self, access, path=None):
-        if isinstance(path, _MapArg):
-            return _make_object('Arg', data=self, map=path.map, idx=path.idx,
-                                access=access)
         if configuration["type_check"] and path and path.toset != self.dataset.set:
             raise MapValueError("To Set of Map does not match Set of Dat.")
         return _make_object('Arg', data=self, map=path, access=access)
@@ -2756,19 +2753,6 @@ class Global(DataCarrier, _EmptyDataMixin):
         return self._iop(other, operator.itruediv)
 
 
-class _MapArg(object):
-
-    def __init__(self, map, idx):
-        """
-        Temporary :class:`Arg`-like object for :class:`Map`\s.
-
-        :arg map: The :class:`Map`.
-        :arg idx: The index into the map.
-        """
-        self.map = map
-        self.idx = idx
-
-
 class Map(object):
 
     """OP2 map, a relation between two :class:`Set` objects.
@@ -2853,13 +2837,6 @@ class Map(object):
                 mask_key.append(tuple(self.top_mask[method]))
         return (type(self), self.arity, tuplify(self.offset), self.implicit_bcs,
                 tuple(self.iteration_region), self.vector_index, tuple(mask_key))
-
-    @validate_type(('index', (int,), IndexTypeError))
-    def __getitem__(self, index):
-        if configuration["type_check"]:
-            if isinstance(index, int) and not (0 <= index < self.arity):
-                raise IndexValueError("Index must be in interval [0,%d]" % (self._arity - 1))
-        return _MapArg(self, index)
 
     # This is necessary so that we can convert a Map to a tuple
     # (needed in as_tuple).  Because, __getitem__ no longer returns a
@@ -3625,28 +3602,10 @@ class Mat(DataCarrier):
 
     @validate_in(('access', _modes, ModeValueError))
     def __call__(self, access, path):
-        if isinstance(path[0], Map) and isinstance(path[1], Map):
-            path_maps = as_tuple(path, Map, 2)
-            path_idxs = None
-        elif isinstance(path[0], _MapArg) and isinstance(path[1], _MapArg):
-            path = as_tuple(path, _MapArg, 2)
-            path_maps = tuple(arg and arg.map for arg in path)
-            path_idxs = tuple(arg and arg.idx for arg in path)
-        else:
-            raise TypeError
+        path_maps = as_tuple(path, Map, 2)
         if configuration["type_check"] and tuple(path_maps) not in self.sparsity:
             raise MapValueError("Path maps not in sparsity maps")
-        return _make_object('Arg', data=self, map=path_maps, access=access,
-                            idx=path_idxs)
-
-    # @validate_in(('access', _modes, ModeValueError))
-    # def __call__(self, access, path=None):
-    #     if isinstance(path, _MapArg):
-    #         return _make_object('Arg', data=self, map=path.map, idx=path.idx,
-    #                             access=access)
-    #     if configuration["type_check"] and path and path.toset != self.dataset.set:
-    #         raise MapValueError("To Set of Map does not match Set of Dat.")
-    #     return _make_object('Arg', data=self, map=path, access=access)
+        return _make_object('Arg', data=self, map=path_maps, access=access)
 
     @cached_property
     def _wrapper_cache_key_(self):

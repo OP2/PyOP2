@@ -245,7 +245,7 @@ class TestArgAPI:
             assert a.data == d
 
     def test_arg_split_mat(self, mat, m_iterset_toset):
-        arg = mat(op2.INC, (m_iterset_toset[0], m_iterset_toset[0]))
+        arg = mat(op2.INC, (m_iterset_toset, m_iterset_toset))
         for a in arg.split:
             assert a == arg
 
@@ -256,15 +256,7 @@ class TestArgAPI:
 
     def test_arg_eq_dat(self, dat, m_iterset_toset):
         assert dat(op2.READ, m_iterset_toset) == dat(op2.READ, m_iterset_toset)
-        assert dat(op2.READ, m_iterset_toset[0]) == dat(op2.READ, m_iterset_toset[0])
         assert not dat(op2.READ, m_iterset_toset) != dat(op2.READ, m_iterset_toset)
-        assert not dat(op2.READ, m_iterset_toset[0]) != dat(op2.READ, m_iterset_toset[0])
-
-    def test_arg_ne_dat_idx(self, dat, m_iterset_toset):
-        a1 = dat(op2.READ, m_iterset_toset[0])
-        a2 = dat(op2.READ, m_iterset_toset[1])
-        assert a1 != a2
-        assert not a1 == a2
 
     def test_arg_ne_dat_mode(self, dat, m_iterset_toset):
         a1 = dat(op2.READ, m_iterset_toset)
@@ -279,20 +271,14 @@ class TestArgAPI:
         assert not dat(op2.READ, m_iterset_toset) == dat(op2.READ, m2)
 
     def test_arg_eq_mat(self, mat, m_iterset_toset):
-        a1 = mat(op2.INC, (m_iterset_toset[0], m_iterset_toset[0]))
-        a2 = mat(op2.INC, (m_iterset_toset[0], m_iterset_toset[0]))
+        a1 = mat(op2.INC, (m_iterset_toset, m_iterset_toset))
+        a2 = mat(op2.INC, (m_iterset_toset, m_iterset_toset))
         assert a1 == a2
         assert not a1 != a2
 
-    def test_arg_ne_mat_idx(self, mat, m_iterset_toset):
-        a1 = mat(op2.INC, (m_iterset_toset[0], m_iterset_toset[0]))
-        a2 = mat(op2.INC, (m_iterset_toset[1], m_iterset_toset[1]))
-        assert a1 != a2
-        assert not a1 == a2
-
     def test_arg_ne_mat_mode(self, mat, m_iterset_toset):
-        a1 = mat(op2.INC, (m_iterset_toset[0], m_iterset_toset[0]))
-        a2 = mat(op2.WRITE, (m_iterset_toset[0], m_iterset_toset[0]))
+        a1 = mat(op2.INC, (m_iterset_toset, m_iterset_toset))
+        a2 = mat(op2.WRITE, (m_iterset_toset, m_iterset_toset))
         assert a1 != a2
         assert not a1 == a2
 
@@ -1278,7 +1264,7 @@ class TestMatAPI:
         "Mat arg constructor should reject invalid maps."
         wrongmap = op2.Map(op2.Set(2), op2.Set(3), 2, [0, 0, 0, 0])
         with pytest.raises(exceptions.MapValueError):
-            mat(op2.INC, (wrongmap[0], wrongmap[1]))
+            mat(op2.INC, (wrongmap, wrongmap))
 
     @pytest.mark.parametrize("mode", [op2.READ, op2.RW, op2.MIN, op2.MAX])
     def test_mat_arg_illegal_mode(self, mat, mode, m_iterset_toset):
@@ -1486,10 +1472,6 @@ class TestMapAPI:
         assert (m.iterset == iterset and m.toset == toset and m.arity == 2 and
                 m.arities == (2,) and m.arange == (0, 2) and
                 m.values.sum() == 2 * iterset.size and m.name == 'bar')
-
-    def test_map_indexing(self, m_iterset_toset):
-        "Indexing a map should create an appropriate Arg"
-        assert m_iterset_toset[0].idx == 0
 
     def test_map_eq(self, m_iterset_toset):
         """Map equality is identity."""
@@ -1725,7 +1707,7 @@ class TestParLoopAPI:
         m = op2.Map(s1, s2, 3)
         d = op2.Dat(s2 ** 1, [0] * 10, dtype=int)
         k = op2.Kernel("void pyop2_kernel_k(int *x) {}", "pyop2_kernel_k")
-        op2.par_loop(k, s1, d(op2.READ, m[0]))
+        op2.par_loop(k, s1, d(op2.READ, m))
         # Force evaluation otherwise this loop will remain in the trace forever
         # in case of lazy evaluation mode
         base._trace.evaluate_all()

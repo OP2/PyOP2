@@ -360,7 +360,7 @@ class TestGeneratedCodeCache:
         op2.par_loop(op2.Kernel(kernel_cpy, "pyop2_kernel_cpy"),
                      iterset,
                      a(op2.WRITE),
-                     x(op2.READ, iter2ind1[0]))
+                     x(op2.READ, iter2ind1))
 
         base._trace.evaluate(set([a]), set())
         assert len(self.cache) == 1
@@ -368,7 +368,7 @@ class TestGeneratedCodeCache:
         op2.par_loop(op2.Kernel(kernel_cpy, "pyop2_kernel_cpy"),
                      iterset,
                      a(op2.WRITE),
-                     x(op2.READ, iter2ind1[0]))
+                     x(op2.READ, iter2ind1))
 
         base._trace.evaluate(set([a]), set())
         assert len(self.cache) == 1
@@ -382,7 +382,7 @@ class TestGeneratedCodeCache:
         op2.par_loop(op2.Kernel(kernel_cpy, "pyop2_kernel_cpy"),
                      iterset,
                      a(op2.WRITE),
-                     x(op2.READ, iter2ind1[0]))
+                     x(op2.READ, iter2ind1))
 
         base._trace.evaluate(set([a]), set())
         assert len(self.cache) == 1
@@ -392,7 +392,7 @@ class TestGeneratedCodeCache:
         op2.par_loop(op2.Kernel(kernel_cpy, "pyop2_kernel_cpy"),
                      iterset,
                      a(op2.WRITE),
-                     x(op2.READ, iter2ind1[0]))
+                     x(op2.READ, iter2ind1))
 
         base._trace.evaluate(set([a]), set())
         assert len(self.cache) == 2
@@ -412,16 +412,16 @@ void pyop2_kernel_swap(unsigned int* x, unsigned int* y)
 """
         op2.par_loop(op2.Kernel(kernel_swap, "pyop2_kernel_swap"),
                      iterset,
-                     x(op2.RW, iter2ind1[0]),
-                     y(op2.RW, iter2ind1[0]))
+                     x(op2.RW, iter2ind1),
+                     y(op2.RW, iter2ind1))
 
         base._trace.evaluate(set([x]), set())
         assert len(self.cache) == 1
 
         op2.par_loop(op2.Kernel(kernel_swap, "pyop2_kernel_swap"),
                      iterset,
-                     y(op2.RW, iter2ind1[0]),
-                     x(op2.RW, iter2ind1[0]))
+                     y(op2.RW, iter2ind1),
+                     x(op2.RW, iter2ind1))
 
         base._trace.evaluate(set([y]), set())
         assert len(self.cache) == 1
@@ -482,25 +482,6 @@ void pyop2_kernel_swap(unsigned int* x)
 
         base._trace.evaluate(set([x2]), set())
         assert len(self.cache) == 1
-
-    def test_map_index_order_matters(self, iterset, x2, iter2ind2):
-        self.cache.clear()
-        assert len(self.cache) == 0
-        k = op2.Kernel("""void pyop2_kernel_k(unsigned int *x, unsigned int *y) {}""", 'pyop2_kernel_k')
-
-        op2.par_loop(k, iterset,
-                     x2(op2.INC, iter2ind2[0]),
-                     x2(op2.INC, iter2ind2[1]))
-
-        base._trace.evaluate(set([x2]), set())
-        assert len(self.cache) == 1
-
-        op2.par_loop(k, iterset,
-                     x2(op2.INC, iter2ind2[1]),
-                     x2(op2.INC, iter2ind2[0]))
-
-        base._trace.evaluate(set([x2]), set())
-        assert len(self.cache) == 2
 
     def test_same_iteration_space_works(self, iterset, x2, iter2ind2):
         self.cache.clear()
