@@ -254,7 +254,7 @@ class TestMixedIndirectLoop:
                                Decl("double", c_sym("*x"))],
                               Block([assembly], open_scope=False))
         op2.par_loop(op2.Kernel(kernel_code.gencode(), "pyop2_kernel_inc"), iterset,
-                     mdat(op2.INC, mmap[op2.i[0]]),
+                     mdat(op2.INC, mmap),
                      d(op2.READ))
         assert all(mdat[0].data == 1.0) and mdat[1].data == 4096.0
 

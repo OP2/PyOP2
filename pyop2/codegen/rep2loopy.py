@@ -420,8 +420,13 @@ def generate(builder, wrapper_name=None):
         wrapper = wrapper.copy(scoped_functions=scoped_functions)
     else:
         # kernel is a string
-        wrapper = loopy.register_function_lookup(wrapper, PyOP2_Kernel_Lookup(kernel.name, kernel._code, tuple(builder.argument_accesses)))
-        preamble = preamble + "\n" + kernel._code
+        from coffee.base import Node
+        if isinstance(kernel._code, Node):
+            code = kernel._code.gencode()
+        else:
+            code = kernel._code
+        wrapper = loopy.register_function_lookup(wrapper, PyOP2_Kernel_Lookup(kernel.name, code, tuple(builder.argument_accesses)))
+        preamble = preamble + "\n" + code
 
     # register petsc functions
     wrapper = loopy.register_function_lookup(wrapper, petsc_function_lookup)

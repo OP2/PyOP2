@@ -1280,16 +1280,11 @@ class TestMatAPI:
         with pytest.raises(exceptions.MapValueError):
             mat(op2.INC, (wrongmap[0], wrongmap[1]))
 
-    def test_mat_arg_nonindexed_maps(self, mat, m_iterset_toset):
-        "Mat arg constructor should reject nonindexed maps."
-        with pytest.raises(TypeError):
-            mat(op2.INC, (m_iterset_toset, m_iterset_toset))
-
     @pytest.mark.parametrize("mode", [op2.READ, op2.RW, op2.MIN, op2.MAX])
     def test_mat_arg_illegal_mode(self, mat, mode, m_iterset_toset):
         """Mat arg constructor should reject illegal access modes."""
         with pytest.raises(exceptions.ModeValueError):
-            mat(mode, (m_iterset_toset[op2.i[0]], m_iterset_toset[op2.i[1]]))
+            mat(mode, (m_iterset_toset, m_iterset_toset))
 
     def test_mat_iter(self, mat):
         "Mat should be iterable and yield self."
@@ -1720,7 +1715,7 @@ class TestParLoopAPI:
         kernel = op2.Kernel("void pyop2_kernel_k() { }", "pyop2_kernel_k")
         with pytest.raises(exceptions.MapValueError):
             op2.par_loop(kernel, set1,
-                         m(op2.INC, (rmap[op2.i[0]], cmap[op2.i[1]])))
+                         m(op2.INC, (rmap, cmap)))
 
     def test_empty_map_and_iterset(self):
         """If the iterset of the ParLoop is zero-sized, it should not matter if

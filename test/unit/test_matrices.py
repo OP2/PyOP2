@@ -574,7 +574,7 @@ class TestMatrices:
         """Mat args can only have modes WRITE and INC."""
         with pytest.raises(ModeValueError):
             op2.par_loop(op2.Kernel("", "pyop2_kernel_dummy"), elements,
-                         mat(mode, (elem_node[op2.i[0]], elem_node[op2.i[1]])))
+                         mat(mode, (elem_node, elem_node)))
 
     @pytest.mark.parametrize('n', [1, 2])
     def test_mat_set_diagonal(self, nodes, elem_node, n):
@@ -632,7 +632,7 @@ class TestMatrices:
         mat = op2.Mat(sparsity, np.float64)
         kernel = op2.Kernel(zero_mat_code.gencode(), "pyop2_kernel_zero_mat")
         op2.par_loop(kernel, set,
-                     mat(op2.WRITE, (map[op2.i[0]], map[op2.i[1]])))
+                     mat(op2.WRITE, (map, map)))
 
         mat.assemble()
         expected_matrix = np.zeros((nelems, nelems), dtype=np.float64)
@@ -644,7 +644,7 @@ class TestMatrices:
         """Assemble a simple finite-element matrix and check the result."""
         mat.zero()
         op2.par_loop(mass, elements,
-                     mat(op2.INC, (elem_node[op2.i[0]], elem_node[op2.i[1]])),
+                     mat(op2.INC, (elem_node, elem_node)),
                      coords(op2.READ, elem_node))
         mat.assemble()
         eps = 1.e-5
@@ -684,13 +684,13 @@ class TestMatrices:
         kernel using op2.WRITE"""
         mat.zero()
         op2.par_loop(kernel_inc, elements,
-                     mat(op2.INC, (elem_node[op2.i[0]], elem_node[op2.i[1]])),
+                     mat(op2.INC, (elem_node, elem_node)),
                      g(op2.READ))
         mat.assemble()
         # Check we have ones in the matrix
         assert mat.values.sum() == 3 * 3 * elements.size
         op2.par_loop(kernel_set, elements,
-                     mat(op2.WRITE, (elem_node[op2.i[0]], elem_node[op2.i[1]])),
+                     mat(op2.WRITE, (elem_node, elem_node)),
                      g(op2.READ))
         mat.assemble()
         assert mat.values.sum() == (3 * 3 - 2) * elements.size
@@ -706,7 +706,7 @@ class TestMatrices:
                           elem_node, expected_matrix):
         """Test that the FFC mass assembly assembles the correct values."""
         op2.par_loop(mass_ffc, elements,
-                     mat(op2.INC, (elem_node[op2.i[0]], elem_node[op2.i[1]])),
+                     mat(op2.INC, (elem_node, elem_node)),
                      coords(op2.READ, elem_node))
         mat.assemble()
         eps = 1.e-5
@@ -732,7 +732,7 @@ class TestMatrices:
         op2.par_loop(zero_dat, nodes,
                      b(op2.WRITE))
         op2.par_loop(rhs_ffc_itspace, elements,
-                     b(op2.INC, elem_node[op2.i[0]]),
+                     b(op2.INC, elem_node),
                      coords(op2.READ, elem_node),
                      f(op2.READ, elem_node))
         eps = 1.e-6
@@ -895,7 +895,7 @@ class TestMixedMatrices:
 
         addone = op2.Kernel(addone, "addone_mat")
         op2.par_loop(addone, mmap.iterset,
-                     mat(op2.INC, (mmap[op2.i[0]], mmap[op2.i[1]])),
+                     mat(op2.INC, (mmap, mmap)),
                      mdat(op2.READ, mmap))
         mat.assemble()
         mat._force_evaluation()
@@ -910,7 +910,7 @@ class TestMixedMatrices:
                               c_for("i", 3, Incr(Symbol("v", ("i")), FlatBlock("d[i]"))))
         addone = op2.Kernel(kernel_code.gencode(), "pyop2_kernel_addone_rhs")
         op2.par_loop(addone, mmap.iterset,
-                     dat(op2.INC, mmap[op2.i[0]]),
+                     dat(op2.INC, mmap),
                      mdat(op2.READ, mmap))
         return dat
 
@@ -941,7 +941,7 @@ class TestMixedMatrices:
                               c_for("i", 3, assembly))
         addone = op2.Kernel(kernel_code.gencode(), "pyop2_kernel_addone_rhs_vec")
         op2.par_loop(addone, mmap.iterset,
-                     dat(op2.INC, mmap[op2.i[0]]),
+                     dat(op2.INC, mmap),
                      mvdat(op2.READ, mmap))
         eps = 1.e-12
         exp = np.kron(list(zip([1.0, 4.0, 6.0, 4.0])), np.ones(2))

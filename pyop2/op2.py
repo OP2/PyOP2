@@ -39,7 +39,6 @@ from pyop2.configuration import configuration
 from pyop2.logger import debug, info, warning, error, critical, set_log_level
 from pyop2.mpi import MPI, COMM_WORLD, collective
 
-from pyop2.base import i                      # noqa: F401
 from pyop2.sequential import par_loop, Kernel  # noqa: F401
 from pyop2.sequential import READ, WRITE, RW, INC, MIN, MAX  # noqa: F401
 from pyop2.base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL  # noqa: F401
@@ -52,7 +51,7 @@ from coffee import coffee_init, O0
 
 __all__ = ['configuration', 'READ', 'WRITE', 'RW', 'INC', 'MIN', 'MAX',
            'ON_BOTTOM', 'ON_TOP', 'ON_INTERIOR_FACETS', 'ALL',
-           'i', 'debug', 'info', 'warning', 'error', 'critical', 'initialised',
+           'debug', 'info', 'warning', 'error', 'critical', 'initialised',
            'set_log_level', 'MPI', 'init', 'exit', 'Kernel', 'Set', 'ExtrudedSet',
            'MixedSet', 'Subset', 'DataSet', 'GlobalDataSet', 'MixedDataSet',
            'Halo', 'Dat', 'MixedDat', 'Mat', 'Global', 'Map', 'MixedMap',
