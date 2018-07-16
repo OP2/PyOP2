@@ -38,7 +38,7 @@ subclass these as required to implement backend-specific features.
 import abc
 
 from contextlib import contextmanager
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 import itertools
 import numpy as np
 import ctypes
@@ -429,40 +429,12 @@ class Arg(object):
         return self._is_mixed_dat or self._is_mixed_mat
 
     @cached_property
-    def _is_INC(self):
-        return self._access == INC
-
-    @cached_property
-    def _is_MIN(self):
-        return self._access == MIN
-
-    @cached_property
-    def _is_MAX(self):
-        return self._access == MAX
-
-    @cached_property
     def _is_direct(self):
         return isinstance(self.data, Dat) and self.map is None
 
     @cached_property
     def _is_indirect(self):
         return isinstance(self.data, Dat) and self.map is not None
-
-    @cached_property
-    def _is_indirect_and_not_read(self):
-        return self._is_indirect and not self._is_read
-
-    @cached_property
-    def _is_read(self):
-        return self._access == READ
-
-    @cached_property
-    def _is_written(self):
-        return not self._is_read
-
-    @cached_property
-    def _is_indirect_reduction(self):
-        return self._is_indirect and self._access is INC
 
     @collective
     def global_to_local_begin(self):
@@ -841,7 +813,6 @@ class ExtrudedSet(Set):
             return (self.layers_array.ctypes.data, )
         else:
             return (self.layers_array.ctypes.data, self.offset.ctypes.data, self.masks.bottom.ctypes.data, self.masks.top.ctypes.data)
-            # return (self.layers_array.ctypes.data, self.masks.handle)
 
     @cached_property
     def _argtypes_(self):
@@ -3828,7 +3799,7 @@ class Kernel(Cached):
 
     @cached_property
     def num_flops(self):
-        # FIXME
+        # FIXME: use loopy counter
         return 0
         v = EstimateFlops()
         return v.visit(self._ast)
@@ -3857,40 +3828,18 @@ class JITModule(Cached):
 
     @classmethod
     def _cache_key(cls, kernel, iterset, *args, **kwargs):
-        from pyop2.codegen.rep2loopy import prepare_cache_key
-        return prepare_cache_key(kernel, iterset, *args) + (kwargs.get("iterate", None), )
-        key = (kernel.cache_key, iterset._extruded,
-               (iterset._extruded and iterset.constant_layers),
-               isinstance(iterset, Subset))
-        for arg in args:
-            key += (arg.__class__,)
-            if arg._is_global:
-                key += (arg.data.dim, arg.data.dtype, arg.access)
-            elif arg._is_dat:
-                idx = arg.idx
-                map_arity = arg.map and (tuplify(arg.map.offset) or arg.map.arity)
-                if arg._is_dat_view:
-                    view_idx = arg.data.index
-                else:
-                    view_idx = None
-                key += (arg.data.dim, arg.data.dtype, map_arity,
-                        idx, view_idx, arg.access)
-            elif arg._is_mat:
-                idxs = (arg.idx[0].__class__, arg.idx[0].index,
-                        arg.idx[1].index)
-                map_arities = (tuplify(arg.map[0].offset) or arg.map[0].arity,
-                               tuplify(arg.map[1].offset) or arg.map[1].arity)
-                # Implicit boundary conditions (extruded "top" or
-                # "bottom") affect generated code, and therefore need
-                # to be part of cache key
-                map_bcs = (arg.map[0].implicit_bcs, arg.map[1].implicit_bcs)
-                map_cmpts = (arg.map[0].vector_index, arg.map[1].vector_index)
-                key += (arg.data.dims, arg.data.dtype, idxs,
-                        map_arities, map_bcs, map_cmpts, arg.access)
+        counter = itertools.count()
+        seen = defaultdict(lambda: next(counter))
+        key = (kernel._wrapper_cache_key_ + iterset._wrapper_cache_key_ +
+               (iterset._extruded, (iterset._extruded and iterset.constant_layers), isinstance(iterset, Subset)))
 
-        iterate = kwargs.get("iterate", None)
-        if iterate is not None:
-            key += ((iterate,))
+        for arg in args:
+            key += arg._wrapper_cache_key_
+            maps = arg.map_tuple
+            for map_ in maps:
+                key += (seen[map_],)
+
+        key += (kwargs.get("iterate", None),)
 
         return key
 
@@ -4034,7 +3983,6 @@ class ParLoop(LazyComputation):
         :arg args: A list of :class:`Args`, the argument to the :fn:`par_loop`.
         """
         return ()
-        # raise NotImplementedError
 
     @cached_property
     def num_flops(self):

@@ -512,21 +512,6 @@ def argtypes(kernel):
     return args
 
 
-def prepare_cache_key(kernel, iterset, *args):
-    from pyop2 import Subset
-    counter = itertools.count()
-    seen = defaultdict(lambda: next(counter))
-    key = (kernel._wrapper_cache_key_ + iterset._wrapper_cache_key_ +
-           (iterset._extruded, (iterset._extruded and iterset.constant_layers), isinstance(iterset, Subset)))
-
-    for arg in args:
-        key += arg._wrapper_cache_key_
-        maps = arg.map_tuple
-        for map_ in maps:
-            key += (seen[map_], )
-    return key
-
-
 @singledispatch
 def statement(expr, context):
     raise AssertionError("Unhandled statement type '%s'" % type(expr))
