@@ -136,7 +136,7 @@ class TestIndirectLoop:
         kernel_wo = "void kernel_wo(unsigned int* x) { *x = 42; }\n"
 
         op2.par_loop(op2.Kernel(kernel_wo, "kernel_wo"),
-                     iterset, x(op2.WRITE, iterset2indset[0]))
+                     iterset, x(op2.WRITE, iterset2indset))
         assert all(map(lambda x: x == 42, x.data))
 
     def test_onecolor_rw(self, iterset, x, iterset2indset):
@@ -144,7 +144,7 @@ class TestIndirectLoop:
         kernel_rw = "void pyop2_kernel_rw(unsigned int* x) { (*x) = (*x) + 1; }\n"
 
         op2.par_loop(op2.Kernel(kernel_rw, "pyop2_kernel_rw"),
-                     iterset, x(op2.RW, iterset2indset[0]))
+                     iterset, x(op2.RW, iterset2indset))
         assert sum(x.data) == nelems * (nelems + 1) // 2
 
     def test_indirect_inc(self, iterset, unitset, iterset2unitset):
@@ -152,7 +152,7 @@ class TestIndirectLoop:
         u = op2.Dat(unitset, np.array([0], dtype=np.uint32), np.uint32, "u")
         kernel_inc = "void pyop2_kernel_inc(unsigned int* x) { (*x) = (*x) + 1; }\n"
         op2.par_loop(op2.Kernel(kernel_inc, "pyop2_kernel_inc"),
-                     iterset, u(op2.INC, iterset2unitset[0]))
+                     iterset, u(op2.INC, iterset2unitset))
         assert u.data[0] == nelems
 
     def test_global_read(self, iterset, x, iterset2indset):
@@ -163,7 +163,7 @@ class TestIndirectLoop:
 
         op2.par_loop(op2.Kernel(kernel_global_read, "pyop2_kernel_global_read"),
                      iterset,
-                     x(op2.RW, iterset2indset[0]),
+                     x(op2.RW, iterset2indset),
                      g(op2.READ))
         assert sum(x.data) == sum(map(lambda v: v // 2, range(nelems)))
 
@@ -178,7 +178,7 @@ class TestIndirectLoop:
 
         op2.par_loop(
             op2.Kernel(kernel_global_inc, "pyop2_kernel_global_inc"), iterset,
-            x(op2.RW, iterset2indset[0]),
+            x(op2.RW, iterset2indset),
             g(op2.INC))
         assert sum(x.data) == nelems * (nelems + 1) // 2
         assert g.data[0] == nelems * (nelems + 1) // 2
@@ -187,7 +187,7 @@ class TestIndirectLoop:
         """Set both components of a vector-valued Dat to a scalar value."""
         kernel_wo = "void pyop2_kernel_wo(unsigned int* x) { x[0] = 42; x[1] = 43; }\n"
         op2.par_loop(op2.Kernel(kernel_wo, "pyop2_kernel_wo"), iterset,
-                     x2(op2.WRITE, iterset2indset[0]))
+                     x2(op2.WRITE, iterset2indset))
         assert all(all(v == [42, 43]) for v in x2.data)
 
     def test_2d_map(self):
@@ -209,7 +209,7 @@ class TestIndirectLoop:
         }"""
         op2.par_loop(op2.Kernel(kernel_sum, "pyop2_kernel_sum"), edges,
                      edge_vals(op2.WRITE),
-                     node_vals(op2.READ, edge2node[0]))
+                     node_vals(op2.READ, edge2node))
 
         expected = np.arange(1, nedges * 2 + 1, 2)
         assert all(expected == edge_vals.data)
