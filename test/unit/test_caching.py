@@ -511,13 +511,13 @@ void pyop2_kernel_swap(unsigned int* x)
         k = op2.Kernel(kernel_code.gencode(), 'pyop2_kernel_k')
 
         op2.par_loop(k, iterset,
-                     x2(op2.INC, iter2ind2[op2.i[0]]))
+                     x2(op2.INC, iter2ind2))
 
         base._trace.evaluate(set([x2]), set())
         assert len(self.cache) == 1
 
         op2.par_loop(k, iterset,
-                     x2(op2.INC, iter2ind2[op2.i[0]]))
+                     x2(op2.INC, iter2ind2))
 
         base._trace.evaluate(set([x2]), set())
         assert len(self.cache) == 1
