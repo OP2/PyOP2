@@ -94,7 +94,6 @@ class JITModule(base.JITModule):
         self._fun = None
         self._iterset = iterset
         self._args = args
-        self._direct = kwargs.get('direct', False)
         self._iteration_region = kwargs.get('iterate', ALL)
         self._pass_layer_arg = kwargs.get('pass_layer_arg', False)
         # Copy the class variables, so we don't overwrite them
@@ -186,8 +185,6 @@ class JITModule(base.JITModule):
         del self._args
         del self._kernel
         del self._iterset
-        del self._direct
-        # return self._fun
 
     def set_argtypes(self, iterset, *args):
 
@@ -229,7 +226,7 @@ class ParLoop(petsc_base.ParLoop):
     @cached_property
     def _jitmodule(self):
         return JITModule(self.kernel, self.iterset, *self.args,
-                         direct=self.is_direct, iterate=self.iteration_region,
+                         iterate=self.iteration_region,
                          pass_layer_arg=self._pass_layer_arg)
 
     @collective
