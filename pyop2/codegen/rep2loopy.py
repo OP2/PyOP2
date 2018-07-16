@@ -507,41 +507,6 @@ def argtypes(kernel):
     return args
 
 
-def prepare_arglist(iterset, *args):
-    arglist = iterset._kernel_args_
-    for arg in args:
-        arglist += arg._kernel_args_
-    seen = set()
-    for arg in args:
-        maps = arg.map_tuple
-        for map_ in maps:
-            for k in map_._kernel_args_:
-                if k in seen:
-                    continue
-                arglist += (k, )
-                seen.add(k)
-    return arglist
-
-
-def set_argtypes(iterset, *args):
-    from pyop2.datatypes import IntType, as_ctypes
-    index_type = as_ctypes(IntType)
-    argtypes = (index_type, index_type)
-    argtypes += iterset._argtypes_
-    for arg in args:
-        argtypes += arg._argtypes_
-    seen = set()
-    for arg in args:
-        maps = arg.map_tuple
-        for map_ in maps:
-            for k, t in zip(map_._kernel_args_, map_._argtypes_):
-                if k in seen:
-                    continue
-                argtypes += (t, )
-                seen.add(k)
-    return argtypes
-
-
 def prepare_cache_key(kernel, iterset, *args):
     from pyop2 import Subset
     counter = itertools.count()
