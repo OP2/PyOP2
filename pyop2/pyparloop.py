@@ -126,8 +126,6 @@ class ParLoop(base.ParLoop):
                 elif arg._is_direct:
                     args.append(arrayview(arg.data._data[idx, ...], arg.access))
                 elif arg._is_indirect:
-                    if isinstance(arg.idx, base.IterationIndex):
-                        raise NotImplementedError
                     if arg._is_vec_map:
                         args.append(arrayview(arg.data._data[arg.map.values_with_halo[idx], ...], arg.access))
                     else:

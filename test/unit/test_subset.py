@@ -238,15 +238,15 @@ void pyop2_kernel_inc(unsigned int* v1, unsigned int* v2) {
         mat10.zero()
 
         op2.par_loop(k, iterset,
-                     mat(op2.INC, (map[op2.i[0]], map[op2.i[1]])),
+                     mat(op2.INC, (map, map)),
                      dat(op2.READ, idmap[0]))
         mat.assemble()
         op2.par_loop(k, ss01,
-                     mat01(op2.INC, (map[op2.i[0]], map[op2.i[1]])),
+                     mat01(op2.INC, (map, map)),
                      dat(op2.READ, idmap[0]))
         mat01.assemble()
         op2.par_loop(k, ss10,
-                     mat10(op2.INC, (map[op2.i[0]], map[op2.i[1]])),
+                     mat10(op2.INC, (map, map)),
                      dat(op2.READ, idmap[0]))
         mat10.assemble()
 
