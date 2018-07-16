@@ -261,14 +261,11 @@ class Arg(object):
         Instead, use the call syntax on the :class:`DataCarrier`.
     """
 
-    def __init__(self, data=None, map=None, idx=None, access=None):
+    def __init__(self, data=None, map=None, access=None):
         """
         :param data: A data-carrying object, either :class:`Dat` or class:`Mat`
         :param map:  A :class:`Map` to access this :class:`Arg` or the default
                      if the identity map is to be used.
-        :param idx:  An index into the :class:`Map`: an :class:`int` to use a
-                     given component of the mapping or the default to use all
-                     components of the mapping.
         :param access: An access descriptor of type :class:`Access`
 
         Checks that:
@@ -286,7 +283,6 @@ class Arg(object):
             self.map_tuple = (map, )
         else:
             self.map_tuple = tuple(map)
-        self._idx = idx
         self._access = access
         self._in_flight = False  # some kind of comms in flight for this arg
 
@@ -320,19 +316,15 @@ class Arg(object):
 
     @cached_property
     def _wrapper_cache_key_(self):
-        if isinstance(self.idx, tuple):
-            idxs = self.idx
-        else:
-            idxs = (self.idx,)
         if self.map is not None:
             map_ = tuple(m._wrapper_cache_key_ for m in self.map)
         else:
             map_ = self.map
-        return (type(self), idxs, self.access, self.data._wrapper_cache_key_, map_)
+        return (type(self), self.access, self.data._wrapper_cache_key_, map_)
 
     @property
     def _key(self):
-        return (self.data, self._map, self._idx, self._access)
+        return (self.data, self._map, self._access)
 
     def __hash__(self):
         # FIXME: inconsistent with the equality predicate, but (loop
@@ -353,12 +345,12 @@ class Arg(object):
         return not self.__eq__(other)
 
     def __str__(self):
-        return "OP2 Arg: dat %s, map %s, index %s, access %s" % \
-            (self.data, self._map, self._idx, self._access)
+        return "OP2 Arg: dat %s, map %s, access %s" % \
+            (self.data, self._map, self._access)
 
     def __repr__(self):
-        return "Arg(%r, %r, %r, %r)" % \
-            (self.data, self._map, self._idx, self._access)
+        return "Arg(%r, %r, %r)" % \
+            (self.data, self._map, self._access)
 
     def __iter__(self):
         for arg in self.split:
@@ -368,13 +360,13 @@ class Arg(object):
     def split(self):
         """Split a mixed argument into a tuple of constituent arguments."""
         if self._is_mixed_dat:
-            return tuple(_make_object('Arg', d, m, self._idx, self._access)
+            return tuple(_make_object('Arg', d, m, self._access)
                          for d, m in zip(self.data, self._map))
         elif self._is_mixed_mat:
             s = self.data.sparsity.shape
             mr, mc = self.map
             return tuple(_make_object('Arg', self.data[i, j], (mr.split[i], mc.split[j]),
-                                      self._idx, self._access)
+                                      self._access)
                          for j in range(s[1]) for i in range(s[0]))
         else:
             return (self,)
@@ -400,11 +392,6 @@ class Arg(object):
         return self._map
 
     @cached_property
-    def idx(self):
-        """Index into the mapping."""
-        return self._idx
-
-    @cached_property
     def access(self):
         """Access descriptor. One of the constants of type :class:`Access`"""
         return self._access
@@ -412,10 +399,6 @@ class Arg(object):
     @cached_property
     def _is_dat_view(self):
         return isinstance(self.data, DatView)
-
-    @cached_property
-    def _is_vec_map(self):
-        return self._is_indirect and self._idx is None
 
     @cached_property
     def _is_mat(self):
