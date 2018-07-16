@@ -266,8 +266,7 @@ class Arg(object):
         :param data: A data-carrying object, either :class:`Dat` or class:`Mat`
         :param map:  A :class:`Map` to access this :class:`Arg` or the default
                      if the identity map is to be used.
-        :param idx:  An index into the :class:`Map`: an :class:`IterationIndex`
-                     when using an iteration space, an :class:`int` to use a
+        :param idx:  An index into the :class:`Map`: an :class:`int` to use a
                      given component of the mapping or the default to use all
                      components of the mapping.
         :param access: An access descriptor of type :class:`Access`
@@ -325,12 +324,11 @@ class Arg(object):
             idxs = self.idx
         else:
             idxs = (self.idx,)
-        idx = tuple(i._wrapper_cache_key_ if isinstance(i, IterationIndex) else i for i in idxs)
         if self.map is not None:
             map_ = tuple(m._wrapper_cache_key_ for m in self.map)
         else:
             map_ = self.map
-        return (type(self), idx, self.access, self.data._wrapper_cache_key_, map_)
+        return (type(self), idxs, self.access, self.data._wrapper_cache_key_, map_)
 
     @property
     def _key(self):
@@ -482,10 +480,6 @@ class Arg(object):
     @cached_property
     def _is_indirect_reduction(self):
         return self._is_indirect and self._access is INC
-
-    @cached_property
-    def _uses_itspace(self):
-        return self._is_mat or isinstance(self.idx, IterationIndex)
 
     @collective
     def global_to_local_begin(self):
@@ -2762,53 +2756,6 @@ class Global(DataCarrier, _EmptyDataMixin):
         return self._iop(other, operator.itruediv)
 
 
-class IterationIndex(object):
-
-    """OP2 iteration space index
-
-    Users should not directly instantiate :class:`IterationIndex` objects. Use
-    ``op2.i`` instead."""
-
-    _cache = {}
-
-    def __new__(cls, index=None):
-        assert index is None or isinstance(index, int), "i must be an int"
-        try:
-            return cls._cache[index]
-        except KeyError:
-            self = super().__new__(cls)
-            self.index = index
-            return cls._cache.setdefault(index, self)
-
-    @cached_property
-    def _wrapper_cache_key_(self):
-        return (type(self), self.index)
-
-    def __str__(self):
-        return "OP2 IterationIndex: %s" % self.index
-
-    def __repr__(self):
-        return "IterationIndex(%r)" % self.index
-
-    def __getitem__(self, idx):
-        return IterationIndex(idx)
-
-    # This is necessary so that we can convert an IterationIndex to a
-    # tuple.  Because, __getitem__ returns a new IterationIndex
-    # we have to explicitly provide an iterable interface
-    def __iter__(self):
-        """Yield self when iterated over."""
-        yield self
-
-
-i = IterationIndex()
-"""Shorthand for constructing :class:`IterationIndex` objects.
-
-``i[idx]`` builds an :class:`IterationIndex` object for which the `index`
-property is `idx`.
-"""
-
-
 class _MapArg(object):
 
     def __init__(self, map, idx):
@@ -2835,11 +2782,6 @@ class Map(object):
       kernel.
     * An integer: ``some_map[n]``. The ``n`` th entry of the
       map result will be passed to the kernel.
-    * An :class:`IterationIndex`, ``some_map[pyop2.i[n]]``. ``n``
-      will take each value from ``0`` to ``e-1`` where ``e`` is the
-      ``n`` th extent passed to the iteration space for this
-      :func:`pyop2.op2.par_loop`. See also :data:`i`.
-
 
     For extruded problems (where ``iterset`` is an
     :class:`ExtrudedSet`) with boundary conditions applied at the top
@@ -2912,13 +2854,11 @@ class Map(object):
         return (type(self), self.arity, tuplify(self.offset), self.implicit_bcs,
                 tuple(self.iteration_region), self.vector_index, tuple(mask_key))
 
-    @validate_type(('index', (int, IterationIndex), IndexTypeError))
+    @validate_type(('index', (int,), IndexTypeError))
     def __getitem__(self, index):
         if configuration["type_check"]:
             if isinstance(index, int) and not (0 <= index < self.arity):
                 raise IndexValueError("Index must be in interval [0,%d]" % (self._arity - 1))
-            if isinstance(index, IterationIndex) and index.index not in [0, 1]:
-                raise IndexValueError("IterationIndex must be in interval [0,1]")
         return _MapArg(self, index)
 
     # This is necessary so that we can convert a Map to a tuple
@@ -3685,13 +3625,28 @@ class Mat(DataCarrier):
 
     @validate_in(('access', _modes, ModeValueError))
     def __call__(self, access, path):
-        path = as_tuple(path, _MapArg, 2)
-        path_maps = tuple(arg and arg.map for arg in path)
-        path_idxs = tuple(arg and arg.idx for arg in path)
+        if isinstance(path[0], Map) and isinstance(path[1], Map):
+            path_maps = as_tuple(path, Map, 2)
+            path_idxs = None
+        elif isinstance(path[0], _MapArg) and isinstance(path[1], _MapArg):
+            path = as_tuple(path, _MapArg, 2)
+            path_maps = tuple(arg and arg.map for arg in path)
+            path_idxs = tuple(arg and arg.idx for arg in path)
+        else:
+            raise TypeError
         if configuration["type_check"] and tuple(path_maps) not in self.sparsity:
             raise MapValueError("Path maps not in sparsity maps")
         return _make_object('Arg', data=self, map=path_maps, access=access,
                             idx=path_idxs)
+
+    # @validate_in(('access', _modes, ModeValueError))
+    # def __call__(self, access, path=None):
+    #     if isinstance(path, _MapArg):
+    #         return _make_object('Arg', data=self, map=path.map, idx=path.idx,
+    #                             access=access)
+    #     if configuration["type_check"] and path and path.toset != self.dataset.set:
+    #         raise MapValueError("To Set of Map does not match Set of Dat.")
+    #     return _make_object('Arg', data=self, map=path, access=access)
 
     @cached_property
     def _wrapper_cache_key_(self):
@@ -3915,9 +3870,7 @@ class Kernel(Cached):
         self._ldargs = ldargs if ldargs is not None else []
         self._headers = headers
         self._user_code = user_code
-        if isinstance(code, Node):
-            code = code.gencode()
-        assert isinstance(code, (str, loopy.kernel.LoopKernel))
+        assert isinstance(code, (str, Node, loopy.kernel.LoopKernel))
         self._code = code
         self._initialized = True
 
@@ -3972,10 +3925,7 @@ class JITModule(Cached):
             if arg._is_global:
                 key += (arg.data.dim, arg.data.dtype, arg.access)
             elif arg._is_dat:
-                if isinstance(arg.idx, IterationIndex):
-                    idx = (arg.idx.__class__, arg.idx.index)
-                else:
-                    idx = arg.idx
+                idx = arg.idx
                 map_arity = arg.map and (tuplify(arg.map.offset) or arg.map.arity)
                 if arg._is_dat_view:
                     view_idx = arg.data.index
@@ -4315,10 +4265,7 @@ class ParLoop(LazyComputation):
 def check_iterset(args, iterset):
     """Checks that the iteration set of the :class:`ParLoop` matches the
     iteration set of all its arguments. A :class:`MapValueError` is raised
-    if this condition is not met.
-
-    Also determines the size of the local iteration space and checks all
-    arguments using an :class:`IterationIndex` for consistency."""
+    if this condition is not met."""
 
     if isinstance(iterset, Subset):
         _iterset = iterset.superset

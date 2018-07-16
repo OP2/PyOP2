@@ -39,8 +39,7 @@ import os
 from collections import OrderedDict, namedtuple
 from copy import deepcopy as dcopy
 
-from pyop2.base import READ, RW, WRITE, MIN, MAX, INC, _LazyMatOp, IterationIndex, \
-    Subset, Map
+from pyop2.base import READ, RW, WRITE, MIN, MAX, INC, _LazyMatOp, Subset, Map
 from pyop2.mpi import MPI
 from pyop2.caching import Cached
 from pyop2.profiling import timed_region
