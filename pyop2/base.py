@@ -47,7 +47,7 @@ import operator
 import types
 from hashlib import md5
 
-from pyop2.datatypes import IntType, as_cstr, _EntityMask, _MapMask, dtype_limits
+from pyop2.datatypes import IntType, as_cstr, _MapMask, dtype_limits
 from pyop2.configuration import configuration
 from pyop2.caching import Cached, ObjectCached
 from pyop2.exceptions import *
@@ -841,22 +841,6 @@ class ExtrudedSet(Set):
 
     def __repr__(self):
         return "ExtrudedSet(%r, %r)" % (self._parent, self._layers)
-
-    class EntityMask(namedtuple("_EntityMask_", ["section", "bottom", "top"])):
-        """Mask bits on each set entity indicating which topological
-        entities in the closure of said set entity are exposed on the
-        bottom or top of the extruded set.  The section encodes the
-        number of entities in each entity column, and their offset
-        from the start of the set."""
-        _argtype = ctypes.POINTER(_EntityMask)
-
-        @cached_property
-        def handle(self):
-            struct = _EntityMask()
-            struct.section = self.section.handle
-            struct.bottom = self.bottom.ctypes.data
-            struct.top = self.top.ctypes.data
-            return ctypes.pointer(struct)
 
     @cached_property
     def parent(self):
