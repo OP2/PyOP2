@@ -3935,8 +3935,6 @@ class ParLoop(LazyComputation):
         check_iterset(self.args, iterset)
 
         if self._pass_layer_arg:
-            if self.is_direct:
-                raise ValueError("Can't request layer arg for direct iteration")
             if not self._is_layered:
                 raise ValueError("Can't request layer arg for non-extruded iteration")
 
@@ -3972,7 +3970,7 @@ class ParLoop(LazyComputation):
     def num_flops(self):
         iterset = self.iterset
         size = 1
-        if self.is_indirect and iterset._extruded:
+        if iterset._extruded:
             region = self.iteration_region
             layers = np.mean(iterset.layers_array[:, 1] - iterset.layers_array[:, 0])
             if region is ON_INTERIOR_FACETS:
@@ -4027,32 +4025,24 @@ class ParLoop(LazyComputation):
     @collective
     def global_to_local_begin(self):
         """Start halo exchanges."""
-        if self.is_direct:
-            return
         for arg in self.dat_args:
             arg.global_to_local_begin()
 
     @collective
     def global_to_local_end(self):
         """Finish halo exchanges"""
-        if self.is_direct:
-            return
         for arg in self.dat_args:
             arg.global_to_local_end()
 
     @collective
     def local_to_global_begin(self):
         """Start halo exchanges."""
-        if self.is_direct:
-            return
         for arg in self.dat_args:
             arg.local_to_global_begin()
 
     @collective
     def local_to_global_end(self):
         """Finish halo exchanges (wait on irecvs)"""
-        if self.is_direct:
-            return
         for arg in self.dat_args:
             arg.local_to_global_end()
 
@@ -4100,17 +4090,6 @@ class ParLoop(LazyComputation):
     @cached_property
     def global_reduction_args(self):
         return [arg for arg in self.args if arg._is_global_reduction]
-
-    @cached_property
-    def is_direct(self):
-        """Is this parallel loop direct? I.e. are all the arguments either
-        :class:Dats accessed through the identity map, or :class:Global?"""
-        return all(a.map is None for a in self.args)
-
-    @cached_property
-    def is_indirect(self):
-        """Is the parallel loop indirect?"""
-        return not self.is_direct
 
     @cached_property
     def kernel(self):
