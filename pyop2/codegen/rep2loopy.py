@@ -431,6 +431,9 @@ def generate(builder, wrapper_name=None):
         wrapper = loopy.register_function_lookup(wrapper, PyOP2_Kernel_Lookup(kernel.name, code, tuple(builder.argument_accesses)))
         preamble = preamble + "\n" + code
 
+    # register petsc functions
+    wrapper = loopy.register_function_lookup(wrapper, petsc_function_lookup)
+
     if builder.batch > 1:
         if builder.extruded:
             outer = "layer"
@@ -578,71 +581,6 @@ def map_to_viennacl_vector(arg_handle, map_to_transfer):
             np.int32(np.product(map_to_transfer.shape)), arg_handle)
 
     return map_ocl
-
-
-def prepare_arglist(iterset, *args):
-    use_opencl = 1
-    arglist = iterset._kernel_args_
-    for arg in args:
-        arglist += arg._kernel_args_
-    seen = set()
-    for arg in args:
-        maps = arg.map_tuple
-        for map_ in maps:
-            for k in map_._kernel_args_:
-                if k in seen:
-                    continue
-                if not map_.viennacl_handle:
-                    map_.viennacl_handle = map_to_viennacl_vector(arg._kernel_args_[0], map_)
-                if use_opencl:
-                    import numpy as np
-                    arglist += (map_.viennacl_handle, np.int32(np.product(map_.shape)))
-                else:
-                    arglist += (k, )
-                seen.add(k)
-    return arglist
-
-
-def set_argtypes(iterset, *args):
-    use_opencl = 1
-    from pyop2.datatypes import IntType, as_ctypes
-    index_type = as_ctypes(IntType)
-    argtypes = (index_type, index_type)
-    argtypes += iterset._argtypes_
-    for arg in args:
-        argtypes += arg._argtypes_
-    seen = set()
-    for arg in args:
-        maps = arg.map_tuple
-        for map_ in maps:
-            for k, t in zip(map_._kernel_args_, map_._argtypes_):
-                if k in seen:
-                    continue
-                if use_opencl:
-                    argtypes += (ctypes.c_void_p, ctypes.c_int)
-                else:
-                    argtypes += (t, )
-
-                seen.add(k)
-    return argtypes
-
-
-def prepare_cache_key(kernel, iterset, *args):
-    from pyop2 import Subset
-    counter = itertools.count()
-    seen = defaultdict(lambda: next(counter))
-    key = (
-            kernel._wrapper_cache_key_
-            + iterset._wrapper_cache_key_
-            + (iterset._extruded, (iterset._extruded and iterset.constant_layers), isinstance(iterset, Subset))
-    )
-
-    for arg in args:
-        key += arg._wrapper_cache_key_
-        maps = arg.map_tuple
-        for map_ in maps:
-            key += (seen[map_], )
-    return key
 
 
 def get_grid_sizes(kernel):
@@ -812,7 +750,7 @@ def statement_assign(expr, context):
     return loopy.Assignment(lvalue, rvalue, within_inames=within_inames,
                             predicates=predicates,
                             id=id,
-                            depends_on=depends_on)
+                            depends_on=depends_on, depends_on_is_final=True)
 
 
 @statement.register(FunctionCall)
@@ -858,7 +796,7 @@ def statement_functioncall(expr, context):
                                  within_inames=within_inames,
                                  predicates=predicates,
                                  id=id,
-                                 depends_on=depends_on)
+                                 depends_on=depends_on, depends_on_is_final=true)
 
 
 @singledispatch
