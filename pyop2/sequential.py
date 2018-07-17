@@ -131,6 +131,7 @@ class JITModule(base.JITModule):
             builder.set_batch(batch_size)
         wrapper = generate(builder)
 
+        use_opencl = 1
         if use_opencl:
             code = generate_viennacl_code(wrapper)
             print(code)
