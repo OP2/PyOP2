@@ -551,7 +551,6 @@ class WrapperBuilder(object):
         self.pass_layer_to_kernel = pass_layer_to_kernel
         self.single_cell = single_cell
         self.forward_arguments = tuple(Argument((), fa, pfx="farg") for fa in forward_arg_types)
-        self.batch = 1
         if restart:
             Argument.restart_counter()
             Index.restart_counter()
@@ -572,9 +571,6 @@ class WrapperBuilder(object):
 
     def set_kernel(self, kernel):
         self.kernel = kernel
-
-    def set_batch(self, batch):
-        self.batch = batch
 
     @cached_property
     def loop_extents(self):

@@ -229,7 +229,7 @@ def loop_nesting(instructions, deps, outer_inames, kernel_name):
             else:
                 nesting[insn] = runtime_indices([insn])
 
-    # Take care of dependencies. e.g. t1[i] = A[i], t2[j] = B[t1[j]], then t2 should depends on {i, j}
+    # take care of dependencies. e.g. t1[i] = A[i], t2[j] = B[t1[j]], then t2 should depends on {i, j}
     name_to_insn = dict((n, i) for i, (n, _) in deps.items())
     for insn, (name, _deps) in deps.items():
         s = set(_deps)
@@ -237,6 +237,24 @@ def loop_nesting(instructions, deps, outer_inames, kernel_name):
             d = s.pop()
             nesting[insn] = nesting[insn] | nesting[name_to_insn[d]]
             s = s | set(deps[name_to_insn[d]][1]) - set([name])
+
+    # boost inames, if one instruction is inside inner inames (free indices),
+    # it should be inside the outer inames as dictated by other instructions.
+    index_nesting = defaultdict(frozenset)  # free index -> {runtime indices}
+    for insn in instructions:
+        if isinstance(insn, When):
+            key = insn.children[1]
+        else:
+            key = insn
+        for fi in traversal([insn]):
+            if isinstance(fi, Index):
+                index_nesting[fi] |= nesting[key]
+
+    for insn in imperatives(instructions):
+        outer = reduce(operator.or_,
+                       iter(index_nesting[fi] for fi in traversal([insn]) if isinstance(fi, Index)),
+                       frozenset())
+        nesting[insn] = nesting[insn] | outer
 
     return nesting
 
@@ -259,6 +277,14 @@ def instruction_dependencies(instructions, initialisers):
             if isinstance(op, (Argument, Variable)):
                 yield op
 
+    def variables_read(exprs):
+        for op in traversal(exprs):
+            if isinstance(op, (Argument, Variable)):
+                yield op
+            if isinstance(op, RuntimeIndex):
+                for bound in variables_read(op.extents):
+                    yield bound
+
     writers = defaultdict(list)
     for op in instructions_by_type[PackInst]:
         assert isinstance(op, Accumulate)
@@ -270,7 +296,7 @@ def instruction_dependencies(instructions, initialisers):
 
     for op in instructions_by_type[PackInst]:
         _, rvalue = op.children
-        deps[op] |= frozenset(x for x in itertools.chain(*(writers[r]for r in variables([rvalue]))))
+        deps[op] |= frozenset(x for x in itertools.chain(*(writers[r]for r in variables_read([rvalue]))))
         deps[op] -= frozenset(names[op])
 
     # kernel instructions depends on packing instructions
@@ -379,6 +405,7 @@ def generate(builder, wrapper_name=None):
 
     if wrapper_name is None:
         wrapper_name = "wrap_%s" % builder.kernel.name
+
     wrapper = loopy.make_kernel(domains,
                                 statements,
                                 kernel_data=parameters.kernel_data,
@@ -387,8 +414,11 @@ def generate(builder, wrapper_name=None):
                                 symbol_manglers=[symbol_mangler],
                                 options=options,
                                 assumptions=assumptions,
-                                lang_version=(2018, 1),
+                                lang_version=(2018, 2),
                                 name=wrapper_name)
+
+    # if wrapper_name == "wrap_form00_cell_integral_otherwise" and len(statements) == 15:
+    #     from IPython import embed; embed()
 
     # Additional assumptions
     wrapper = loopy.assume(wrapper, "start < end")
@@ -427,29 +457,6 @@ def generate(builder, wrapper_name=None):
 
     # register petsc functions
     wrapper = loopy.register_function_lookup(wrapper, petsc_function_lookup)
-
-    # {{{ outer loop vectorization
-
-    if builder.batch > 1:
-        if builder.extruded:
-            outer = "layer"
-            inner = "layer_inner"
-            wrapper = loopy.assume(wrapper, "t0 mod {0} = 0".format(builder.batch))
-            wrapper = loopy.assume(wrapper, "exists zz: zz > 0 and t1 = {0}*zz + t0".format(builder.batch))
-        else:
-            outer = "n"
-            inner = "n_inner"
-            wrapper = loopy.assume(wrapper, "start mod {0} = 0".format(builder.batch))
-            wrapper = loopy.assume(wrapper, "exists zz: zz > 0 and end = {0}*zz + start".format(builder.batch))
-
-        wrapper = loopy.split_iname(wrapper, outer, builder.batch, inner_tag="ilp.seq", inner_iname=inner)
-
-    alignment = 64
-    for name in wrapper.temporary_variables:
-        tv = wrapper.temporary_variables[name]
-        wrapper.temporary_variables[name] = tv.copy(alignment=alignment)
-
-    # outer loop vectorization }}}
 
     # mark inner most loop as omp simd
     # import os
