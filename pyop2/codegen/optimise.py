@@ -52,7 +52,6 @@ def index_merger(instructions, cache=None):
 
     for insn in instructions:
         if isinstance(insn, FunctionCall):
-            # yield insn.reconstruct(*merge_indices(insn.children))
             continue
 
         indices = tuple(i for i in collect_indices([insn]))

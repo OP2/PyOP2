@@ -80,13 +80,14 @@ class IndexBase(metaclass=ABCMeta):
 
 class Index(Terminal, Scalar):
     _count = itertools.count()
-    __slots__ = ("name", "extent")
-    __front__ = ("name", "extent")
+    __slots__ = ("name", "extent", "merge")
+    __front__ = ("name", "extent", "merge")
 
-    def __init__(self, extent=None):
+    def __init__(self, extent=None, merge=True):
         self.name = "i%d" % next(Index._count)
         self.extent = None
         self.set_extent(extent)
+        self.merge = merge
 
     @classmethod
     def restart_counter(cls):
