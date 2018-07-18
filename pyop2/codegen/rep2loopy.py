@@ -277,13 +277,11 @@ def instruction_dependencies(instructions, initialisers):
             if isinstance(op, (Argument, Variable)):
                 yield op
 
-    def variables_read(exprs):
+    def bounds(exprs):
         for op in traversal(exprs):
-            if isinstance(op, (Argument, Variable)):
-                yield op
             if isinstance(op, RuntimeIndex):
-                for bound in variables_read(op.extents):
-                    yield bound
+                for v in variables(op.extents):
+                    yield v
 
     writers = defaultdict(list)
     for op in instructions_by_type[PackInst]:
@@ -296,7 +294,9 @@ def instruction_dependencies(instructions, initialisers):
 
     for op in instructions_by_type[PackInst]:
         _, rvalue = op.children
-        deps[op] |= frozenset(x for x in itertools.chain(*(writers[r]for r in variables_read([rvalue]))))
+        deps[op] |= frozenset(x for x in itertools.chain(*(
+            writers[r] for r in itertools.chain(variables([rvalue]), bounds([op]))
+        )))
         deps[op] -= frozenset(names[op])
 
     # kernel instructions depends on packing instructions
