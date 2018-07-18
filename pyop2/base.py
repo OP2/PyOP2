@@ -47,7 +47,7 @@ import operator
 import types
 from hashlib import md5
 
-from pyop2.datatypes import IntType, as_cstr, _MapMask, dtype_limits
+from pyop2.datatypes import IntType, as_cstr, dtype_limits
 from pyop2.configuration import configuration
 from pyop2.caching import Cached, ObjectCached
 from pyop2.exceptions import *
@@ -326,12 +326,6 @@ class Arg(object):
     def _key(self):
         return (self.data, self._map, self._access)
 
-    def __hash__(self):
-        # FIXME: inconsistent with the equality predicate, but (loop
-        # fusion related) code generation relies on object identity as
-        # the equality predicate when using Args as dict keys.
-        return id(self)
-
     def __eq__(self, other):
         r""":class:`Arg`\s compare equal of they are defined on the same data,
         use the same :class:`Map` with the same index and the same access
@@ -444,6 +438,8 @@ class Arg(object):
         assert self._is_dat, "Doing halo exchanges only makes sense for Dats"
         assert not self._in_flight, \
             "Halo exchange already in flight for Arg %s" % self
+        if self._is_direct:
+            return
         if self.access in [READ, RW, INC, MIN, MAX]:
             self._in_flight = True
             self.data.global_to_local_begin(self.access)
@@ -463,6 +459,8 @@ class Arg(object):
         assert self._is_dat, "Doing halo exchanges only makes sense for Dats"
         assert not self._in_flight, \
             "Halo exchange already in flight for Arg %s" % self
+        if self._is_direct:
+            return
         if self.access in [INC, MIN, MAX]:
             self._in_flight = True
             self.data.local_to_global_begin(self.access)
@@ -841,6 +839,15 @@ class ExtrudedSet(Set):
 
     def __repr__(self):
         return "ExtrudedSet(%r, %r)" % (self._parent, self._layers)
+
+    class EntityMask(namedtuple("_EntityMask_", ["section", "bottom", "top"])):
+        """Mask bits on each set entity indicating which topological
+        entities in the closure of said set entity are exposed on the
+        bottom or top of the extruded set.  The section encodes the
+        number of entities in each entity column, and their offset
+        from the start of the set."""
+
+        pass
 
     @cached_property
     def parent(self):
@@ -1778,7 +1785,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
             i = p.Variable("i")
             insn = loopy.Assignment(x.index(i), 0, within_inames=frozenset(["i"]))
             data = loopy.GlobalArg("dat", dtype=self.dtype, shape=(self.cdim,))
-            knl = loopy.make_kernel([domain], [insn], [data], name="zero", lang_version=(2018, 1))
+            knl = loopy.make_kernel([domain], [insn], [data], name="zero", lang_version=(2018, 2))
 
             knl = _make_object('Kernel', knl, 'zero')
             loop = _make_object('ParLoop', knl,
@@ -1812,7 +1819,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
             insn = loopy.Assignment(_other.index(i), _self.index(i), within_inames=frozenset(["i"]))
             data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
                     loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,))]
-            knl = loopy.make_kernel([domain], [insn], data, name="copy", lang_version=(2018, 1))
+            knl = loopy.make_kernel([domain], [insn], data, name="copy", lang_version=(2018, 2))
 
             self._copy_kernel = _make_object('Kernel', knl, 'copy')
         return _make_object('ParLoop', self._copy_kernel,
@@ -1866,7 +1873,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
                 loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,)),
                 loopy.GlobalArg("ret", dtype=self.dtype, shape=(self.cdim,))]
-        knl = loopy.make_kernel([domain], [insn], data, name=name, lang_version=(2018, 1))
+        knl = loopy.make_kernel([domain], [insn], data, name=name, lang_version=(2018, 2))
         k = _make_object('Kernel', knl, name)
 
         par_loop(k, self.dataset.set, self(READ), other(READ), ret(WRITE))
@@ -1896,7 +1903,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         insn = loopy.Assignment(lhs, op(lhs, rhs), within_inames=frozenset(["i"]))
         data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
                 loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,))]
-        knl = loopy.make_kernel([domain], [insn], data, name=name, lang_version=(2018, 1))
+        knl = loopy.make_kernel([domain], [insn], data, name=name, lang_version=(2018, 2))
         k = _make_object('Kernel', knl, name)
 
         par_loop(k, self.dataset.set, self(INC), other(READ))
@@ -1918,7 +1925,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
 
         insn = loopy.Assignment(_self.index(i), _op(_self.index(i)), within_inames=frozenset(["i"]))
         data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,))]
-        knl = loopy.make_kernel([domain], [insn], data, name=name, lang_version=(2018, 1))
+        knl = loopy.make_kernel([domain], [insn], data, name=name, lang_version=(2018, 2))
         k = _make_object('Kernel', knl, name)
 
         par_loop(k, self.dataset.set, self(RW))
@@ -1948,7 +1955,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
                 loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,)),
                 loopy.GlobalArg("ret", dtype=ret.dtype, shape=(1,))]
-        knl = loopy.make_kernel([domain], [insn], data, name="inner", lang_version=(2018, 1))
+        knl = loopy.make_kernel([domain], [insn], data, name="inner", lang_version=(2018, 2))
 
         k = _make_object('Kernel', knl, "inner")
         par_loop(k, self.dataset.set, self(READ), other(READ), ret(INC))
@@ -2755,14 +2762,16 @@ class Map(object):
 
     class MapMask(namedtuple("_MapMask_", ["section", "indices", "facet_points"])):
 
-        _argtype = ctypes.POINTER(_MapMask)
+        pass
 
-        @cached_property
-        def handle(self):
-            struct = _MapMask()
-            struct.section = self.section.handle
-            struct.indices = self.indices.ctypes.data
-            return ctypes.pointer(struct)
+        # _argtype = ctypes.POINTER(_MapMask)
+        #
+        # @cached_property
+        # def handle(self):
+        #     struct = _MapMask()
+        #     struct.section = self.section.handle
+        #     struct.indices = self.indices.ctypes.data
+        #     return ctypes.pointer(struct)
 
     @cached_property
     def _kernel_args_(self):
@@ -2774,7 +2783,6 @@ class Map(object):
 
     @cached_property
     def _wrapper_cache_key_(self):
-        # FIXME: boundary masks
         mask_key = []
         for location, method in self.implicit_bcs:
             if location == "bottom":
@@ -3756,7 +3764,7 @@ class Kernel(Cached):
 
         if isinstance(code, Node):
             code = code.gencode()
-        if isinstance(code, loopy.kernel.LoopKernel):
+        if isinstance(code, loopy.LoopKernel):
             code = hash(code)
         hashee = (str(code) + name + str(sorted(opts.items())) + str(include_dirs) +
                   str(headers) + version + str(configuration['loop_fusion']) +
@@ -3781,7 +3789,7 @@ class Kernel(Cached):
         self._ldargs = ldargs if ldargs is not None else []
         self._headers = headers
         self._user_code = user_code
-        assert isinstance(code, (str, Node, loopy.kernel.LoopKernel))
+        assert isinstance(code, (str, Node, loopy.LoopKernel))
         self._code = code
         self._initialized = True
 
@@ -3790,17 +3798,22 @@ class Kernel(Cached):
         """Kernel name, must match the kernel function name in the code."""
         return self._name
 
+    @property
     def code(self):
-        """String containing the c code for this kernel routine. This
-        code must conform to the OP2 user kernel API."""
         return self._code
 
     @cached_property
     def num_flops(self):
-        # FIXME: use loopy counter
-        return 0
-        v = EstimateFlops()
-        return v.visit(self._ast)
+        if isinstance(self.code, Node):
+            v = EstimateFlops()
+            return v.visit(self.code)
+        elif isinstance(self.code, loopy.LoopKernel):
+            op_map = loopy.get_op_map(self.code)
+            return op_map.filter_by(name=['add', 'sub', 'mul', 'div'], dtype=[np.float64]).eval_and_sum({})
+        else:
+            from pyop2.logger import warning
+            warning("Cannot estimate flops for kernel passed in as string.")
+            return 0
 
     def __str__(self):
         return "OP2 Kernel: %s" % self._name

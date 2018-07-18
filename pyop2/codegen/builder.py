@@ -69,7 +69,6 @@ class Map(object):
 
         if boundary_masks is not None:
             v = {}
-            # FIXME: what is bottom and top, can I always unpack like this
             for method, (section, indices, (*_, bottom, top)) in boundary_masks.items():
                 if iterset.constant_layers:
                     vals = []
@@ -600,10 +599,7 @@ class WrapperBuilder(object):
         n = self._loop_index
         if self.subset:
             n = Materialise(PackInst(), Indexed(self._subset_indices, MultiIndex(n)), MultiIndex())
-            return n
-            # return Indexed(self._subset_indices, MultiIndex(n))
-        else:
-            return n
+        return n
 
     @cached_property
     def _layers_array(self):
@@ -744,9 +740,7 @@ class WrapperBuilder(object):
                                 pfx="glob")
             pack = GlobalPack(argument, arg.access)
         elif arg._is_mat:
-            # FIXME: pointer types?
             argument = Argument((), PetscMat(), pfx="mat")
-            # argument = Argument((), numpy.dtype(numpy.uint64), pfx="mat")
             map_ = tuple(self.map_(m) for m in arg.map)
             pack = MatPack(argument, arg.access, map_,
                            arg.data.dims, arg.data.dtype,

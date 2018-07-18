@@ -32,8 +32,6 @@ class Bag(object):
     pass
 
 
-# {{{ manglers
-
 def symbol_mangler(kernel, name):
     if name in {"ADD_VALUES", "INSERT_VALUES"}:
         return loopy.types.to_loopy_type(numpy.int32), name
@@ -80,7 +78,7 @@ def petsc_function_lookup(target, identifier):
     return None
 
 
-# PyOP2 Kernel passed in as string
+# for PyOP2 kernels passed in as string
 class PyOP2KernelCallable(loopy.ScalarCallable):
 
     fields = set(["name", "access", "arg_id_to_dtype", "arg_id_to_descr", "name_in_target"])
@@ -120,7 +118,6 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
         return self.copy(arg_id_to_descr=new_arg_id_to_descr)
 
     def emit_call_insn(self, insn, target, expression_to_code_mapper):
-
         # reorder arguments, e.g. a,c = f(b,d) to f(a,b,c,d)
         parameters = []
         reads = iter(insn.expression.parameters)
@@ -151,6 +148,8 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
         return var(self.name_in_target)(*c_parameters), assignee_is_returned
 
 
+# this is a class which implements __call__ instead of a function, because
+# we only know the kernel name at runtime.
 class PyOP2_Kernel_Lookup(object):
 
     def __init__(self, name, code, access):
@@ -372,7 +371,7 @@ def generate(builder, wrapper_name=None):
                           parameters.assumptions.values()).params().get_basic_sets()
     options = loopy.Options(check_dep_resolution=True)
 
-    # TODO: sometimes masks are not used
+    # sometimes masks are not used, but we still need to create the function arguments
     for i, arg in enumerate(parameters.wrapper_arguments):
         if parameters.kernel_data[i] is None:
             arg = loopy.GlobalArg(arg.name, dtype=arg.dtype, shape=arg.shape)
@@ -385,41 +384,37 @@ def generate(builder, wrapper_name=None):
                                 kernel_data=parameters.kernel_data,
                                 target=loopy.CTarget(),
                                 temporary_variables=parameters.temporaries,
-                                # function_manglers=[petsc_function_mangler, kernel_mangler],
                                 symbol_manglers=[symbol_mangler],
                                 options=options,
                                 assumptions=assumptions,
                                 lang_version=(2018, 1),
                                 name=wrapper_name)
+
+    # Additional assumptions
     wrapper = loopy.assume(wrapper, "start < end")
     if builder.extruded:
         t0, t1 = builder.layer_extents
         wrapper = loopy.assume(wrapper, "{0} < {1}".format(t0.name, t1.name))
 
+    # prioritize loops
     for indices in context.index_ordering:
         wrapper = loopy.prioritize_loops(wrapper, indices)
 
-    # {{{ vectorization
-
+    # register kernel
     kernel = builder.kernel
-    alignment = 64
     headers = set(kernel._headers)
     headers = headers | set(["#include <petsc.h>", "#include <math.h>"])
     preamble = "\n".join(sorted(headers))
-    # , "#include <Eigen/Dense>"
 
     if isinstance(kernel._code, loopy.LoopKernel):
-        # register kernel
         knl = kernel._code
         wrapper = loopy.register_callable_kernel(wrapper, knl.name, knl)
-        # from loopy.transform.register_callable import _match_caller_callee_argument_dimension
-        # wrapper = _match_caller_callee_argument_dimension(wrapper, kernel.name)
         wrapper = loopy.inline_callable_kernel(wrapper, knl.name)
         scoped_functions = wrapper.scoped_functions.copy()
         scoped_functions.update(knl.scoped_functions)
         wrapper = wrapper.copy(scoped_functions=scoped_functions)
     else:
-        # kernel is a string
+        # kernel is a string, add it to preamble
         from coffee.base import Node
         if isinstance(kernel._code, Node):
             code = kernel._code.gencode()
@@ -428,8 +423,12 @@ def generate(builder, wrapper_name=None):
         wrapper = loopy.register_function_lookup(wrapper, PyOP2_Kernel_Lookup(kernel.name, code, tuple(builder.argument_accesses)))
         preamble = preamble + "\n" + code
 
+    wrapper = wrapper.copy(preambles=[("0", preamble)])
+
     # register petsc functions
     wrapper = loopy.register_function_lookup(wrapper, petsc_function_lookup)
+
+    # {{{ outer loop vectorization
 
     if builder.batch > 1:
         if builder.extruded:
@@ -445,26 +444,12 @@ def generate(builder, wrapper_name=None):
 
         wrapper = loopy.split_iname(wrapper, outer, builder.batch, inner_tag="ilp.seq", inner_iname=inner)
 
-        # Transpose arguments and temporaries
-        # def transpose(tags):
-        #     new_tags = ["N0"]
-        #     for tag in tags[1:]:
-        #         new_tags.append("N{0}".format(tag.layout_nesting_level + 1))
-        #     return tuple(new_tags)
-        #
-        # for arg_name in args_to_batch:
-        #     arg = kernel.arg_dict[arg_name]
-        #     tags = ["N0"]
-        #     kernel = loopy.tag_array_axes(kernel, arg_name, transpose(arg.dim_tags))
-        #
-        # for tv in kernel.temporary_variables.values():
-        #     if tv.initializer is None:
-        #         kernel = loopy.tag_array_axes(kernel, tv.name, transpose(tv.dim_tags))
-        #
-        # kernel = loopy.tag_inames(kernel, {"elem": "ilp.seq"})
+    alignment = 64
     for name in wrapper.temporary_variables:
         tv = wrapper.temporary_variables[name]
         wrapper.temporary_variables[name] = tv.copy(alignment=alignment)
+
+    # outer loop vectorization }}}
 
     # mark inner most loop as omp simd
     # import os
@@ -484,8 +469,6 @@ def generate(builder, wrapper_name=None):
     #
     #     for iname in innermost_iname:
     #         kernel = loopy.tag_inames(kernel, {iname: "l.0"})
-
-    wrapper = wrapper.copy(preambles=[("0", preamble)])
 
     # vectorization }}}
 
@@ -550,14 +533,12 @@ def statement_assign(expr, context):
 
 @statement.register(FunctionCall)
 def statement_functioncall(expr, context):
-    # FIXME: function manglers
+
     parameters = context.parameters
 
     from loopy.symbolic import SubArrayRef
     from loopy.types import OpaqueType
 
-    # children = list(expression(c, parameters) for c in expr.children)
-    # call = pym.Call(pym.Variable(name), children)
     free_indices = set(i.name for i in expr.free_indices)
     writes = []
     reads = []
@@ -576,7 +557,6 @@ def statement_functioncall(expr, context):
             # scalar argument or constant
             arg = var
         if access is READ or (isinstance(child, Argument) and isinstance(child.dtype, OpaqueType)):
-            # opaque data type treated as read
             reads.append(arg)
         else:
             writes.append(arg)
@@ -682,7 +662,6 @@ def expression_extent(expr, parameters):
 
 @expression.register(Symbol)
 def expression_symbol(expr, parameters):
-    # FIXME: symbol manglers!
     return pym.Variable(expr.name)
 
 
@@ -719,7 +698,6 @@ def expression_variable(expr, parameters):
 def expression_zero(expr, parameters):
     assert expr.shape == ()
     return 0
-    # return loopy.symbolic.TypeCast(expr.dtype, expr.dtype.type(0))
 
 
 @expression.register(Literal)
