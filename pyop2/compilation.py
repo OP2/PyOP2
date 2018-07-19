@@ -200,17 +200,17 @@ class Compiler(object):
         return []
 
     @collective
-    def get_so(self, src, extension):
+    def get_so(self, jitmodule, extension):
         """Build a shared library and load it
 
-        :arg src: The source string to compile.
+        :arg jitmodule: The JIT Module which can generate the code to compile.
         :arg extension: extension of the source file (c, cpp).
 
         Returns a :class:`ctypes.CDLL` object of the resulting shared
         library."""
 
         # Determine cache key
-        hsh = md5(src.encode())
+        hsh = md5(str(jitmodule.cache_key).encode())
         hsh.update(self._cc.encode())
         if self._ld:
             hsh.update(self._ld.encode())
@@ -239,7 +239,7 @@ class Compiler(object):
                         os.makedirs(output, exist_ok=True)
                 self.comm.barrier()
                 with open(srcfile, "w") as f:
-                    f.write(src)
+                    f.write(jitmodule.code_to_compile)
                 self.comm.barrier()
                 raise CompilationError("Generated code differs across ranks (see output in %s)" % output)
         try:
@@ -255,7 +255,7 @@ class Compiler(object):
                 errfile = os.path.join(cachedir, "%s_p%d.err" % (basename, pid))
                 with progress(INFO, 'Compiling wrapper'):
                     with open(cname, "w") as f:
-                        f.write(src)
+                        f.write(jitmodule.code_to_compile)
                     # Compiler also links
                     if self._ld is None:
                         cc = [self._cc] + self._cppargs + \
@@ -378,7 +378,7 @@ class LinuxCompiler(Compiler):
         if cpp:
             cc = "mpicxx"
             stdargs = []
-        cppargs = stdargs + ['-fPIC', '-fopenmp', '-Wall'] + opt_flags + cppargs
+        cppargs = stdargs + ['-fPIC', '-Wall'] + opt_flags + cppargs
         ldargs = ['-shared'] + ldargs
 
         super(LinuxCompiler, self).__init__(cc, cppargs=cppargs, ldargs=ldargs,
@@ -411,18 +411,15 @@ class LinuxIntelCompiler(Compiler):
 
 
 @collective
-def load(src, extension, fn_name, cppargs=[], ldargs=[],
-         argtypes=None, restype=None, compiler=None, comm=None):
+def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
+         restype=None, compiler=None, comm=None):
     """Build a shared library and return a function pointer from it.
 
-    :arg src: A string containing the source to build
+    :arg jitmodule: The JIT Module which can generate the code to compile
     :arg extension: extension of the source file (c, cpp)
     :arg fn_name: The name of the function to return from the resulting library
     :arg cppargs: A list of arguments to the C compiler (optional)
     :arg ldargs: A list of arguments to the linker (optional)
-    :arg argtypes: A list of ctypes argument types matching the
-         arguments of the returned function (optional, pass ``None``
-         for ``void``).
     :arg restype: The return type of the function (optional, pass
          ``None`` for ``void``).
     :arg compiler: The name of the C compiler (intel, ``None`` for default).
@@ -432,19 +429,21 @@ def load(src, extension, fn_name, cppargs=[], ldargs=[],
     platform = sys.platform
     cpp = extension == "cpp"
     if platform.find('linux') == 0:
-        if compiler == 'intel':
+        if compiler == 'icc':
             compiler = LinuxIntelCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
-        else:
+        elif compiler == 'gcc':
             compiler = LinuxCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
+        else:
+            raise CompilationError("Unrecognized compiler name '%s'" % compiler)
     elif platform.find('darwin') == 0:
         compiler = MacCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
     else:
         raise CompilationError("Don't know what compiler to use for platform '%s'" %
                                platform)
-    dll = compiler.get_so(src, extension)
+    dll = compiler.get_so(jitmodule, extension)
 
     fn = getattr(dll, fn_name)
-    fn.argtypes = argtypes
+    fn.argtypes = jitmodule.argtypes
     fn.restype = restype
     return fn
 

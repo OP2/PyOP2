@@ -187,9 +187,6 @@ class ExecutionTrace(object):
                 new_trace.append(comp)
         self._trace = new_trace
 
-        if configuration['loop_fusion']:
-            from pyop2.fusion.interface import fuse, lazy_trace_name
-            to_run = fuse(lazy_trace_name, to_run)
         for comp in to_run:
             comp._run()
 
@@ -3767,8 +3764,7 @@ class Kernel(Cached):
         if isinstance(code, loopy.LoopKernel):
             code = hash(code)
         hashee = (str(code) + name + str(sorted(opts.items())) + str(include_dirs) +
-                  str(headers) + version + str(configuration['loop_fusion']) +
-                  str(ldargs) + str(cpp))
+                  str(headers) + version + str(ldargs) + str(cpp))
         return md5(hashee.encode()).hexdigest()
 
     @cached_property
@@ -3850,35 +3846,9 @@ class JITModule(Cached):
             for map_ in maps:
                 key += (seen[map_],)
 
-        key += (kwargs.get("iterate", None),)
+        key += (kwargs.get("iterate", None), cls)
 
         return key
-
-    def _dump_generated_code(self, src, ext=None):
-        """Write the generated code to a file for debugging purposes.
-
-        :arg src: The source string to write
-        :arg ext: The file extension of the output file (if not `None`)
-
-        Output will only be written if the `dump_gencode`
-        configuration parameter is `True`.  The output file will be
-        written to the directory specified by the PyOP2 configuration
-        parameter `dump_gencode_path`.  See :class:`Configuration` for
-        more details.
-
-        """
-        if configuration['dump_gencode']:
-            import os
-            import hashlib
-            fname = "%s-%s.%s" % (self._kernel.name,
-                                  hashlib.md5(src).hexdigest(),
-                                  ext if ext is not None else "c")
-            if not os.path.exists(configuration['dump_gencode_path']):
-                os.makedirs(configuration['dump_gencode_path'])
-            output = os.path.abspath(os.path.join(configuration['dump_gencode_path'],
-                                                  fname))
-            with open(output, "w") as f:
-                f.write(src)
 
 
 class IterationRegion(object):
