@@ -58,8 +58,6 @@ from pyop2.mpi import collective
 from pyop2.profiling import timed_region
 from pyop2.utils import cached_property, get_petsc_dir
 
-import coffee.system
-
 import loopy
 
 
@@ -92,7 +90,6 @@ class JITModule(base.JITModule):
     _cppargs = []
     _libraries = []
     _system_headers = []
-    _extension = 'c'
 
     def __init__(self, kernel, iterset, *args, **kwargs):
         r"""
@@ -146,17 +143,9 @@ class JITModule(base.JITModule):
         for arg in self._args:
             builder.add_argument(arg)
         builder.set_kernel(self._kernel)
-        import os
-        try:
-            batch_size = int(os.environ['BATCHSIZE'])
-        except Exception:
-            batch_size = 1
-        if batch_size > 1:
-            builder.set_batch(batch_size)
+
         wrapper = generate(builder)
         code = loopy.generate_code_v2(wrapper)
-
-        self.set_argtypes(self._iterset, *self._args)
 
         # nbytes = 0
         # for arg in self._args:
@@ -175,50 +164,45 @@ class JITModule(base.JITModule):
 
     @collective
     def compile(self):
+        # If we weren't in the cache we /must/ have arguments
         if not hasattr(self, '_args'):
             raise RuntimeError("JITModule has no args associated with it, should never happen")
 
-        # If we weren't in the cache we /must/ have arguments
-        compiler = coffee.system.compiler
-        extension = self._extension
+        from pyop2.configuration import configuration
+
+        compiler = configuration["compiler"]
+        extension = "cpp" if self._kernel._cpp else "c"
         cppargs = self._cppargs
         cppargs += ["-I%s/include" % d for d in get_petsc_dir()] + \
                    ["-I%s" % d for d in self._kernel._include_dirs] + \
                    ["-I%s" % os.path.abspath(os.path.dirname(__file__))]
-        if compiler:
-            cppargs += [compiler[coffee.system.isa['inst_set']]]
         ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
                  ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()] + \
                  ["-lpetsc", "-lm"] + self._libraries
         ldargs += self._kernel._ldargs
 
-        if self._kernel._cpp:
-            extension = "cpp"
-
-        code_to_compile = self.code_to_compile
-        self._fun = compilation.load(code_to_compile,
+        self._fun = compilation.load(self,
                                      extension,
                                      self._wrapper_name,
                                      cppargs=cppargs,
                                      ldargs=ldargs,
-                                     argtypes=self._argtypes,
                                      restype=ctypes.c_int,
-                                     compiler=compiler.get('name'),
+                                     compiler=compiler,
                                      comm=self.comm)
         # Blow away everything we don't need any more
         del self._args
         del self._kernel
         del self._iterset
 
-    def set_argtypes(self, iterset, *args):
-
+    @cached_property
+    def argtypes(self):
         index_type = as_ctypes(IntType)
         argtypes = (index_type, index_type)
-        argtypes += iterset._argtypes_
-        for arg in args:
+        argtypes += self._iterset._argtypes_
+        for arg in self._args:
             argtypes += arg._argtypes_
         seen = set()
-        for arg in args:
+        for arg in self._args:
             maps = arg.map_tuple
             for map_ in maps:
                 for k, t in zip(map_._kernel_args_, map_._argtypes_):
@@ -226,8 +210,7 @@ class JITModule(base.JITModule):
                         continue
                     argtypes += (t,)
                     seen.add(k)
-
-        self._argtypes = argtypes
+        return argtypes
 
 
 class ParLoop(petsc_base.ParLoop):
