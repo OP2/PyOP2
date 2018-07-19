@@ -47,8 +47,6 @@ from pyop2.sequential import Map, MixedMap, DecoratedMap, Sparsity, Halo  # noqa
 from pyop2.sequential import Global, GlobalDataSet        # noqa: F401
 from pyop2.sequential import Dat, MixedDat, DatView, Mat  # noqa: F401
 
-from coffee import coffee_init, O0
-
 __all__ = ['configuration', 'READ', 'WRITE', 'RW', 'INC', 'MIN', 'MAX',
            'ON_BOTTOM', 'ON_TOP', 'ON_INTERIOR_FACETS', 'ALL',
            'debug', 'info', 'warning', 'error', 'critical', 'initialised',
@@ -76,9 +74,6 @@ def init(**kwargs):
     :arg comm:      The MPI communicator to use for parallel communication,
                     defaults to `MPI_COMM_WORLD`
     :arg log_level: The log level. Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
-    :arg opt_level: The default optimization level in COFFEE. Options: O0, O1, O2,
-                    O3, Ofast. For more information about these levels, refer to
-                    ``coffee_init``'s documentation. The default value is O0.
 
     For debugging purposes, `init` accepts all keyword arguments
     accepted by the PyOP2 :class:`Configuration` object, see
@@ -96,8 +91,7 @@ def init(**kwargs):
     configuration.reconfigure(**kwargs)
 
     set_log_level(configuration['log_level'])
-    coffee_init(compiler=configuration['compiler'], isa=configuration['simd_isa'],
-                optlevel=configuration.get('opt_level', O0))
+
     _initialised = True
 
 
