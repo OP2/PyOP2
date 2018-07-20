@@ -3762,7 +3762,11 @@ class Kernel(Cached):
         if isinstance(code, Node):
             code = code.gencode()
         if isinstance(code, loopy.LoopKernel):
-            code = hash(code)
+            from loopy.tools import LoopyKeyBuilder
+            from pytools.persistent_dict import new_hash
+            key_hash = new_hash()
+            code.update_persistent_hash(key_hash, LoopyKeyBuilder())
+            code = key_hash.hexdigest()
         hashee = (str(code) + name + str(sorted(opts.items())) + str(include_dirs) +
                   str(headers) + version + str(ldargs) + str(cpp))
         return md5(hashee.encode()).hexdigest()
