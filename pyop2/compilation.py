@@ -46,6 +46,7 @@ from pyop2.mpi import dup_comm, get_compilation_comm, set_compilation_comm
 from pyop2.configuration import configuration
 from pyop2.logger import debug, progress, INFO
 from pyop2.exceptions import CompilationError
+from pyop2.base import JITModule
 
 
 def _check_hashes(x, y, datatype):
@@ -208,7 +209,12 @@ class Compiler(object):
         library."""
 
         # Determine cache key
-        hsh = md5(str(jitmodule.cache_key).encode())
+        if isinstance(jitmodule, JITModule):
+            code_hashee = str(jitmodule.cache_key)
+        else:
+            # we got a string
+            code_hashee = jitmodule
+        hsh = md5(code_hashee.encode())
         hsh.update(self._cc.encode())
         if self._ld:
             hsh.update(self._ld.encode())
@@ -226,6 +232,11 @@ class Compiler(object):
         # atomically (avoiding races).
         tmpname = os.path.join(cachedir, "%s_p%d.so.tmp" % (basename, pid))
 
+        def get_code(jitmodule):
+            if isinstance(jitmodule, JITModule):
+                return jitmodule.code_to_compile
+            return jitmodule  # we got a string
+
         if configuration['check_src_hashes'] or configuration['debug']:
             matching = self.comm.allreduce(basename, op=_check_op)
             if matching != basename:
@@ -237,7 +248,7 @@ class Compiler(object):
                         os.makedirs(output)
                 self.comm.barrier()
                 with open(srcfile, "w") as f:
-                    f.write(jitmodule.code_to_compile)
+                    f.write(get_code(jitmodule))
                 self.comm.barrier()
                 raise CompilationError("Generated code differs across ranks (see output in %s)" % output)
         try:
@@ -253,7 +264,7 @@ class Compiler(object):
                 errfile = os.path.join(cachedir, "%s_p%d.err" % (basename, pid))
                 with progress(INFO, 'Compiling wrapper'):
                     with open(cname, "w") as f:
-                        f.write(jitmodule.code_to_compile)
+                        f.write(get_code(jitmodule))
                     # Compiler also links
                     if self._ld is None:
                         cc = [self._cc] + self._cppargs + \
@@ -413,7 +424,8 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
          restype=None, compiler=None, comm=None):
     """Build a shared library and return a function pointer from it.
 
-    :arg jitmodule: The JIT Module which can generate the code to compile
+    :arg jitmodule: The JIT Module which can generate the code to compile, or
+        the string representing the source code.
     :arg extension: extension of the source file (c, cpp)
     :arg fn_name: The name of the function to return from the resulting library
     :arg cppargs: A list of arguments to the C compiler (optional)
@@ -424,8 +436,12 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
     :kwarg comm: Optional communicator to compile the code on (only
         rank 0 compiles code) (defaults to COMM_WORLD).
     """
+    assert isinstance(jitmodule, (str, JITModule))
+
     platform = sys.platform
     cpp = extension == "cpp"
+    if not compiler:
+        compiler = configuration["compiler"]
     if platform.find('linux') == 0:
         if compiler == 'icc':
             compiler = LinuxIntelCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
@@ -441,7 +457,8 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
     dll = compiler.get_so(jitmodule, extension)
 
     fn = getattr(dll, fn_name)
-    fn.argtypes = jitmodule.argtypes
+    if isinstance(jitmodule, JITModule):
+        fn.argtypes = jitmodule.argtypes
     fn.restype = restype
     return fn
 

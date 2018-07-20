@@ -243,7 +243,7 @@ class ParLoop(petsc_base.ParLoop):
             self.log_flops(self.num_flops * part.size)
 
 
-def generate_single_cell_wrapper(iterset, args, forward_args=(), kernel_name=None, wrapper_name=None):
+def generate_single_cell_wrapper(iterset, args, forward_args=(), kernel_name=None, wrapper_name=None, restart_counter=True):
     """Generates wrapper for a single cell. No iteration loop, but cellwise data is extracted.
     Cell is expected as an argument to the wrapper. For extruded, the numbering of the cells
     is columnwise continuous, bottom to top.
@@ -254,6 +254,8 @@ def generate_single_cell_wrapper(iterset, args, forward_args=(), kernel_name=Non
                          give an iterable of strings describing their C types.
     :param kernel_name: Kernel function name
     :param wrapper_name: Wrapper function name
+    :param restart_counter: Whether to restart counter in naming variables and indices
+                            in code generation.W
 
     :return: string containing the C code for the single-cell wrapper
     """
@@ -262,7 +264,8 @@ def generate_single_cell_wrapper(iterset, args, forward_args=(), kernel_name=Non
     from loopy.types import OpaqueType
 
     forward_arg_types = [OpaqueType(fa) for fa in forward_args]
-    builder = WrapperBuilder(iterset=iterset, single_cell=True, forward_arg_types=forward_arg_types, restart=False)
+    builder = WrapperBuilder(iterset=iterset, single_cell=True, forward_arg_types=forward_arg_types,
+                             restart_counter=restart_counter)
     for arg in args:
         builder.add_argument(arg)
     builder.set_kernel(Kernel("", kernel_name))
