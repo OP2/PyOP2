@@ -536,7 +536,7 @@ class MatPack(Pack):
 class WrapperBuilder(object):
 
     def __init__(self, *, iterset, iteration_region=None, single_cell=False,
-                 restart=True, pass_layer_to_kernel=False, forward_arg_types=()):
+                 restart_counter=True, pass_layer_to_kernel=False, forward_arg_types=()):
         super().__init__()
         self.arguments = []
         self.argument_accesses = []
@@ -551,7 +551,7 @@ class WrapperBuilder(object):
         self.pass_layer_to_kernel = pass_layer_to_kernel
         self.single_cell = single_cell
         self.forward_arguments = tuple(Argument((), fa, pfx="farg") for fa in forward_arg_types)
-        if restart:
+        if restart_counter:
             Argument.restart_counter()
             Index.restart_counter()
             RuntimeIndex.restart_counter()
