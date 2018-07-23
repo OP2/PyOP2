@@ -796,7 +796,8 @@ def statement_functioncall(expr, context):
                                  within_inames=within_inames,
                                  predicates=predicates,
                                  id=id,
-                                 depends_on=depends_on, depends_on_is_final=true)
+                                 depends_on=depends_on,
+                                 depends_on_is_final=True)
 
 
 @singledispatch

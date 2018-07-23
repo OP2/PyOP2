@@ -100,6 +100,7 @@ class JITModule(base.JITModule):
         self._cppargs = dcopy(type(self)._cppargs)
         self._libraries = dcopy(type(self)._libraries)
         self._system_headers = dcopy(type(self)._system_headers)
+        self.set_argtypes(iterset, *args)
         if not kwargs.get('delay', False):
             self.compile()
             self._initialized = True
@@ -116,9 +117,11 @@ class JITModule(base.JITModule):
     def code_to_compile(self):
 
         from pyop2.codegen.builder import WrapperBuilder
-        from pyop2.codegen.rep2loopy import generate
+        from pyop2.codegen.rep2loopy import generate, generate_viennacl_code
 
-        builder = WrapperBuilder(iterset=self._iterset, iteration_region=self._iteration_region, pass_layer_to_kernel=self._pass_layer_arg)
+        builder = WrapperBuilder(iterset=self._iterset,
+                iteration_region=self._iteration_region,
+                pass_layer_to_kernel=self._pass_layer_arg)
         for arg in self._args:
             builder.add_argument(arg)
         builder.set_kernel(self._kernel)
@@ -176,7 +179,8 @@ class JITModule(base.JITModule):
                  ["-lpetsc", "-lm"] + self._libraries
         ldargs += self._kernel._ldargs
 
-        if self._kernel._cpp:
+        use_opencl = 1
+        if self._kernel._cpp or use_opencl:
             extension = "cpp"
 
         code_to_compile = self.code_to_compile
@@ -195,7 +199,7 @@ class JITModule(base.JITModule):
         del self._iterset
 
     def set_argtypes(self, iterset, *args):
-
+        use_opencl = 1
         index_type = as_ctypes(IntType)
         argtypes = (index_type, index_type)
         argtypes += iterset._argtypes_
@@ -208,7 +212,11 @@ class JITModule(base.JITModule):
                 for k, t in zip(map_._kernel_args_, map_._argtypes_):
                     if k in seen:
                         continue
-                    argtypes += (t,)
+                    if use_opencl:
+                        argtypes += (ctypes.c_void_p, ctypes.c_int)
+                    else:
+                        argtypes += (t, )
+
                     seen.add(k)
 
         self._argtypes = argtypes
@@ -217,6 +225,10 @@ class JITModule(base.JITModule):
 class ParLoop(petsc_base.ParLoop):
 
     def prepare_arglist(self, iterset, *args):
+
+        from pyop2.codegen.rep2loopy import map_to_viennacl_vector
+
+        use_opencl = 1
         arglist = iterset._kernel_args_
         for arg in args:
             arglist += arg._kernel_args_
@@ -227,9 +239,17 @@ class ParLoop(petsc_base.ParLoop):
                 for k in map_._kernel_args_:
                     if k in seen:
                         continue
-                    arglist += (k,)
+                    if not map_.viennacl_handle:
+                        map_.viennacl_handle = (
+                                map_to_viennacl_vector(arg._kernel_args_[0],
+                                    map_))
+                    if use_opencl:
+                        import numpy as np
+                        arglist += (map_.viennacl_handle,
+                                np.int32(np.product(map_.shape)))
+                    else:
+                        arglist += (k, )
                     seen.add(k)
-
         return arglist
 
     @cached_property
