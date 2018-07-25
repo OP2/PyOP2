@@ -66,17 +66,21 @@ def vectorize_loop(wrapper, iname, batch_size, start, end):
     if batch_size == 1:
         return wrapper
 
+    wrapper = wrapper.copy(target=loopy.CVecTarget())
     # split iname and vectorize the inner loop
     inner_iname = iname + "_batch"
     wrapper = loopy.assume(wrapper, "{0} mod {1} = 0".format(end, batch_size))
     wrapper = loopy.assume(wrapper, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format(end, batch_size, start))
-    wrapper = loopy.split_iname(wrapper, iname, batch_size, inner_tag="ilp.seq", inner_iname=inner_iname)
+    wrapper = loopy.split_iname(wrapper, iname, batch_size, inner_tag="c_vec", inner_iname=inner_iname)
     # wrapper = loopy.tag_inames(inner_iname, )
 
     alignment = 64
     for name in wrapper.temporary_variables:
         tv = wrapper.temporary_variables[name]
         wrapper.temporary_variables[name] = tv.copy(alignment=alignment)
+
+    preamble = [("00", "\ntypedef double double4 __attribute__ ((vector_size (32)));\n")]
+    wrapper = wrapper.copy(preambles=wrapper.preambles + preamble)
 
     return wrapper
 
@@ -125,7 +129,7 @@ class JITModule(base.JITModule):
     def __call__(self, *args):
         return self._fun(*args)
 
-    @property
+    @cached_property
     def _wrapper_name(self):
         return 'wrap_%s' % self._kernel.name
 
@@ -147,12 +151,12 @@ class JITModule(base.JITModule):
 
         code = loopy.generate_code_v2(wrapper)
 
-        # nbytes = 0
-        # for arg in self._args:
-        #     nbytes += arg.data.nbytes
-        # for m in builder.maps.keys():
-        #     nbytes += len(m.values) * 4
-        # print("BYTES= {0}".format(nbytes))
+        nbytes = 0
+        for arg in self._args:
+            nbytes += arg.data.nbytes
+        for m in builder.maps.keys():
+            nbytes += len(m.values) * 4
+        print("{0}_BYTES= {1}".format(self._wrapper_name, nbytes))
 
         if self._kernel._cpp:
             from loopy.codegen.result import process_preambles
@@ -238,7 +242,7 @@ class ParLoop(petsc_base.ParLoop):
 
     @collective
     def _compute(self, part, fun, *arglist):
-        with timed_region("ParLoop{0}".format(self.iterset.name)):
+        with timed_region("ParLoop_{0}_{1}".format(self.iterset.name, self._jitmodule._wrapper_name)):
             fun(part.offset, part.offset + part.size, *arglist)
             self.log_flops(self.num_flops * part.size)
 
