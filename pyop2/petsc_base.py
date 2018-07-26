@@ -635,7 +635,7 @@ class Mat(base.Mat):
         mat.fixISLocalEmpty(True)
         mat.setLGMap(rmap=rlgmap, cmap=clgmap)
         mat.setPreallocationNNZ((self.sparsity.nnz, self.sparsity.onnz))
-        mat.setPreallocationIS(self.sparsity.nnz, self.sparsity.onnz)
+        mat.setISPreallocation(self.sparsity.nnz, self.sparsity.onnz)
         self.handle = mat
         self._blocks = []
         rows, cols = self.sparsity.shape
@@ -714,21 +714,21 @@ class Mat(base.Mat):
         mat.fixISLocalEmpty(True)
         mat.setLGMap(rmap=rset.lgmap, cmap=cset.lgmap)
         mat.setPreallocationNNZ((self.sparsity.nnz, self.sparsity.onnz))
-        mat.setPreallocationIS(self.sparsity.nnz, self.sparsity.onnz)
+        mat.setISPreallocation(self.sparsity.nnz, self.sparsity.onnz)
         # Stash entries destined for other processors
         mat.setOption(mat.Option.IGNORE_OFF_PROC_ENTRIES, False)
         # Any add or insertion that would generate a new entry that has not
         # been preallocated will raise an error
+        mat.setOption(mat.Option.NEW_NONZERO_ALLOCATION_ERR, True)
         if typ != mat.Type.IS:
             # Preallocation is only exact for AIJ matrices
-            mat.setOption(mat.Option.NEW_NONZERO_ALLOCATION_ERR, True)
+            mat.setOption(mat.Option.UNUSED_NONZERO_LOCATION_ERR, True)
         # When zeroing rows (e.g. for enforcing Dirichlet bcs), keep those in
         # the nonzero structure of the matrix. Otherwise PETSc would compact
         # the sparsity and render our sparsity caching useless.
         mat.setOption(mat.Option.KEEP_NONZERO_PATTERN, True)
         # We completely fill the allocated matrix when zeroing the
         # entries, so raise an error if we "missed" one.
-        # mat.setOption(mat.Option.UNUSED_NONZERO_LOCATION_ERR, True)
         # Put zeros in all the places we might eventually put a value.
         with timed_region("MatZeroInitial"):
             sparsity.fill(mat, 1.0, self.sparsity.dims[0][0], self.sparsity.maps, set_diag=self.sparsity._has_diagonal)
