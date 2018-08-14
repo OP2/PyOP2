@@ -61,30 +61,6 @@ from pyop2.utils import cached_property, get_petsc_dir
 import loopy
 
 
-def vectorize_loop(wrapper, iname, batch_size, start, end):
-
-    if batch_size == 1:
-        return wrapper
-
-    wrapper = wrapper.copy(target=loopy.CVecTarget())
-    # split iname and vectorize the inner loop
-    inner_iname = iname + "_batch"
-    wrapper = loopy.assume(wrapper, "{0} mod {1} = 0".format(end, batch_size))
-    wrapper = loopy.assume(wrapper, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format(end, batch_size, start))
-    wrapper = loopy.split_iname(wrapper, iname, batch_size, inner_tag="c_vec", inner_iname=inner_iname)
-    # wrapper = loopy.tag_inames(inner_iname, )
-
-    alignment = 64
-    for name in wrapper.temporary_variables:
-        tv = wrapper.temporary_variables[name]
-        wrapper.temporary_variables[name] = tv.copy(alignment=alignment)
-
-    preamble = [("00", "\ntypedef double double4 __attribute__ ((vector_size (32)));\n")]
-    wrapper = wrapper.copy(preambles=wrapper.preambles + preamble)
-
-    return wrapper
-
-
 class JITModule(base.JITModule):
 
     _cppargs = []
@@ -145,18 +121,7 @@ class JITModule(base.JITModule):
         builder.set_kernel(self._kernel)
 
         wrapper = generate(builder)
-
-        from pyop2.configuration import configuration
-        wrapper = vectorize_loop(wrapper, "n", configuration["simd_width"], "start", "end")
-
         code = loopy.generate_code_v2(wrapper)
-
-        nbytes = 0
-        for arg in self._args:
-            nbytes += arg.data.nbytes
-        for m in builder.maps.keys():
-            nbytes += len(m.values) * 4
-        print("{0}_BYTES= {1}".format(self._wrapper_name, nbytes))
 
         if self._kernel._cpp:
             from loopy.codegen.result import process_preambles
