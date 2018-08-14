@@ -3836,7 +3836,7 @@ class JITModule(Cached):
             for map_ in maps:
                 key += (seen[map_],)
 
-        key += (kwargs.get("iterate", None), cls)
+        key += (kwargs.get("iterate", None), cls, configuration["simd_width"])
 
         return key
 

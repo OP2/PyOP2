@@ -61,28 +61,28 @@ from pyop2.utils import cached_property, get_petsc_dir
 import loopy
 
 
-# def vectorize_loop(wrapper, iname, batch_size, start, end):
-#     # split iname and vectorize the inner loop
-#     if builder.batch > 1:
-#         if builder.extruded:
-#             outer = "layer"
-#             inner = "layer_inner"
-#             wrapper = loopy.assume(wrapper, "t0 mod {0} = 0".format(builder.batch))
-#             wrapper = loopy.assume(wrapper, "exists zz: zz > 0 and t1 = {0}*zz + t0".format(builder.batch))
-#         else:
-#             outer = "n"
-#             inner = "n_inner"
-#             wrapper = loopy.assume(wrapper, "start mod {0} = 0".format(builder.batch))
-#             wrapper = loopy.assume(wrapper, "exists zz: zz > 0 and end = {0}*zz + start".format(builder.batch))
-#
-#         wrapper = loopy.split_iname(wrapper, outer, builder.batch, inner_tag="ilp.seq", inner_iname=inner)
-#
-#     alignment = 64
-#     for name in wrapper.temporary_variables:
-#         tv = wrapper.temporary_variables[name]
-#         wrapper.temporary_variables[name] = tv.copy(alignment=alignment)
-#
-#     return wrapper
+def vectorize_loop(wrapper, iname, batch_size, start, end):
+
+    if batch_size == 1:
+        return wrapper
+
+    wrapper = wrapper.copy(target=loopy.CVecTarget())
+    # split iname and vectorize the inner loop
+    inner_iname = iname + "_batch"
+    wrapper = loopy.assume(wrapper, "{0} mod {1} = 0".format(end, batch_size))
+    wrapper = loopy.assume(wrapper, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format(end, batch_size, start))
+    wrapper = loopy.split_iname(wrapper, iname, batch_size, inner_tag="c_vec", inner_iname=inner_iname)
+    # wrapper = loopy.tag_inames(inner_iname, )
+
+    alignment = 64
+    for name in wrapper.temporary_variables:
+        tv = wrapper.temporary_variables[name]
+        wrapper.temporary_variables[name] = tv.copy(alignment=alignment)
+
+    preamble = [("00", "\ntypedef double double4 __attribute__ ((vector_size (32)));\n")]
+    wrapper = wrapper.copy(preambles=wrapper.preambles + preamble)
+
+    return wrapper
 
 
 class JITModule(base.JITModule):
@@ -129,7 +129,7 @@ class JITModule(base.JITModule):
     def __call__(self, *args):
         return self._fun(*args)
 
-    @property
+    @cached_property
     def _wrapper_name(self):
         return 'wrap_%s' % self._kernel.name
 
@@ -145,14 +145,23 @@ class JITModule(base.JITModule):
         builder.set_kernel(self._kernel)
 
         wrapper = generate(builder)
+
+        from pyop2.configuration import configuration
+        if isinstance(self._kernel.code, loopy.LoopKernel):
+            if self._iterset._extruded:
+                start, end = builder.layer_extents
+                wrapper = vectorize_loop(wrapper, "layer", configuration["simd_width"], start.name, end.name)
+            else:
+                wrapper = vectorize_loop(wrapper, "n", configuration["simd_width"], "start", "end")
+
         code = loopy.generate_code_v2(wrapper)
 
-        # nbytes = 0
-        # for arg in self._args:
-        #     nbytes += arg.data.nbytes
-        # for m in builder.maps.keys():
-        #     nbytes += len(m.values) * 4
-        # print("BYTES= {0}".format(nbytes))
+        nbytes = 0
+        for arg in self._args:
+            nbytes += arg.data.nbytes
+        for m in builder.maps.keys():
+            nbytes += len(m.values) * 4
+        print("{0}_BYTES= {1}".format(self._wrapper_name, nbytes))
 
         if self._kernel._cpp:
             from loopy.codegen.result import process_preambles
@@ -238,7 +247,7 @@ class ParLoop(petsc_base.ParLoop):
 
     @collective
     def _compute(self, part, fun, *arglist):
-        with timed_region("ParLoop{0}".format(self.iterset.name)):
+        with timed_region("ParLoop_{0}_{1}".format(self.iterset.name, self._jitmodule._wrapper_name)):
             fun(part.offset, part.offset + part.size, *arglist)
             self.log_flops(self.num_flops * part.size)
 
