@@ -219,6 +219,17 @@ class Access(object):
     def __repr__(self):
         return "Access(%r)" % self._mode
 
+    def __hash__(self):
+        return hash(self._mode)
+
+    def __eq__(self, other):
+        return (
+                type(self) == type(other)
+                and self._mode == other._mode)
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
 
 READ = Access("READ")
 """The :class:`Global`, :class:`Dat`, or :class:`Mat` is accessed read-only."""
