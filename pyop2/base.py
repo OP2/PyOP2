@@ -3857,8 +3857,9 @@ class JITModule(Cached):
 
         for arg in args:
             key += arg._wrapper_cache_key_
-            maps = arg.map_tuple
-            for map_ in maps:
+            for map_ in arg.map_tuple:
+                if isinstance(map_, DecoratedMap):
+                    map_ = map_.map
                 key += (seen[map_],)
 
         key += (kwargs.get("iterate", None), cls, configuration["simd_width"])
