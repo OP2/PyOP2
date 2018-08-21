@@ -223,9 +223,7 @@ class Access(object):
         return hash(self._mode)
 
     def __eq__(self, other):
-        return (
-                type(self) == type(other)
-                and self._mode == other._mode)
+        return type(self) == type(other) and self._mode == other._mode
 
     def __ne__(self, other):
         return not self.__eq__(other)
@@ -2771,15 +2769,6 @@ class Map(object):
     class MapMask(namedtuple("_MapMask_", ["section", "indices", "facet_points"])):
 
         pass
-
-        # _argtype = ctypes.POINTER(_MapMask)
-        #
-        # @cached_property
-        # def handle(self):
-        #     struct = _MapMask()
-        #     struct.section = self.section.handle
-        #     struct.indices = self.indices.ctypes.data
-        #     return ctypes.pointer(struct)
 
     @cached_property
     def _kernel_args_(self):
