@@ -59,6 +59,7 @@ from pyop2.profiling import timed_region
 from pyop2.utils import cached_property, get_petsc_dir
 
 import loopy
+import numpy
 
 
 def vectorize_loop(wrapper, iname, batch_size, start, end):
@@ -67,11 +68,18 @@ def vectorize_loop(wrapper, iname, batch_size, start, end):
         return wrapper
 
     wrapper = wrapper.copy(target=loopy.CVecTarget())
+    zeros = loopy.TemporaryVariable("_zeros", shape=loopy.auto, dtype=numpy.float64, initializer=numpy.array(0.0, dtype=numpy.float64),
+                                    scope=loopy.temp_var_scope.GLOBAL, read_only=True)
+    tmps = wrapper.temporary_variables
+    tmps["_zeros"] = zeros
+    wrapper = wrapper.copy(temporary_variables=tmps)
     # split iname and vectorize the inner loop
     inner_iname = iname + "_batch"
     wrapper = loopy.assume(wrapper, "{0} mod {1} = 0".format(end, batch_size))
     wrapper = loopy.assume(wrapper, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format(end, batch_size, start))
-    wrapper = loopy.split_iname(wrapper, iname, batch_size, inner_tag="c_vec", inner_iname=inner_iname)
+    # wrapper = loopy.split_iname(wrapper, iname, batch_size, inner_tag="ilp.seq", inner_iname=inner_iname)
+    # wrapper = loopy.split_iname(wrapper, iname, batch_size, inner_tag="c_vec", inner_iname=inner_iname)
+    wrapper = loopy.split_iname(wrapper, iname, batch_size, inner_tag="omp_simd", inner_iname=inner_iname)
     # wrapper = loopy.tag_inames(inner_iname, )
 
     alignment = 64
@@ -79,7 +87,10 @@ def vectorize_loop(wrapper, iname, batch_size, start, end):
         tv = wrapper.temporary_variables[name]
         wrapper.temporary_variables[name] = tv.copy(alignment=alignment)
 
-    preamble = [("00", "\ntypedef double double4 __attribute__ ((vector_size (32)));\n")]
+    preamble = [("00", "\ntypedef double double4 __attribute__ ((vector_size (32)));\n"
+                       "typedef int int4 __attribute__ ((vector_size (16)));\n"
+                       "typedef double double8 __attribute__ ((vector_size (64)));\n"
+                       "typedef int int8 __attribute__ ((vector_size (32)));\n")]
     wrapper = wrapper.copy(preambles=wrapper.preambles + preamble)
 
     return wrapper
@@ -249,7 +260,7 @@ class ParLoop(petsc_base.ParLoop):
     def _compute(self, part, fun, *arglist):
         with timed_region("ParLoop_{0}_{1}".format(self.iterset.name, self._jitmodule._wrapper_name)):
             fun(part.offset, part.offset + part.size, *arglist)
-            self.log_flops(self.num_flops * part.size)
+            # self.log_flops(self.num_flops * part.size)
 
 
 def generate_single_cell_wrapper(iterset, args, forward_args=(), kernel_name=None, wrapper_name=None, restart_counter=True):
