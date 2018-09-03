@@ -387,7 +387,6 @@ def generate(builder, wrapper_name=None):
                                 kernel_data=parameters.kernel_data,
                                 target=loopy.CTarget(),
                                 temporary_variables=parameters.temporaries,
-                                # function_manglers=[petsc_function_mangler, kernel_mangler],
                                 symbol_manglers=[symbol_mangler],
                                 options=options,
                                 assumptions=assumptions,
@@ -415,12 +414,31 @@ def generate(builder, wrapper_name=None):
         # register kernel
         knl = kernel._code
         wrapper = loopy.register_callable_kernel(wrapper, knl.name, knl)
-        # from loopy.transform.register_callable import _match_caller_callee_argument_dimension
+        # from loopy.transform.register_callable import (
+        #         _match_caller_callee_argument_dimension)
         # wrapper = _match_caller_callee_argument_dimension(wrapper, kernel.name)
         wrapper = loopy.inline_callable_kernel(wrapper, knl.name)
         scoped_functions = wrapper.scoped_functions.copy()
         scoped_functions.update(knl.scoped_functions)
         wrapper = wrapper.copy(scoped_functions=scoped_functions)
+
+        atomic_arg_names = set()
+        for insn in wrapper.instructions:
+            if isinstance(insn, loopy.Assignment):
+                atomic_arg_names.update(atm.var_name for atm in insn.atomicity)
+
+        new_args = wrapper.args.copy()
+        new_args = []
+        for arg in wrapper.args:
+            if isinstance(arg, loopy.ArrayArg):
+                new_args.append(arg.copy(
+                    for_atomic=arg.name in atomic_arg_names))
+                print(new_args[-1].for_atomic)
+            else:
+                new_args.append(arg)
+
+        wrapper = wrapper.copy(args=new_args)
+
     else:
         # kernel is a string
         from coffee.base import Node
@@ -605,17 +623,70 @@ def get_grid_sizes(kernel):
     return llens, glens
 
 
+def transform_for_opencl(kernel):
+    """
+    Performs transformations on kernels.
+    """
+    def insn_needs_atomic(insn):
+        # TODO: assumes that the assignee is always a subscript
+        assignee_name = insn.assignee.aggregate.name
+        return (
+                assignee_name in insn.read_dependency_names() and
+                assignee_name not in kernel.temporary_variables)
+
+    new_insns = []
+    args_marked_for_atomic = set()
+    for insn in kernel.instructions:
+        if ('pyop2_assign' in insn.tags) or (
+                'tsfc_return_accumulate' in insn.tags):
+
+            if insn_needs_atomic(insn):
+                atomicity = (loopy.AtomicUpdate(insn.assignee.aggregate.name), )
+                insn = insn.copy(atomicity=atomicity)
+                args_marked_for_atomic |= set([insn.assignee.aggregate.name])
+
+        new_insns.append(insn)
+
+    new_args = []
+    for arg in kernel.args:
+        if arg.name in args_marked_for_atomic:
+            new_args.append(arg.copy(for_atomic=True))
+        else:
+            new_args.append(arg)
+
+    kernel = kernel.copy(instructions=new_insns,
+            args=new_args)
+
+    if kernel.name == 'wrap_zero':
+        kernel = loopy.split_iname(kernel, "n", 33, inner_tag="l.0",
+                outer_tag="g.0")
+    else:
+        kernel = loopy.split_iname(kernel, "n", 32, inner_tag="l.0",
+                outer_tag="g.0")
+
+    return kernel
+
+
 def generate_viennacl_code(kernel):
+    kernel = transform_for_opencl(kernel)
     import pyopencl as cl
     import re
     from mako.template import Template
     lsize, gsize = get_grid_sizes(kernel)
     if not lsize:
+        # lsize has not been set => run serially on a GPU
+        # both gsize and lsize should be 1
         lsize = (1, )
-    if not gsize:
+        assert not gsize
         gsize = (1, )
+    if not gsize:
+        # if lsize if set then currently assuming that the parallelization is
+        # always over the number of elements.
+        gsize = ('(end-start)', )
+
     ctx = cl.create_some_context()
-    # TODO: somehow pull the device from the petsc vec
+    # TODO: somehow pull the device from the petsc vec for the preprocess
+    # checks.
     kernel = kernel.copy(
             target=loopy.PyOpenCLTarget(ctx.devices[0]))
 
@@ -644,6 +715,11 @@ def generate_viennacl_code(kernel):
                                 str(arg.get_arg_decl(ast_builder))[:-1]
                                 for arg in args])})
             {
+                if(end == start)
+                {
+                    // no need to go any further
+                    return;
+                }
                 // viennacl vector declarations
                 % for arg in args:
                 % if isinstance(arg, lp.ArrayArg) and not arg.dtype.is_integral():
@@ -667,7 +743,8 @@ def generate_viennacl_code(kernel):
                 // declaring the int arrays(if any..)
                 % for arg in args:
                 % if isinstance(arg, lp.ArrayArg) and arg.dtype.is_integral():
-                viennacl::vector<cl_int> ${arg.name}_viennacl(${arg.name}, ${arg.name}_size);
+                viennacl::vector<cl_int> ${arg.name}_viennacl(${arg.name}, ${
+                        arg.name}_size);
                 % endif
                 % endfor
 
@@ -707,9 +784,11 @@ def generate_viennacl_code(kernel):
 
     c_code = Template(c_code_str)
 
+    kernel_src = loopy.generate_code_v2(kernel).device_code().replace('\n',
+            '\\n"\n"')
+
     return c_code.render(
-        kernel_src=loopy.generate_code_v2(kernel).device_code().replace('\n',
-            '\\n"\n"'),
+        kernel_src=kernel_src,
         kernel_name=kernel.name,
         ast_builder=kernel.target.get_device_ast_builder(),
         args=kernel.args,
@@ -747,10 +826,13 @@ def statement_assign(expr, context):
 
     id, depends_on = context.instruction_dependencies[expr]
     predicates = frozenset(context.conditions)
-    return loopy.Assignment(lvalue, rvalue, within_inames=within_inames,
+    insn = loopy.Assignment(lvalue, rvalue, within_inames=within_inames,
                             predicates=predicates,
                             id=id,
-                            depends_on=depends_on, depends_on_is_final=True)
+                            depends_on=depends_on, depends_on_is_final=True,
+                            tags=frozenset(['pyop2_assign']))
+
+    return insn
 
 
 @statement.register(FunctionCall)

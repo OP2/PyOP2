@@ -151,10 +151,10 @@ class JITModule(base.JITModule):
         #     nbytes += len(m.values) * 4
         # print("BYTES= {0}".format(nbytes))
 
-
         if self._kernel._cpp:
             from loopy.codegen.result import process_preambles
-            preamble = "".join(process_preambles(getattr(code, "device_preambles", [])))
+            preamble = "".join(process_preambles(getattr(code,
+                "device_preambles", [])))
             device_code = "\n\n".join(str(dp.ast) for dp in code.device_programs)
             return preamble + "\nextern \"C\" {\n" + device_code + "\n}\n"
 
