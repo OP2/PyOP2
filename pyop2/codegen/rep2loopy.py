@@ -433,7 +433,6 @@ def generate(builder, wrapper_name=None):
             if isinstance(arg, loopy.ArrayArg):
                 new_args.append(arg.copy(
                     for_atomic=arg.name in atomic_arg_names))
-                print(new_args[-1].for_atomic)
             else:
                 new_args.append(arg)
 
@@ -657,11 +656,13 @@ def transform_for_opencl(kernel):
     kernel = kernel.copy(instructions=new_insns,
             args=new_args)
 
+    LOCAL_SIZE = 32
+
     if kernel.name == 'wrap_zero':
-        kernel = loopy.split_iname(kernel, "n", 33, inner_tag="l.0",
+        kernel = loopy.split_iname(kernel, "n", LOCA_SIZE+1, inner_tag="l.0",
                 outer_tag="g.0")
     else:
-        kernel = loopy.split_iname(kernel, "n", 32, inner_tag="l.0",
+        kernel = loopy.split_iname(kernel, "n", LOCAL_SIZE, inner_tag="l.0",
                 outer_tag="g.0")
 
     return kernel
