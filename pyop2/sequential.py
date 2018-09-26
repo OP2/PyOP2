@@ -57,10 +57,12 @@ from pyop2.exceptions import *  # noqa: F401
 from pyop2.mpi import collective
 from pyop2.profiling import timed_region
 from pyop2.utils import cached_property, get_petsc_dir
+from pyop2.codegen.rep2loopy import get_viennacl_kernel
 
 import coffee.system
 
 import loopy
+from time import time
 
 
 class JITModule(base.JITModule):
@@ -134,10 +136,27 @@ class JITModule(base.JITModule):
             builder.set_batch(batch_size)
         wrapper = generate(builder)
 
+        if False and wrapper.name == 'wrap_form0_cell_integral_otherwise':
+            # disable for now
+            mem_map = loopy.get_mem_access_map(loopy.set_options(wrapper,
+                "ignore_boostable_into"), subgroup_size=32)
+            bytes_map = mem_map.to_bytes()
+            global_ld_st_bytes = bytes_map.filter_by(mtype=['global']
+                                                     ).group_by('direction')
+            loaded = global_ld_st_bytes[loopy.MemAccess(direction='load')
+                                        ]
+            stored = global_ld_st_bytes[loopy.MemAccess(direction='store')]
+            print(loaded+stored)
+            print(75*'-')
+            print(wrapper)
+
         use_opencl = 1
         if use_opencl:
+
+            self.viennacl_kernel_getter_func = get_viennacl_kernel(wrapper,
+                    self._argtypes, self.comm)
             code = generate_viennacl_code(wrapper)
-            print(code)
+            # print(code)
             return code
 
         code = loopy.generate_code_v2(wrapper)
@@ -184,18 +203,53 @@ class JITModule(base.JITModule):
             extension = "cpp"
 
         code_to_compile = self.code_to_compile
-        self._fun = compilation.load(code_to_compile,
-                                     extension,
-                                     self._wrapper_name,
-                                     cppargs=cppargs,
-                                     ldargs=ldargs,
-                                     argtypes=self._argtypes,
-                                     restype=ctypes.c_int,
-                                     compiler=compiler.get('name'),
-                                     comm=self.comm)
+        if use_opencl:
+            class TempFunc(object):
+                def __init__(self, func_to_be_wrapped, viennacl_getter_func):
+                    self.func_to_be_wrapped = func_to_be_wrapped
+                    self.viennacl_kernel_getter_func = viennacl_getter_func
+                    self.viennacl_kernel = None
+
+                def __call__(self, start, end, *arglist):
+                    if self.viennacl_kernel:
+                        return self.func_to_be_wrapped(
+                                self.viennacl_kernel, start, end,
+                                *arglist)
+                    else:
+                        print('Came for compiling')
+                        self.viennacl_kernel = (
+                                self.viennacl_kernel_getter_func(start, end,
+                                    *arglist))
+                        return self.func_to_be_wrapped(
+                                self.viennacl_kernel, start, end,
+                                *arglist)
+
+            random_func = compilation.load(code_to_compile,
+                    extension,
+                    self._wrapper_name,
+                    cppargs=cppargs,
+                    ldargs=ldargs,
+                    argtypes=(
+                        (ctypes.c_void_p, ) +
+                        self._argtypes),
+                    restype=ctypes.c_int,
+                    compiler=compiler.get('name'),
+                    comm=self.comm)
+
+            self._fun = TempFunc(random_func, self.viennacl_kernel_getter_func)
+        else:
+            self._fun = compilation.load(code_to_compile,
+                                         extension,
+                                         self._wrapper_name,
+                                         cppargs=cppargs,
+                                         ldargs=ldargs,
+                                         argtypes=self._argtypes,
+                                         restype=ctypes.c_int,
+                                         compiler=compiler.get('name'),
+                                         comm=self.comm)
         # Blow away everything we don't need any more
         del self._args
-        del self._kernel
+        # del self._kernel
         del self._iterset
 
     def set_argtypes(self, iterset, *args):
@@ -260,8 +314,11 @@ class ParLoop(petsc_base.ParLoop):
 
     @collective
     def _compute(self, part, fun, *arglist):
-        with timed_region("ParLoop{0}".format(self.iterset.name)):
+        with timed_region("ParLoop_{0}_{1}".format(self.iterset.name,
+                self._jitmodule._wrapper_name)):
+            start_time = time()
             fun(part.offset, part.offset + part.size, *arglist)
+            print(self._jitmodule._wrapper_name, time() - start_time)
 
             self.log_flops(self.num_flops * part.size)
 
