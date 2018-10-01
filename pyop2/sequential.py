@@ -202,6 +202,8 @@ class JITModule(base.JITModule):
         if self._kernel._cpp or use_opencl:
             extension = "cpp"
 
+        WRAPPER_NAME = self._wrapper_name
+
         code_to_compile = self.code_to_compile
         if use_opencl:
             class TempFunc(object):
@@ -216,10 +218,14 @@ class JITModule(base.JITModule):
                                 self.viennacl_kernel, start, end,
                                 *arglist)
                     else:
-                        print('Came for compiling')
+                        start_time = time()
                         self.viennacl_kernel = (
                                 self.viennacl_kernel_getter_func(start, end,
                                     *arglist))
+                        print('Compiling time for %s = %f' % (
+                            WRAPPER_NAME,
+                            time() - start_time))
+
                         return self.func_to_be_wrapped(
                                 self.viennacl_kernel, start, end,
                                 *arglist)
@@ -316,9 +322,9 @@ class ParLoop(petsc_base.ParLoop):
     def _compute(self, part, fun, *arglist):
         with timed_region("ParLoop_{0}_{1}".format(self.iterset.name,
                 self._jitmodule._wrapper_name)):
-            start_time = time()
+            # start_time = time()
             fun(part.offset, part.offset + part.size, *arglist)
-            print(self._jitmodule._wrapper_name, time() - start_time)
+            # print("Entire time for", self._jitmodule._wrapper_name, time() - start_time)
 
             self.log_flops(self.num_flops * part.size)
 

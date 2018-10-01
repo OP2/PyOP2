@@ -675,6 +675,12 @@ def get_viennacl_kernel(kernel, argtypes, comm):
     kernel = kernel.copy(
             target=loopy.PyOpenCLTarget(ctx.devices[0]))
 
+    if False and kernel.name == 'wrap_form_cell_integral_otherwise':
+        print(kernel)
+
+    if kernel.name == 'wrap_form0_cell_integral_otherwise':
+        print(kernel)
+
     lsize, gsize = get_grid_sizes(kernel)
     if not lsize:
         # lsize has not been set => run serially on a GPU
@@ -860,7 +866,7 @@ def transform_for_opencl(kernel):
     LOCAL_SIZE = 64
 
     if kernel.name in ['wrap_zero', 'wrap_copy']:
-        kernel = loopy.split_iname(kernel, "n", 1, inner_tag="l.0",
+        kernel = loopy.split_iname(kernel, "n", 57, inner_tag="l.0",
                 outer_tag="g.0")
     else:
         kernel = loopy.split_iname(kernel, "n", LOCAL_SIZE, inner_tag="l.0",
@@ -926,6 +932,11 @@ def generate_viennacl_code(kernel):
                     return;
                 }
 
+                struct timeval time_compute_start, time_compute_end,
+                time_init_start, time_init_end, time_wrapup_start,
+                time_wrapup_end;
+
+                 gettimeofday(&time_init_start, NULL);
 
                 // viennacl vector declarations
                 % for arg in args:
@@ -982,14 +993,26 @@ def generate_viennacl_code(kernel):
                 % for i, ls in enumerate(gsize):
                 gwg_size[${i}] = ${gsize[i]};
                 % endfor
-
                 clFinish(queue);
+
+                gettimeofday(&time_init_end, NULL);
+                // cout << "${kernel_name}: init time: " << (
+                //         TIME_DIFF(time_init_end, time_init_start)) << endl;
+
+                gettimeofday(&time_compute_start, NULL);
 
                 // enqueueing the kernel
                 clEnqueueNDRangeKernel(queue, cl_knl, ${len(lsize)}, NULL,
                         gwg_size, lwg_size, 0, NULL, NULL);
 
                 clFinish(queue);
+
+                gettimeofday(&time_compute_end, NULL);
+
+                % if kernel_name == 'wrap_form_cell_integral_otherwise':
+                cout << "${kernel_name}: compute time: " << (
+                        TIME_DIFF(time_compute_end, time_compute_start)) << endl;
+                % endif
 
                 // restoring the arrays to the petsc vecs
                 % for arg in args:
