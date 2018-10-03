@@ -78,8 +78,13 @@ def vectorize_loop(wrapper, iname, batch_size, start, end):
     wrapper = loopy.assume(wrapper, "{0} mod {1} = 0".format(end, batch_size))
     wrapper = loopy.assume(wrapper, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format(end, batch_size, start))
     # wrapper = loopy.split_iname(wrapper, iname, batch_size, inner_tag="ilp.seq", inner_iname=inner_iname)
-    # wrapper = loopy.split_iname(wrapper, iname, batch_size, inner_tag="c_vec", inner_iname=inner_iname)
-    wrapper = loopy.split_iname(wrapper, iname, batch_size, inner_tag="omp_simd", inner_iname=inner_iname)
+    from pyop2.configuration import configuration
+    if configuration["vect_strategy"] == "omp":
+        wrapper = loopy.split_iname(wrapper, iname, batch_size, inner_tag="omp_simd", inner_iname=inner_iname)
+    else:
+        assert configuration["vect_strategy"] == "ve"
+        wrapper = loopy.split_iname(wrapper, iname, batch_size, inner_tag="c_vec", inner_iname=inner_iname)
+
     # wrapper = loopy.tag_inames(inner_iname, )
 
     alignment = 64
@@ -167,13 +172,6 @@ class JITModule(base.JITModule):
 
         code = loopy.generate_code_v2(wrapper)
 
-        nbytes = 0
-        for arg in self._args:
-            nbytes += arg.data.nbytes
-        for m in builder.maps.keys():
-            nbytes += len(m.values) * 4
-        print("{0}_BYTES= {1}".format(self._wrapper_name, nbytes))
-
         if self._kernel._cpp:
             from loopy.codegen.result import process_preambles
             preamble = "".join(process_preambles(getattr(code, "device_preambles", [])))
@@ -237,8 +235,11 @@ class ParLoop(petsc_base.ParLoop):
 
     def prepare_arglist(self, iterset, *args):
         arglist = iterset._kernel_args_
+        nbytes = 0
+
         for arg in args:
             arglist += arg._kernel_args_
+            nbytes += arg.data.nbytes
         seen = set()
         for arg in args:
             maps = arg.map_tuple
@@ -248,6 +249,8 @@ class ParLoop(petsc_base.ParLoop):
                         continue
                     arglist += (k,)
                     seen.add(k)
+                    nbytes += map_.values.nbytes
+        self.nbytes = nbytes
         return arglist
 
     @cached_property
@@ -258,9 +261,12 @@ class ParLoop(petsc_base.ParLoop):
 
     @collective
     def _compute(self, part, fun, *arglist):
+        nbytes = self.comm.allreduce(self.nbytes)
+        if self.comm.Get_rank() == 0:
+            print("{0}_BYTES= {1}".format(self._jitmodule._wrapper_name, nbytes))
         with timed_region("ParLoop_{0}_{1}".format(self.iterset.name, self._jitmodule._wrapper_name)):
             fun(part.offset, part.offset + part.size, *arglist)
-            # self.log_flops(self.num_flops * part.size)
+
 
 
 def generate_single_cell_wrapper(iterset, args, forward_args=(), kernel_name=None, wrapper_name=None, restart_counter=True):
