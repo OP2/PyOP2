@@ -2,6 +2,7 @@ import ctypes
 import numpy
 
 import loopy
+import loopy.options
 import islpy as isl
 import pymbolic.primitives as pym
 
@@ -26,6 +27,7 @@ from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
                                           Argument, Variable, Literal, NamedLiteral,
                                           Symbol, Zero, Sum, Product)
 from pyop2.codegen.representation import (PackInst, UnpackInst, KernelInst)
+loopy.options.ALLOW_TERMINAL_COLORS = False
 
 
 class Bag(object):
@@ -678,7 +680,7 @@ def get_viennacl_kernel(kernel, argtypes, comm):
     if False and kernel.name == 'wrap_form_cell_integral_otherwise':
         print(kernel)
 
-    if kernel.name == 'wrap_form0_cell_integral_otherwise':
+    if False and kernel.name == 'wrap_form0_cell_integral_otherwise':
         print(kernel)
 
     lsize, gsize = get_grid_sizes(kernel)
@@ -769,7 +771,9 @@ def get_viennacl_kernel(kernel, argtypes, comm):
     # remove the whitespaces for pretty printing
     import re
     c_code = Template(re.sub("\\n        ", "\n", c_code_str))
-    kernel_src = loopy.generate_code_v2(kernel).device_code().replace('\n', '\\n"\n"')
+    kernel_src = loopy.generate_code_v2(kernel).device_code().replace(
+            '\n', '\\n"\n"')
+    print(kernel_src)
     code_to_compile = c_code.render(
             kernel_src=kernel_src,
             kernel_name=kernel.name,
@@ -926,6 +930,9 @@ def generate_viennacl_code(kernel):
                         str(arg.get_arg_decl(ast_builder))[:-1]
                         for arg in args])})
             {
+            #if defined(PETSC_HAVE_CUDA)
+            cout << "Halla hu!\n";
+            #endif
                 if(end == start)
                 {
                     // no need to go any further

@@ -58,6 +58,7 @@ from pyop2.mpi import collective
 from pyop2.profiling import timed_region
 from pyop2.utils import cached_property, get_petsc_dir
 from pyop2.codegen.rep2loopy import get_viennacl_kernel
+import pyopencl as cl
 
 import coffee.system
 
@@ -215,11 +216,11 @@ class JITModule(base.JITModule):
                 def __call__(self, start, end, *arglist):
                     if self.viennacl_kernel:
                         return self.func_to_be_wrapped(
-                                self.viennacl_kernel, start, end,
+                                self.viennacl_kernel.int_ptr, start, end,
                                 *arglist)
                     else:
                         start_time = time()
-                        self.viennacl_kernel = (
+                        self.viennacl_kernel = cl.Kernel.from_int_ptr(
                                 self.viennacl_kernel_getter_func(start, end,
                                     *arglist))
                         print('Compiling time for %s = %f' % (
@@ -227,7 +228,7 @@ class JITModule(base.JITModule):
                             time() - start_time))
 
                         return self.func_to_be_wrapped(
-                                self.viennacl_kernel, start, end,
+                                self.viennacl_kernel.int_ptr, start, end,
                                 *arglist)
 
             random_func = compilation.load(code_to_compile,
