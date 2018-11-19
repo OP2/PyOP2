@@ -1790,7 +1790,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
             x = p.Variable("dat")
             i = p.Variable("i")
             insn = loopy.Assignment(x.index(i), 0, within_inames=frozenset(["i"]))
-            data = loopy.GlobalArg("dat", dtype=self.dtype, shape=(self.cdim,))
+            data = loopy.ArrayArg("dat", dtype=self.dtype, shape=(self.cdim,))
             knl = loopy.make_kernel([domain], [insn], [data], name="zero", lang_version=(2018, 2))
 
             knl = _make_object('Kernel', knl, 'zero')
@@ -1823,8 +1823,8 @@ class Dat(DataCarrier, _EmptyDataMixin):
             _self = p.Variable("self")
             i = p.Variable("i")
             insn = loopy.Assignment(_other.index(i), _self.index(i), within_inames=frozenset(["i"]))
-            data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
-                    loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,))]
+            data = [loopy.ArrayArg("self", dtype=self.dtype, shape=(self.cdim,)),
+                    loopy.ArrayArg("other", dtype=other.dtype, shape=(other.cdim,))]
             knl = loopy.make_kernel([domain], [insn], data, name="copy", lang_version=(2018, 2))
 
             self._copy_kernel = _make_object('Kernel', knl, 'copy')
@@ -1876,9 +1876,9 @@ class Dat(DataCarrier, _EmptyDataMixin):
             self._check_shape(other)
             rhs = _other.index(i)
         insn = loopy.Assignment(lhs, op(_self.index(i), rhs), within_inames=frozenset(["i"]))
-        data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
-                loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,)),
-                loopy.GlobalArg("ret", dtype=self.dtype, shape=(self.cdim,))]
+        data = [loopy.ArrayArg("self", dtype=self.dtype, shape=(self.cdim,)),
+                loopy.ArrayArg("other", dtype=other.dtype, shape=(other.cdim,)),
+                loopy.ArrayArg("ret", dtype=self.dtype, shape=(self.cdim,))]
         knl = loopy.make_kernel([domain], [insn], data, name=name, lang_version=(2018, 2))
         k = _make_object('Kernel', knl, name)
 
@@ -1907,8 +1907,8 @@ class Dat(DataCarrier, _EmptyDataMixin):
             self._check_shape(other)
             rhs = _other.index(i)
         insn = loopy.Assignment(lhs, op(lhs, rhs), within_inames=frozenset(["i"]))
-        data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
-                loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,))]
+        data = [loopy.ArrayArg("self", dtype=self.dtype, shape=(self.cdim,)),
+                loopy.ArrayArg("other", dtype=other.dtype, shape=(other.cdim,))]
         knl = loopy.make_kernel([domain], [insn], data, name=name, lang_version=(2018, 2))
         k = _make_object('Kernel', knl, name)
 
@@ -1930,7 +1930,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         i = p.Variable("i")
 
         insn = loopy.Assignment(_self.index(i), _op(_self.index(i)), within_inames=frozenset(["i"]))
-        data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,))]
+        data = [loopy.ArrayArg("self", dtype=self.dtype, shape=(self.cdim,))]
         knl = loopy.make_kernel([domain], [insn], data, name=name, lang_version=(2018, 2))
         k = _make_object('Kernel', knl, name)
 
@@ -1958,9 +1958,9 @@ class Dat(DataCarrier, _EmptyDataMixin):
         i = p.Variable("i")
 
         insn = loopy.Assignment(_ret.index(0), _ret.index(0) + _self.index(i) * _other.index(i), within_inames=frozenset(["i"]))
-        data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
-                loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,)),
-                loopy.GlobalArg("ret", dtype=ret.dtype, shape=(1,))]
+        data = [loopy.ArrayArg("self", dtype=self.dtype, shape=(self.cdim,)),
+                loopy.ArrayArg("other", dtype=other.dtype, shape=(other.cdim,)),
+                loopy.ArrayArg("ret", dtype=ret.dtype, shape=(1,))]
         knl = loopy.make_kernel([domain], [insn], data, name="inner", lang_version=(2018, 2))
 
         k = _make_object('Kernel', knl, "inner")

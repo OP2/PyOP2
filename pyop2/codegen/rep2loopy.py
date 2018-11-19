@@ -400,7 +400,7 @@ def generate(builder, wrapper_name=None):
     # sometimes masks are not used, but we still need to create the function arguments
     for i, arg in enumerate(parameters.wrapper_arguments):
         if parameters.kernel_data[i] is None:
-            arg = loopy.GlobalArg(arg.name, dtype=arg.dtype, shape=arg.shape)
+            arg = loopy.ArrayArg(arg.name, dtype=arg.dtype, shape=arg.shape)
             parameters.kernel_data[i] = arg
 
     if wrapper_name is None:
@@ -495,7 +495,7 @@ def argtypes(kernel):
     for arg in kernel.args:
         if isinstance(arg, loopy.ValueArg):
             args.append(as_ctypes(arg.dtype))
-        elif isinstance(arg, loopy.GlobalArg):
+        elif isinstance(arg, loopy.ArrayArg):
             args.append(ctypes.c_voidp)
         else:
             raise ValueError("Unhandled arg type '%s'" % type(arg))
@@ -680,9 +680,7 @@ def expression_argument(expr, parameters):
     if shape == ():
         arg = loopy.ValueArg(name, dtype=dtype)
     else:
-        arg = loopy.GlobalArg(name,
-                              dtype=dtype,
-                              shape=shape)
+        arg = loopy.ArrayArg(name, dtype=dtype, shape=shape)
     idx = parameters.wrapper_arguments.index(expr)
     parameters.kernel_data[idx] = arg
     return pym.Variable(name)
@@ -721,7 +719,7 @@ def expression_namedliteral(expr, parameters):
     val = loopy.TemporaryVariable(name,
                                   dtype=expr.dtype,
                                   shape=expr.shape,
-                                  scope=loopy.temp_var_scope.GLOBAL,
+                                  scope=loopy.AddressSpace.GLOBAL,
                                   read_only=True,
                                   initializer=expr.value)
     parameters.temporaries[name] = val
