@@ -445,8 +445,7 @@ def generate(builder, wrapper_name=None):
     # register kernel
     kernel = builder.kernel
     headers = set(kernel._headers)
-    headers = headers | set(["#include <petsc.h>", "#include <math.h>",
-        "#include <sys/time.h>", "#include <stdio.h>"])
+    headers = headers | set(["#include <petsc.h>", "#include <math.h>"])
     preamble = "\n".join(sorted(headers))
 
     if isinstance(kernel._code, loopy.LoopKernel):
@@ -456,8 +455,6 @@ def generate(builder, wrapper_name=None):
                 _match_caller_callee_argument_dimension_)
         wrapper = _match_caller_callee_argument_dimension_(wrapper, knl.name)
         wrapper = loopy.inline_callable_kernel(wrapper, knl.name)
-    elif isinstance(kernel._code, loopy.Program):
-        raise RuntimeError()
     else:
         # kernel is a string, add it to preamble
         from coffee.base import Node
