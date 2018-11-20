@@ -451,10 +451,6 @@ def generate(builder, wrapper_name=None):
 
     if isinstance(kernel._code, loopy.LoopKernel):
         knl = kernel._code
-        if wrapper.name == 'wrap_zero':
-            import pudb; pu.db
-            print(wrapper)
-            1/0
         wrapper = loopy.register_callable_kernel(wrapper, knl)
         from loopy.transform.callable import (
                 _match_caller_callee_argument_dimension_)
