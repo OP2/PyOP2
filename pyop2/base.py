@@ -1791,7 +1791,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
             i = p.Variable("i")
             insn = loopy.Assignment(x.index(i), 0, within_inames=frozenset(["i"]))
             data = loopy.GlobalArg("dat", dtype=self.dtype, shape=(self.cdim,))
-            knl = loopy.make_kernel([domain], [insn], [data], name="zero", lang_version=(2018, 2))
+            knl = loopy.make_function([domain], [insn], [data], name="zero")
 
             knl = _make_object('Kernel', knl, 'zero')
             loop = _make_object('ParLoop', knl,
@@ -1825,7 +1825,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
             insn = loopy.Assignment(_other.index(i), _self.index(i), within_inames=frozenset(["i"]))
             data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
                     loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,))]
-            knl = loopy.make_kernel([domain], [insn], data, name="copy", lang_version=(2018, 2))
+            knl = loopy.make_function([domain], [insn], data, name="copy")
 
             self._copy_kernel = _make_object('Kernel', knl, 'copy')
         return _make_object('ParLoop', self._copy_kernel,
@@ -1879,7 +1879,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
                 loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,)),
                 loopy.GlobalArg("ret", dtype=self.dtype, shape=(self.cdim,))]
-        knl = loopy.make_kernel([domain], [insn], data, name=name, lang_version=(2018, 2))
+        knl = loopy.make_function([domain], [insn], data, name=name)
         k = _make_object('Kernel', knl, name)
 
         par_loop(k, self.dataset.set, self(READ), other(READ), ret(WRITE))
@@ -1909,7 +1909,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         insn = loopy.Assignment(lhs, op(lhs, rhs), within_inames=frozenset(["i"]))
         data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
                 loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,))]
-        knl = loopy.make_kernel([domain], [insn], data, name=name, lang_version=(2018, 2))
+        knl = loopy.make_function([domain], [insn], data, name=name)
         k = _make_object('Kernel', knl, name)
 
         par_loop(k, self.dataset.set, self(INC), other(READ))
@@ -1931,7 +1931,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
 
         insn = loopy.Assignment(_self.index(i), _op(_self.index(i)), within_inames=frozenset(["i"]))
         data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,))]
-        knl = loopy.make_kernel([domain], [insn], data, name=name, lang_version=(2018, 2))
+        knl = loopy.make_function([domain], [insn], data, name=name)
         k = _make_object('Kernel', knl, name)
 
         par_loop(k, self.dataset.set, self(RW))
@@ -1961,7 +1961,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
                 loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,)),
                 loopy.GlobalArg("ret", dtype=ret.dtype, shape=(1,))]
-        knl = loopy.make_kernel([domain], [insn], data, name="inner", lang_version=(2018, 2))
+        knl = loopy.make_function([domain], [insn], data, name="inner")
 
         k = _make_object('Kernel', knl, "inner")
         par_loop(k, self.dataset.set, self(READ), other(READ), ret(INC))
@@ -3789,7 +3789,7 @@ class Kernel(Cached):
         self._ldargs = ldargs if ldargs is not None else []
         self._headers = headers
         self._user_code = user_code
-        assert isinstance(code, (str, Node, loopy.LoopKernel))
+        assert isinstance(code, (str, Node, loopy.Program, loopy.LoopKernel))
         self._code = code
         self._initialized = True
 
@@ -3808,7 +3808,8 @@ class Kernel(Cached):
             v = EstimateFlops()
             return v.visit(self.code)
         elif isinstance(self.code, loopy.LoopKernel):
-            op_map = loopy.get_op_map(self.code)
+            op_map = loopy.get_op_map(
+                    self.code.copy(options=loopy.Options(ignore_boostable_into=True)))
             return op_map.filter_by(name=['add', 'sub', 'mul', 'div'], dtype=[np.float64]).eval_and_sum({})
         else:
             from pyop2.logger import warning
