@@ -503,7 +503,7 @@ def argtypes(kernel):
     for arg in kernel.args:
         if isinstance(arg, loopy.ValueArg):
             args.append(as_ctypes(arg.dtype))
-        elif isinstance(arg, loopy.GlobalArg):
+        elif isinstance(arg, loopy.ArrayArg):
             args.append(ctypes.c_voidp)
         else:
             raise ValueError("Unhandled arg type '%s'" % type(arg))
@@ -729,7 +729,7 @@ def expression_namedliteral(expr, parameters):
     val = loopy.TemporaryVariable(name,
                                   dtype=expr.dtype,
                                   shape=expr.shape,
-                                  scope=loopy.temp_var_scope.GLOBAL,
+                                  scope=loopy.AddressSpace.GLOBAL,
                                   read_only=True,
                                   initializer=expr.value)
     parameters.temporaries[name] = val
