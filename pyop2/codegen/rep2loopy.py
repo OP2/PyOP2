@@ -26,6 +26,7 @@ from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
                                           Argument, Variable, Literal, NamedLiteral,
                                           Symbol, Zero, Sum, Product)
 from pyop2.codegen.representation import (PackInst, UnpackInst, KernelInst)
+from pytools import ImmutableRecord
 
 
 class Bag(object):
@@ -76,6 +77,16 @@ def petsc_function_lookup(target, identifier):
     elif identifier == 'MatSetValuesLocal':
         return PetscCallable(name=identifier)
     return None
+
+
+class _PreambleGen(ImmutableRecord):
+    fields = set(("preamble", ))
+
+    def __init__(self, preamble):
+        self.preamble = preamble
+
+    def __call__(self, preamble_info):
+        yield ("0", self.preamble)
 
 
 # for PyOP2 kernels passed in as string
@@ -395,7 +406,8 @@ def generate(builder, wrapper_name=None):
 
     assumptions, = reduce(operator.and_,
                           parameters.assumptions.values()).params().get_basic_sets()
-    options = loopy.Options(check_dep_resolution=True)
+    options = loopy.Options(check_dep_resolution=True,
+            ignore_boostable_into=True)
 
     # sometimes masks are not used, but we still need to create the function arguments
     for i, arg in enumerate(parameters.wrapper_arguments):
@@ -433,16 +445,23 @@ def generate(builder, wrapper_name=None):
     # register kernel
     kernel = builder.kernel
     headers = set(kernel._headers)
-    headers = headers | set(["#include <petsc.h>", "#include <math.h>"])
+    headers = headers | set(["#include <petsc.h>", "#include <math.h>",
+        "#include <sys/time.h>", "#include <stdio.h>"])
     preamble = "\n".join(sorted(headers))
 
     if isinstance(kernel._code, loopy.LoopKernel):
         knl = kernel._code
-        wrapper = loopy.register_callable_kernel(wrapper, knl.name, knl)
+        if wrapper.name == 'wrap_zero':
+            import pudb; pu.db
+            print(wrapper)
+            1/0
+        wrapper = loopy.register_callable_kernel(wrapper, knl)
+        from loopy.transform.callable import (
+                _match_caller_callee_argument_dimension_)
+        wrapper = _match_caller_callee_argument_dimension_(wrapper, knl.name)
         wrapper = loopy.inline_callable_kernel(wrapper, knl.name)
-        scoped_functions = wrapper.scoped_functions.copy()
-        scoped_functions.update(knl.scoped_functions)
-        wrapper = wrapper.copy(scoped_functions=scoped_functions)
+    elif isinstance(kernel._code, loopy.Program):
+        raise RuntimeError()
     else:
         # kernel is a string, add it to preamble
         from coffee.base import Node
@@ -450,13 +469,17 @@ def generate(builder, wrapper_name=None):
             code = kernel._code.gencode()
         else:
             code = kernel._code
-        wrapper = loopy.register_function_lookup(wrapper, PyOP2_Kernel_Lookup(kernel.name, code, tuple(builder.argument_accesses)))
+        wrapper = loopy.register_function_id_to_in_knl_callable_mapper(wrapper,
+                PyOP2_Kernel_Lookup(kernel.name, code,
+                    tuple(builder.argument_accesses)))
         preamble = preamble + "\n" + code
 
-    wrapper = wrapper.copy(preambles=[("0", preamble)])
+    wrapper = loopy.register_preamble_generators(wrapper,
+            [_PreambleGen(preamble)])
 
     # register petsc functions
-    wrapper = loopy.register_function_lookup(wrapper, petsc_function_lookup)
+    wrapper = loopy.register_function_id_to_in_knl_callable_mapper(wrapper,
+            petsc_function_lookup)
 
     # mark inner most loop as omp simd
     # import os
