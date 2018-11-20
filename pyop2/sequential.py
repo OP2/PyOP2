@@ -61,31 +61,6 @@ from pyop2.utils import cached_property, get_petsc_dir
 import loopy
 
 
-def wrap_timer(func_str):
-    import re
-    func_def_re = re.compile(
-        r"^"
-        r"\s*"
-        r"void.*$")
-
-    old_lines = func_str.split('\n')
-    new_lines = [old_lines[0]]
-
-    for i, line in enumerate(old_lines[1:-1]):
-        new_lines.append(line)
-        if func_def_re.match(old_lines[i]):
-            new_lines.append('  struct timeval time_start, time_end;')
-            new_lines.append('  gettimeofday(&time_start, NULL);')
-
-    new_lines.append('  gettimeofday(&time_end, NULL);')
-    new_lines.append('  double time_taken = (time_end.tv_sec - time_start.tv_sec) + '
-            '(time_end.tv_usec - time_start.tv_usec)*1e-6;')
-    new_lines.append(r'  printf("Time taken = %f\n", time_taken);')
-
-    new_lines.append(old_lines[-1])
-    return ('\n').join(new_lines)
-
-
 class JITModule(base.JITModule):
 
     _cppargs = []
@@ -153,13 +128,7 @@ class JITModule(base.JITModule):
             preamble = "".join(process_preambles(getattr(code, "device_preambles", [])))
             device_code = "\n\n".join(str(dp.ast) for dp in code.device_programs)
             return preamble + "\nextern \"C\" {\n" + device_code + "\n}\n"
-
-        if False and self._wrapper_name not in ["wrap_zero", "wrap_copy",
-                "wrap_expression_kernel"]:
-            print(self._wrapper_name)
-            return wrap_timer(code.device_code())
-        else:
-            return code.device_code()
+        return code.device_code()
 
     @collective
     def compile(self):
