@@ -705,7 +705,7 @@ def expression_variable(expr, parameters):
         parameters.temporaries[name] = loopy.TemporaryVariable(name,
                                                                dtype=dtype,
                                                                shape=shape,
-                                                               scope=loopy.auto)
+                                                               address_space=loopy.auto)
     return pym.Variable(name)
 
 
