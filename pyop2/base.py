@@ -3809,7 +3809,8 @@ class Kernel(Cached):
             return v.visit(self.code)
         elif isinstance(self.code, loopy.LoopKernel):
             op_map = loopy.get_op_map(
-                    self.code.copy(options=loopy.Options(ignore_boostable_into=True)))
+                    self.code.copy(options=loopy.Options(ignore_boostable_into=True)),
+                    subgroup_size='guess')
             return op_map.filter_by(name=['add', 'sub', 'mul', 'div'], dtype=[np.float64]).eval_and_sum({})
         else:
             from pyop2.logger import warning
