@@ -41,13 +41,13 @@ def symbol_mangler(kernel, name):
 
 class PetscCallable(loopy.ScalarCallable):
 
-    def with_types(self, arg_id_to_dtype, kernel, program_callables_info):
+    def with_types(self, arg_id_to_dtype, kernel, callables_table):
         new_arg_id_to_dtype = arg_id_to_dtype.copy()
         return (self.copy(
             name_in_target=self.name,
-            arg_id_to_dtype=new_arg_id_to_dtype), program_callables_info)
+            arg_id_to_dtype=new_arg_id_to_dtype), callables_table)
 
-    def with_descrs(self, arg_id_to_descr, program_callables_info):
+    def with_descrs(self, arg_id_to_descr, callables_table):
         from loopy.kernel.function_interface import ArrayArgDescriptor
         from loopy.kernel.array import FixedStrideArrayDimTag
         new_arg_id_to_descr = arg_id_to_descr.copy()
@@ -64,7 +64,7 @@ class PetscCallable(loopy.ScalarCallable):
                 new_arg_id_to_descr[i] = des.copy(dim_tags=dim_tags)
 
         return (self.copy(arg_id_to_descr=new_arg_id_to_descr),
-                program_callables_info)
+                callables_table)
 
 
 def petsc_function_lookup(target, identifier):
@@ -95,13 +95,13 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
         super(PyOP2KernelCallable, self).__init__(name, arg_id_to_dtype, arg_id_to_descr, name_in_target)
         self.access = access
 
-    def with_types(self, arg_id_to_dtype, kernel, program_callables_info):
+    def with_types(self, arg_id_to_dtype, kernel, callables_table):
         new_arg_id_to_dtype = arg_id_to_dtype.copy()
         return self.copy(
             name_in_target=self.name,
-            arg_id_to_dtype=new_arg_id_to_dtype), program_callables_info
+            arg_id_to_dtype=new_arg_id_to_dtype), callables_table
 
-    def with_descrs(self, arg_id_to_descr, program_callables_info):
+    def with_descrs(self, arg_id_to_descr, callables_table):
         from loopy.kernel.function_interface import ArrayArgDescriptor
         from loopy.kernel.array import FixedStrideArrayDimTag
         new_arg_id_to_descr = arg_id_to_descr.copy()
@@ -118,7 +118,7 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
                 new_arg_id_to_descr[i] = des.copy(dim_tags=dim_tags)
         return (
                 self.copy(arg_id_to_descr=new_arg_id_to_descr),
-                program_callables_info)
+                callables_table)
 
     def emit_call_insn(self, insn, target, expression_to_code_mapper):
         # reorder arguments, e.g. a,c = f(b,d) to f(a,b,c,d)
