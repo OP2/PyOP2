@@ -729,7 +729,7 @@ def expression_namedliteral(expr, parameters):
     val = loopy.TemporaryVariable(name,
                                   dtype=expr.dtype,
                                   shape=expr.shape,
-                                  scope=loopy.AddressSpace.GLOBAL,
+                                  address_space=loopy.AddressSpace.GLOBAL,
                                   read_only=True,
                                   initializer=expr.value)
     parameters.temporaries[name] = val
