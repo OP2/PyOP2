@@ -66,6 +66,11 @@ class PetscCallable(loopy.ScalarCallable):
         return (self.copy(arg_id_to_descr=new_arg_id_to_descr),
                 callables_table)
 
+    def generate_preambles(self, target):
+        assert isinstance(target, loopy.CTarget)
+        yield("00_petsc", "#include <petsc.h>")
+        return
+
 
 def petsc_function_lookup(target, identifier):
     if identifier == 'MatSetValuesBlockedLocal':
@@ -85,8 +90,9 @@ class _PreambleGen(ImmutableRecord):
         yield ("0", self.preamble)
 
 
-# for PyOP2 kernels passed in as string
 class PyOP2KernelCallable(loopy.ScalarCallable):
+    """Handles PyOP2 Kernel passed in as a string
+    """
 
     fields = set(["name", "access", "arg_id_to_dtype", "arg_id_to_descr", "name_in_target"])
     init_arg_names = ("name", "access", "arg_id_to_dtype", "arg_id_to_descr", "name_in_target")
@@ -116,9 +122,7 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
                     for i in range(len(des.shape))
                 )
                 new_arg_id_to_descr[i] = des.copy(dim_tags=dim_tags)
-        return (
-                self.copy(arg_id_to_descr=new_arg_id_to_descr),
-                callables_table)
+        return (self.copy(arg_id_to_descr=new_arg_id_to_descr), callables_table)
 
     def emit_call_insn(self, insn, target, expression_to_code_mapper):
         # reorder arguments, e.g. a,c = f(b,d) to f(a,b,c,d)
@@ -151,8 +155,6 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
         return var(self.name_in_target)(*c_parameters), assignee_is_returned
 
 
-# this is a class which implements __call__ instead of a function, because
-# we only know the kernel name at runtime.
 class PyOP2_Kernel_Lookup(object):
 
     def __init__(self, name, code, access):
@@ -398,8 +400,7 @@ def generate(builder, wrapper_name=None):
 
     assumptions, = reduce(operator.and_,
                           parameters.assumptions.values()).params().get_basic_sets()
-    options = loopy.Options(check_dep_resolution=True,
-            ignore_boostable_into=True)
+    options = loopy.Options(check_dep_resolution=True, ignore_boostable_into=True)
 
     # sometimes masks are not used, but we still need to create the function arguments
     for i, arg in enumerate(parameters.wrapper_arguments):
@@ -421,10 +422,7 @@ def generate(builder, wrapper_name=None):
                                 lang_version=(2018, 2),
                                 name=wrapper_name)
 
-    # if wrapper_name == "wrap_form00_cell_integral_otherwise" and len(statements) == 15:
-    #     from IPython import embed; embed()
-
-    # Additional assumptions
+    # additional assumptions
     wrapper = loopy.assume(wrapper, "start < end")
     if builder.extruded:
         t0, t1 = builder.layer_extents
@@ -437,14 +435,13 @@ def generate(builder, wrapper_name=None):
     # register kernel
     kernel = builder.kernel
     headers = set(kernel._headers)
-    headers = headers | set(["#include <petsc.h>", "#include <math.h>"])
+    headers = headers | set(["#include <math.h>"])
     preamble = "\n".join(sorted(headers))
 
     if isinstance(kernel._code, loopy.LoopKernel):
         knl = kernel._code
         wrapper = loopy.register_callable_kernel(wrapper, knl)
-        from loopy.transform.callable import (
-                _match_caller_callee_argument_dimension_)
+        from loopy.transform.callable import _match_caller_callee_argument_dimension_
         wrapper = _match_caller_callee_argument_dimension_(wrapper, knl.name)
         wrapper = loopy.inline_callable_kernel(wrapper, knl.name)
     else:
@@ -454,47 +451,17 @@ def generate(builder, wrapper_name=None):
             code = kernel._code.gencode()
         else:
             code = kernel._code
-        wrapper = loopy.register_function_id_to_in_knl_callable_mapper(wrapper,
-                PyOP2_Kernel_Lookup(kernel.name, code,
-                    tuple(builder.argument_accesses)))
+        wrapper = loopy.register_function_id_to_in_knl_callable_mapper(
+            wrapper,
+            PyOP2_Kernel_Lookup(kernel.name, code, tuple(builder.argument_accesses)))
         preamble = preamble + "\n" + code
 
-    wrapper = loopy.register_preamble_generators(wrapper,
-            [_PreambleGen(preamble)])
+    wrapper = loopy.register_preamble_generators(wrapper, [_PreambleGen(preamble)])
 
     # register petsc functions
-    wrapper = loopy.register_function_id_to_in_knl_callable_mapper(wrapper,
-            petsc_function_lookup)
+    wrapper = loopy.register_function_id_to_in_knl_callable_mapper(
+        wrapper, petsc_function_lookup)
 
-    # mark inner most loop as omp simd
-    # import os
-    # try:
-    #     innermost = os.environ["INNERMOST"] == "1"
-    # except:
-    #     innermost = False
-
-    # if innermost:
-    #     kernel = kernel.copy(target=loopy.OpenMPTarget())
-    #     innermost_iname = set(kernel.all_inames())
-    #     priority, = kernel.loop_priority
-    #     priority = priority + ('elem',)
-    #     for inst in kernel.instructions:
-    #         for iname in list(sorted(inst.within_inames, key=lambda iname: priority.index(iname)))[:-1]:
-    #             innermost_iname.discard(iname)
-    #
-    #     for iname in innermost_iname:
-    #         kernel = loopy.tag_inames(kernel, {iname: "l.0"})
-
-    # vectorization }}}
-
-    # refcount = collect_refcount(instructions)
-    # for map_, *_ in builder.maps.values():
-    #     if refcount[map_] > 1 or builder.extruded:
-    #         knl = loopy.add_prefetch(knl, map_.name,
-    #                                  footprint_subscripts=[(pym.Variable(builder._loop_index.name),
-    #                                                         pym.Slice((None, )))])
-    # print(wrapper)
-    # from IPython import embed; embed()
     return wrapper
 
 
@@ -655,8 +622,8 @@ def expression_runtimeindex(expr, parameters):
         lo, hi, constraint = expr.children
         params = list(v.name for v in traversal([lo, hi]) if isinstance(v, (Argument, Variable)))
         vars = isl.make_zero_and_vars([name], params)
-        domain = (vars[name].ge_set(translate(lo, vars)) &
-                  vars[name].lt_set(translate(hi, vars)))
+        domain = (vars[name].ge_set(translate(lo, vars))
+                  & vars[name].lt_set(translate(hi, vars)))
         parameters.domains[name] = domain
         if constraint is not None:
             parameters.assumptions[name] = translate(constraint, vars)
