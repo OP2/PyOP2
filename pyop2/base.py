@@ -3767,8 +3767,8 @@ class Kernel(Cached):
             key_hash = new_hash()
             code.update_persistent_hash(key_hash, LoopyKeyBuilder())
             code = key_hash.hexdigest()
-        hashee = (str(code) + name + str(sorted(opts.items())) + str(include_dirs) +
-                  str(headers) + version + str(ldargs) + str(cpp))
+        hashee = (str(code) + name + str(sorted(opts.items())) + str(include_dirs)
+                  + str(headers) + version + str(ldargs) + str(cpp))
         return md5(hashee.encode()).hexdigest()
 
     @cached_property
@@ -3809,8 +3809,8 @@ class Kernel(Cached):
             return v.visit(self.code)
         elif isinstance(self.code, loopy.LoopKernel):
             op_map = loopy.get_op_map(
-                    self.code.copy(options=loopy.Options(ignore_boostable_into=True)),
-                    subgroup_size='guess')
+                self.code.copy(options=loopy.Options(ignore_boostable_into=True)),
+                subgroup_size='guess')
             return op_map.filter_by(name=['add', 'sub', 'mul', 'div'], dtype=[np.float64]).eval_and_sum({})
         else:
             from pyop2.logger import warning
@@ -3843,8 +3843,8 @@ class JITModule(Cached):
     def _cache_key(cls, kernel, iterset, *args, **kwargs):
         counter = itertools.count()
         seen = defaultdict(lambda: next(counter))
-        key = (kernel._wrapper_cache_key_ + iterset._wrapper_cache_key_ +
-               (iterset._extruded, (iterset._extruded and iterset.constant_layers), isinstance(iterset, Subset)))
+        key = (kernel._wrapper_cache_key_ + iterset._wrapper_cache_key_
+               + (iterset._extruded, (iterset._extruded and iterset.constant_layers), isinstance(iterset, Subset)))
 
         for arg in args:
             key += arg._wrapper_cache_key_
