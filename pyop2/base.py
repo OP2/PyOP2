@@ -47,7 +47,7 @@ import operator
 import types
 from hashlib import md5
 
-from pyop2.datatypes import IntType, as_cstr, dtype_limits
+from pyop2.datatypes import IntType, as_cstr, dtype_limits, ScalarType
 from pyop2.configuration import configuration
 from pyop2.caching import Cached, ObjectCached
 from pyop2.exceptions import *
@@ -1887,7 +1887,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
         return ret
 
     def _iop(self, other, op):
-
         name = "iop_%s" % op.__name__
 
         import islpy as isl
@@ -3811,7 +3810,7 @@ class Kernel(Cached):
             op_map = loopy.get_op_map(
                 self.code.copy(options=loopy.Options(ignore_boostable_into=True)),
                 subgroup_size='guess')
-            return op_map.filter_by(name=['add', 'sub', 'mul', 'div'], dtype=[np.float64]).eval_and_sum({})
+            return op_map.filter_by(name=['add', 'sub', 'mul', 'div'], dtype=[ScalarType]).eval_and_sum({})
         else:
             from pyop2.logger import warning
             warning("Cannot estimate flops for kernel passed in as string.")
