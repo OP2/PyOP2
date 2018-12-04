@@ -54,13 +54,9 @@ class PetscCallable(loopy.ScalarCallable):
         for i, des in arg_id_to_descr.items():
             # petsc takes 1D arrays as arguments
             if isinstance(des, ArrayArgDescriptor):
-                dim_tags = tuple(
-                    FixedStrideArrayDimTag(
-                        stride=int(numpy.prod(des.shape[i+1:])),
-                        layout_nesting_level=len(des.shape)-i-1
-                    )
-                    for i in range(len(des.shape))
-                )
+                dim_tags = tuple(FixedStrideArrayDimTag(stride=int(numpy.prod(des.shape[i+1:])),
+                                                        layout_nesting_level=len(des.shape)-i-1)
+                                 for i in range(len(des.shape)))
                 new_arg_id_to_descr[i] = des.copy(dim_tags=dim_tags)
 
         return (self.copy(arg_id_to_descr=new_arg_id_to_descr),
@@ -72,10 +68,11 @@ class PetscCallable(loopy.ScalarCallable):
         return
 
 
+petsc_functions = set(['MatSetValuesBlockedLocal', 'MatSetValuesLocal'])
+
+
 def petsc_function_lookup(target, identifier):
-    if identifier == 'MatSetValuesBlockedLocal':
-        return PetscCallable(name=identifier)
-    elif identifier == 'MatSetValuesLocal':
+    if identifier in petsc_functions:
         return PetscCallable(name=identifier)
     return None
 
@@ -155,7 +152,7 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
         return var(self.name_in_target)(*c_parameters), assignee_is_returned
 
 
-class PyOP2_Kernel_Lookup(object):
+class PyOP2KernelLookup(object):
 
     def __init__(self, name, code, access):
         self.name = name
@@ -166,7 +163,7 @@ class PyOP2_Kernel_Lookup(object):
         return hash(self.name + self.code)
 
     def __eq__(self, other):
-        if isinstance(other, PyOP2_Kernel_Lookup):
+        if isinstance(other, PyOP2KernelLookup):
             return self.name == other.name and self.code == other.code
         return False
 
@@ -312,7 +309,7 @@ def instruction_dependencies(instructions, initialisers):
     for op in instructions_by_type[UnpackInst]:
         deps[op] |= frozenset(names[o] for o in instructions_by_type[KernelInst])
 
-    # add sequential instructions
+    # add sequential instructions in the initialisers
     for inits in initialisers:
         for i, parent in enumerate(inits[1:], 1):
             for p in imperatives([parent]):
@@ -423,10 +420,11 @@ def generate(builder, wrapper_name=None):
                                 name=wrapper_name)
 
     # additional assumptions
-    wrapper = loopy.assume(wrapper, "start < end")
+    wrapper = loopy.assume(wrapper, "start <= end")
+    wrapper = loopy.assume(wrapper, "start >= 0")
     if builder.extruded:
         t0, t1 = builder.layer_extents
-        wrapper = loopy.assume(wrapper, "{0} < {1}".format(t0.name, t1.name))
+        wrapper = loopy.assume(wrapper, "{0} <= {1}".format(t0.name, t1.name))
 
     # prioritize loops
     for indices in context.index_ordering:
@@ -438,6 +436,8 @@ def generate(builder, wrapper_name=None):
     headers = headers | set(["#include <math.h>"])
     preamble = "\n".join(sorted(headers))
 
+    from coffee.base import Node
+
     if isinstance(kernel._code, loopy.LoopKernel):
         knl = kernel._code
         wrapper = loopy.register_callable_kernel(wrapper, knl)
@@ -446,14 +446,13 @@ def generate(builder, wrapper_name=None):
         wrapper = loopy.inline_callable_kernel(wrapper, knl.name)
     else:
         # kernel is a string, add it to preamble
-        from coffee.base import Node
         if isinstance(kernel._code, Node):
             code = kernel._code.gencode()
         else:
             code = kernel._code
         wrapper = loopy.register_function_id_to_in_knl_callable_mapper(
             wrapper,
-            PyOP2_Kernel_Lookup(kernel.name, code, tuple(builder.argument_accesses)))
+            PyOP2KernelLookup(kernel.name, code, tuple(builder.argument_accesses)))
         preamble = preamble + "\n" + code
 
     wrapper = loopy.register_preamble_generators(wrapper, [_PreambleGen(preamble)])
@@ -637,7 +636,6 @@ def expression_multiindex(expr, parameters):
 
 @expression.register(Extent)
 def expression_extent(expr, parameters):
-    # FIXME: There will be a symbolic representation of this.
     multiindex, = expr.children
     return int(numpy.prod(tuple(i.extent for i in multiindex)))
 

@@ -222,7 +222,7 @@ def generate_single_cell_wrapper(iterset, args, forward_args=(), kernel_name=Non
     :param kernel_name: Kernel function name
     :param wrapper_name: Wrapper function name
     :param restart_counter: Whether to restart counter in naming variables and indices
-                            in code generation.W
+                            in code generation.
 
     :return: string containing the C code for the single-cell wrapper
     """

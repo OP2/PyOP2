@@ -18,6 +18,7 @@ from pyop2.op2 import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL, Subset, Decora
 from pyop2.op2 import READ, INC, WRITE
 from loopy.types import OpaqueType
 from functools import reduce
+import itertools
 
 
 class PetscMat(OpaqueType):
@@ -105,10 +106,11 @@ class Map(object):
     def indexed(self, multiindex, layer=None):
         n, i, f = multiindex
         if layer is not None and self.offset is not None:
+            # For extruded mesh, prefetch the indirections for each map, so that they don't
+            # need to be recomputed. Different f values need to be treated separately.
             key = f.extent
             if key is None:
                 key = 1
-
             if key not in self.prefetch:
                 bottom_layer, _ = self.layer_bounds
                 offset_extent, = self.offset.shape
@@ -399,7 +401,7 @@ class MixedDatPack(Pack):
                 expr = p._rvalue(mi, loop_indices)
                 extents = [numpy.prod(shape[i+1:], dtype=numpy.int32) for i in range(len(shape))]
                 index = reduce(Sum, [Product(i, Literal(IntType.type(e), casting=False)) for i, e in zip(mi, extents)], Literal(IntType.type(0), casting=False))
-                indices = MultiIndex(Sum(index, Literal(IntType.type(offset, casting=False))),)
+                indices = MultiIndex(Sum(index, Literal(IntType.type(offset), casting=False)),)
                 offset += numpy.prod(shape, dtype=numpy.int32)
                 expressions.append(expr)
                 expressions.append(indices)
@@ -503,11 +505,13 @@ class MatPack(Pack):
 
         pack = self.pack(loop_indices=loop_indices)
         if vector:
+            # The shape of MatPack is
+            # (row, cols) if it has vector BC
+            # (block_rows, row_cmpt, block_cols, col_cmpt) otherwise
             free_indices = rindices + cindices
             pack = Indexed(pack, free_indices)
             name = "MatSetValuesLocal"
         else:
-            # TODO: What is this?
             free_indices = rindices + (Index(), ) + cindices + (Index(), )
             pack = Indexed(pack, free_indices)
             name = "MatSetValuesBlockedLocal"
@@ -678,7 +682,6 @@ class WrapperBuilder(object):
         if self.constant_layers:
             return FixedIndex(0)
         if self.subset:
-            # FIXME: Should we instead not compress subset layers array?
             return self._loop_index
         else:
             return self.loop_index
@@ -793,7 +796,6 @@ class WrapperBuilder(object):
     def kernel_call(self):
         args = self.kernel_args
         access = tuple(self.argument_accesses)
-        import itertools
         # assuming every index is free index
         free_indices = set(itertools.chain.from_iterable(arg.multiindex for arg in args))
         # remove runtime index
