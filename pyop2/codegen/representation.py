@@ -5,9 +5,7 @@ from collections import defaultdict
 from pyop2.utils import cached_property
 import numpy
 from abc import ABCMeta
-
-
-from gem.node import Node as NodeBase
+from pyop2.codegen.node import Node as NodeBase
 
 
 class InstructionLabel(object):
