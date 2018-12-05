@@ -39,7 +39,7 @@ Lazy evaluation unit tests.
 import pytest
 import numpy
 
-from pyop2 import op2, base
+from pyop2 import op2, base, configuration
 
 nelems = 42
 
@@ -51,11 +51,11 @@ class TestLaziness:
         return op2.Set(nelems, name="iterset")
 
     def test_stable(self, skip_greedy, iterset):
+        configuration["lazy_evaluation"] = True
         a = op2.Global(1, 0, numpy.uint32, "a")
 
         kernel = """
-void
-pyop2_kernel_count(unsigned int* x)
+void pyop2_kernel_count(unsigned int* x)
 {
   (*x) += 1;
 }
@@ -67,12 +67,12 @@ pyop2_kernel_count(unsigned int* x)
         assert a.data[0] == nelems
 
     def test_reorder(self, skip_greedy, iterset):
+        configuration["lazy_evaluation"] = True
         a = op2.Global(1, 0, numpy.uint32, "a")
         b = op2.Global(1, 0, numpy.uint32, "b")
 
         kernel = """
-void
-pyop2_kernel_count(unsigned int* x)
+void pyop2_kernel_count(unsigned int* x)
 {
   (*x) += 1;
 }
@@ -88,6 +88,7 @@ pyop2_kernel_count(unsigned int* x)
 
     def test_ro_accessor(self, skip_greedy, iterset):
         """Read-only access to a Dat should force computation that writes to it."""
+        configuration["lazy_evaluation"] = True
         base._trace.clear()
         d = op2.Dat(iterset, numpy.zeros(iterset.total_size), dtype=numpy.float64)
         k = op2.Kernel('void pyop2_kernel_k(double *x) { *x = 1.0; }', 'pyop2_kernel_k')
@@ -98,6 +99,7 @@ pyop2_kernel_count(unsigned int* x)
     def test_rw_accessor(self, skip_greedy, iterset):
         """Read-write access to a Dat should force computation that writes to it,
         and any pending computations that read from it."""
+        configuration["lazy_evaluation"] = True
         base._trace.clear()
         d = op2.Dat(iterset, numpy.zeros(iterset.total_size), dtype=numpy.float64)
         d2 = op2.Dat(iterset, numpy.empty(iterset.total_size), dtype=numpy.float64)
@@ -109,6 +111,7 @@ pyop2_kernel_count(unsigned int* x)
         assert len(base._trace._trace) == 0
 
     def test_chain(self, skip_greedy, iterset):
+        configuration["lazy_evaluation"] = True
         a = op2.Global(1, 0, numpy.uint32, "a")
         x = op2.Dat(iterset, numpy.zeros(nelems), numpy.uint32, "x")
         y = op2.Dat(iterset, numpy.zeros(nelems), numpy.uint32, "y")
