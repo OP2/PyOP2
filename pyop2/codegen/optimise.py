@@ -1,4 +1,4 @@
-from gem.node import traversal, reuse_if_untouched, Memoizer
+from pyop2.codegen.node import traversal, reuse_if_untouched, Memoizer
 from functools import singledispatch
 from pyop2.codegen.representation import (Index, RuntimeIndex, FixedIndex,
                                           Node, FunctionCall)

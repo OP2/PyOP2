@@ -10,7 +10,7 @@ from functools import singledispatch, reduce
 import itertools
 import operator
 
-from gem.node import traversal, Node, Memoizer, reuse_if_untouched
+from pyop2.codegen.node import traversal, Node, Memoizer, reuse_if_untouched
 
 from pyop2.base import READ
 from pyop2.datatypes import as_ctypes
