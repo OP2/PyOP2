@@ -1,7 +1,7 @@
 from pyop2.codegen.node import traversal, reuse_if_untouched, Memoizer
 from functools import singledispatch
-from pyop2.codegen.representation import (Index, RuntimeIndex, FixedIndex,
-                                          Node, FunctionCall)
+from pyop2.codegen.representation import (Index, RuntimeIndex, FixedIndex, Node,
+                                          FunctionCall, Variable, Argument)
 
 
 def collect_indices(expressions):
@@ -85,3 +85,66 @@ def index_merger(instructions, cache=None):
 
     index_replacer.subst = dict(subst)
     return index_replacer
+
+
+@singledispatch
+def _rename_node(node, self):
+    """Replace division with multiplication
+
+    :param node: root of expression
+    :param self: function for recursive calls
+    """
+    raise AssertionError("cannot handle type %s" % type(node))
+
+
+_rename_node.register(Node)(reuse_if_untouched)
+
+
+@_rename_node.register(Index)
+def _rename_node_index(node, self):
+    if node.name in self.replace:
+        return Index(extent=node.extent, name=self.replace[node.name])
+    return node
+
+
+@_rename_node.register(FunctionCall)
+def _rename_node_func(node, self):
+    free_indices = tuple(map(self, node.free_indices))
+    children = tuple(map(self, node.children))
+    return FunctionCall(node.name, node.label, node.access, free_indices, *children)
+
+
+@_rename_node.register(RuntimeIndex)
+def _rename_node_rtindex(node, self):
+    children = tuple(map(self, node.children))
+    if node.name in self.replace:
+        name = self.replace[node.name]
+    else:
+        name = node.name
+    return RuntimeIndex(*children, name=name)
+
+
+@_rename_node.register(Variable)
+def _rename_node_variable(node, self):
+    if node.name in self.replace:
+        return Variable(self.replace[node.name], node.shape, node.dtype)
+    return node
+
+
+@_rename_node.register(Argument)
+def _rename_node_argument(node, self):
+    if node.name in self.replace:
+        return Argument(node.shape, node.dtype, name=self.replace[node.name])
+    return node
+
+
+def rename_nodes(instructions, replace):
+    """Rename the nodes in the instructions.
+
+    :param instructions: Iterable of nodes.
+    :param replace: Dictionary matching old names to new names.
+    :return: List of instructions with nodes renamed.
+    """
+    mapper = Memoizer(_rename_node)
+    mapper.replace = replace
+    return list(map(mapper, instructions))
