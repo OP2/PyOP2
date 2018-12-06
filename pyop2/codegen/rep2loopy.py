@@ -15,7 +15,7 @@ from pyop2.codegen.node import traversal, Node, Memoizer, reuse_if_untouched
 from pyop2.base import READ
 from pyop2.datatypes import as_ctypes
 
-from pyop2.codegen.optimise import index_merger
+from pyop2.codegen.optimise import index_merger, rename_nodes
 
 from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
                                           MultiIndex, Extent, Indexed,
@@ -328,15 +328,7 @@ def instruction_names(instructions):
     return names
 
 
-def generate(builder, wrapper_name=None):
-    parameters = Bag()
-    parameters.domains = OrderedDict()
-    parameters.assumptions = OrderedDict()
-    parameters.wrapper_arguments = builder.wrapper_args
-    parameters.conditions = []
-    parameters.kernel_data = list(None for _ in parameters.wrapper_arguments)
-    parameters.temporaries = OrderedDict()
-    parameters.kernel_name = builder.kernel.name
+def generate(builder, wrapper_name=None, restart_counter=True):
 
     if builder.layer_index is not None:
         outer_inames = frozenset([builder._loop_index.name,
@@ -345,6 +337,17 @@ def generate(builder, wrapper_name=None):
         outer_inames = frozenset([builder._loop_index.name])
 
     instructions = list(builder.emit_instructions())
+
+    parameters = Bag()
+    parameters.domains = OrderedDict()
+    parameters.assumptions = OrderedDict()
+    parameters.wrapper_arguments = builder.wrapper_args
+    parameters.layer_start = builder.layer_extents[0].name
+    parameters.layer_end = builder.layer_extents[1].name
+    parameters.conditions = []
+    parameters.kernel_data = list(None for _ in parameters.wrapper_arguments)
+    parameters.temporaries = OrderedDict()
+    parameters.kernel_name = builder.kernel.name
 
     # replace Materialise
     mapper = Memoizer(replace_materialise)
@@ -360,6 +363,32 @@ def generate(builder, wrapper_name=None):
     instructions = instructions + initialiser
     mapper.initialisers = [tuple(merger(i) for i in inits) for inits in mapper.initialisers]
 
+    # rename indices and nodes (so that the counter start from zero)
+    if restart_counter:
+        import re
+        pattern = re.compile(r"^([a-zA-Z_]+)([0-9]+$)")
+        replace = {}
+        names = defaultdict(list)
+        for node in traversal(instructions):
+            if isinstance(node, (Index, RuntimeIndex, Variable, Argument)):
+                match = pattern.match(node.name)
+                if match is not None:
+                    prefix, idx = match.groups()  # string, index
+                    names[prefix].append(int(idx))
+
+        for prefix, indices in names.items():
+            for old_idx, new_idx in zip(sorted(indices), range(len(indices))):
+                replace["{0}{1}".format(prefix, old_idx)] = "{0}{1}".format(prefix, new_idx)
+
+        instructions = rename_nodes(instructions, replace)
+        mapper.initialisers = [rename_nodes(inits, replace) for inits in mapper.initialisers]
+        parameters.wrapper_arguments = rename_nodes(parameters.wrapper_arguments, replace)
+        if parameters.layer_start in replace:
+            parameters.layer_start = replace[parameters.layer_start]
+        if parameters.layer_end in replace:
+            parameters.layer_end = replace[parameters.layer_end]
+
+    # scheduling and loop nesting
     deps = instruction_dependencies(instructions, mapper.initialisers)
     within_inames = loop_nesting(instructions, deps, outer_inames, parameters.kernel_name)
 
@@ -389,7 +418,7 @@ def generate(builder, wrapper_name=None):
             for d in domains:
                 if d.get_dim_name(isl.dim_type.set, 0) == "layer":
                     # layer = t1 - 1
-                    t1 = builder.layer_extents[1].name
+                    t1 = parameters.layer_end
                     new_domains.append(d.add_constraint(isl.Constraint.eq_from_names(d.space, {"layer": 1, t1: -1, 1: 1})))
                 else:
                     new_domains.append(d)
@@ -423,8 +452,7 @@ def generate(builder, wrapper_name=None):
     wrapper = loopy.assume(wrapper, "start <= end")
     wrapper = loopy.assume(wrapper, "start >= 0")
     if builder.extruded:
-        t0, t1 = builder.layer_extents
-        wrapper = loopy.assume(wrapper, "{0} <= {1}".format(t0.name, t1.name))
+        wrapper = loopy.assume(wrapper, "{0} <= {1}".format(parameters.layer_start, parameters.layer_end))
 
     # prioritize loops
     for indices in context.index_ordering:
