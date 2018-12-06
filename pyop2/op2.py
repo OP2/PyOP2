@@ -47,6 +47,8 @@ from pyop2.sequential import Map, MixedMap, DecoratedMap, Sparsity, Halo  # noqa
 from pyop2.sequential import Global, GlobalDataSet        # noqa: F401
 from pyop2.sequential import Dat, MixedDat, DatView, Mat  # noqa: F401
 
+import loopy
+
 __all__ = ['configuration', 'READ', 'WRITE', 'RW', 'INC', 'MIN', 'MAX',
            'ON_BOTTOM', 'ON_TOP', 'ON_INTERIOR_FACETS', 'ALL',
            'debug', 'info', 'warning', 'error', 'critical', 'initialised',
@@ -58,6 +60,9 @@ __all__ = ['configuration', 'READ', 'WRITE', 'RW', 'INC', 'MIN', 'MAX',
 
 
 _initialised = False
+
+# turn off loopy caching because pyop2 kernels are cached already
+loopy.set_caching_enabled(False)
 
 
 def initialised():
