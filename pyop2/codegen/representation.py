@@ -81,15 +81,11 @@ class Index(Terminal, Scalar):
     __slots__ = ("name", "extent", "merge")
     __front__ = ("name", "extent", "merge")
 
-    def __init__(self, extent=None, merge=True):
-        self.name = "i%d" % next(Index._count)
+    def __init__(self, extent=None, merge=True, name=None):
+        self.name = name or "i%d" % next(Index._count)
         self.extent = None
         self.set_extent(extent)
         self.merge = merge
-
-    @classmethod
-    def restart_counter(cls):
-        cls._count = itertools.count()
 
     def set_extent(self, value):
         if self.extent is None:
@@ -119,10 +115,6 @@ class RuntimeIndex(Scalar):
     def __init__(self, lo, hi, constraint, name=None):
         self.name = name or "r%d" % next(RuntimeIndex._count)
         self.children = lo, hi, constraint
-
-    @classmethod
-    def restart_counter(cls):
-        cls._count = itertools.count()
 
     @cached_property
     def extents(self):
@@ -174,10 +166,6 @@ class Argument(Terminal):
 
     __slots__ = ("shape", "dtype", "name")
     __front__ = ("shape", "dtype", "name")
-
-    @classmethod
-    def restart_counter(cls):
-        cls._count = defaultdict(partial(itertools.count))
 
     def __init__(self, shape, dtype, name=None, pfx=None):
         self.dtype = dtype
@@ -340,10 +328,6 @@ class Materialise(Node):
         new.name = self.name
         return new
 
-    @classmethod
-    def restart_counter(cls):
-        cls._count = itertools.count()
-
     @cached_property
     def shape(self):
         indices = self.children[1]
@@ -392,7 +376,7 @@ class FunctionCall(Node):
     __front__ = ("name", "label", "access", "free_indices")
 
     def __init__(self, name, label, access, free_indices, *arguments):
-        self.children = tuple(arguments)  # TODO: + free_indices?
+        self.children = tuple(arguments)
         self.access = tuple(access)
         self.free_indices = free_indices
         self.name = name

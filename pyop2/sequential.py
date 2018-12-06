@@ -231,12 +231,11 @@ def generate_single_cell_wrapper(iterset, args, forward_args=(), kernel_name=Non
     from loopy.types import OpaqueType
 
     forward_arg_types = [OpaqueType(fa) for fa in forward_args]
-    builder = WrapperBuilder(iterset=iterset, single_cell=True, forward_arg_types=forward_arg_types,
-                             restart_counter=restart_counter)
+    builder = WrapperBuilder(iterset=iterset, single_cell=True, forward_arg_types=forward_arg_types)
     for arg in args:
         builder.add_argument(arg)
     builder.set_kernel(Kernel("", kernel_name))
-    wrapper = generate(builder, wrapper_name)
+    wrapper = generate(builder, wrapper_name, restart_counter)
     code = loopy.generate_code_v2(wrapper)
 
     return code.device_code()
