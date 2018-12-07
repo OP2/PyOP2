@@ -267,12 +267,14 @@ class Arg(object):
         Instead, use the call syntax on the :class:`DataCarrier`.
     """
 
-    def __init__(self, data=None, map=None, access=None):
+    def __init__(self, data=None, map=None, access=None, lgmaps=None):
         """
         :param data: A data-carrying object, either :class:`Dat` or class:`Mat`
         :param map:  A :class:`Map` to access this :class:`Arg` or the default
                      if the identity map is to be used.
         :param access: An access descriptor of type :class:`Access`
+        :param lgmaps: For :class:`Mat` objects, a 2-tuple or local to
+            global maps used during assembly.
 
         Checks that:
 
@@ -303,14 +305,11 @@ class Arg(object):
             if self._is_dat and map.toset != data.dataset.set:
                 raise MapValueError(
                     "To set of %s doesn't match the set of %s." % (map, data))
-
-        # Determine the iteration space extents, if any
         if self._is_mat:
-            self._block_shape = tuple(tuple((mr.arity, mc.arity)
-                                      for mc in map[1])
-                                      for mr in map[0])
+            self.lgmaps = as_tuple(lgmaps)
         else:
-            self._block_shape = None
+            if lgmaps is not None:
+                raise ValueError("lgmaps only for matrices")
 
     @cached_property
     def _kernel_args_(self):
@@ -787,7 +786,7 @@ class ExtrudedSet(Set):
     """
 
     @validate_type(('parent', Set, TypeError))
-    def __init__(self, parent, layers, masks=None):
+    def __init__(self, parent, layers):
         self._parent = parent
         try:
             layers = verify_reshape(layers, IntType, (parent.total_size, 2))
@@ -807,26 +806,17 @@ class ExtrudedSet(Set):
             layers = np.asarray([[0, layers]], dtype=IntType)
             self.constant_layers = True
 
-        self.masks = masks
         self._layers = layers
-        if masks:
-            section = self.masks.section
-            self.offset = np.asanyarray([section.getOffset(p) for p in range(*section.getChart())], dtype=IntType)
-        self._extruded = True
+
+    _extruded = True
 
     @cached_property
     def _kernel_args_(self):
-        if self.constant_layers:
-            return (self.layers_array.ctypes.data, )
-        else:
-            return (self.layers_array.ctypes.data, self.offset.ctypes.data, self.masks.bottom.ctypes.data, self.masks.top.ctypes.data)
+        return (self.layers_array.ctypes.data, )
 
     @cached_property
     def _argtypes_(self):
-        if self.constant_layers:
-            return (ctypes.c_voidp, )
-        else:
-            return (ctypes.c_voidp, ctypes.c_voidp, ctypes.c_voidp, ctypes.c_voidp)
+        return (ctypes.c_voidp, )
 
     @cached_property
     def _wrapper_cache_key_(self):
@@ -961,29 +951,6 @@ class Subset(ExtrudedSet):
             return self._superset.layers_array
         else:
             return self._superset.layers_array[self.indices, ...]
-
-    @cached_property
-    def masks(self):
-        if self._superset.masks is None:
-            return None
-        psection, pbottom, ptop = self._superset.masks
-        # Avoid importing PETSc directly!
-        section = type(psection)().create(comm=MPI.COMM_SELF)
-        section.setChart(0, self.total_size)
-        shape = (np.sum(self.layers_array[:, 1] - self.layers_array[:, 0] - 1), ) + pbottom.shape[1:]
-        bottom = np.zeros(shape, dtype=pbottom.dtype)
-        top = np.zeros_like(bottom)
-        idx = 0
-        for i, pidx in enumerate(self.indices):
-            offset = psection.getOffset(pidx)
-            nval = self.layers_array[i, 1] - self.layers_array[i, 0] - 1
-            for j in range(nval):
-                bottom[idx] = pbottom[offset + j]
-                top[idx] = ptop[offset + j]
-                idx += 1
-            section.setDof(i, nval)
-        section.setUp()
-        return ExtrudedSet.EntityMask(section, bottom, top)
 
     @cached_property
     def _argtype(self):
@@ -2724,14 +2691,6 @@ class Map(object):
       kernel.
     * An integer: ``some_map[n]``. The ``n`` th entry of the
       map result will be passed to the kernel.
-
-    For extruded problems (where ``iterset`` is an
-    :class:`ExtrudedSet`) with boundary conditions applied at the top
-    and bottom of the domain, ``bt_masks`` should be a :class:`dict`
-    mapping boundary condition types to a 2-tuple of masks that should
-    be applied to switch off respectively the "bottom" and "top" nodes
-    of a cell.
-
     """
 
     _globalcount = 0
@@ -2740,7 +2699,7 @@ class Map(object):
 
     @validate_type(('iterset', Set, SetTypeError), ('toset', Set, SetTypeError),
                    ('arity', numbers.Integral, ArityTypeError), ('name', str, NameTypeError))
-    def __init__(self, iterset, toset, arity, values=None, name=None, offset=None, parent=None, boundary_masks=None):
+    def __init__(self, iterset, toset, arity, values=None, name=None, offset=None):
         self._iterset = iterset
         self._toset = toset
         self.comm = toset.comm
@@ -2754,15 +2713,8 @@ class Map(object):
             self._offset = None
         else:
             self._offset = verify_reshape(offset, IntType, (arity, ))
-        # This is intended to be used for modified maps, for example
-        # where a boundary condition is imposed by setting some map
-        # entries negative.
-        self._parent = parent
         # A cache for objects built on top of this map
         self._cache = {}
-        # Which indices in the extruded map should be masked out for
-        # the application of strong boundary conditions
-        self.boundary_masks = boundary_masks
         Map._globalcount += 1
 
     class MapMask(namedtuple("_MapMask_", ["section", "indices", "facet_points"])):
@@ -2779,14 +2731,8 @@ class Map(object):
 
     @cached_property
     def _wrapper_cache_key_(self):
-        mask_key = []
-        for location, method in self.implicit_bcs:
-            if location == "bottom":
-                mask_key.append(tuple(self.bottom_mask[method]))
-            else:
-                mask_key.append(tuple(self.top_mask[method]))
-        return (type(self), self.arity, tuplify(self.offset), self.implicit_bcs,
-                tuple(self.iteration_region), self.vector_index, tuple(mask_key))
+        return (type(self), self.arity, tuplify(self.offset),
+                tuple(self.iteration_region), self.vector_index)
 
     # This is necessary so that we can convert a Map to a tuple
     # (needed in as_tuple).  Because, __getitem__ no longer returns a
@@ -2814,13 +2760,6 @@ class Map(object):
         will always be ALL. For a :class:`DecoratedMap` it will specify over which mesh
         region the iteration will take place."""
         return frozenset([ALL])
-
-    @cached_property
-    def implicit_bcs(self):
-        r"""Return any implicit (extruded "top" or "bottom") bcs to
-        apply to this :class:`Map`. Normally empty except in the case of
-        some :class:`DecoratedMap`\s."""
-        return ()
 
     @cached_property
     def vector_index(self):
@@ -2922,7 +2861,7 @@ class Map(object):
             # The iteration region of self must be a subset of the
             # iteration region of the sparsitymap.
             return len(self.iteration_region - o.iteration_region) == 0 and self <= o._map
-        return self == o or (isinstance(self._parent, Map) and self._parent <= o)
+        return self == o
 
     @classmethod
     def fromhdf5(cls, iterset, toset, f, name):
@@ -2944,16 +2883,14 @@ class DecoratedMap(Map, ObjectCached):
 
     :kwarg iteration_region: The class:`IterationRegion` of the mesh over which
                              the parallel loop will iterate.
-    :kwarg implicit_bcs: Any "top" or "bottom" boundary conditions to apply
-                         when assembling :class:`Mat`\s.
 
     The :data:`map` parameter may be an existing :class:`DecoratedMap`
-    in which case, if either the :data:`iteration_region` or
-    :data:`implicit_bcs` arguments are :data:`None`, they will be
-    copied over from the supplied :data:`map`."""
+    in which case, if the :data:`iteration_region` is :data:`None`, it
+    will be copied over from the supplied :data:`map`.
 
-    def __new__(cls, map, iteration_region=None, implicit_bcs=None,
-                vector_index=None):
+    """
+
+    def __new__(cls, map, iteration_region=None, vector_index=None):
         if map is None:
             return None
         if isinstance(map, DecoratedMap):
@@ -2962,24 +2899,18 @@ class DecoratedMap(Map, ObjectCached):
             # told to)
             if iteration_region is None:
                 iteration_region = [x for x in map.iteration_region]
-            if implicit_bcs is None:
-                implicit_bcs = [x for x in map.implicit_bcs]
             if vector_index is None:
                 vector_index = map.vector_index
             return DecoratedMap(map.map, iteration_region=iteration_region,
-                                implicit_bcs=implicit_bcs,
                                 vector_index=vector_index)
         if isinstance(map, MixedMap):
             return MixedMap([DecoratedMap(m, iteration_region=iteration_region,
-                                          implicit_bcs=implicit_bcs,
                                           vector_index=vector_index)
                              for m in map])
         return super(DecoratedMap, cls).__new__(cls, map, iteration_region=iteration_region,
-                                                implicit_bcs=implicit_bcs,
                                                 vector_index=vector_index)
 
-    def __init__(self, map, iteration_region=None, implicit_bcs=None,
-                 vector_index=None):
+    def __init__(self, map, iteration_region=None, vector_index=None):
         if self._initialized:
             return
         self._map = map
@@ -2987,10 +2918,6 @@ class DecoratedMap(Map, ObjectCached):
             iteration_region = [ALL]
         iteration_region = as_tuple(iteration_region, IterationRegion)
         self._iteration_region = frozenset(iteration_region)
-        if implicit_bcs is None:
-            implicit_bcs = []
-        implicit_bcs = as_tuple(implicit_bcs)
-        self.implicit_bcs = tuple(sorted(implicit_bcs))
         self.vector_index = vector_index
         self._initialized = True
 
@@ -3007,18 +2934,16 @@ class DecoratedMap(Map, ObjectCached):
         return (m, ) + (m, ), kwargs
 
     @classmethod
-    def _cache_key(cls, map, iteration_region=None, implicit_bcs=None,
-                   vector_index=None):
+    def _cache_key(cls, map, iteration_region=None, vector_index=None):
         ir = as_tuple(iteration_region, IterationRegion) if iteration_region else ()
-        bcs = as_tuple(implicit_bcs) if implicit_bcs else ()
-        return (map, ir, bcs, vector_index)
+        return (map, ir, vector_index)
 
     def __repr__(self):
-        return "DecoratedMap(%r, %r, %r, %r)" % (self._map, self._iteration_region, self.implicit_bcs, self.vector_index)
+        return "DecoratedMap(%r, %r, %r)" % (self._map, self._iteration_region, self.vector_index)
 
     def __str__(self):
-        return "OP2 DecoratedMap on %s with region %s, implicit bcs %s, vector index %s" % \
-            (self._map, self._iteration_region, self.implicit_bcs, self.vector_index)
+        return "OP2 DecoratedMap on %s with region %s, vector index %s" % \
+            (self._map, self._iteration_region, self.vector_index)
 
     def __le__(self, other):
         """self<=other if the iteration regions of self are a subset of the
@@ -3557,11 +3482,11 @@ class Mat(DataCarrier):
         Mat._globalcount += 1
 
     @validate_in(('access', _modes, ModeValueError))
-    def __call__(self, access, path):
+    def __call__(self, access, path, lgmaps=None):
         path_maps = as_tuple(path, Map, 2)
         if configuration["type_check"] and tuple(path_maps) not in self.sparsity:
             raise MapValueError("Path maps not in sparsity maps")
-        return _make_object('Arg', data=self, map=path_maps, access=access)
+        return _make_object('Arg', data=self, map=path_maps, access=access, lgmaps=lgmaps)
 
     @cached_property
     def _wrapper_cache_key_(self):
@@ -3997,6 +3922,11 @@ class ParLoop(LazyComputation):
     def compute(self):
         """Executes the kernel over all members of the iteration space."""
         with timed_region("ParLoopExecute"):
+            lgmaps = []
+            for arg in self.args:
+                if arg._is_mat and arg.lgmaps is not None:
+                    lgmaps.append(arg.data.handle.getLGMap())
+                    arg.data.handle.setLGMap(*arg.lgmaps)
             self.global_to_local_begin()
             iterset = self.iterset
             arglist = self.arglist
@@ -4013,6 +3943,9 @@ class ParLoop(LazyComputation):
             self.reduction_end()
             self.local_to_global_end()
             self.update_arg_data_state()
+            for arg in reversed(self.args):
+                if arg._is_mat and arg.lgmaps is not None:
+                    arg.data.handle.setLGMap(*lgmaps.pop())
 
     @collective
     def _compute(self, part, fun, *arglist):

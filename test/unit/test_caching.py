@@ -213,28 +213,13 @@ class TestObjectCaching:
         assert sm2 != sm3
         assert not sm2 == sm3
 
-    def test_decoratedmap_change_bcs(self, base_map):
-        sm = op2.DecoratedMap(base_map, [op2.ALL])
-        smbc = op2.DecoratedMap(base_map, [op2.ALL], implicit_bcs=["top"])
-
-        assert "top" in smbc.implicit_bcs
-        assert "top" not in sm.implicit_bcs
-
-        smbc = op2.DecoratedMap(sm, implicit_bcs=["top"])
-
-        assert "top" in smbc.implicit_bcs
-        assert op2.ALL in smbc.iteration_region
-
-        assert len(sm.implicit_bcs) == 0
-        assert op2.ALL in smbc.iteration_region
-
     def test_decoratedmap_le(self, base_map):
         sm = op2.DecoratedMap(base_map, [op2.ALL])
 
         assert base_map <= sm
         assert sm <= base_map
 
-        smbc = op2.DecoratedMap(base_map, [op2.ALL], implicit_bcs=["top"])
+        smbc = op2.DecoratedMap(base_map, [op2.ALL])
 
         assert base_map <= smbc
         assert smbc <= base_map

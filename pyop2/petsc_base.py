@@ -74,10 +74,13 @@ class DataSet(base.DataSet):
         """A PETSc LGMap mapping process-local indices to global
         indices for this :class:`DataSet` with a block size of 1.
         """
-        indices = self.lgmap.indices
-        lgmap = PETSc.LGMap().create(indices=indices,
-                                     bsize=1, comm=self.lgmap.comm)
-        return lgmap
+        if self.cdim == 1:
+            return self.lgmap
+        else:
+            indices = self.lgmap.indices
+            lgmap = PETSc.LGMap().create(indices=indices,
+                                         bsize=1, comm=self.lgmap.comm)
+            return lgmap
 
     @utils.cached_property
     def field_ises(self):
@@ -150,10 +153,13 @@ class GlobalDataSet(base.GlobalDataSet):
         """A PETSc LGMap mapping process-local indices to global
         indices for this :class:`DataSet` with a block size of 1.
         """
-        indices = self.lgmap.indices
-        lgmap = PETSc.LGMap().create(indices=indices,
-                                     bsize=1, comm=self.lgmap.comm)
-        return lgmap
+        if self.cdim == 1:
+            return self.lgmap
+        else:
+            indices = self.lgmap.indices
+            lgmap = PETSc.LGMap().create(indices=indices,
+                                         bsize=1, comm=self.lgmap.comm)
+            return lgmap
 
     @utils.cached_property
     def field_ises(self):
@@ -547,6 +553,17 @@ class SparsityBlock(base.Sparsity):
         return "SparsityBlock(%r, %r, %r)" % (self._parent, self._i, self._j)
 
 
+def masked_lgmap(lgmap, mask, block=True):
+    if block:
+        indices = lgmap.block_indices.copy()
+        bsize = lgmap.getBlockSize()
+    else:
+        indices = lgmap.indices.copy()
+        bsize = 1
+    indices[mask] = -1
+    return PETSc.LGMap().create(indices=indices, bsize=bsize, comm=lgmap.comm)
+
+
 class MatBlock(base.Mat):
     """A proxy class for a local block in a monolithic :class:`.Mat`.
 
@@ -691,14 +708,8 @@ class Mat(base.Mat):
     def _init_monolithic(self):
         mat = PETSc.Mat()
         rset, cset = self.sparsity.dsets
-        if rset.cdim != 1:
-            rlgmap = rset.unblocked_lgmap
-        else:
-            rlgmap = rset.lgmap
-        if cset.cdim != 1:
-            clgmap = cset.unblocked_lgmap
-        else:
-            clgmap = cset.lgmap
+        rlgmap = rset.unblocked_lgmap
+        clgmap = cset.unblocked_lgmap
         mat.createAIJ(size=((self.nrows, None), (self.ncols, None)),
                       nnz=(self.sparsity.nnz, self.sparsity.onnz),
                       bsize=1,
@@ -819,13 +830,14 @@ class Mat(base.Mat):
             mat = _DatMat(self.sparsity)
         self.handle = mat
 
-    def __call__(self, access, path):
+    def __call__(self, access, path, lgmaps=None):
         """Override the parent __call__ method in order to special-case global
         blocks in matrices."""
         try:
             # Usual case
-            return super(Mat, self).__call__(access, path)
+            return super(Mat, self).__call__(access, path, lgmaps=lgmaps)
         except TypeError:
+            assert lgmaps is None
             # One of the path entries was not an Arg.
             if path == (None, None):
                 return _make_object('Arg',

@@ -132,7 +132,7 @@ class ParLoop(base.ParLoop):
                         raise NotImplementedError
                     if arg._is_mixed_mat:
                         raise ValueError("Mixed Mats must be split before assembly")
-                    args.append(np.zeros(arg._block_shape[0][0], dtype=arg.data.dtype))
+                    args.append(np.zeros(arg.data.dims[0][0], dtype=arg.data.dtype))
                 if args[-1].shape == ():
                     args[-1] = args[-1].reshape(1)
             self._kernel(*args)
