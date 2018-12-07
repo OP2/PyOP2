@@ -449,7 +449,10 @@ def generate(builder, wrapper_name=None, restart_counter=True):
                                 name=wrapper_name)
 
     # additional assumptions
-    wrapper = loopy.assume(wrapper, "start <= end")
+    if builder.single_cell:
+        wrapper = loopy.assume(wrapper, "start < end")
+    else:
+        wrapper = loopy.assume(wrapper, "start <= end")
     wrapper = loopy.assume(wrapper, "start >= 0")
     if builder.extruded:
         wrapper = loopy.assume(wrapper, "{0} <= {1}".format(parameters.layer_start, parameters.layer_end))
