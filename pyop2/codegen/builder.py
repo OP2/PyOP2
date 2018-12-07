@@ -12,7 +12,7 @@ from pyop2.codegen.representation import (PackInst, UnpackInst, KernelInst)
 
 from pyop2.utils import cached_property
 from pyop2.datatypes import IntType
-from pyop2.op2 import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL, Subset, DecoratedMap
+from pyop2.op2 import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL, Subset
 from pyop2.op2 import READ, INC, WRITE
 from loopy.types import OpaqueType
 from functools import reduce
@@ -585,10 +585,7 @@ class WrapperBuilder(object):
         if map_ is None:
             return None
         interior_horizontal = self.iteration_region == ON_INTERIOR_FACETS
-        if isinstance(map_, DecoratedMap):
-            key = map_.map
-        else:
-            key = map_
+        key = map_
         try:
             return self.maps[key]
         except KeyError:

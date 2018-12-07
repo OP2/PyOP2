@@ -536,6 +536,7 @@ class SparsityBlock(base.Sparsity):
         self._parent = parent
         self._dims = tuple([tuple([parent.dims[i][j]])])
         self._blocks = [[self]]
+        self.iteration_regions = parent.iteration_regions
         self.lcomm = self.dsets[0].comm
         self.rcomm = self.dsets[1].comm
         # TODO: think about lcomm != rcomm
@@ -739,6 +740,7 @@ class Mat(base.Mat):
                     sparsity.fill_with_zeros(self[i, j].handle,
                                              self[i, j].sparsity.dims[0][0],
                                              self[i, j].sparsity.maps,
+                                             self[i, j].sparsity.iteration_regions,
                                              set_diag=self[i, j].sparsity._has_diagonal)
                     self[i, j].handle.assemble()
 
@@ -810,7 +812,9 @@ class Mat(base.Mat):
         mat.setOption(mat.Option.UNUSED_NONZERO_LOCATION_ERR, True)
         # Put zeros in all the places we might eventually put a value.
         with timed_region("MatZeroInitial"):
-            sparsity.fill_with_zeros(mat, self.sparsity.dims[0][0], self.sparsity.maps, set_diag=self.sparsity._has_diagonal)
+            sparsity.fill_with_zeros(mat, self.sparsity.dims[0][0],
+                                     self.sparsity.maps, self.sparsity.iteration_regions,
+                                     set_diag=self.sparsity._has_diagonal)
         mat.assemble()
         mat.setOption(mat.Option.NEW_NONZERO_LOCATION_ERR, True)
         # Now we've filled up our matrix, so the sparsity is

@@ -38,7 +38,7 @@ subclass these as required to implement backend-specific features.
 import abc
 
 from contextlib import contextmanager
-from collections import namedtuple, defaultdict
+from collections import defaultdict
 import itertools
 import numpy as np
 import ctypes
@@ -305,7 +305,8 @@ class Arg(object):
             if self._is_dat and map.toset != data.dataset.set:
                 raise MapValueError(
                     "To set of %s doesn't match the set of %s." % (map, data))
-        if self._is_mat:
+        self.lgmaps = None
+        if self._is_mat and lgmaps is not None:
             self.lgmaps = as_tuple(lgmaps)
         else:
             if lgmaps is not None:
@@ -556,8 +557,6 @@ class Set(object):
     _CORE_SIZE = 0
     _OWNED_SIZE = 1
     _GHOST_SIZE = 2
-
-    masks = None
 
     _extruded = False
 
@@ -835,15 +834,6 @@ class ExtrudedSet(Set):
 
     def __repr__(self):
         return "ExtrudedSet(%r, %r)" % (self._parent, self._layers)
-
-    class EntityMask(namedtuple("_EntityMask_", ["section", "bottom", "top"])):
-        """Mask bits on each set entity indicating which topological
-        entities in the closure of said set entity are exposed on the
-        bottom or top of the extruded set.  The section encodes the
-        number of entities in each entity column, and their offset
-        from the start of the set."""
-
-        pass
 
     @cached_property
     def parent(self):
@@ -2717,10 +2707,6 @@ class Map(object):
         self._cache = {}
         Map._globalcount += 1
 
-    class MapMask(namedtuple("_MapMask_", ["section", "indices", "facet_points"])):
-
-        pass
-
     @cached_property
     def _kernel_args_(self):
         return (self._values.ctypes.data, )
@@ -2731,8 +2717,7 @@ class Map(object):
 
     @cached_property
     def _wrapper_cache_key_(self):
-        return (type(self), self.arity, tuplify(self.offset),
-                tuple(self.iteration_region), self.vector_index)
+        return (type(self), self.arity, tuplify(self.offset), self.vector_index)
 
     # This is necessary so that we can convert a Map to a tuple
     # (needed in as_tuple).  Because, __getitem__ no longer returns a
@@ -2753,13 +2738,6 @@ class Map(object):
     @cached_property
     def split(self):
         return (self,)
-
-    @cached_property
-    def iteration_region(self):
-        """Return the iteration region for the current map. For a normal map it
-        will always be ALL. For a :class:`DecoratedMap` it will specify over which mesh
-        region the iteration will take place."""
-        return frozenset([ALL])
 
     @cached_property
     def vector_index(self):
@@ -2821,32 +2799,6 @@ class Map(object):
         """The vertical offset."""
         return self._offset
 
-    def _constant_layer_masks(self, which):
-        if self.offset is None:
-            return {}
-        idx = {"bottom": -2, "top": -1}[which]
-        masks = {}
-        for method, (section, indices, facet_indices) in self.boundary_masks.items():
-            facet = facet_indices[idx]
-            off = section.getOffset(facet)
-            dof = section.getDof(facet)
-            section.getDof(facet)
-            indices = indices[off:off+dof]
-            mask = np.zeros(len(self.offset), dtype=IntType)
-            mask[indices] = -1
-            masks[method] = mask
-        return masks
-
-    @cached_property
-    def top_mask(self):
-        """The top layer mask to be applied on a mesh cell."""
-        return self._constant_layer_masks("top")
-
-    @cached_property
-    def bottom_mask(self):
-        """The bottom layer mask to be applied on a mesh cell."""
-        return self._constant_layer_masks("bottom")
-
     def __str__(self):
         return "OP2 Map: %s from (%s) to (%s) with arity %s" \
                % (self._name, self._iterset, self._toset, self._arity)
@@ -2857,10 +2809,6 @@ class Map(object):
 
     def __le__(self, o):
         """self<=o if o equals self or self._parent <= o."""
-        if isinstance(o, DecoratedMap):
-            # The iteration region of self must be a subset of the
-            # iteration region of the sparsitymap.
-            return len(self.iteration_region - o.iteration_region) == 0 and self <= o._map
         return self == o
 
     @classmethod
@@ -2872,99 +2820,6 @@ class Map(object):
         if len(arity) != 1:
             raise ArityTypeError("Unrecognised arity value %s" % arity)
         return cls(iterset, toset, arity[0], values, name)
-
-
-class DecoratedMap(Map, ObjectCached):
-    r"""Augmented type for a map used for attaching extra information
-    used to inform code generation and/or sparsity building about the
-    implicit structure of the extruded :class:`Map`.
-
-    :param map: The original class:`Map`.
-
-    :kwarg iteration_region: The class:`IterationRegion` of the mesh over which
-                             the parallel loop will iterate.
-
-    The :data:`map` parameter may be an existing :class:`DecoratedMap`
-    in which case, if the :data:`iteration_region` is :data:`None`, it
-    will be copied over from the supplied :data:`map`.
-
-    """
-
-    def __new__(cls, map, iteration_region=None, vector_index=None):
-        if map is None:
-            return None
-        if isinstance(map, DecoratedMap):
-            # Need to add information, rather than replace if we
-            # already have a decorated map (but overwrite if we're
-            # told to)
-            if iteration_region is None:
-                iteration_region = [x for x in map.iteration_region]
-            if vector_index is None:
-                vector_index = map.vector_index
-            return DecoratedMap(map.map, iteration_region=iteration_region,
-                                vector_index=vector_index)
-        if isinstance(map, MixedMap):
-            return MixedMap([DecoratedMap(m, iteration_region=iteration_region,
-                                          vector_index=vector_index)
-                             for m in map])
-        return super(DecoratedMap, cls).__new__(cls, map, iteration_region=iteration_region,
-                                                vector_index=vector_index)
-
-    def __init__(self, map, iteration_region=None, vector_index=None):
-        if self._initialized:
-            return
-        self._map = map
-        if iteration_region is None:
-            iteration_region = [ALL]
-        iteration_region = as_tuple(iteration_region, IterationRegion)
-        self._iteration_region = frozenset(iteration_region)
-        self.vector_index = vector_index
-        self._initialized = True
-
-    @cached_property
-    def _kernel_args_(self):
-        return self._map._kernel_args_
-
-    @cached_property
-    def _argtypes_(self):
-        return self._map._argtypes_
-
-    @classmethod
-    def _process_args(cls, m, **kwargs):
-        return (m, ) + (m, ), kwargs
-
-    @classmethod
-    def _cache_key(cls, map, iteration_region=None, vector_index=None):
-        ir = as_tuple(iteration_region, IterationRegion) if iteration_region else ()
-        return (map, ir, vector_index)
-
-    def __repr__(self):
-        return "DecoratedMap(%r, %r, %r)" % (self._map, self._iteration_region, self.vector_index)
-
-    def __str__(self):
-        return "OP2 DecoratedMap on %s with region %s, vector index %s" % \
-            (self._map, self._iteration_region, self.vector_index)
-
-    def __le__(self, other):
-        """self<=other if the iteration regions of self are a subset of the
-        iteration regions of other and self._map<=other"""
-        if isinstance(other, DecoratedMap):
-            return len(self.iteration_region - other.iteration_region) == 0 and self._map <= other._map
-        else:
-            return len(self.iteration_region - other.iteration_region) == 0 and self._map <= other
-
-    def __getattr__(self, name):
-        return getattr(self._map, name)
-
-    @cached_property
-    def map(self):
-        """The :class:`Map` this :class:`DecoratedMap` is decorating"""
-        return self._map
-
-    @cached_property
-    def iteration_region(self):
-        """Returns the type of the iteration to be performed."""
-        return self._iteration_region
 
 
 class MixedMap(Map, ObjectCached):
@@ -3107,7 +2962,7 @@ class Sparsity(ObjectCached):
     .. _MatMPIAIJSetPreallocation: http://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Mat/MatMPIAIJSetPreallocation.html
     """
 
-    def __init__(self, dsets, maps, name=None, nest=None, block_sparse=None):
+    def __init__(self, dsets, maps, *, iteration_regions=None, name=None, nest=None, block_sparse=None):
         r"""
         :param dsets: :class:`DataSet`\s for the left and right function
             spaces this :class:`Sparsity` maps between
@@ -3116,6 +2971,7 @@ class Sparsity(ObjectCached):
             map, or an iterable of pairs of :class:`Map`\s specifying multiple
             row and column maps - if a single :class:`Map` is passed, it is
             used as both a row map and a column map
+        :param iteration_regions: regions that select subsets of extruded maps to iterate over.
         :param string name: user-defined label (optional)
         :param nest: Should the sparsity over mixed set be built as nested blocks?
         :param block_sparse: Should the sparsity for datasets with
@@ -3166,6 +3022,7 @@ class Sparsity(ObjectCached):
         self._name = name or "sparsity_%d" % Sparsity._globalcount
         Sparsity._globalcount += 1
 
+        self.iteration_regions = iteration_regions
         # If the Sparsity is defined on MixedDataSets, we need to build each
         # block separately
         if (isinstance(dsets[0], MixedDataSet) or isinstance(dsets[1], MixedDataSet)) \
@@ -3177,6 +3034,7 @@ class Sparsity(ObjectCached):
                 for j, cds in enumerate(dsets[1]):
                     row.append(Sparsity((rds, cds), [(rm.split[i], cm.split[j]) for
                                                      rm, cm in maps],
+                                        iteration_regions=iteration_regions,
                                         block_sparse=block_sparse))
                 self._blocks.append(row)
             self._d_nnz = tuple(s._d_nnz for s in self)
@@ -3203,9 +3061,8 @@ class Sparsity(ObjectCached):
 
     @classmethod
     @validate_type(('dsets', (Set, DataSet, tuple, list), DataSetTypeError),
-                   ('maps', (Map, tuple, list), MapTypeError),
-                   ('name', str, NameTypeError))
-    def _process_args(cls, dsets, maps, name=None, nest=None, block_sparse=None, *args, **kwargs):
+                   ('maps', (Map, tuple, list), MapTypeError))
+    def _process_args(cls, dsets, maps, *, iteration_regions=None, name=None, nest=None, block_sparse=None):
         "Turn maps argument into a canonical tuple of pairs."
 
         # A single data set becomes a pair of identical data sets
@@ -3247,7 +3104,10 @@ class Sparsity(ObjectCached):
                 raise RuntimeError("Iterset of both maps in a pair must be the same")
 
         rmaps, cmaps = zip(*maps)
-
+        if iteration_regions is None:
+            iteration_regions = tuple((ALL, ) for _ in maps)
+        else:
+            iteration_regions = tuple(iteration_regions)
         if not len(rmaps) == len(cmaps):
             raise RuntimeError("Must pass equal number of row and column maps")
 
@@ -3272,7 +3132,11 @@ class Sparsity(ObjectCached):
             nest = configuration["matnest"]
         if block_sparse is None:
             block_sparse = configuration["block_sparsity"]
-        return (cache,) + (tuple(dsets), frozenset(maps), name, nest, block_sparse), {}
+        kwargs = {"iteration_regions": iteration_regions,
+                  "name": name,
+                  "nest": nest,
+                  "block_sparse": block_sparse}
+        return (cache,) + (tuple(dsets), frozenset(maps)), kwargs
 
     @classmethod
     def _cache_key(cls, dsets, maps, name, nest, block_sparse, *args, **kwargs):
@@ -3773,8 +3637,6 @@ class JITModule(Cached):
         for arg in args:
             key += arg._wrapper_cache_key_
             for map_ in arg.map_tuple:
-                if isinstance(map_, DecoratedMap):
-                    map_ = map_.map
                 key += (seen[map_],)
 
         key += (kwargs.get("iterate", None), cls, configuration["simd_width"])
