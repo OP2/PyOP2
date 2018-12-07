@@ -320,14 +320,6 @@ def instruction_dependencies(instructions, initialisers):
     return deps
 
 
-def instruction_names(instructions):
-    c = itertools.count()
-    names = {}
-    for insn in traversal(instructions):
-        names[insn] = "statement%d" % next(c)
-    return names
-
-
 def generate(builder, wrapper_name=None, restart_counter=True):
 
     if builder.layer_index is not None:
@@ -407,7 +399,7 @@ def generate(builder, wrapper_name=None, restart_counter=True):
     if builder.single_cell:
         new_domains = []
         for d in domains:
-            if d.get_dim_name(isl.dim_type.set, 0) == "n":
+            if d.get_dim_name(isl.dim_type.set, 0) == builder._loop_index.name:
                 # n = start
                 new_domains.append(d.add_constraint(isl.Constraint.eq_from_names(d.space, {"n": 1, "start": -1})))
             else:
@@ -416,7 +408,7 @@ def generate(builder, wrapper_name=None, restart_counter=True):
         if builder.extruded:
             new_domains = []
             for d in domains:
-                if d.get_dim_name(isl.dim_type.set, 0) == "layer":
+                if d.get_dim_name(isl.dim_type.set, 0) == builder.layer_index.name:
                     # layer = t1 - 1
                     t1 = parameters.layer_end
                     new_domains.append(d.add_constraint(isl.Constraint.eq_from_names(d.space, {"layer": 1, t1: -1, 1: 1})))
@@ -546,10 +538,10 @@ def statement_assign(expr, context):
 @statement.register(FunctionCall)
 def statement_functioncall(expr, context):
 
-    parameters = context.parameters
-
     from loopy.symbolic import SubArrayRef
     from loopy.types import OpaqueType
+
+    parameters = context.parameters
 
     free_indices = set(i.name for i in expr.free_indices)
     writes = []
