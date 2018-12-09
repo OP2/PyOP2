@@ -3325,6 +3325,10 @@ class Mat(DataCarrier):
        before using it (for example to view its values), you must call
        :meth:`assemble` to finalise the writes.
     """
+    @cached_property
+    def pack(self):
+        from pyop2.codegen.builder import MatPack
+        return MatPack
 
     ASSEMBLED = "ASSEMBLED"
     INSERT_VALUES = "INSERT_VALUES"

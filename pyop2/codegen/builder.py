@@ -106,6 +106,10 @@ class Map(object):
 
 class Pack(metaclass=ABCMeta):
 
+    def pick_loop_indices(self, loop_index, layer_index=None, entity_index=None):
+        """Override this to select the loop indices used by a pack for indexing."""
+        return (loop_index, layer_index)
+
     @abstractmethod
     def kernel_arg(self, loop_indices=None):
         pass
@@ -150,11 +154,7 @@ class DatPack(Pack):
 
     def _rvalue(self, multiindex, loop_indices=None):
         f, i, *j = multiindex
-        try:
-            n, layer = loop_indices
-        except ValueError:
-            n, = loop_indices
-            layer = None
+        n, layer = self.pick_loop_indices(*loop_indices)
         if self.view_index is not None:
             j = tuple(j) + tuple(FixedIndex(i) for i in self.view_index)
         map_, (f, i) = self.map_.indexed((n, i, f), layer=layer)
@@ -192,10 +192,7 @@ class DatPack(Pack):
         if self.map_ is None:
             if loop_indices is None:
                 raise ValueError("Need iteration index")
-            try:
-                n, layer = loop_indices
-            except ValueError:
-                n, = loop_indices
+            n, layer = self.pick_loop_indices(*loop_indices)
             # Direct dats on extruded sets never get a layer index
             # (they're defined on the "base" set, effectively).
             # FIXME: is this a bug?
@@ -278,10 +275,8 @@ class MixedDatPack(Pack):
         shape = pack.shape
         return Indexed(pack, (Index(e) for e in shape))
 
-    def emit_unpack_instruction(self, *,
-                                loop_indices=None):
+    def emit_unpack_instruction(self, *, loop_indices=None):
         pack = self.pack(loop_indices)
-
         if self.access is READ:
             yield None
         else:
@@ -307,6 +302,10 @@ class MixedDatPack(Pack):
 
 
 class MatPack(Pack):
+
+    insertion_names = {False: "MatSetValuesBlockedLocal",
+                       True: "MatSetValuesLocal"}
+
     def __init__(self, outer, access, maps, dims, dtype, interior_horizontal=False):
         self.outer = outer
         self.access = access
@@ -343,11 +342,7 @@ class MatPack(Pack):
                                 loop_indices=None):
         ((rdim, cdim), ), = self.dims
         rmap, cmap = self.maps
-        try:
-            n, layer = loop_indices
-        except ValueError:
-            n, = loop_indices
-            layer = None
+        n, layer = self.pick_loop_indices(*loop_indices)
         vector = rmap.vector_bc or cmap.vector_bc
         if vector:
             maps = [map_.indexed_vector(n, (dim, ), layer=layer)
@@ -364,17 +359,16 @@ class MatPack(Pack):
         (rmap, cmap), (rindices, cindices) = zip(*maps)
 
         pack = self.pack(loop_indices=loop_indices)
+        name = self.insertion_names[vector is not None]
         if vector:
             # The shape of MatPack is
             # (row, cols) if it has vector BC
             # (block_rows, row_cmpt, block_cols, col_cmpt) otherwise
             free_indices = rindices + cindices
             pack = Indexed(pack, free_indices)
-            name = "MatSetValuesLocal"
         else:
             free_indices = rindices + (Index(), ) + cindices + (Index(), )
             pack = Indexed(pack, free_indices)
-            name = "MatSetValuesBlockedLocal"
 
         access = Symbol({WRITE: "INSERT_VALUES",
                          INC: "ADD_VALUES"}[self.access])
@@ -532,9 +526,9 @@ class WrapperBuilder(object):
     @property
     def loop_indices(self):
         if self.extruded:
-            return (self.loop_index, self.layer_index)
+            return (self.loop_index, self.layer_index, self._loop_index)
         else:
-            return (self.loop_index, )
+            return (self.loop_index, None, self._loop_index)
 
     def add_argument(self, arg):
         interior_horizontal = self.iteration_region == ON_INTERIOR_FACETS
@@ -572,9 +566,9 @@ class WrapperBuilder(object):
         elif arg._is_mat:
             argument = Argument((), PetscMat(), pfx="mat")
             map_ = tuple(self.map_(m) for m in arg.map)
-            pack = MatPack(argument, arg.access, map_,
-                           arg.data.dims, arg.data.dtype,
-                           interior_horizontal=interior_horizontal)
+            pack = arg.data.pack(argument, arg.access, map_,
+                                 arg.data.dims, arg.data.dtype,
+                                 interior_horizontal=interior_horizontal)
         else:
             raise ValueError("Unhandled argument type")
         self.arguments.append(argument)
@@ -630,7 +624,8 @@ class WrapperBuilder(object):
         return FunctionCall(self.kernel.name, KernelInst(), access, free_indices, *args)
 
     def emit_instructions(self):
-        yield DummyInstruction(PackInst(), *self.loop_indices)
+        loop_indices = [x for x in self.loop_indices if x is not None]
+        yield DummyInstruction(PackInst(), *loop_indices)
         yield self.kernel_call()
         for pack in self.packed_args:
             insns = pack.emit_unpack_instruction(loop_indices=self.loop_indices)
