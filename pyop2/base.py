@@ -267,13 +267,15 @@ class Arg(object):
         Instead, use the call syntax on the :class:`DataCarrier`.
     """
 
+    unroll_map = False
+
     def __init__(self, data=None, map=None, access=None, lgmaps=None):
         """
         :param data: A data-carrying object, either :class:`Dat` or class:`Mat`
         :param map:  A :class:`Map` to access this :class:`Arg` or the default
                      if the identity map is to be used.
         :param access: An access descriptor of type :class:`Access`
-        :param lgmaps: For :class:`Mat` objects, a 2-tuple or local to
+        :param lgmaps: For :class:`Mat` objects, a 2-tuple of local to
             global maps used during assembly.
 
         Checks that:
@@ -310,7 +312,7 @@ class Arg(object):
             self.lgmaps = as_tuple(lgmaps)
         else:
             if lgmaps is not None:
-                raise ValueError("lgmaps only for matrices")
+                raise ValueError("Local to global maps only for matrices")
 
     @cached_property
     def _kernel_args_(self):
@@ -326,7 +328,7 @@ class Arg(object):
             map_ = tuple(m._wrapper_cache_key_ for m in self.map)
         else:
             map_ = self.map
-        return (type(self), self.access, self.data._wrapper_cache_key_, map_)
+        return (type(self), self.access, self.data._wrapper_cache_key_, map_, self.unroll_map)
 
     @property
     def _key(self):
@@ -2717,7 +2719,7 @@ class Map(object):
 
     @cached_property
     def _wrapper_cache_key_(self):
-        return (type(self), self.arity, tuplify(self.offset), self.vector_index)
+        return (type(self), self.arity, tuplify(self.offset))
 
     # This is necessary so that we can convert a Map to a tuple
     # (needed in as_tuple).  Because, __getitem__ no longer returns a
@@ -2738,10 +2740,6 @@ class Map(object):
     @cached_property
     def split(self):
         return (self,)
-
-    @cached_property
-    def vector_index(self):
-        return None
 
     @cached_property
     def iterset(self):
@@ -2862,7 +2860,7 @@ class MixedMap(Map, ObjectCached):
 
     @cached_property
     def _wrapper_cache_key_(self):
-        raise NotImplementedError
+        return tuple(m._wrapper_cache_key_ for m in self)
 
     @cached_property
     def split(self):
@@ -3350,11 +3348,13 @@ class Mat(DataCarrier):
         Mat._globalcount += 1
 
     @validate_in(('access', _modes, ModeValueError))
-    def __call__(self, access, path, lgmaps=None):
+    def __call__(self, access, path, lgmaps=None, unroll_map=False):
         path_maps = as_tuple(path, Map, 2)
         if configuration["type_check"] and tuple(path_maps) not in self.sparsity:
             raise MapValueError("Path maps not in sparsity maps")
-        return _make_object('Arg', data=self, map=path_maps, access=access, lgmaps=lgmaps)
+        arg = _make_object('Arg', data=self, map=path_maps, access=access, lgmaps=lgmaps)
+        arg.unroll_map = unroll_map
+        return arg
 
     @cached_property
     def _wrapper_cache_key_(self):
@@ -3788,10 +3788,10 @@ class ParLoop(LazyComputation):
     def compute(self):
         """Executes the kernel over all members of the iteration space."""
         with timed_region("ParLoopExecute"):
-            lgmaps = []
+            orig_lgmaps = []
             for arg in self.args:
                 if arg._is_mat and arg.lgmaps is not None:
-                    lgmaps.append(arg.data.handle.getLGMap())
+                    orig_lgmaps.append(arg.data.handle.getLGMap())
                     arg.data.handle.setLGMap(*arg.lgmaps)
             self.global_to_local_begin()
             iterset = self.iterset
@@ -3811,7 +3811,7 @@ class ParLoop(LazyComputation):
             self.update_arg_data_state()
             for arg in reversed(self.args):
                 if arg._is_mat and arg.lgmaps is not None:
-                    arg.data.handle.setLGMap(*lgmaps.pop())
+                    arg.data.handle.setLGMap(*orig_lgmaps.pop())
 
     @collective
     def _compute(self, part, fun, *arglist):

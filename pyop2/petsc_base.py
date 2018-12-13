@@ -834,12 +834,12 @@ class Mat(base.Mat):
             mat = _DatMat(self.sparsity)
         self.handle = mat
 
-    def __call__(self, access, path, lgmaps=None):
+    def __call__(self, access, path, lgmaps=None, unroll_map=False):
         """Override the parent __call__ method in order to special-case global
         blocks in matrices."""
         try:
             # Usual case
-            return super(Mat, self).__call__(access, path, lgmaps=lgmaps)
+            return super(Mat, self).__call__(access, path, lgmaps=lgmaps, unroll_map=unroll_map)
         except TypeError:
             assert lgmaps is None
             # One of the path entries was not an Arg.

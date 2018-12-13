@@ -28,13 +28,13 @@ class PetscMat(OpaqueType):
 class Map(object):
 
     __slots__ = ("values", "offset", "interior_horizontal",
-                 "variable", "vector_bc", "layer_bounds",
+                 "variable", "unroll", "layer_bounds",
                  "prefetch")
 
     def __init__(self, map_, interior_horizontal, layer_bounds,
-                 values=None, offset=None):
+                 values=None, offset=None, unroll=False):
         self.variable = map_.iterset._extruded and not map_.iterset.constant_layers
-        self.vector_bc = map_.vector_index
+        self.unroll = unroll
         self.layer_bounds = layer_bounds
         self.interior_horizontal = interior_horizontal
         self.prefetch = {}
@@ -219,12 +219,12 @@ class DatPack(Pack):
             rvalue = self._rvalue(multiindex, loop_indices=loop_indices)
             yield Accumulate(UnpackInst(),
                              rvalue,
-                             Sum(rvalue, view(pack, tuple((0, i) for i in multiindex))))
+                             Sum(rvalue, Indexed(pack, multiindex)))
         else:
             multiindex = tuple(Index(e) for e in pack.shape)
             yield Accumulate(UnpackInst(),
                              self._rvalue(multiindex, loop_indices=loop_indices),
-                             view(pack, tuple((0, i) for i in multiindex)))
+                             Indexed(pack, multiindex))
 
 
 class MixedDatPack(Pack):
@@ -305,6 +305,9 @@ class MatPack(Pack):
 
     insertion_names = {False: "MatSetValuesBlockedLocal",
                        True: "MatSetValuesLocal"}
+    """Function call name for inserting into the PETSc Mat. The keys
+       are whether or not maps are "unrolled" (addressing dofs) or
+       blocked (addressing nodes)."""
 
     def __init__(self, outer, access, maps, dims, dtype, interior_horizontal=False):
         self.outer = outer
@@ -340,11 +343,12 @@ class MatPack(Pack):
 
     def emit_unpack_instruction(self, *,
                                 loop_indices=None):
+        from pyop2.codegen.rep2loopy import register_petsc_function
         ((rdim, cdim), ), = self.dims
         rmap, cmap = self.maps
         n, layer = self.pick_loop_indices(*loop_indices)
-        vector = rmap.vector_bc or cmap.vector_bc
-        if vector:
+        unroll = any(m.unroll for m in self.maps)
+        if unroll:
             maps = [map_.indexed_vector(n, (dim, ), layer=layer)
                     for map_, dim in zip(self.maps, (rdim, cdim))]
         else:
@@ -359,8 +363,8 @@ class MatPack(Pack):
         (rmap, cmap), (rindices, cindices) = zip(*maps)
 
         pack = self.pack(loop_indices=loop_indices)
-        name = self.insertion_names[vector is not None]
-        if vector:
+        name = self.insertion_names[unroll]
+        if unroll:
             # The shape of MatPack is
             # (row, cols) if it has vector BC
             # (block_rows, row_cmpt, block_cols, col_cmpt) otherwise
@@ -375,6 +379,8 @@ class MatPack(Pack):
 
         rextent = Extent(MultiIndex(*rindices))
         cextent = Extent(MultiIndex(*cindices))
+
+        register_petsc_function(name)
 
         call = FunctionCall(name,
                             UnpackInst(),
@@ -538,7 +544,7 @@ class WrapperBuilder(object):
                 for a in arg:
                     shape = (None, *a.data.shape[1:])
                     argument = Argument(shape, a.data.dtype, pfx="mdat")
-                    packs.append(DatPack(argument, arg.access, self.map_(a.map),
+                    packs.append(DatPack(argument, arg.access, self.map_(a.map, unroll=a.unroll_map),
                                          interior_horizontal=interior_horizontal))
                     self.arguments.append(argument)
                 pack = MixedDatPack(packs, arg.access, arg.dtype, interior_horizontal=interior_horizontal)
@@ -555,7 +561,7 @@ class WrapperBuilder(object):
             argument = Argument(shape,
                                 arg.data.dtype,
                                 pfx="dat")
-            pack = DatPack(argument, arg.access, self.map_(arg.map),
+            pack = DatPack(argument, arg.access, self.map_(arg.map, unroll=arg.unroll_map),
                            interior_horizontal=interior_horizontal,
                            view_index=view_index)
         elif arg._is_global:
@@ -565,7 +571,7 @@ class WrapperBuilder(object):
             pack = GlobalPack(argument, arg.access)
         elif arg._is_mat:
             argument = Argument((), PetscMat(), pfx="mat")
-            map_ = tuple(self.map_(m) for m in arg.map)
+            map_ = tuple(self.map_(m, unroll=arg.unroll_map) for m in arg.map)
             pack = arg.data.pack(argument, arg.access, map_,
                                  arg.data.dims, arg.data.dtype,
                                  interior_horizontal=interior_horizontal)
@@ -575,7 +581,7 @@ class WrapperBuilder(object):
         self.packed_args.append(pack)
         self.argument_accesses.append(arg.access)
 
-    def map_(self, map_):
+    def map_(self, map_, unroll=False):
         if map_ is None:
             return None
         interior_horizontal = self.iteration_region == ON_INTERIOR_FACETS
@@ -584,7 +590,7 @@ class WrapperBuilder(object):
             return self.maps[key]
         except KeyError:
             map_ = Map(map_, interior_horizontal,
-                       (self.bottom_layer, self.top_layer))
+                       (self.bottom_layer, self.top_layer), unroll=unroll)
             self.maps[key] = map_
             return map_
 
