@@ -16,6 +16,7 @@ from pyop2.utils import cached_property
 from pyop2.datatypes import IntType
 from pyop2.op2 import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL, Subset, DecoratedMap
 from pyop2.op2 import READ, INC, WRITE
+from pyop2.base import ComposedMap as CMap
 from loopy.types import OpaqueType
 from functools import reduce
 import itertools
@@ -239,6 +240,32 @@ class Map(object):
         pack = Materialise(*expressions)
         multiindex = tuple(Index(e) for e in pack.shape)
         return Indexed(pack, multiindex), multiindex
+
+
+class ComposedMap(object):
+    variable = False
+    unroll = False
+    layer_bounds = None
+    interior_horizontal = False
+    values = None
+
+    def __init__(self, maps):
+        self.maps = tuple(maps)
+        self.offset = None
+        # FIXME: not right
+        self.shape = maps[0].shape
+
+    def indexed(self, multiindex, layer=None):
+        assert layer is None
+        n, i, f = multiindex
+        # TODO: interior facets
+        assert f.extent == 1
+
+        expr = n
+        for map_ in reversed(self.maps[1:]):
+            expr, _ = map_.indexed((expr, Index(), Index()))
+        expr, (f, i) = self.maps[0].indexed((expr, i, f))
+        return expr, (f, i)
 
 
 class Pack(metaclass=ABCMeta):
@@ -756,11 +783,14 @@ class WrapperBuilder(object):
         try:
             return self.maps[key]
         except KeyError:
-            map_ = Map(map_, interior_horizontal,
-                       (self.bottom_layer, self.top_layer),
-                       self.indexed_variable_entity_masks)
-            self.maps[key] = map_
-            return map_
+            if isinstance(map_, CMap):
+                maps = tuple(self.map_(m) for m in map_.maps)
+                map_ = ComposedMap(maps)
+            else:
+                map_ = Map(map_, interior_horizontal,
+                           (self.bottom_layer, self.top_layer),
+                           self.indexed_variable_entity_masks)
+            return self.maps.setdefault(key, map_)
 
     @property
     def kernel_args(self):
@@ -785,7 +815,8 @@ class WrapperBuilder(object):
         args.extend(self.arguments)
         # maps are refcounted
         for map_ in self.maps.values():
-            args.append(map_.values)
+            if map_.values is not None:
+                args.append(map_.values)
         return tuple(args)
 
     def kernel_call(self):

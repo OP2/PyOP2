@@ -295,8 +295,6 @@ class Arg(object):
         # Check arguments for consistency
         if configuration["type_check"] and not (self._is_global or map is None):
             for j, m in enumerate(map):
-                if m.iterset.total_size > 0 and len(m.values_with_halo) == 0:
-                    raise MapValueError("%s is not initialized." % map)
                 if self._is_mat and m.toset != data.sparsity.dsets[j].set:
                     raise MapValueError(
                         "To set of %s doesn't match the set of %s." % (map, data))
@@ -2740,14 +2738,13 @@ class Map(object):
 
     @validate_type(('iterset', Set, SetTypeError), ('toset', Set, SetTypeError),
                    ('arity', numbers.Integral, ArityTypeError), ('name', str, NameTypeError))
-    def __init__(self, iterset, toset, arity, values=None, name=None, offset=None, parent=None, boundary_masks=None):
+    def __init__(self, iterset, toset, arity, values, name=None, offset=None, parent=None, boundary_masks=None):
         self._iterset = iterset
         self._toset = toset
         self.comm = toset.comm
         self._arity = arity
         self._values = verify_reshape(values, IntType,
-                                      (iterset.total_size, arity),
-                                      allow_none=True)
+                                      (iterset.total_size, arity))
         self.shape = (iterset.total_size, arity)
         self._name = name or "map_%d" % Map._globalcount
         if offset is None or len(offset) == 0:
@@ -3040,6 +3037,47 @@ class DecoratedMap(Map, ObjectCached):
     def iteration_region(self):
         """Returns the type of the iteration to be performed."""
         return self._iteration_region
+
+
+class ComposedMap(object):
+    def __init__(self, *maps):
+        """Representation of map[0](map[1](map[2], ...))"""
+        maps = tuple(maps)
+        self.maps = maps
+        for m1, m2 in zip(maps[:-1], maps[1:]):
+            if m1.iterset != m2.toset:
+                raise ValueError("m2 o m1 is not valid")
+        self.iterset = maps[-1].iterset
+        self.toset = maps[0].toset
+        self.arity = np.prod([m.arity for m in maps], dtype=int)
+        self.shape = (self.iterset.total_size, self.arity)
+        # TODO: Must all maps have the same MPI communicator?
+        # TODO: is this the right communicator?
+        self.comm = maps[0].comm
+        # TODO: extruded offsets
+        self.offset = None
+        self.dtype = maps[0].dtype
+
+    @cached_property
+    def _kernel_args_(self):
+        return tuple(itertools.chain(*(m._kernel_args_ for m in self.maps)))
+
+    @cached_property
+    def _argtypes_(self):
+        return tuple(itertools.chain(*(m._argtypes_ for m in self.maps)))
+
+    @cached_property
+    def _wrapper_cache_key_(self):
+        return (type(self), tuple(m._wrapper_cache_key_ for m in self.maps))
+
+    def __iter__(self):
+        yield self
+
+    def __len__(self):
+        return 1
+
+    def __str__(self):
+        return " o ".join(str(m) for m in reversed(self.maps))
 
 
 class MixedMap(Map, ObjectCached):
