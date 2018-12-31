@@ -721,6 +721,8 @@ def get_viennacl_kernel(kernel, argtypes, comm):
                             for arg in args])})
         {
 
+            cl_int ocl_err;
+
 
             // viennacl vector declarations
             % for arg in args:
@@ -766,7 +768,8 @@ def get_viennacl_kernel(kernel, argtypes, comm):
             cl_kernel cl_knl = viennacl_kernel.handle().get();
             clRetainKernel(cl_knl);
             return cl_knl;
-        }''')
+        }
+        ''')
 
     # remove the whitespaces for pretty printing
     import re
@@ -916,6 +919,8 @@ def generate_viennacl_code(kernel):
             #include "viennacl/ocl/backend.hpp"
             #include "viennacl/vector.hpp"
             #include "viennacl/backend/memory.hpp"
+            #include "viennacl/ocl/error.hpp"
+
             #define TIME_DIFF(t2, t1) ((t2).tv_sec - (t1).tv_sec + ((t2).tv_usec - (t1).tv_usec)*1e-6)
 
             using namespace std;
@@ -930,9 +935,6 @@ def generate_viennacl_code(kernel):
                         str(arg.get_arg_decl(ast_builder))[:-1]
                         for arg in args])})
             {
-            #if defined(PETSC_HAVE_CUDA)
-            cout << "Halla hu!\n";
-            #endif
                 if(end == start)
                 {
                     // no need to go any further
@@ -942,6 +944,7 @@ def generate_viennacl_code(kernel):
                 struct timeval time_compute_start, time_compute_end,
                 time_init_start, time_init_end, time_wrapup_start,
                 time_wrapup_end;
+                cl_int ocl_err;
 
                  gettimeofday(&time_init_start, NULL);
 
@@ -966,20 +969,24 @@ def generate_viennacl_code(kernel):
                         arg.dtype.is_integral()][0].name}_viennacl->handle().opencl_handle().context();
 
 
-
                 // set the kernel args which are changing
                 % for i, arg in enumerate(args):
                 % if isinstance(arg, lp.ValueArg):
 
-                clSetKernelArg(cl_knl, ${i}, ${arg.dtype.itemsize}, &${arg.name});
+                ocl_err = clSetKernelArg(cl_knl, ${i}, ${arg.dtype.itemsize}, &${arg.name});
+                VIENNACL_ERR_CHECK(ocl_err);
 
                 % elif isinstance(arg, lp.ArrayArg):
                 % if arg.dtype.is_integral():
-                clSetKernelArg(cl_knl, ${i}, sizeof(${arg.name}), &${arg.name});
+                ocl_err = clSetKernelArg(cl_knl, ${i}, sizeof(${arg.name}), &${arg.name});
+                VIENNACL_ERR_CHECK(ocl_err);
+
 
                 % else:
-                clSetKernelArg(cl_knl, ${i}, sizeof(PetscScalar),
-                        &(${arg.name}_viennacl->handle().opencl_handle()));
+                ocl_err = clSetKernelArg(cl_knl, ${i}, sizeof(PetscScalar),
+                        &(${arg.name}_viennacl->handle().opencl_handle().get()));
+                VIENNACL_ERR_CHECK(ocl_err);
+
                 % endif
                 % else:
                     <% raise RuntimeError("Unknown type of arg.") %>
@@ -1003,20 +1010,21 @@ def generate_viennacl_code(kernel):
                 clFinish(queue);
 
                 gettimeofday(&time_init_end, NULL);
-                // cout << "${kernel_name}: init time: " << (
-                //         TIME_DIFF(time_init_end, time_init_start)) << endl;
+                cout << "${kernel_name}: init time: " << (
+                        TIME_DIFF(time_init_end, time_init_start)) << endl;
 
                 gettimeofday(&time_compute_start, NULL);
 
                 // enqueueing the kernel
-                clEnqueueNDRangeKernel(queue, cl_knl, ${len(lsize)}, NULL,
+                ocl_err = clEnqueueNDRangeKernel(queue, cl_knl, ${len(lsize)}, NULL,
                         gwg_size, lwg_size, 0, NULL, NULL);
+                VIENNACL_ERR_CHECK(ocl_err);
 
                 clFinish(queue);
 
                 gettimeofday(&time_compute_end, NULL);
 
-                % if kernel_name == 'wrap_form_cell_integral_otherwise':
+                % if kernel_name == 'wrap_form0_cell_integral_otherwise':
                 cout << "${kernel_name}: compute time: " << (
                         TIME_DIFF(time_compute_end, time_compute_start)) << endl;
                 % endif
