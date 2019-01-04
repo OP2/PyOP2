@@ -2,6 +2,7 @@ import ctypes
 import numpy
 
 import loopy
+import loopy.options
 import islpy as isl
 import pymbolic.primitives as pym
 
@@ -27,6 +28,7 @@ from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
                                           Symbol, Zero, Sum, Product)
 from pyop2.codegen.representation import (PackInst, UnpackInst, KernelInst)
 from pytools import ImmutableRecord
+loopy.options.ALLOW_TERMINAL_COLORS = False
 
 
 class Bag(object):
@@ -499,6 +501,525 @@ def argtypes(kernel):
     return args
 
 
+def map_to_viennacl_vector(arg_handle, map_to_transfer):
+    import re
+
+    c_code_str = r"""#include "petsc.h"
+    #include "petscviennacl.h"
+    #include <CL/cl.h>
+
+    using namespace std;
+
+    extern "C" cl_mem int_array_to_viennacl_vector(int * __restrict__ map_array, const int map_size, Vec arg)
+    {
+        viennacl::vector<PetscScalar> *arg_viennacl;
+        VecViennaCLGetArrayReadWrite(arg, &arg_viennacl);
+
+        viennacl::ocl::context ctx = arg_viennacl->handle().opencl_handle().context();
+
+        cl_mem map_opencl = clCreateBuffer(ctx.handle().get(), CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, map_size*sizeof(cl_int), map_array, NULL);
+
+        VecViennaCLRestoreArrayReadWrite(arg, &arg_viennacl);
+        return map_opencl;
+    }
+    """
+
+    # remove the whitespaces for pretty printing
+    code_to_compile = re.sub("\\n    ", "\n", c_code_str)
+
+    # If we weren't in the cache we /must/ have arguments
+    from pyop2.utils import get_petsc_dir
+    import coffee.system
+    from pyop2.sequential import JITModule
+    from pyop2 import compilation
+    import os
+    import ctypes
+    import numpy as np
+
+    compiler = coffee.system.compiler
+    extension = "cpp"
+    cppargs = JITModule._cppargs
+    cppargs += ["-I%s/include" % d for d in get_petsc_dir()] + \
+               ["-I%s" % os.path.abspath(os.path.dirname(__file__))]
+    if compiler:
+        cppargs += [compiler[coffee.system.isa['inst_set']]]
+    ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
+             ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()] + \
+             ["-lpetsc", "-lm"]
+    fun = compilation.load(code_to_compile,
+                                 extension,
+                                 'int_array_to_viennacl_vector',
+                                 cppargs=cppargs,
+                                 ldargs=ldargs,
+                                 argtypes=(ctypes.c_void_p, ctypes.c_int,
+                                     ctypes.c_void_p),
+                                 restype=ctypes.c_void_p,
+                                 compiler=compiler.get('name'),
+                                 comm=None)
+    map_ocl = fun(map_to_transfer._kernel_args_[0],
+            np.int32(np.product(map_to_transfer.shape)), arg_handle)
+
+    return map_ocl
+
+
+def get_cl_context(kernel, argtypes, comm):
+    c_code_str = (
+            r"""
+            #include <CL/cl.h>
+
+            #include "petsc.h"
+            #include "petscvec.h"
+            #include "petscviennacl.h"
+
+            extern "C" cl_context get_cl_context(Vec arg) {
+
+                const viennacl::vector<PetscScalar> *arg_viennacl;
+                VecViennaCLGetArrayRead(arg, &arg_viennacl);
+
+                cl_context ctx =
+                        arg_viennacl->handle().opencl_handle().context().handle().get();
+
+                VecViennaCLRestoreArrayRead(arg, &arg_viennacl);
+
+                return ctx;
+            }
+            """
+            )
+
+    for i, arg in enumerate(kernel.args):
+        if isinstance(arg, loopy.ArrayArg) and not (
+                arg.dtype.is_integral()):
+            arg_pos = i
+            break
+
+    # remove the whitespaces for pretty printing
+    import re
+    code_to_compile = re.sub("\\n        ", "\n", c_code_str)
+
+    # If we weren't in the cache we /must/ have arguments
+    from pyop2.utils import get_petsc_dir
+    import coffee.system
+    from pyop2.sequential import JITModule
+    from pyop2 import compilation
+    import os
+    import ctypes
+
+    compiler = coffee.system.compiler
+    extension = "cpp"
+    cppargs = JITModule._cppargs
+    cppargs += ["-I%s/include" % d for d in get_petsc_dir()] + \
+               ["-I%s" % os.path.abspath(os.path.dirname(__file__))]
+    if compiler:
+        cppargs += [compiler[coffee.system.isa['inst_set']]]
+    ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
+             ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()] + \
+             ["-lpetsc", "-lm"]
+    fun = compilation.load(code_to_compile,
+            extension,
+            'get_cl_context',
+            cppargs=cppargs,
+            ldargs=ldargs,
+            argtypes=(argtypes[arg_pos], ),
+            restype=ctypes.c_void_p,
+            compiler=compiler.get('name'),
+            comm=comm)
+
+    return fun
+
+
+def get_viennacl_kernel(kernel, argtypes, comm):
+    kernel = transform_for_opencl(kernel)
+    from mako.template import Template
+    import pyopencl as cl
+    ctx = cl.create_some_context()
+    # TODO: somehow pull the device from the petsc vec for the preprocess
+    # checks.
+    kernel = kernel.copy(
+            target=loopy.PyOpenCLTarget(ctx.devices[0]))
+
+    if False and kernel.name == 'wrap_form_cell_integral_otherwise':
+        print(kernel)
+
+    if False and kernel.name == 'wrap_form0_cell_integral_otherwise':
+        print(kernel)
+
+    lsize, gsize = get_grid_sizes(kernel)
+    if not lsize:
+        # lsize has not been set => run serially on a GPU
+        # both gsize and lsize should be 1
+        lsize = (1, )
+        assert not gsize
+        gsize = (1, )
+    else:
+        # if lsize if set then currently assuming that the parallelization is
+        # always over the number of elements.
+        gsize = ('(end-start)', )
+
+    c_code_str = (
+        r'''
+        <%! import loopy as lp %>
+        #include <CL/cl.h>
+        #include "petsc.h"
+        #include "petscvec.h"
+        #include "petscviennacl.h"
+        #include "viennacl/ocl/backend.hpp"
+        #include "viennacl/vector.hpp"
+        #include "viennacl/backend/memory.hpp"
+        #include <cstdlib>
+        // #include <iostream>
+
+        using namespace std;
+
+        char kernel_source[] = "${kernel_src}";
+        extern "C" cl_kernel ${kernel_name}_vcl_knl_extractor(${", ".join(
+                            [('Vec ' + arg.name)  if isinstance(arg,
+                            lp.ArrayArg) and not arg.dtype.is_integral() else
+                            ('cl_mem ' + arg.name + ', const int ' +
+                            arg.name + '_size') if isinstance(arg,
+                            lp.ArrayArg) and arg.dtype.is_integral() else
+                            str(arg.get_arg_decl(ast_builder))[:-1]
+                            for arg in args])})
+        {
+
+            cl_int ocl_err;
+
+
+            // viennacl vector declarations
+            % for arg in args:
+            % if isinstance(arg, lp.ArrayArg) and not arg.dtype.is_integral():
+            viennacl::vector<PetscScalar> *${arg.name}_viennacl;
+            % endif
+            % endfor
+
+            // getting the array from the petsc vecs
+            % for arg in args:
+            % if isinstance(arg, lp.ArrayArg) and not arg.dtype.is_integral():
+            VecViennaCLGetArrayReadWrite(${arg.name}, &${arg.name}_viennacl);
+            % endif
+            % endfor
+
+
+            // defining the context
+            viennacl::ocl::context ctx =
+                    ${[arg for arg in args if isinstance(arg,
+                    lp.ArrayArg) and not
+                    arg.dtype.is_integral()][0].name}_viennacl->handle().opencl_handle().context();
+
+            // declaring the int arrays(if any..)
+            % for arg in args:
+            % if isinstance(arg, lp.ArrayArg) and arg.dtype.is_integral():
+            viennacl::vector<cl_int> ${arg.name}_viennacl(${arg.name}, ${
+                    arg.name}_size);
+            % endif
+            % endfor
+
+            viennacl::ocl::program & my_prog =
+                        ctx.add_program(kernel_source,
+                        "kernel_program_${kernel_name}");
+            viennacl::ocl::kernel & viennacl_kernel =
+                    my_prog.get_kernel("${kernel_name}");
+
+            % for arg in args:
+            % if isinstance(arg, lp.ArrayArg) and not arg.dtype.is_integral():
+            VecViennaCLRestoreArrayReadWrite(${arg.name}, &${arg.name}_viennacl);
+            % endif
+            % endfor
+
+            cl_kernel cl_knl = viennacl_kernel.handle().get();
+            clRetainKernel(cl_knl);
+            return cl_knl;
+        }
+        ''')
+
+    # remove the whitespaces for pretty printing
+    import re
+    c_code = Template(re.sub("\\n        ", "\n", c_code_str))
+    kernel_src = loopy.generate_code_v2(kernel).device_code().replace(
+            '\n', '\\n"\n"')
+    print(kernel_src)
+    code_to_compile = c_code.render(
+            kernel_src=kernel_src,
+            kernel_name=kernel.name,
+            ast_builder=kernel.target.get_device_ast_builder(),
+            args=kernel.args)
+
+    # If we weren't in the cache we /must/ have arguments
+    from pyop2.utils import get_petsc_dir
+    import coffee.system
+    from pyop2.sequential import JITModule
+    from pyop2 import compilation
+    import os
+    import ctypes
+
+    compiler = coffee.system.compiler
+    extension = "cpp"
+    cppargs = JITModule._cppargs
+    cppargs += ["-I%s/include" % d for d in get_petsc_dir()] + \
+               ["-I%s" % os.path.abspath(os.path.dirname(__file__))]
+    if compiler:
+        cppargs += [compiler[coffee.system.isa['inst_set']]]
+    ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
+             ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()] + \
+             ["-lpetsc", "-lm"]
+    fun = compilation.load(code_to_compile,
+            extension,
+            kernel.name+'_vcl_knl_extractor',
+            cppargs=cppargs,
+            ldargs=ldargs,
+            argtypes=argtypes,
+            restype=ctypes.c_void_p,
+            compiler=compiler.get('name'),
+            comm=comm)
+    return fun
+
+
+def get_grid_sizes(kernel):
+    parameters = {}
+    for arg in kernel.args:
+        if isinstance(arg, loopy.ValueArg) and arg.approximately is not None:
+            parameters[arg.name] = arg.approximately
+
+    glens, llens = kernel.get_grid_size_upper_bounds_as_exprs()
+
+    from pymbolic import evaluate
+    from pymbolic.mapper.evaluator import UnknownVariableError
+    try:
+        glens = evaluate(glens, parameters)
+        llens = evaluate(llens, parameters)
+    except UnknownVariableError as name:
+        from warnings import warn
+        warn("could not check axis bounds because no value "
+                "for variable '%s' was passed to check_kernels()"
+                % name)
+
+    return llens, glens
+
+
+def transform_for_opencl(kernel):
+    """
+    Performs transformations on kernels.
+    """
+
+    def insn_needs_atomic(insn):
+        # TODO: assumes that the assignee is always a subscript
+        assignee_name = insn.assignee.aggregate.name
+        return (
+                assignee_name in insn.read_dependency_names() and
+                assignee_name not in kernel.temporary_variables)
+
+    new_insns = []
+    args_marked_for_atomic = set()
+    for insn in kernel.instructions:
+        if ('pyop2_assign' in insn.tags) or (
+                'tsfc_return_accumulate' in insn.tags):
+
+            if insn_needs_atomic(insn):
+                atomicity = (loopy.AtomicUpdate(insn.assignee.aggregate.name), )
+                insn = insn.copy(atomicity=atomicity)
+                args_marked_for_atomic |= set([insn.assignee.aggregate.name])
+
+        new_insns.append(insn)
+
+    new_args = []
+    for arg in kernel.args:
+        if arg.name in args_marked_for_atomic:
+            new_args.append(arg.copy(for_atomic=True))
+        else:
+            new_args.append(arg)
+
+    kernel = kernel.copy(instructions=new_insns,
+            args=new_args)
+
+    # These numbers '57' and '128' are very specific to my problem.
+    # Need to find a generalized way of fixing these numbers.
+    if kernel.name in ['wrap_zero', 'wrap_copy']:
+        kernel = loopy.split_iname(kernel, "n", 57, inner_tag="l.0",
+                outer_tag="g.0")
+    else:
+
+        LOCAL_SIZE = 128
+        kernel = loopy.split_iname(kernel, "n", LOCAL_SIZE, inner_tag="l.0",
+                outer_tag="g.0")
+
+    return kernel
+
+
+def generate_viennacl_code(kernel):
+    kernel = transform_for_opencl(kernel)
+    import pyopencl as cl
+    import re
+    from mako.template import Template
+    lsize, gsize = get_grid_sizes(kernel)
+    if not lsize:
+        # lsize has not been set => run serially on a GPU
+        # both gsize and lsize should be 1
+        lsize = (1, )
+        assert not gsize
+        gsize = (1, )
+    else:
+        # if lsize if set then currently assuming that the parallelization is
+        # always over the number of elements.
+        gsize = ('(end-start)', )
+
+    ctx = cl.create_some_context()
+    # TODO: somehow pull the device from the petsc vec for the preprocess
+    # checks.
+    kernel = kernel.copy(
+            target=loopy.PyOpenCLTarget(ctx.devices[0]))
+
+    c_code_str = r'''#include <CL/cl.hpp>
+            #include "petsc.h"
+            #include "petscvec.h"
+            #include "petscviennacl.h"
+            #include <iostream>
+            #include <sys/time.h>
+            #include <cstring>
+
+            <%! import loopy as lp %>
+
+            // ViennaCL Headers
+            #include "viennacl/ocl/backend.hpp"
+            #include "viennacl/vector.hpp"
+            #include "viennacl/backend/memory.hpp"
+            #include "viennacl/ocl/error.hpp"
+
+            #define TIME_DIFF(t2, t1) ((t2).tv_sec - (t1).tv_sec + ((t2).tv_usec - (t1).tv_usec)*1e-6)
+
+            using namespace std;
+
+            extern "C" void ${kernel_name}(cl_kernel cl_knl,
+                    ${", ".join(
+                        [('Vec ' + arg.name)  if isinstance(arg,
+                        lp.ArrayArg) and not arg.dtype.is_integral() else
+                        ('cl_mem ' + arg.name + ', const int ' +
+                        arg.name + '_size') if isinstance(arg,
+                        lp.ArrayArg) and arg.dtype.is_integral() else
+                        str(arg.get_arg_decl(ast_builder))[:-1]
+                        for arg in args])})
+            {
+                if(end == start)
+                {
+                    // no need to go any further
+                    return;
+                }
+
+                struct timeval time_compute_start, time_compute_end,
+                time_init_start, time_init_end, time_wrapup_start,
+                time_wrapup_end;
+                cl_int ocl_err;
+
+                 gettimeofday(&time_init_start, NULL);
+
+                // viennacl vector declarations
+                % for arg in args:
+                % if isinstance(arg, lp.ArrayArg) and not arg.dtype.is_integral():
+                viennacl::vector<PetscScalar> *${arg.name}_viennacl;
+                % endif
+                % endfor
+
+                // getting the array from the petsc vecs
+                % for arg in args:
+                % if isinstance(arg, lp.ArrayArg) and not arg.dtype.is_integral():
+                VecViennaCLGetArrayReadWrite(${arg.name}, &${arg.name}_viennacl);
+                % endif
+                % endfor
+
+                // defining the context
+                viennacl::ocl::context ctx =
+                        ${[arg for arg in args if isinstance(arg,
+                        lp.ArrayArg) and not
+                        arg.dtype.is_integral()][0].name}_viennacl->handle().opencl_handle().context();
+
+
+                // set the kernel args which are changing
+                % for i, arg in enumerate(args):
+                % if isinstance(arg, lp.ValueArg):
+
+                ocl_err = clSetKernelArg(cl_knl, ${i}, ${arg.dtype.itemsize}, &${arg.name});
+                VIENNACL_ERR_CHECK(ocl_err);
+
+                % elif isinstance(arg, lp.ArrayArg):
+                % if arg.dtype.is_integral():
+                ocl_err = clSetKernelArg(cl_knl, ${i}, sizeof(${arg.name}), &${arg.name});
+                VIENNACL_ERR_CHECK(ocl_err);
+
+
+                % else:
+                ocl_err = clSetKernelArg(cl_knl, ${i}, sizeof(PetscScalar),
+                        &(${arg.name}_viennacl->handle().opencl_handle().get()));
+                VIENNACL_ERR_CHECK(ocl_err);
+
+                % endif
+                % else:
+                    <% raise RuntimeError("Unknown type of arg.") %>
+                % endif
+                % endfor
+
+
+                // getting the queue
+                cl_command_queue queue= ctx.get_queue().handle().get();
+
+                // set work group sizes
+                size_t lwg_size[${len(lsize)}];
+                size_t gwg_size[${len(lsize)}];
+                % for i, ls in enumerate(lsize):
+                lwg_size[${i}] = ${lsize[i]};
+                % endfor
+
+                % for i, ls in enumerate(gsize):
+                gwg_size[${i}] = ${gsize[i]};
+                % endfor
+                clFinish(queue);
+
+                gettimeofday(&time_init_end, NULL);
+                cout << "${kernel_name}: init time: " << (
+                        TIME_DIFF(time_init_end, time_init_start)) << endl;
+
+                gettimeofday(&time_compute_start, NULL);
+
+                // enqueueing the kernel
+                ocl_err = clEnqueueNDRangeKernel(queue, cl_knl, ${len(lsize)}, NULL,
+                        gwg_size, lwg_size, 0, NULL, NULL);
+                VIENNACL_ERR_CHECK(ocl_err);
+
+                clFinish(queue);
+
+                gettimeofday(&time_compute_end, NULL);
+
+                % if kernel_name == 'wrap_form0_cell_integral_otherwise':
+                cout << "${kernel_name}: compute time: " << (
+                        TIME_DIFF(time_compute_end, time_compute_start)) << endl;
+                % endif
+
+                // restoring the arrays to the petsc vecs
+                % for arg in args:
+                % if isinstance(arg, lp.ArrayArg) and not arg.dtype.is_integral():
+                VecViennaCLRestoreArrayReadWrite(${arg.name}, &${arg.name}_viennacl);
+                % endif
+                % endfor
+            }
+            '''
+
+    # remove the whitespaces for pretty printing
+    c_code_str = re.sub("\\n            ", "\n", c_code_str)
+
+    c_code = Template(c_code_str)
+
+    kernel_src = loopy.generate_code_v2(kernel).device_code().replace('\n',
+            '\\n"\n"')
+
+    # TODO: Naming!!
+    krr = c_code.render(
+        kernel_src=kernel_src,
+        kernel_name=kernel.name,
+        ast_builder=kernel.target.get_device_ast_builder(),
+        args=kernel.args,
+        lsize=lsize,
+        gsize=gsize)
+
+    return krr
+
+
 @singledispatch
 def statement(expr, context):
     raise AssertionError("Unhandled statement type '%s'" % type(expr))
@@ -529,10 +1050,13 @@ def statement_assign(expr, context):
 
     id, depends_on = context.instruction_dependencies[expr]
     predicates = frozenset(context.conditions)
-    return loopy.Assignment(lvalue, rvalue, within_inames=within_inames,
+    insn = loopy.Assignment(lvalue, rvalue, within_inames=within_inames,
                             predicates=predicates,
                             id=id,
-                            depends_on=depends_on, depends_on_is_final=True)
+                            depends_on=depends_on, depends_on_is_final=True,
+                            tags=frozenset(['pyop2_assign']))
+
+    return insn
 
 
 @statement.register(FunctionCall)

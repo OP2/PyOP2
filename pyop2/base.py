@@ -314,6 +314,11 @@ class Arg(object):
 
     @cached_property
     def _kernel_args_(self):
+        use_opencl = 1
+        if use_opencl:
+            with self.data.vec as v:
+                return (v.handle, )
+
         return self.data._kernel_args_
 
     @cached_property
@@ -1886,6 +1891,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
 
         return ret
 
+
     def _iop(self, other, op):
         name = "iop_%s" % op.__name__
 
@@ -2764,6 +2770,7 @@ class Map(object):
         # the application of strong boundary conditions
         self.boundary_masks = boundary_masks
         Map._globalcount += 1
+        self.viennacl_handle = None
 
     class MapMask(namedtuple("_MapMask_", ["section", "indices", "facet_points"])):
 
@@ -3780,6 +3787,11 @@ class Kernel(Cached):
         if self._initialized:
             return
         self._name = name or "pyop2_kernel_%d" % Kernel._globalcount
+
+        use_opencl = 1
+        if use_opencl:
+            cpp = True
+
         self._cpp = cpp
         Kernel._globalcount += 1
         # Record used optimisations
@@ -4071,7 +4083,12 @@ class ParLoop(LazyComputation):
             # data back from the device if necessary.
             # In fact we can't access the properties directly because
             # that forces an infinite loop.
-            glob._data += tmp._data
+            use_opencl = 1
+            if use_opencl:
+                with tmp.vec as v:
+                    glob._data += v.array_r
+            else:
+                glob._data += tmp._data
 
     @collective
     def update_arg_data_state(self):
@@ -4085,6 +4102,8 @@ class ParLoop(LazyComputation):
                 state = {WRITE: Mat.INSERT_VALUES,
                          INC: Mat.ADD_VALUES}[arg.access]
                 arg.data.assembly_state = state
+            if arg._is_global and arg.access is not READ:
+                pass
 
     @cached_property
     def dat_args(self):
