@@ -338,6 +338,8 @@ class Dat(base.Dat):
             data = self._data[:size[0]]
             use_opencl = 1
             if use_opencl:
+                # FIXME: (kk) This is highly discouraged!
+                # This is backend specific
                 self._vec = PETSc.Vec().create(self.comm)
                 self._vec.setSizes(size=size, bsize=self.cdim)
                 self._vec.setType('viennacl')

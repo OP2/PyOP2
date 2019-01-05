@@ -31,7 +31,7 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
 # OF THE POSSIBILITY OF SUCH DAMAGE.
 
-"""OP2 sequential backend."""
+"""OP2 GPU backend."""
 
 import os
 from copy import deepcopy as dcopy
@@ -59,6 +59,9 @@ from pyop2.profiling import timed_region
 from pyop2.utils import cached_property, get_petsc_dir
 
 import loopy
+from pyop2.codegen.rep2loopy import get_viennacl_kernel
+import pyopencl as cl
+import coffee.system
 
 
 class JITModule(base.JITModule):
@@ -83,6 +86,9 @@ class JITModule(base.JITModule):
            otherwise they (and the :class:`~.Dat`\s, :class:`~.Map`\s
            and :class:`~.Mat`\s they reference) will never be collected.
         """
+        print("Just called the GPU backend. Exiting now, feel free to remove "
+                "this line later.")
+        1/0
         # Return early if we were in the cache.
         if self._initialized:
             return
@@ -113,7 +119,7 @@ class JITModule(base.JITModule):
     def code_to_compile(self):
 
         from pyop2.codegen.builder import WrapperBuilder
-        from pyop2.codegen.rep2loopy import generate
+        from pyop2.codegen.rep2loopy import generate, generate_viennacl_code
 
         builder = WrapperBuilder(iterset=self._iterset, iteration_region=self._iteration_region, pass_layer_to_kernel=self._pass_layer_arg)
         for arg in self._args:
@@ -121,14 +127,12 @@ class JITModule(base.JITModule):
         builder.set_kernel(self._kernel)
 
         wrapper = generate(builder)
-        code = loopy.generate_code_v2(wrapper)
 
-        if self._kernel._cpp:
-            from loopy.codegen.result import process_preambles
-            preamble = "".join(process_preambles(getattr(code, "device_preambles", [])))
-            device_code = "\n\n".join(str(dp.ast) for dp in code.device_programs)
-            return preamble + "\nextern \"C\" {\n" + device_code + "\n}\n"
-        return code.device_code()
+        self.viennacl_kernel_getter_func = get_viennacl_kernel(wrapper,
+                self._argtypes, self.comm)
+        code = generate_viennacl_code(wrapper)
+        # print(code)
+        return code
 
     @collective
     def compile(self):
@@ -149,17 +153,46 @@ class JITModule(base.JITModule):
                  ["-lpetsc", "-lm"] + self._libraries
         ldargs += self._kernel._ldargs
 
-        self._fun = compilation.load(self,
-                                     extension,
-                                     self._wrapper_name,
-                                     cppargs=cppargs,
-                                     ldargs=ldargs,
-                                     restype=ctypes.c_int,
-                                     compiler=compiler,
-                                     comm=self.comm)
+        extension = "cpp"
+        code_to_compile = self.code_to_compile
+
+        class TempFunc(object):
+            # FIXME: Needs a way better name.(Please!)
+            def __init__(self, func_to_be_wrapped, viennacl_getter_func):
+                self.func_to_be_wrapped = func_to_be_wrapped
+                self.viennacl_kernel_getter_func = viennacl_getter_func
+                self.viennacl_kernel = None
+
+            def __call__(self, start, end, *arglist):
+                if self.viennacl_kernel:
+                    return self.func_to_be_wrapped(
+                            self.viennacl_kernel.int_ptr, start, end,
+                            *arglist)
+                else:
+                    self.viennacl_kernel = cl.Kernel.from_int_ptr(
+                            self.viennacl_kernel_getter_func(start, end,
+                                *arglist))
+
+                    return self.func_to_be_wrapped(
+                            self.viennacl_kernel.int_ptr, start, end,
+                            *arglist)
+
+        random_func = compilation.load(code_to_compile,
+                extension,
+                self._wrapper_name,
+                cppargs=cppargs,
+                ldargs=ldargs,
+                argtypes=(
+                    (ctypes.c_void_p, ) +
+                    self._argtypes),
+                restype=ctypes.c_int,
+                compiler=compiler.get('name'),
+                comm=self.comm)
+
+        self._fun = TempFunc(random_func, self.viennacl_kernel_getter_func)
         # Blow away everything we don't need any more
         del self._args
-        del self._kernel
+        # del self._kernel
         del self._iterset
 
     @cached_property
@@ -176,14 +209,18 @@ class JITModule(base.JITModule):
                 for k, t in zip(map_._kernel_args_, map_._argtypes_):
                     if k in seen:
                         continue
-                    argtypes += (t,)
+                    argtypes += (ctypes.c_void_p, ctypes.c_int)
                     seen.add(k)
+
         return argtypes
 
 
 class ParLoop(petsc_base.ParLoop):
 
     def prepare_arglist(self, iterset, *args):
+
+        from pyop2.codegen.rep2loopy import map_to_viennacl_vector
+
         arglist = iterset._kernel_args_
         for arg in args:
             arglist += arg._kernel_args_
@@ -194,7 +231,13 @@ class ParLoop(petsc_base.ParLoop):
                 for k in map_._kernel_args_:
                     if k in seen:
                         continue
-                    arglist += (k,)
+                    if not map_.viennacl_handle:
+                        map_.viennacl_handle = (
+                                map_to_viennacl_vector(arg._kernel_args_[0],
+                                    map_))
+                    import numpy as np
+                    arglist += (map_.viennacl_handle,
+                            np.int32(np.product(map_.shape)))
                     seen.add(k)
         return arglist
 
