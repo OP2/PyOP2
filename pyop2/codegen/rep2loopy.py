@@ -458,7 +458,6 @@ def generate(builder, wrapper_name=None, restart_counter=True):
     # register kernel
     kernel = builder.kernel
     headers = set(kernel._headers)
-    headers = headers | set(["#include <math.h>"])
     preamble = "\n".join(sorted(headers))
 
     from coffee.base import Node
@@ -507,19 +506,21 @@ def map_to_viennacl_vector(arg_handle, map_to_transfer):
     c_code_str = r"""#include "petsc.h"
     #include "petscviennacl.h"
     #include <CL/cl.h>
+    #include <iostream>
 
     using namespace std;
 
     extern "C" cl_mem int_array_to_viennacl_vector(int * __restrict__ map_array, const int map_size, Vec arg)
     {
-        viennacl::vector<PetscScalar> *arg_viennacl;
-        VecViennaCLGetArrayReadWrite(arg, &arg_viennacl);
+        const viennacl::vector<PetscScalar> *arg_viennacl;
+        VecViennaCLGetArrayRead(arg, &arg_viennacl);
 
         viennacl::ocl::context ctx = arg_viennacl->handle().opencl_handle().context();
 
         cl_mem map_opencl = clCreateBuffer(ctx.handle().get(), CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, map_size*sizeof(cl_int), map_array, NULL);
 
-        VecViennaCLRestoreArrayReadWrite(arg, &arg_viennacl);
+
+        VecViennaCLRestoreArrayRead(arg, &arg_viennacl);
         return map_opencl;
     }
     """
@@ -543,6 +544,8 @@ def map_to_viennacl_vector(arg_handle, map_to_transfer):
                ["-I%s" % os.path.abspath(os.path.dirname(__file__))]
     if compiler:
         cppargs += [compiler[coffee.system.isa['inst_set']]]
+
+    cppargs += ["-DVIENNACL_WITH_OPENCL"]
     ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
              ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()] + \
              ["-lpetsc", "-lm"]
@@ -551,11 +554,13 @@ def map_to_viennacl_vector(arg_handle, map_to_transfer):
                                  'int_array_to_viennacl_vector',
                                  cppargs=cppargs,
                                  ldargs=ldargs,
-                                 argtypes=(ctypes.c_void_p, ctypes.c_int,
-                                     ctypes.c_void_p),
+                                 # argtypes=(ctypes.c_void_p, ctypes.c_int,
+                                 #     ctypes.c_void_p),
                                  restype=ctypes.c_void_p,
                                  compiler=compiler.get('name'),
                                  comm=None)
+    fun.argtypes = (ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p)
+
     map_ocl = fun(map_to_transfer._kernel_args_[0],
             np.int32(np.product(map_to_transfer.shape)), arg_handle)
 
@@ -736,7 +741,6 @@ def get_viennacl_kernel(kernel, argtypes, comm):
     c_code = Template(re.sub("\\n        ", "\n", c_code_str))
     kernel_src = loopy.generate_code_v2(kernel).device_code().replace(
             '\n', '\\n"\n"')
-    print(kernel_src)
     code_to_compile = c_code.render(
             kernel_src=kernel_src,
             kernel_name=kernel.name,
@@ -761,15 +765,16 @@ def get_viennacl_kernel(kernel, argtypes, comm):
     ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
              ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()] + \
              ["-lpetsc", "-lm"]
+
     fun = compilation.load(code_to_compile,
             extension,
             kernel.name+'_vcl_knl_extractor',
             cppargs=cppargs,
             ldargs=ldargs,
-            argtypes=argtypes,
             restype=ctypes.c_void_p,
             compiler=compiler.get('name'),
             comm=comm)
+    fun.argtypes = argtypes
     return fun
 
 
@@ -795,10 +800,11 @@ def get_grid_sizes(kernel):
     return llens, glens
 
 
-def transform_for_opencl(kernel):
+def transform_for_opencl(program):
     """
     Performs transformations on kernels.
     """
+    kernel = program.root_kernel
 
     def insn_needs_atomic(insn):
         # TODO: assumes that the assignee is always a subscript
@@ -833,15 +839,16 @@ def transform_for_opencl(kernel):
     # These numbers '57' and '128' are very specific to my problem.
     # Need to find a generalized way of fixing these numbers.
     if kernel.name in ['wrap_zero', 'wrap_copy']:
-        kernel = loopy.split_iname(kernel, "n", 57, inner_tag="l.0",
-                outer_tag="g.0")
+        pass
+        # kernel = loopy.split_iname(kernel, "n", 57, inner_tag="l.0",
+        #         outer_tag="g.0")
     else:
 
         LOCAL_SIZE = 128
         kernel = loopy.split_iname(kernel, "n", LOCAL_SIZE, inner_tag="l.0",
                 outer_tag="g.0")
 
-    return kernel
+    return program.with_root_kernel(kernel)
 
 
 def generate_viennacl_code(kernel):
@@ -867,7 +874,7 @@ def generate_viennacl_code(kernel):
     kernel = kernel.copy(
             target=loopy.PyOpenCLTarget(ctx.devices[0]))
 
-    c_code_str = r'''#include <CL/cl.hpp>
+    c_code_str = r'''#include <CL/cl.h>
             #include "petsc.h"
             #include "petscvec.h"
             #include "petscviennacl.h"
@@ -972,8 +979,8 @@ def generate_viennacl_code(kernel):
                 clFinish(queue);
 
                 gettimeofday(&time_init_end, NULL);
-                cout << "${kernel_name}: init time: " << (
-                        TIME_DIFF(time_init_end, time_init_start)) << endl;
+                // cout << "${kernel_name}: init time: " << (
+                //        TIME_DIFF(time_init_end, time_init_start)) << endl;
 
                 gettimeofday(&time_compute_start, NULL);
 
@@ -986,10 +993,8 @@ def generate_viennacl_code(kernel):
 
                 gettimeofday(&time_compute_end, NULL);
 
-                % if kernel_name == 'wrap_form0_cell_integral_otherwise':
-                cout << "${kernel_name}: compute time: " << (
-                        TIME_DIFF(time_compute_end, time_compute_start)) << endl;
-                % endif
+                // cout << "${kernel_name}: compute time: " << (
+                //        TIME_DIFF(time_compute_end, time_compute_start)) << endl;
 
                 // restoring the arrays to the petsc vecs
                 % for arg in args:

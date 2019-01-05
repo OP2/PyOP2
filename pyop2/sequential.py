@@ -86,9 +86,6 @@ class JITModule(base.JITModule):
            otherwise they (and the :class:`~.Dat`\s, :class:`~.Map`\s
            and :class:`~.Mat`\s they reference) will never be collected.
         """
-        print("Just called the GPU backend. Exiting now, feel free to remove "
-                "this line later.")
-        1/0
         # Return early if we were in the cache.
         if self._initialized:
             return
@@ -129,7 +126,7 @@ class JITModule(base.JITModule):
         wrapper = generate(builder)
 
         self.viennacl_kernel_getter_func = get_viennacl_kernel(wrapper,
-                self._argtypes, self.comm)
+                self.argtypes[1:], self.comm)
         code = generate_viennacl_code(wrapper)
         # print(code)
         return code
@@ -154,7 +151,7 @@ class JITModule(base.JITModule):
         ldargs += self._kernel._ldargs
 
         extension = "cpp"
-        code_to_compile = self.code_to_compile
+        UNNECESSARY_VAR = self.code_to_compile  # noqa
 
         class TempFunc(object):
             # FIXME: Needs a way better name.(Please!)
@@ -177,16 +174,14 @@ class JITModule(base.JITModule):
                             self.viennacl_kernel.int_ptr, start, end,
                             *arglist)
 
-        random_func = compilation.load(code_to_compile,
+        random_func = compilation.load(
+                self,
                 extension,
                 self._wrapper_name,
                 cppargs=cppargs,
                 ldargs=ldargs,
-                argtypes=(
-                    (ctypes.c_void_p, ) +
-                    self._argtypes),
                 restype=ctypes.c_int,
-                compiler=compiler.get('name'),
+                compiler=compiler,
                 comm=self.comm)
 
         self._fun = TempFunc(random_func, self.viennacl_kernel_getter_func)
@@ -198,7 +193,7 @@ class JITModule(base.JITModule):
     @cached_property
     def argtypes(self):
         index_type = as_ctypes(IntType)
-        argtypes = (index_type, index_type)
+        argtypes = (ctypes.c_void_p, index_type, index_type)
         argtypes += self._iterset._argtypes_
         for arg in self._args:
             argtypes += arg._argtypes_
