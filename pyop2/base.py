@@ -314,11 +314,6 @@ class Arg(object):
 
     @cached_property
     def _kernel_args_(self):
-        use_opencl = 1
-        if use_opencl:
-            with self.data.vec as v:
-                return (v.handle, )
-
         return self.data._kernel_args_
 
     @cached_property
@@ -1600,6 +1595,9 @@ class Dat(DataCarrier, _EmptyDataMixin):
 
     @cached_property
     def _kernel_args_(self):
+        with self.vec as v:
+            if v.type == 'seqviennacl':
+                return (v.handle, )
         return (self._data.ctypes.data, )
 
     @cached_property
@@ -3788,10 +3786,6 @@ class Kernel(Cached):
             return
         self._name = name or "pyop2_kernel_%d" % Kernel._globalcount
 
-        use_opencl = 1
-        if use_opencl:
-            cpp = True
-
         self._cpp = cpp
         Kernel._globalcount += 1
         # Record used optimisations
@@ -4083,12 +4077,7 @@ class ParLoop(LazyComputation):
             # data back from the device if necessary.
             # In fact we can't access the properties directly because
             # that forces an infinite loop.
-            use_opencl = 1
-            if use_opencl:
-                with tmp.vec as v:
-                    glob._data += v.array_r
-            else:
-                glob._data += tmp._data
+            glob._data += tmp._data
 
     @collective
     def update_arg_data_state(self):

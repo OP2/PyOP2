@@ -336,16 +336,7 @@ class Dat(base.Dat):
             # global size.
             size = self.dataset.layout_vec.getSizes()
             data = self._data[:size[0]]
-            use_opencl = 1
-            if use_opencl:
-                # FIXME: (kk) This is highly discouraged!
-                # This is backend specific
-                self._vec = PETSc.Vec().create(self.comm)
-                self._vec.setSizes(size=size, bsize=self.cdim)
-                self._vec.setType('viennacl')
-                self._vec.setArray(data)
-            else:
-                self._vec = PETSc.Vec().createWithArray(data, size=size,
+            self._vec = PETSc.Vec().createWithArray(data, size=size,
                                                         bsize=self.cdim,
                                                         comm=self.comm)
         # PETSc Vecs have a state counter and cache norm computations
@@ -468,37 +459,29 @@ class Global(base.Global):
         self._force_evaluation(read=access is not base.WRITE,
                                write=access is not base.READ)
         data = self._data
-        use_opencl = 1
         if not hasattr(self, '_vec'):
             # Can't duplicate layout_vec of dataset, because we then
             # carry around extra unnecessary data.
             # But use getSizes to save an Allreduce in computing the
             # global size.
             size = self.dataset.layout_vec.getSizes()
-            if use_opencl:
-                self._vec = PETSc.Vec().create(self.comm)
-                self._vec.setSizes(size=size, bsize=self.cdim)
-                self._vec.setType('viennacl')
-                self._vec.setArray(data)
+            if self.comm.rank == 0:
+                self._vec = PETSc.Vec().createWithArray(data, size=size,
+                                                        bsize=self.cdim,
+                                                        comm=self.comm)
             else:
-                if self.comm.rank == 0:
-                    self._vec = PETSc.Vec().createWithArray(data, size=size,
-                                                            bsize=self.cdim,
-                                                            comm=self.comm)
-                else:
-                    self._vec = PETSc.Vec().createWithArray(np.empty(0, dtype=self.dtype),
-                                                            size=size,
-                                                            bsize=self.cdim,
-                                                            comm=self.comm)
+                self._vec = PETSc.Vec().createWithArray(np.empty(0, dtype=self.dtype),
+                                                        size=size,
+                                                        bsize=self.cdim,
+                                                        comm=self.comm)
         # PETSc Vecs have a state counter and cache norm computations
         # to return immediately if the state counter is unchanged.
         # Since we've updated the data behind their back, we need to
         # change that state counter.
         self._vec.stateIncrease()
         yield self._vec
-        if not use_opencl:
-            if access is not base.READ:
-                self.comm.Bcast(data, 0)
+        if access is not base.READ:
+            self.comm.Bcast(data, 0)
 
     @property
     @collective

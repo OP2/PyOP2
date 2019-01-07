@@ -836,16 +836,16 @@ def transform_for_opencl(program):
     kernel = kernel.copy(instructions=new_insns,
             args=new_args)
 
-    # These numbers '57' and '128' are very specific to my problem.
+    # These numbers '57' and '64' are very specific to my problem.
     # Need to find a generalized way of fixing these numbers.
+    # These numbers are for problem with 512 x 512 square grid.
     if kernel.name in ['wrap_zero', 'wrap_copy']:
-        pass
         # kernel = loopy.split_iname(kernel, "n", 57, inner_tag="l.0",
         #         outer_tag="g.0")
+        pass
     else:
-
-        LOCAL_SIZE = 128
-        kernel = loopy.split_iname(kernel, "n", LOCAL_SIZE, inner_tag="l.0",
+        _LOCAL_SIZE = 64
+        kernel = loopy.split_iname(kernel, "n", _LOCAL_SIZE, inner_tag="l.0",
                 outer_tag="g.0")
 
     return program.with_root_kernel(kernel)

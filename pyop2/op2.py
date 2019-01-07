@@ -45,6 +45,10 @@ from pyop2.base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL  # noqa: F401
 from pyop2.sequential import Set, ExtrudedSet, MixedSet, Subset, DataSet, MixedDataSet  # noqa: F401
 from pyop2.sequential import Map, MixedMap, DecoratedMap, Sparsity, Halo  # noqa: F401
 from pyop2.sequential import Global, GlobalDataSet        # noqa: F401
+#TODO: [KK] This should pickup classes depending on the backend, so that
+# Firedrake could pickup the correct classes. Or maybe we could even derive new
+# classes calling them SeqDat, GPUDat and calling appropriately from
+# firedrake.
 from pyop2.sequential import Dat, MixedDat, DatView, Mat  # noqa: F401
 
 import loopy

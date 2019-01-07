@@ -37,6 +37,7 @@ import os
 from copy import deepcopy as dcopy
 
 import ctypes
+from contextlib import contextmanager
 
 from pyop2.datatypes import IntType, as_ctypes
 from pyop2 import base
@@ -51,17 +52,88 @@ from pyop2.base import DatView                           # noqa: F401
 from pyop2.base import Kernel                            # noqa: F401
 from pyop2.base import Arg                               # noqa: F401
 from pyop2.petsc_base import DataSet, MixedDataSet       # noqa: F401
-from pyop2.petsc_base import Global, GlobalDataSet       # noqa: F401
-from pyop2.petsc_base import Dat, MixedDat, Mat          # noqa: F401
+from pyop2.petsc_base import GlobalDataSet       # noqa: F401
+from pyop2.petsc_base import Dat as petsc_Dat
+from pyop2.petsc_base import Global as petsc_Global
+from pyop2.petsc_base import PETSc, MixedDat, Mat          # noqa: F401
 from pyop2.exceptions import *  # noqa: F401
 from pyop2.mpi import collective
-from pyop2.profiling import timed_region
+from pyop2.profiling import timed_region, timed_function
 from pyop2.utils import cached_property, get_petsc_dir
 
 import loopy
 from pyop2.codegen.rep2loopy import get_viennacl_kernel
 import pyopencl as cl
 import coffee.system
+
+
+class Dat(petsc_Dat):
+    """
+    Dat for GPU.
+    """
+    @contextmanager
+    def vec_context(self, access):
+        """A context manager for a :class:`PETSc.Vec` from a :class:`Dat`.
+
+        :param access: Access descriptor: READ, WRITE, or RW."""
+
+        assert self.dtype == PETSc.ScalarType, \
+            "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
+        # Getting the Vec needs to ensure we've done all current
+        # necessary computation.
+        self._force_evaluation(read=access is not base.WRITE,
+                               write=access is not base.READ)
+        if not hasattr(self, '_vec'):
+            # Can't duplicate layout_vec of dataset, because we then
+            # carry around extra unnecessary data.
+            # But use getSizes to save an Allreduce in computing the
+            # global size.
+            size = self.dataset.layout_vec.getSizes()
+            data = self._data[:size[0]]
+            self._vec = PETSc.Vec().create(self.comm)
+            self._vec.setSizes(size=size, bsize=self.cdim)
+            self._vec.setType('viennacl')
+            self._vec.setArray(data)
+        # PETSc Vecs have a state counter and cache norm computations
+        # to return immediately if the state counter is unchanged.
+        # Since we've updated the data behind their back, we need to
+        # change that state counter.
+        self._vec.stateIncrease()
+        yield self._vec
+        if access is not base.READ:
+            self.halo_valid = False
+
+
+class Global(petsc_Global):
+    @contextmanager
+    def vec_context(self, access):
+        """A context manager for a :class:`PETSc.Vec` from a :class:`Global`.
+
+        :param access: Access descriptor: READ, WRITE, or RW."""
+
+        assert self.dtype == PETSc.ScalarType, \
+            "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
+        # Getting the Vec needs to ensure we've done all current
+        # necessary computation.
+        self._force_evaluation(read=access is not base.WRITE,
+                               write=access is not base.READ)
+        data = self._data
+        if not hasattr(self, '_vec'):
+            # Can't duplicate layout_vec of dataset, because we then
+            # carry around extra unnecessary data.
+            # But use getSizes to save an Allreduce in computing the
+            # global size.
+            size = self.dataset.layout_vec.getSizes()
+            self._vec = PETSc.Vec().create(self.comm)
+            self._vec.setSizes(size=size, bsize=self.cdim)
+            self._vec.setType('viennacl')
+            self._vec.setArray(data)
+        # PETSc Vecs have a state counter and cache norm computations
+        # to return immediately if the state counter is unchanged.
+        # Since we've updated the data behind their back, we need to
+        # change that state counter.
+        self._vec.stateIncrease()
+        yield self._vec
 
 
 class JITModule(base.JITModule):
@@ -212,6 +284,10 @@ class JITModule(base.JITModule):
 
 class ParLoop(petsc_base.ParLoop):
 
+    def __init__(self, *args, **kwargs):
+        super(ParLoop, self).__init__(*args, **kwargs)
+        self.kernel.cpp = True
+
     def prepare_arglist(self, iterset, *args):
 
         from pyop2.codegen.rep2loopy import map_to_viennacl_vector
@@ -235,6 +311,24 @@ class ParLoop(petsc_base.ParLoop):
                             np.int32(np.product(map_.shape)))
                     seen.add(k)
         return arglist
+
+    @collective
+    @timed_function("ParLoopRednEnd")
+    def reduction_end(self):
+        """End reductions"""
+        for arg in self.global_reduction_args:
+            arg.reduction_end(self.comm)
+        # Finalise global increments
+        for tmp, glob in self._reduced_globals.items():
+            # These can safely access the _data member directly
+            # because lazy evaluation has ensured that any pending
+            # updates to glob happened before this par_loop started
+            # and the reduction_end on the temporary global pulled
+            # data back from the device if necessary.
+            # In fact we can't access the properties directly because
+            # that forces an infinite loop.
+            with tmp.vec as v:
+                glob._data += v.array_r
 
     @cached_property
     def _jitmodule(self):
