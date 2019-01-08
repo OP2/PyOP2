@@ -31,12 +31,13 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
 # OF THE POSSIBILITY OF SUCH DAMAGE.
 
-"""OP2 sequential backend."""
+"""OP2 GPU backend."""
 
 import os
 from copy import deepcopy as dcopy
 
 import ctypes
+from contextlib import contextmanager
 
 from pyop2.datatypes import IntType, as_ctypes
 from pyop2 import base
@@ -51,14 +52,87 @@ from pyop2.base import DatView                           # noqa: F401
 from pyop2.base import Kernel                            # noqa: F401
 from pyop2.base import Arg                               # noqa: F401
 from pyop2.petsc_base import DataSet, MixedDataSet       # noqa: F401
-from pyop2.petsc_base import Global, GlobalDataSet       # noqa: F401
-from pyop2.petsc_base import Dat, MixedDat, Mat          # noqa: F401
+from pyop2.petsc_base import GlobalDataSet       # noqa: F401
+from pyop2.petsc_base import Dat as petsc_Dat
+from pyop2.petsc_base import Global as petsc_Global
+from pyop2.petsc_base import PETSc, MixedDat, Mat          # noqa: F401
 from pyop2.exceptions import *  # noqa: F401
 from pyop2.mpi import collective
-from pyop2.profiling import timed_region
+from pyop2.profiling import timed_region, timed_function
 from pyop2.utils import cached_property, get_petsc_dir
 
 import loopy
+import pyopencl as cl
+import coffee.system
+
+
+class Dat(petsc_Dat):
+    """
+    Dat for GPU.
+    """
+    @contextmanager
+    def vec_context(self, access):
+        """A context manager for a :class:`PETSc.Vec` from a :class:`Dat`.
+
+        :param access: Access descriptor: READ, WRITE, or RW."""
+
+        assert self.dtype == PETSc.ScalarType, \
+            "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
+        # Getting the Vec needs to ensure we've done all current
+        # necessary computation.
+        self._force_evaluation(read=access is not base.WRITE,
+                               write=access is not base.READ)
+        if not hasattr(self, '_vec'):
+            # Can't duplicate layout_vec of dataset, because we then
+            # carry around extra unnecessary data.
+            # But use getSizes to save an Allreduce in computing the
+            # global size.
+            size = self.dataset.layout_vec.getSizes()
+            data = self._data[:size[0]]
+            self._vec = PETSc.Vec().create(self.comm)
+            self._vec.setSizes(size=size, bsize=self.cdim)
+            self._vec.setType('viennacl')
+            self._vec.setArray(data)
+        # PETSc Vecs have a state counter and cache norm computations
+        # to return immediately if the state counter is unchanged.
+        # Since we've updated the data behind their back, we need to
+        # change that state counter.
+        self._vec.stateIncrease()
+        yield self._vec
+        if access is not base.READ:
+            self.halo_valid = False
+
+
+class Global(petsc_Global):
+    @contextmanager
+    def vec_context(self, access):
+        """A context manager for a :class:`PETSc.Vec` from a :class:`Global`.
+
+        :param access: Access descriptor: READ, WRITE, or RW."""
+
+        assert self.dtype == PETSc.ScalarType, \
+            "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
+        # Getting the Vec needs to ensure we've done all current
+        # necessary computation.
+        self._force_evaluation(read=access is not base.WRITE,
+                               write=access is not base.READ)
+        data = self._data
+        if not hasattr(self, '_vec'):
+            # Can't duplicate layout_vec of dataset, because we then
+            # carry around extra unnecessary data.
+            # But use getSizes to save an Allreduce in computing the
+            # global size.
+            size = self.dataset.layout_vec.getSizes()
+            self._vec = PETSc.Vec().create(self.comm)
+            self._vec.setSizes(size=size, bsize=self.cdim)
+            self._vec.setType('viennacl')
+            self._vec.setArray(data)
+        # PETSc Vecs have a state counter and cache norm computations
+        # to return immediately if the state counter is unchanged.
+        # Since we've updated the data behind their back, we need to
+        # change that state counter.
+        self._vec.stateIncrease()
+        yield self._vec
 
 
 class JITModule(base.JITModule):
@@ -97,13 +171,21 @@ class JITModule(base.JITModule):
         self._cppargs = dcopy(type(self)._cppargs)
         self._libraries = dcopy(type(self)._libraries)
         self._system_headers = dcopy(type(self)._system_headers)
+        self.cl_kernel = None
+
         if not kwargs.get('delay', False):
             self.compile()
             self._initialized = True
 
     @collective
     def __call__(self, *args):
-        return self._fun(*args)
+
+        if self.cl_kernel is None:
+            # compile the CL kernel only once.
+            self.cl_kernel = cl.Kernel.from_int_ptr(
+                    self.cl_kernel_getter_func(*args))
+
+        return self._fun(self.cl_kernel.int_ptr, *args)
 
     @cached_property
     def _wrapper_name(self):
@@ -113,7 +195,7 @@ class JITModule(base.JITModule):
     def code_to_compile(self):
 
         from pyop2.codegen.builder import WrapperBuilder
-        from pyop2.codegen.rep2loopy import generate
+        from pyop2.codegen.rep2loopy import generate, generate_cl_kernel_compiler_executor
 
         builder = WrapperBuilder(iterset=self._iterset, iteration_region=self._iteration_region, pass_layer_to_kernel=self._pass_layer_arg)
         for arg in self._args:
@@ -121,14 +203,10 @@ class JITModule(base.JITModule):
         builder.set_kernel(self._kernel)
 
         wrapper = generate(builder)
-        code = loopy.generate_code_v2(wrapper)
 
-        if self._kernel._cpp:
-            from loopy.codegen.result import process_preambles
-            preamble = "".join(process_preambles(getattr(code, "device_preambles", [])))
-            device_code = "\n\n".join(str(dp.ast) for dp in code.device_programs)
-            return preamble + "\nextern \"C\" {\n" + device_code + "\n}\n"
-        return code.device_code()
+        code = generate_cl_kernel_compiler_executor(wrapper)
+        # print(code)
+        return code
 
     @collective
     def compile(self):
@@ -139,7 +217,7 @@ class JITModule(base.JITModule):
         from pyop2.configuration import configuration
 
         compiler = configuration["compiler"]
-        extension = "cpp" if self._kernel._cpp else "c"
+        extension = "cpp" if self._kernel.cpp else "c"
         cppargs = self._cppargs
         cppargs += ["-I%s/include" % d for d in get_petsc_dir()] + \
                    ["-I%s" % d for d in self._kernel._include_dirs] + \
@@ -149,23 +227,36 @@ class JITModule(base.JITModule):
                  ["-lpetsc", "-lm"] + self._libraries
         ldargs += self._kernel._ldargs
 
-        self._fun = compilation.load(self,
-                                     extension,
-                                     self._wrapper_name,
-                                     cppargs=cppargs,
-                                     ldargs=ldargs,
-                                     restype=ctypes.c_int,
-                                     compiler=compiler,
-                                     comm=self.comm)
+        self.cl_kernel_getter_func = compilation.load(
+                self,
+                extension,
+                self._wrapper_name+'_cl_knl_extractor',
+                cppargs=cppargs,
+                ldargs=ldargs,
+                restype=ctypes.c_void_p,
+                compiler=compiler,
+                comm=self.comm)
+        self.cl_kernel_getter_func.argtypes = self.argtypes[1:]
+
+        self._fun = compilation.load(
+                self,
+                extension,
+                self._wrapper_name+'_executor',
+                cppargs=cppargs,
+                ldargs=ldargs,
+                restype=ctypes.c_int,
+                compiler=compiler,
+                comm=self.comm)
+
         # Blow away everything we don't need any more
         del self._args
-        del self._kernel
+        # del self._kernel
         del self._iterset
 
     @cached_property
     def argtypes(self):
         index_type = as_ctypes(IntType)
-        argtypes = (index_type, index_type)
+        argtypes = (ctypes.c_void_p, index_type, index_type)
         argtypes += self._iterset._argtypes_
         for arg in self._args:
             argtypes += arg._argtypes_
@@ -176,14 +267,22 @@ class JITModule(base.JITModule):
                 for k, t in zip(map_._kernel_args_, map_._argtypes_):
                     if k in seen:
                         continue
-                    argtypes += (t,)
+                    argtypes += (ctypes.c_void_p, ctypes.c_int)
                     seen.add(k)
+
         return argtypes
 
 
 class ParLoop(petsc_base.ParLoop):
 
+    def __init__(self, *args, **kwargs):
+        super(ParLoop, self).__init__(*args, **kwargs)
+        self.kernel.cpp = True
+
     def prepare_arglist(self, iterset, *args):
+
+        from pyop2.codegen.rep2loopy import map_to_viennacl_vector
+
         arglist = iterset._kernel_args_
         for arg in args:
             arglist += arg._kernel_args_
@@ -194,9 +293,33 @@ class ParLoop(petsc_base.ParLoop):
                 for k in map_._kernel_args_:
                     if k in seen:
                         continue
-                    arglist += (k,)
+                    if not map_.viennacl_handle:
+                        map_.viennacl_handle = (
+                                map_to_viennacl_vector(arg._kernel_args_[0],
+                                    map_))
+                    import numpy as np
+                    arglist += (map_.viennacl_handle,
+                            np.int32(np.product(map_.shape)))
                     seen.add(k)
         return arglist
+
+    @collective
+    @timed_function("ParLoopRednEnd")
+    def reduction_end(self):
+        """End reductions"""
+        for arg in self.global_reduction_args:
+            arg.reduction_end(self.comm)
+        # Finalise global increments
+        for tmp, glob in self._reduced_globals.items():
+            # These can safely access the _data member directly
+            # because lazy evaluation has ensured that any pending
+            # updates to glob happened before this par_loop started
+            # and the reduction_end on the temporary global pulled
+            # data back from the device if necessary.
+            # In fact we can't access the properties directly because
+            # that forces an infinite loop.
+            with tmp.vec as v:
+                glob._data += v.array_r
 
     @cached_property
     def _jitmodule(self):

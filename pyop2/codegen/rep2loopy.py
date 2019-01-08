@@ -567,71 +567,6 @@ def map_to_viennacl_vector(arg_handle, map_to_transfer):
     return map_ocl
 
 
-def get_cl_context(kernel, argtypes, comm):
-    c_code_str = (
-            r"""
-            #include <CL/cl.h>
-
-            #include "petsc.h"
-            #include "petscvec.h"
-            #include "petscviennacl.h"
-
-            extern "C" cl_context get_cl_context(Vec arg) {
-
-                const viennacl::vector<PetscScalar> *arg_viennacl;
-                VecViennaCLGetArrayRead(arg, &arg_viennacl);
-
-                cl_context ctx =
-                        arg_viennacl->handle().opencl_handle().context().handle().get();
-
-                VecViennaCLRestoreArrayRead(arg, &arg_viennacl);
-
-                return ctx;
-            }
-            """
-            )
-
-    for i, arg in enumerate(kernel.args):
-        if isinstance(arg, loopy.ArrayArg) and not (
-                arg.dtype.is_integral()):
-            arg_pos = i
-            break
-
-    # remove the whitespaces for pretty printing
-    import re
-    code_to_compile = re.sub("\\n        ", "\n", c_code_str)
-
-    # If we weren't in the cache we /must/ have arguments
-    from pyop2.utils import get_petsc_dir
-    import coffee.system
-    from pyop2.sequential import JITModule
-    from pyop2 import compilation
-    import os
-    import ctypes
-
-    compiler = coffee.system.compiler
-    extension = "cpp"
-    cppargs = JITModule._cppargs
-    cppargs += ["-I%s/include" % d for d in get_petsc_dir()] + \
-               ["-I%s" % os.path.abspath(os.path.dirname(__file__))]
-    if compiler:
-        cppargs += [compiler[coffee.system.isa['inst_set']]]
-    ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
-             ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()] + \
-             ["-lpetsc", "-lm"]
-    fun = compilation.load(code_to_compile,
-            extension,
-            'get_cl_context',
-            cppargs=cppargs,
-            ldargs=ldargs,
-            argtypes=(argtypes[arg_pos], ),
-            restype=ctypes.c_void_p,
-            compiler=compiler.get('name'),
-            comm=comm)
-
-    return fun
-
-
 def get_grid_sizes(kernel):
     parameters = {}
     for arg in kernel.args:
@@ -661,11 +596,10 @@ def transform_for_opencl(program):
     kernel = program.root_kernel
 
     def insn_needs_atomic(insn):
-        # TODO: assumes that the assignee is always a subscript
         assignee_name = insn.assignee.aggregate.name
         return (
-                assignee_name in insn.read_dependency_names() and
-                assignee_name not in kernel.temporary_variables)
+                assignee_name in insn.read_dependency_names()
+                and assignee_name not in kernel.temporary_variables)
 
     new_insns = []
     args_marked_for_atomic = set()
@@ -723,8 +657,6 @@ def generate_cl_kernel_compiler_executor(kernel):
         gsize = ('(end-start)', )
 
     ctx = cl.create_some_context()
-    # TODO: somehow pull the device from the petsc vec for the preprocess
-    # checks.
     kernel = kernel.copy(
             target=loopy.PyOpenCLTarget(ctx.devices[0]))
 
