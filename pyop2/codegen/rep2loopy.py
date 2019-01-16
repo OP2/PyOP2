@@ -656,7 +656,7 @@ def generate_cl_kernel_compiler_executor(kernel):
         # always over the number of elements.
         gsize = ('(end-start)', )
 
-    ctx = cl.create_some_context()
+    ctx = cl.create_some_context(0)
     kernel = kernel.copy(
             target=loopy.PyOpenCLTarget(ctx.devices[0]))
 

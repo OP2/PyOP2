@@ -65,8 +65,10 @@ import loopy
 
 
 def _make_object(name, *args, **kwargs):
-    from pyop2 import sequential
-    return getattr(sequential, name)(*args, **kwargs)
+    # from pyop2 import sequential
+    # return getattr(sequential, name)(*args, **kwargs)
+    from pyop2 import gpu
+    return getattr(gpu, name)(*args, **kwargs)
 
 
 @contextmanager
