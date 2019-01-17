@@ -2770,7 +2770,7 @@ class Map(object):
         # the application of strong boundary conditions
         self.boundary_masks = boundary_masks
         Map._globalcount += 1
-        self.viennacl_handle = None
+        self.ocl_buffer = None
 
     class MapMask(namedtuple("_MapMask_", ["section", "indices", "facet_points"])):
 

@@ -34,9 +34,9 @@
 """OP2 GPU backend."""
 
 import os
+import ctypes
 from copy import deepcopy as dcopy
 
-import ctypes
 from contextlib import contextmanager
 
 from pyop2.datatypes import IntType, as_ctypes
@@ -60,11 +60,76 @@ from pyop2.exceptions import *  # noqa: F401
 from pyop2.mpi import collective
 from pyop2.profiling import timed_region, timed_function
 from pyop2.utils import cached_property, get_petsc_dir
+from pyop2.configuration import configuration
 
 import loopy
 import pyopencl as cl
-import coffee.system
+import numpy as np
 
+
+class Map(Map):
+
+    map_buffer_func = None
+    # move ocl_buffer here potentially
+
+    @staticmethod
+    def get_map_buffer_func():
+        # function handle to create buffer for Map, this is the same function for all Maps
+        if Map.map_buffer_func is not None:
+            return Map.map_buffer_func
+
+        # arg is needed to get the context
+        # better way to do this?
+        c_code_str = r"""
+#include "petsc.h"
+#include "petscviennacl.h"
+#include <CL/cl.h>
+#include <iostream>
+
+using namespace std;
+
+extern "C" cl_mem get_map_buffer(int * __restrict__ map_array, const int map_size, Vec arg)
+{
+    const viennacl::vector<PetscScalar> *arg_viennacl;
+    VecViennaCLGetArrayRead(arg, &arg_viennacl);
+
+    viennacl::ocl::context ctx = arg_viennacl->handle().opencl_handle().context();
+    cl_mem map_buffer = clCreateBuffer(ctx.handle().get(), CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, map_size*sizeof(cl_int), map_array, NULL);
+
+    VecViennaCLRestoreArrayRead(arg, &arg_viennacl);
+    return map_buffer;
+}
+"""
+        from pyop2.sequential import JITModule
+
+        compiler = configuration["compiler"]
+        extension = "cpp"
+        cppargs = JITModule._cppargs
+        cppargs += ["-I%s/include" % d for d in get_petsc_dir()] + \
+                   ["-I%s" % os.path.abspath(os.path.dirname(__file__))]
+
+        cppargs += ["-DVIENNACL_WITH_OPENCL"]
+        ldargs = ["-L%s/lib" % d for d in get_petsc_dir()] + \
+                 ["-Wl,-rpath,%s/lib" % d for d in get_petsc_dir()] + \
+                 ["-lpetsc", "-lm"]
+        fun = compilation.load(c_code_str,
+                               extension,
+                               'get_map_buffer',
+                               cppargs=cppargs,
+                               ldargs=ldargs,
+                               restype=ctypes.c_void_p,
+                               compiler=compiler,
+                               comm=None)  # does comm matter?
+        fun.argtypes = (ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p)
+        Map.map_buffer_func = fun
+        return fun
+
+    def map_buffer(self, arg):
+        if self.ocl_buffer is None:
+            # if not in the cache, we /must/ have arguments
+            func = Map.get_map_buffer_func()
+            self.ocl_buffer = func(self._kernel_args_[0], np.int32(np.product(self.shape)), arg._kernel_args_[0])
+        return self.ocl_buffer
 
 class Dat(petsc_Dat):
     """
@@ -293,13 +358,7 @@ class ParLoop(petsc_base.ParLoop):
                 for k in map_._kernel_args_:
                     if k in seen:
                         continue
-                    if not map_.viennacl_handle:
-                        map_.viennacl_handle = (
-                                map_to_viennacl_vector(arg._kernel_args_[0],
-                                    map_))
-                    import numpy as np
-                    arglist += (map_.viennacl_handle,
-                            np.int32(np.product(map_.shape)))
+                    arglist += (map_.map_buffer(arg), np.int32(np.product(map_.shape)))
                     seen.add(k)
         return arglist
 
