@@ -37,6 +37,8 @@ import os
 from copy import deepcopy as dcopy
 
 import ctypes
+import numpy
+import loopy
 
 from pyop2.datatypes import IntType, as_ctypes
 from pyop2 import base
@@ -57,8 +59,49 @@ from pyop2.exceptions import *  # noqa: F401
 from pyop2.mpi import collective
 from pyop2.profiling import timed_region
 from pyop2.utils import cached_property, get_petsc_dir
+from pyop2.configuration import configuration
 
-import loopy
+
+def vectorize(wrapper, iname, batch_size, start, end):
+
+    if batch_size == 1:
+        return wrapper
+
+    # create constant zero vectors
+    wrapper = wrapper.copy(target=loopy.CVecTarget())
+    kernel = wrapper.root_kernel
+    zeros = loopy.TemporaryVariable("_zeros", shape=loopy.auto, dtype=numpy.float64, read_only=True,
+                                    initializer=numpy.array(0.0, dtype=numpy.float64),
+                                    scope=loopy.temp_var_scope.GLOBAL, zero_size=batch_size)
+    tmps = kernel.temporary_variables
+    tmps["_zeros"] = zeros
+    kernel = kernel.copy(temporary_variables=tmps)
+
+    # split iname and vectorize the inner loop
+    inner_iname = iname + "_batch"
+
+    # TODO: use slabs to get rid of this assumption
+    kernel = loopy.assume(kernel, "{0} mod {1} = 0".format(end, batch_size))
+    kernel = loopy.assume(kernel, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format(end, batch_size, start))
+
+    # vectorize using vector extenstions
+    kernel = loopy.split_iname(kernel, iname, batch_size, inner_tag="c_vec", inner_iname=inner_iname)
+
+    alignment = 64
+    for name in kernel.temporary_variables:
+        tv = kernel.temporary_variables[name]
+        kernel.temporary_variables[name] = tv.copy(alignment=alignment)
+
+    wrapper = wrapper.with_root_kernel(kernel)
+
+    from pyop2.codegen.rep2loopy import _PreambleGen
+
+    vec_types = [("double", 8), ("int", 4)]
+    preamble = ["typedef {0} {0}{1} __attribute__ ((vector_size ({2})));".format(t, batch_size, batch_size*b) for t, b in vec_types]
+    preamble = "\n" + "\n".join(preamble)
+
+    wrapper = loopy.register_preamble_generators(wrapper, [_PreambleGen(preamble, idx="01")])
+    return wrapper
 
 
 class JITModule(base.JITModule):
@@ -121,6 +164,15 @@ class JITModule(base.JITModule):
         builder.set_kernel(self._kernel)
 
         wrapper = generate(builder)
+
+        # vectorization
+        if isinstance(self._kernel.code, loopy.LoopKernel):
+            if self._iterset._extruded:
+                start, end = builder.layer_extents
+                wrapper = vectorize(wrapper, "layer", configuration["simd_width"], start.name, end.name)
+            else:
+                wrapper = vectorize(wrapper, "n", configuration["simd_width"], "start", "end")
+
         code = loopy.generate_code_v2(wrapper)
 
         if self._kernel._cpp:
