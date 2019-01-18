@@ -247,8 +247,7 @@ class JITModule(base.JITModule):
 
         if self.cl_kernel is None:
             # compile the CL kernel only once.
-            self.cl_kernel = cl.Kernel.from_int_ptr(
-                    self.cl_kernel_getter_func(*args))
+            self.cl_kernel = cl.Kernel.from_int_ptr(self.cl_kernel_getter_func(*args))
 
         return self._fun(self.cl_kernel.int_ptr, *args)
 
@@ -345,8 +344,6 @@ class ParLoop(petsc_base.ParLoop):
         self.kernel.cpp = True
 
     def prepare_arglist(self, iterset, *args):
-
-        from pyop2.codegen.rep2loopy import map_to_viennacl_vector
 
         arglist = iterset._kernel_args_
         for arg in args:
