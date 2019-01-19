@@ -136,6 +136,7 @@ class JITModule(base.JITModule):
         self._args = args
         self._iteration_region = kwargs.get('iterate', ALL)
         self._pass_layer_arg = kwargs.get('pass_layer_arg', False)
+        self._is_mat_assembly = kwargs.get('is_mat_assembly', False)
         # Copy the class variables, so we don't overwrite them
         self._cppargs = dcopy(type(self)._cppargs)
         self._libraries = dcopy(type(self)._libraries)
@@ -166,7 +167,7 @@ class JITModule(base.JITModule):
         wrapper = generate(builder)
 
         # vectorization
-        if isinstance(self._kernel.code, loopy.LoopKernel):
+        if isinstance(self._kernel.code, loopy.LoopKernel) and not self._is_mat_assembly:
             if self._iterset._extruded:
                 start, end = builder.layer_extents
                 wrapper = vectorize(wrapper, "layer", configuration["simd_width"], start.name, end.name)
@@ -254,7 +255,8 @@ class ParLoop(petsc_base.ParLoop):
     def _jitmodule(self):
         return JITModule(self.kernel, self.iterset, *self.args,
                          iterate=self.iteration_region,
-                         pass_layer_arg=self._pass_layer_arg)
+                         pass_layer_arg=self._pass_layer_arg,
+                         is_mat_assembly=self._is_mat_assembly)
 
     @collective
     def _compute(self, part, fun, *arglist):

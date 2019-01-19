@@ -3932,6 +3932,7 @@ class ParLoop(LazyComputation):
         self._actual_args = args
         self._kernel = kernel
         self._is_layered = iterset._extruded
+        self._is_mat_assembly = any(arg._is_mat for arg in args)
         self._iteration_region = kwargs.get("iterate", None)
         self._pass_layer_arg = kwargs.get("pass_layer_arg", False)
 
