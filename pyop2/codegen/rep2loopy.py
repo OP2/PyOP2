@@ -537,9 +537,7 @@ def transform_for_opencl(program):
     new_insns = []
     args_marked_for_atomic = set()
     for insn in kernel.instructions:
-        if ('pyop2_assign' in insn.tags) or (
-                'tsfc_return_accumulate' in insn.tags):
-
+        if ('pyop2_assign' in insn.tags) or ('tsfc_return_accumulate' in insn.tags):
             if insn_needs_atomic(insn):
                 atomicity = (loopy.AtomicUpdate(insn.assignee.aggregate.name), )
                 insn = insn.copy(atomicity=atomicity)
@@ -554,8 +552,7 @@ def transform_for_opencl(program):
         else:
             new_args.append(arg)
 
-    kernel = kernel.copy(instructions=new_insns,
-            args=new_args)
+    kernel = kernel.copy(instructions=new_insns, args=new_args)
 
     # These numbers '57' and '64' are very specific to my problem.
     # Need to find a generalized way of fixing these numbers.
@@ -565,19 +562,23 @@ def transform_for_opencl(program):
         #         outer_tag="g.0")
         pass
     else:
-        _LOCAL_SIZE = 64
-        kernel = loopy.split_iname(kernel, "n", _LOCAL_SIZE, inner_tag="l.0",
+        batch_size = 64
+        kernel = loopy.assume(kernel, "{0} mod {1} = 0".format("end", batch_size))
+        kernel = loopy.assume(kernel, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format("end", batch_size, "start"))
+        kernel = loopy.split_iname(kernel, "n", batch_size, inner_tag="l.0",
                 outer_tag="g.0")
 
     return program.with_root_kernel(kernel)
 
 
 def generate_cl_kernel_compiler_executor(kernel):
-    kernel = transform_for_opencl(kernel)
+
     import pyopencl as cl
-    import re
     from mako.template import Template
+
+    kernel = transform_for_opencl(kernel)
     lsize, gsize = get_grid_sizes(kernel)
+
     if not lsize:
         # lsize has not been set => run serially on a GPU
         # both gsize and lsize should be 1
@@ -629,10 +630,7 @@ v0 = vecs[0]
 #include "viennacl/backend/memory.hpp"
 #include "viennacl/ocl/error.hpp"
 
-#define TIME_DIFF(t2, t1) ((t2).tv_sec - (t1).tv_sec + ((t2).tv_usec - (t1).tv_usec)*1e-6)
-
 using namespace std;
-
 
 char kernel_source[] = "${kernel_src}";
 
@@ -665,12 +663,7 @@ extern "C" void ${kernel_name}_executor(cl_kernel cl_knl, ${', '.join(v[2] for v
         return;
     }
 
-    struct timeval time_compute_start, time_compute_end,
-    time_init_start, time_init_end, time_wrapup_start,
-    time_wrapup_end;
     cl_int ocl_err;
-
-    gettimeofday(&time_init_start, NULL);
 
     // viennacl vector declarations
     % for vec in vecs:
@@ -714,23 +707,12 @@ extern "C" void ${kernel_name}_executor(cl_kernel cl_knl, ${', '.join(v[2] for v
     % endfor
     clFinish(queue);
 
-    gettimeofday(&time_init_end, NULL);
-    // cout << "${kernel_name}: init time: " << (
-    //        TIME_DIFF(time_init_end, time_init_start)) << endl;
-
-    gettimeofday(&time_compute_start, NULL);
-
     // enqueueing the kernel
     ocl_err = clEnqueueNDRangeKernel(queue, cl_knl, ${len(lsize)}, NULL,
             gwg_size, lwg_size, 0, NULL, NULL);
     VIENNACL_ERR_CHECK(ocl_err);
 
     clFinish(queue);
-
-    gettimeofday(&time_compute_end, NULL);
-
-    // cout << "${kernel_name}: compute time: " << (
-    //        TIME_DIFF(time_compute_end, time_compute_start)) << endl;
 
     // restoring the arrays to the petsc vecs
     % for v in vecs:

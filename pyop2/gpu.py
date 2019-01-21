@@ -269,7 +269,7 @@ class JITModule(base.JITModule):
         wrapper = generate(builder)
 
         code = generate_cl_kernel_compiler_executor(wrapper)
-        # print(code)
+        
         return code
 
     @collective
