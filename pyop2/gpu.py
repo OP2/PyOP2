@@ -65,6 +65,7 @@ from pyop2.configuration import configuration
 import loopy
 import pyopencl as cl
 import numpy as np
+from collections import OrderedDict
 
 
 class Map(Map):
@@ -130,6 +131,7 @@ extern "C" cl_mem get_map_buffer(int * __restrict__ map_array, const int map_siz
             func = Map.get_map_buffer_func()
             self.ocl_buffer = func(self._kernel_args_[0], np.int32(np.product(self.shape)), arg._kernel_args_[0])
         return self.ocl_buffer
+
 
 class Dat(petsc_Dat):
     """
@@ -259,7 +261,7 @@ class JITModule(base.JITModule):
     def code_to_compile(self):
 
         from pyop2.codegen.builder import WrapperBuilder
-        from pyop2.codegen.rep2loopy import generate, generate_cl_kernel_compiler_executor
+        from pyop2.codegen.rep2loopy import generate
 
         builder = WrapperBuilder(iterset=self._iterset, iteration_region=self._iteration_region, pass_layer_to_kernel=self._pass_layer_arg)
         for arg in self._args:
@@ -267,9 +269,7 @@ class JITModule(base.JITModule):
         builder.set_kernel(self._kernel)
 
         wrapper = generate(builder)
-
         code = generate_cl_kernel_compiler_executor(wrapper)
-        
         return code
 
     @collective
@@ -292,25 +292,25 @@ class JITModule(base.JITModule):
         ldargs += self._kernel._ldargs
 
         self.cl_kernel_getter_func = compilation.load(
-                self,
-                extension,
-                self._wrapper_name+'_cl_knl_extractor',
-                cppargs=cppargs,
-                ldargs=ldargs,
-                restype=ctypes.c_void_p,
-                compiler=compiler,
-                comm=self.comm)
+            self,
+            extension,
+            self._wrapper_name+'_cl_knl_extractor',
+            cppargs=cppargs,
+            ldargs=ldargs,
+            restype=ctypes.c_void_p,
+            compiler=compiler,
+            comm=self.comm)
         self.cl_kernel_getter_func.argtypes = self.argtypes[1:]
 
         self._fun = compilation.load(
-                self,
-                extension,
-                self._wrapper_name+'_executor',
-                cppargs=cppargs,
-                ldargs=ldargs,
-                restype=ctypes.c_int,
-                compiler=compiler,
-                comm=self.comm)
+            self,
+            extension,
+            self._wrapper_name+'_executor',
+            cppargs=cppargs,
+            ldargs=ldargs,
+            restype=ctypes.c_int,
+            compiler=compiler,
+            comm=self.comm)
 
         # Blow away everything we don't need any more
         del self._args
@@ -418,3 +418,233 @@ def generate_single_cell_wrapper(iterset, args, forward_args=(), kernel_name=Non
     code = loopy.generate_code_v2(wrapper)
 
     return code.device_code()
+
+
+def get_grid_sizes(kernel):
+    parameters = {}
+    for arg in kernel.args:
+        if isinstance(arg, loopy.ValueArg) and arg.approximately is not None:
+            parameters[arg.name] = arg.approximately
+
+    glens, llens = kernel.get_grid_size_upper_bounds_as_exprs()
+
+    from pymbolic import evaluate
+    from pymbolic.mapper.evaluator import UnknownVariableError
+    try:
+        glens = evaluate(glens, parameters)
+        llens = evaluate(llens, parameters)
+    except UnknownVariableError as name:
+        from warnings import warn
+        warn("could not check axis bounds because no value for variable '%s' was passed to check_kernels()" % name)
+
+    return llens, glens
+
+
+def transform_for_opencl(program):
+    """
+    Performs transformations on kernels.
+    """
+    kernel = program.root_kernel
+
+    def insn_needs_atomic(insn):
+        assignee_name = insn.assignee.aggregate.name
+        return assignee_name in insn.read_dependency_names() and assignee_name not in kernel.temporary_variables
+
+    new_insns = []
+    args_marked_for_atomic = set()
+    for insn in kernel.instructions:
+        if ('pyop2_assign' in insn.tags) or ('tsfc_return_accumulate' in insn.tags):
+            if insn_needs_atomic(insn):
+                atomicity = (loopy.AtomicUpdate(insn.assignee.aggregate.name), )
+                insn = insn.copy(atomicity=atomicity)
+                args_marked_for_atomic |= set([insn.assignee.aggregate.name])
+
+        new_insns.append(insn)
+
+    new_args = []
+    for arg in kernel.args:
+        if arg.name in args_marked_for_atomic:
+            new_args.append(arg.copy(for_atomic=True))
+        else:
+            new_args.append(arg)
+
+    kernel = kernel.copy(instructions=new_insns, args=new_args)
+
+    # These numbers '57' and '64' are very specific to my problem.
+    # Need to find a generalized way of fixing these numbers.
+    # These numbers are for problem with 512 x 512 square grid.
+    if kernel.name in ['wrap_zero', 'wrap_copy']:
+        # kernel = loopy.split_iname(kernel, "n", 57, inner_tag="l.0",
+        #         outer_tag="g.0")
+        pass
+    else:
+        batch_size = 64
+        kernel = loopy.assume(kernel, "{0} mod {1} = 0".format("end", batch_size))
+        kernel = loopy.assume(kernel, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format("end", batch_size, "start"))
+        kernel = loopy.split_iname(kernel, "n", batch_size, inner_tag="l.0", outer_tag="g.0")
+
+    return program.with_root_kernel(kernel)
+
+
+def generate_cl_kernel_compiler_executor(kernel):
+
+    import pyopencl as cl
+    from mako.template import Template
+
+    kernel = transform_for_opencl(kernel)
+    lsize, gsize = get_grid_sizes(kernel)
+
+    if not lsize:
+        # lsize has not been set => run serially on a GPU
+        # both gsize and lsize should be 1
+        lsize = (1,)
+        assert not gsize
+        gsize = (1,)
+    else:
+        # if lsize if set then currently assuming that the parallelization is
+        # always over the number of elements.
+        gsize = ('(end-start)',)
+
+    ctx = cl.create_some_context(0)
+    kernel = kernel.copy(target=loopy.PyOpenCLTarget(ctx.devices[0]))
+
+    ast_builder = kernel.target.get_device_ast_builder()
+    arg_dict = OrderedDict()  # arg name -> (idx, type, declariation, size)
+    for idx, arg in enumerate(kernel.args):
+        name = arg.name
+        if isinstance(arg, loopy.ArrayArg):
+            if arg.dtype.is_integral():
+                # map
+                arg_dict[name] = (idx, "map", "cl_mem {0}".format(name), "sizeof({0})".format(name))
+                arg_dict[name + "_size"] = (None, "map_size", "const int {0}_size".format(name), "")
+            else:
+                # vec
+                arg_dict[name] = (idx, "vec", "Vec {0}".format(name), "sizeof(PetscScalar)")
+        else:
+            # start, end
+            arg_dict[name] = (idx, "other", str(arg.get_arg_decl(ast_builder))[:-1], arg.dtype.itemsize)
+
+    c_code_str = r'''
+<%
+import loopy as lp
+vecs = [arg for arg in arg_dict if arg_dict[arg][1] == "vec"]
+v0 = vecs[0]
+%>
+#include <CL/cl.h>
+#include "petsc.h"
+#include "petscvec.h"
+#include "petscviennacl.h"
+#include <iostream>
+#include <sys/time.h>
+#include <cstring>
+#include <cstdlib>
+
+// ViennaCL Headers
+#include "viennacl/ocl/backend.hpp"
+#include "viennacl/vector.hpp"
+#include "viennacl/backend/memory.hpp"
+#include "viennacl/ocl/error.hpp"
+
+using namespace std;
+
+char kernel_source[] = "${kernel_src}";
+
+extern "C" cl_kernel ${kernel_name}_cl_knl_extractor(${', '.join(v[2] for v in arg_dict.values())})
+{
+    // viennacl vector declarations
+    const viennacl::vector<PetscScalar> *${v0}_viennacl;
+
+    // getting the array from the petsc vecs
+    VecViennaCLGetArrayRead(${v0}, &${v0}_viennacl);
+
+    // defining the context
+    viennacl::ocl::context ctx = ${v0}_viennacl->handle().opencl_handle().context();
+
+    viennacl::ocl::program & my_prog = ctx.add_program(kernel_source, "kernel_program_${kernel_name}");
+    viennacl::ocl::kernel & viennacl_kernel = my_prog.get_kernel("${kernel_name}");
+
+    VecViennaCLRestoreArrayRead(${v0}, &${v0}_viennacl);
+
+    cl_kernel cl_knl = viennacl_kernel.handle().get();
+    clRetainKernel(cl_knl);
+    return cl_knl;
+}
+
+extern "C" void ${kernel_name}_executor(cl_kernel cl_knl, ${', '.join(v[2] for v in arg_dict.values())})
+{
+    if(end == start)
+    {
+        // no need to go any further
+        return;
+    }
+
+    cl_int ocl_err;
+
+    // viennacl vector declarations
+    % for vec in vecs:
+    viennacl::vector<PetscScalar> *${vec}_viennacl;
+    % endfor
+
+    // getting the array from the petsc vecs
+    % for vec in vecs:
+    VecViennaCLGetArrayReadWrite(${vec}, &${vec}_viennacl);
+    % endfor
+
+    // defining the context
+    viennacl::ocl::context ctx = ${v0}_viennacl->handle().opencl_handle().context();
+
+    // set the kernel args
+    % for arg, (idx, t, _, size) in arg_dict.items():
+    % if t == "other":
+    ocl_err = clSetKernelArg(cl_knl, ${idx}, ${size}, &${arg});
+    % elif t == "map":
+    ocl_err = clSetKernelArg(cl_knl, ${idx}, ${size}, &${arg});
+    % elif t == "vec":
+    ocl_err = clSetKernelArg(cl_knl, ${idx}, ${size}, &(${arg}_viennacl->handle().opencl_handle().get()));
+    % endif
+    VIENNACL_ERR_CHECK(ocl_err);
+
+    % endfor
+
+
+    // getting the queue
+    cl_command_queue queue= ctx.get_queue().handle().get();
+
+    // set work group sizes
+    size_t lwg_size[${len(lsize)}];
+    size_t gwg_size[${len(lsize)}];
+    % for i, ls in enumerate(lsize):
+    lwg_size[${i}] = ${lsize[i]};
+    % endfor
+
+    % for i, ls in enumerate(gsize):
+    gwg_size[${i}] = ${gsize[i]};
+    % endfor
+    clFinish(queue);
+
+    // enqueueing the kernel
+    ocl_err = clEnqueueNDRangeKernel(queue, cl_knl, ${len(lsize)}, NULL,
+            gwg_size, lwg_size, 0, NULL, NULL);
+    VIENNACL_ERR_CHECK(ocl_err);
+
+    clFinish(queue);
+
+    // restoring the arrays to the petsc vecs
+    % for v in vecs:
+    VecViennaCLRestoreArrayReadWrite(${v}, &${v}_viennacl);
+    % endfor
+}
+'''
+    c_code = Template(c_code_str)
+
+    kernel_src = loopy.generate_code_v2(kernel).device_code().replace('\n',
+                                                                      '\\n"\n"')
+
+    return c_code.render(
+        kernel_src=kernel_src,
+        kernel_name=kernel.name,
+        arg_dict=arg_dict,
+        ast_builder=kernel.target.get_device_ast_builder(),
+        args=kernel.args,
+        lsize=lsize,
+        gsize=gsize)

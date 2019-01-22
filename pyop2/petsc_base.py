@@ -336,9 +336,7 @@ class Dat(base.Dat):
             # global size.
             size = self.dataset.layout_vec.getSizes()
             data = self._data[:size[0]]
-            self._vec = PETSc.Vec().createWithArray(data, size=size,
-                                                        bsize=self.cdim,
-                                                        comm=self.comm)
+            self._vec = PETSc.Vec().createWithArray(data, size=size, bsize=self.cdim, comm=self.comm)
         # PETSc Vecs have a state counter and cache norm computations
         # to return immediately if the state counter is unchanged.
         # Since we've updated the data behind their back, we need to

@@ -1891,7 +1891,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
 
         return ret
 
-
     def _iop(self, other, op):
         name = "iop_%s" % op.__name__
 
