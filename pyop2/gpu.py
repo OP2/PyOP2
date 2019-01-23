@@ -440,13 +440,17 @@ def get_grid_sizes(kernel):
     return llens, glens
 
 
-def transform_for_opencl(program):
-    """
-    Performs transformations on kernels.
-    """
+def generate_cl_kernel_compiler_executor(program):
+
+    import pyopencl as cl
+    from mako.template import Template
+
+    # Kernel transformations
+
     kernel = program.root_kernel
 
     def insn_needs_atomic(insn):
+        # updates to global variables are atomic
         assignee_name = insn.assignee.aggregate.name
         return assignee_name in insn.read_dependency_names() and assignee_name not in kernel.temporary_variables
 
@@ -461,6 +465,7 @@ def transform_for_opencl(program):
 
         new_insns.append(insn)
 
+    # label args as atomic
     new_args = []
     for arg in kernel.args:
         if arg.name in args_marked_for_atomic:
@@ -470,45 +475,24 @@ def transform_for_opencl(program):
 
     kernel = kernel.copy(instructions=new_insns, args=new_args)
 
-    # These numbers '57' and '64' are very specific to my problem.
-    # Need to find a generalized way of fixing these numbers.
-    # These numbers are for problem with 512 x 512 square grid.
-    if kernel.name in ['wrap_zero', 'wrap_copy']:
-        # kernel = loopy.split_iname(kernel, "n", 57, inner_tag="l.0",
-        #         outer_tag="g.0")
-        pass
-    else:
-        batch_size = 64
-        kernel = loopy.assume(kernel, "{0} mod {1} = 0".format("end", batch_size))
-        kernel = loopy.assume(kernel, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format("end", batch_size, "start"))
-        kernel = loopy.split_iname(kernel, "n", batch_size, inner_tag="l.0", outer_tag="g.0")
+    # batch cells into groups
+    assert "start" in kernel.arg_dict and "end" in kernel.arg_dict
+    
+    batch_size = 128
+    g_size = ("(end - start)",)  # global size
+    l_size = (batch_size,)  # local size
 
-    return program.with_root_kernel(kernel)
+    kernel = loopy.assume(kernel, "{0} mod {1} = 0".format("end", batch_size))
+    kernel = loopy.assume(kernel, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format("end", batch_size, "start"))
+    kernel = loopy.split_iname(kernel, "n", batch_size, inner_tag="l.0", outer_tag="g.0")
 
+    # create boiler plate code to compile OpenCL kernel
 
-def generate_cl_kernel_compiler_executor(kernel):
-
-    import pyopencl as cl
-    from mako.template import Template
-
-    kernel = transform_for_opencl(kernel)
-    lsize, gsize = get_grid_sizes(kernel)
-
-    if not lsize:
-        # lsize has not been set => run serially on a GPU
-        # both gsize and lsize should be 1
-        lsize = (1,)
-        assert not gsize
-        gsize = (1,)
-    else:
-        # if lsize if set then currently assuming that the parallelization is
-        # always over the number of elements.
-        gsize = ('(end-start)',)
-
+    program = program.with_root_kernel(kernel)
     ctx = cl.create_some_context(0)
-    kernel = kernel.copy(target=loopy.PyOpenCLTarget(ctx.devices[0]))
+    program = program.copy(target=loopy.PyOpenCLTarget(ctx.devices[0]))
 
-    ast_builder = kernel.target.get_device_ast_builder()
+    ast_builder = program.target.get_device_ast_builder()
     arg_dict = OrderedDict()  # arg name -> (idx, type, declariation, size)
     for idx, arg in enumerate(kernel.args):
         name = arg.name
@@ -524,6 +508,7 @@ def generate_cl_kernel_compiler_executor(kernel):
             # start, end
             arg_dict[name] = (idx, "other", str(arg.get_arg_decl(ast_builder))[:-1], arg.dtype.itemsize)
 
+    # code generation template
     c_code_str = r'''
 <%
 import loopy as lp
@@ -606,25 +591,16 @@ extern "C" void ${kernel_name}_executor(cl_kernel cl_knl, ${', '.join(v[2] for v
 
     % endfor
 
-
     // getting the queue
     cl_command_queue queue= ctx.get_queue().handle().get();
 
     // set work group sizes
-    size_t lwg_size[${len(lsize)}];
-    size_t gwg_size[${len(lsize)}];
-    % for i, ls in enumerate(lsize):
-    lwg_size[${i}] = ${lsize[i]};
-    % endfor
-
-    % for i, ls in enumerate(gsize):
-    gwg_size[${i}] = ${gsize[i]};
-    % endfor
+    size_t lwg_size[${len(l_size)}] = {${", ".join(map(str, l_size))}};
+    size_t gwg_size[${len(g_size)}] = {${", ".join(map(str, g_size))}};
     clFinish(queue);
 
     // enqueueing the kernel
-    ocl_err = clEnqueueNDRangeKernel(queue, cl_knl, ${len(lsize)}, NULL,
-            gwg_size, lwg_size, 0, NULL, NULL);
+    ocl_err = clEnqueueNDRangeKernel(queue, cl_knl, ${len(l_size)}, NULL, gwg_size, lwg_size, 0, NULL, NULL);
     VIENNACL_ERR_CHECK(ocl_err);
 
     clFinish(queue);
@@ -637,14 +613,13 @@ extern "C" void ${kernel_name}_executor(cl_kernel cl_knl, ${', '.join(v[2] for v
 '''
     c_code = Template(c_code_str)
 
-    kernel_src = loopy.generate_code_v2(kernel).device_code().replace('\n',
-                                                                      '\\n"\n"')
+    kernel_code = loopy.generate_code_v2(program).device_code().replace('\n', '\\n"\n"')
 
     return c_code.render(
-        kernel_src=kernel_src,
-        kernel_name=kernel.name,
+        kernel_src=kernel_code,
+        kernel_name=program.name,
         arg_dict=arg_dict,
-        ast_builder=kernel.target.get_device_ast_builder(),
-        args=kernel.args,
-        lsize=lsize,
-        gsize=gsize)
+        ast_builder=program.target.get_device_ast_builder(),
+        args=program.args,
+        l_size=l_size,
+        g_size=g_size)
