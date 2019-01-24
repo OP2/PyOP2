@@ -314,7 +314,7 @@ class JITModule(base.JITModule):
 
         # Blow away everything we don't need any more
         del self._args
-        # del self._kernel
+        del self._kernel
         del self._iterset
 
     @cached_property
@@ -339,15 +339,19 @@ class JITModule(base.JITModule):
 
 class ParLoop(petsc_base.ParLoop):
 
+    printed = set()
+
     def __init__(self, *args, **kwargs):
         super(ParLoop, self).__init__(*args, **kwargs)
         self.kernel.cpp = True
 
     def prepare_arglist(self, iterset, *args):
+        nbytes = 0
 
         arglist = iterset._kernel_args_
         for arg in args:
             arglist += arg._kernel_args_
+            nbytes += arg.data.nbytes
         seen = set()
         for arg in args:
             maps = arg.map_tuple
@@ -357,6 +361,14 @@ class ParLoop(petsc_base.ParLoop):
                         continue
                     arglist += (map_.map_buffer(arg), np.int32(np.product(map_.shape)))
                     seen.add(k)
+                    nbytes += map_.values.nbytes
+
+        self.nbytes = nbytes
+        wrapper_name = "wrap_" + self._kernel.name
+        if wrapper_name not in ParLoop.printed:
+            print("{0}_BYTES= {1}".format("wrap_" + self._kernel.name, self.nbytes))
+            ParLoop.printed.add(wrapper_name)
+
         return arglist
 
     @collective
@@ -478,7 +490,7 @@ def generate_cl_kernel_compiler_executor(program):
     # batch cells into groups
     assert "start" in kernel.arg_dict and "end" in kernel.arg_dict
     
-    batch_size = 128
+    batch_size = 64
     g_size = ("(end - start)",)  # global size
     l_size = (batch_size,)  # local size
 
