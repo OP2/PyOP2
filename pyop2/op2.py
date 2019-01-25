@@ -41,12 +41,12 @@ from pyop2.mpi import MPI, COMM_WORLD, collective
 
 from pyop2.base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL  # noqa: F401
 
-from pyop2.gpu import par_loop, Kernel  # noqa: F401
-from pyop2.gpu import READ, WRITE, RW, INC, MIN, MAX  # noqa: F401
-from pyop2.gpu import Set, ExtrudedSet, MixedSet, Subset, DataSet, MixedDataSet  # noqa: F401
-from pyop2.gpu import Map, MixedMap, DecoratedMap, Sparsity, Halo  # noqa: F401
-from pyop2.gpu import Global, GlobalDataSet        # noqa: F401
-from pyop2.gpu import Dat, MixedDat, DatView, Mat  # noqa: F401
+from pyop2.cuda import par_loop, Kernel  # noqa: F401
+from pyop2.cuda import READ, WRITE, RW, INC, MIN, MAX  # noqa: F401
+from pyop2.cuda import Set, ExtrudedSet, MixedSet, Subset, DataSet, MixedDataSet  # noqa: F401
+from pyop2.cuda import Map, MixedMap, DecoratedMap, Sparsity, Halo  # noqa: F401
+from pyop2.cuda import Global, GlobalDataSet        # noqa: F401
+from pyop2.cuda import Dat, MixedDat, DatView, Mat  # noqa: F401
 
 # from pyop2.sequential import par_loop, Kernel  # noqa: F401
 # from pyop2.sequential import READ, WRITE, RW, INC, MIN, MAX  # noqa: F401
