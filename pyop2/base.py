@@ -65,10 +65,8 @@ import loopy
 
 
 def _make_object(name, *args, **kwargs):
-    # from pyop2 import sequential
-    # return getattr(sequential, name)(*args, **kwargs)
-    from pyop2 import gpu
-    return getattr(gpu, name)(*args, **kwargs)
+    from pyop2 import cuda as backend
+    return getattr(backend, name)(*args, **kwargs)
 
 
 @contextmanager
@@ -1598,7 +1596,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
     @cached_property
     def _kernel_args_(self):
         with self.vec as v:
-            if v.type == 'seqviennacl':
+            if v.type == "seqviennacl":
                 return (v.handle, )
         return (self._data.ctypes.data, )
 
