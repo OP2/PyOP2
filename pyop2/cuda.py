@@ -228,8 +228,9 @@ class JITModule(base.JITModule):
 
     @collective
     def __call__(self, *args):
-        grid = (int((args[1] - args[0]) // 32), 1)
-        block = (32, 1, 1)
+        block_size = configuration["cuda_block_size"]
+        grid = (int((args[1] - args[0]) // block_size), 1)
+        block = (block_size, 1, 1)
         return self._fun.prepared_call(grid, block, *args)
 
     @cached_property
@@ -238,7 +239,7 @@ class JITModule(base.JITModule):
 
     @cached_property
     def code_to_compile(self):
-        if configuration["load_cuda_kernel"]:
+        if self._wrapper_name == configuration["cuda_jitmodule_name"] and configuration["load_cuda_kernel"]:
             f = open(configuration["cuda_kernel_name"], "r")
             code = f.read()
             f.close()
@@ -255,7 +256,7 @@ class JITModule(base.JITModule):
         wrapper = generate(builder)
         code = generate_cuda_kernel(wrapper)
 
-        if configuration["dump_cuda_kernel"]:
+        if self._wrapper_name == configuration["cuda_jitmodule_name"] and configuration["dump_cuda_kernel"]:
             f = open(configuration["cuda_kernel_name"], "w")
             f.write(code)
             f.close()
@@ -424,36 +425,53 @@ def generate_cuda_kernel(program):
         assignee_name = insn.assignee.aggregate.name
         return assignee_name in insn.read_dependency_names() and assignee_name not in kernel.temporary_variables
 
-    # new_insns = []
-    # args_marked_for_atomic = set()
-    # for insn in kernel.instructions:
-    #     if ('pyop2_assign' in insn.tags) or ('tsfc_return_accumulate' in insn.tags):
-    #         if insn_needs_atomic(insn):
-    #             atomicity = (loopy.AtomicUpdate(insn.assignee.aggregate.name), )
-    #             insn = insn.copy(atomicity=atomicity)
-    #             args_marked_for_atomic |= set([insn.assignee.aggregate.name])
-    #
-    #     new_insns.append(insn)
-    #
-    # # label args as atomic
-    # new_args = []
-    # for arg in kernel.args:
-    #     if arg.name in args_marked_for_atomic:
-    #         new_args.append(arg.copy(for_atomic=True))
-    #     else:
-    #         new_args.append(arg)
-    #
-    # kernel = kernel.copy(instructions=new_insns, args=new_args)
+    new_insns = []
+    args_marked_for_atomic = set()
+    for insn in kernel.instructions:
+        if ('pyop2_assign' in insn.tags) or ('tsfc_return_accumulate' in insn.tags):
+            if insn_needs_atomic(insn):
+                atomicity = (loopy.AtomicUpdate(insn.assignee.aggregate.name), )
+                insn = insn.copy(atomicity=atomicity)
+                args_marked_for_atomic |= set([insn.assignee.aggregate.name])
+
+        new_insns.append(insn)
+
+    # label args as atomic
+    new_args = []
+    for arg in kernel.args:
+        if arg.name in args_marked_for_atomic:
+            new_args.append(arg.copy(for_atomic=True))
+        else:
+            new_args.append(arg)
+
+    kernel = kernel.copy(instructions=new_insns, args=new_args)
 
     # batch cells into groups
     # assert "start" in kernel.arg_dict and "end" in kernel.arg_dict
     
-    batch_size = 32
+    batch_size = configuration["cuda_block_size"]
 
     kernel = loopy.assume(kernel, "{0} mod {1} = 0".format("end", batch_size))
     kernel = loopy.assume(kernel, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format("end", batch_size, "start"))
     kernel = loopy.split_iname(kernel, "n", batch_size, inner_tag="l.0", outer_tag="g.0")
 
     program = program.with_root_kernel(kernel)
+    code = loopy.generate_code_v2(program).device_code()
+    code = """
+#if __CUDA_ARCH__ < 600
+__device__ double atomicAdd(double* address, double val)
+{
+    unsigned long long int* address_as_ull = (unsigned long long int*)address;
+    unsigned long long int old = *address_as_ull, assumed;
 
-    return loopy.generate_code_v2(program).device_code()
+    do {
+        assumed = old;
+        old = atomicCAS(address_as_ull, assumed, __double_as_longlong(val + __longlong_as_double(assumed)));
+    } while (assumed != old);  // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
+
+    return __longlong_as_double(old);
+}
+#endif
+""" + code
+
+    return code
