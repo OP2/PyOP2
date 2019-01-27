@@ -65,7 +65,6 @@ from pyop2.configuration import configuration
 import loopy
 import pycuda
 import pycuda.autoinit
-import pycuda.gpuarray as gpuarray
 import pycuda.driver as cuda_driver
 import numpy as np
 from collections import OrderedDict
@@ -74,10 +73,15 @@ from collections import OrderedDict
 class Map(Map):
 
     @cached_property
+    def device_handle(self):
+        print(self.values.nbytes)
+        m_gpu = cuda_driver.mem_alloc(int(self.values.nbytes))
+        cuda_driver.memcpy_htod(m_gpu, self.values)
+        return m_gpu
+
+    @cached_property
     def _kernel_args_(self):
-        m_gpu = cuda_driver.mem_alloc(int(self._values.nbytes))
-        cuda_driver.memcpy_htod(m_gpu, self._values.data)
-        return (m_gpu, )
+        return (self.device_handle, )
 
 
 class Arg(Arg):
@@ -124,17 +128,29 @@ class Dat(petsc_Dat):
             self.halo_valid = False
 
     @cached_property
-    def _kernel_args_(self):
-        self.v_gpu = cuda_driver.mem_alloc(int(self.nbytes))
+    def device_handle(self):
         with self.vec as v:
-            cuda_driver.memcpy_htod(self.v_gpu, ctypes.c_ulong(v.handle))
-        return (self.v_gpu, )
+            return v.getCUDAHandle()
 
+    @cached_property
+    def _kernel_args_(self):
+        return (self.device_handle, )
+
+    @collective
     @property
-    def cuda_data(self):
-        self.data
-        cuda_driver.memcpy_dtoh(self._vec, self.v_gpu)
-        return self._vec.array
+    def data(self):
+
+        from pyop2.base import _trace
+
+        _trace.evaluate(set([self]), set([self]))
+
+        with self.vec as v:
+            v.restoreCUDAHandle(self.device_handle)
+            return v.array
+
+        # cuda_driver.memcpy_dtoh(self.data, self.device_handle)
+        # return self.data
+
 
 
 class Global(petsc_Global):
@@ -205,8 +221,6 @@ class JITModule(base.JITModule):
         self._cppargs = dcopy(type(self)._cppargs)
         self._libraries = dcopy(type(self)._libraries)
         self._system_headers = dcopy(type(self)._system_headers)
-        self.grid = (1, 1)
-        self.block = (32, 1, 1)
 
         if not kwargs.get('delay', False):
             self.compile()
@@ -214,7 +228,9 @@ class JITModule(base.JITModule):
 
     @collective
     def __call__(self, *args):
-        return self._fun.prepared_call(self.grid, self.block, *args)
+        grid = (int((args[1] - args[0]) // 32), 1)
+        block = (32, 1, 1)
+        return self._fun.prepared_call(grid, block, *args)
 
     @cached_property
     def _wrapper_name(self):
@@ -222,6 +238,11 @@ class JITModule(base.JITModule):
 
     @cached_property
     def code_to_compile(self):
+        # if self._wrapper_name == "wrap_form0_cell_integral_otherwise":
+        #     f = open("demos/gpu/cuda_kernel_2.cu", "r")
+        #     code = f.read()
+        #     f.close()
+        #     return code
 
         from pyop2.codegen.builder import WrapperBuilder
         from pyop2.codegen.rep2loopy import generate
@@ -233,6 +254,7 @@ class JITModule(base.JITModule):
 
         wrapper = generate(builder)
         code = generate_cuda_kernel(wrapper)
+        print(code)
         return code
 
     @collective
@@ -242,7 +264,6 @@ class JITModule(base.JITModule):
             raise RuntimeError("JITModule has no args associated with it, should never happen")
 
         from pycuda.compiler import SourceModule
-        print(self.code_to_compile)
 
         func = SourceModule(self.code_to_compile)
         self._fun = func.get_function(self._wrapper_name)
@@ -336,6 +357,8 @@ class ParLoop(petsc_base.ParLoop):
 
     @collective
     def _compute(self, part, fun, *arglist):
+        if part.size == 0:
+            return
         with timed_region("ParLoop_{0}_{1}".format(self.iterset.name, self._jitmodule._wrapper_name)):
             fun(part.offset, part.offset + part.size, *arglist)
 
