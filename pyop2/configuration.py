@@ -82,6 +82,8 @@ class Configuration(dict):
         "dump_cuda_kernel": ("PYOP2_DUMP_CUDA_KERNEL", bool, False),
         "load_cuda_kernel": ("PYOP2_LOAD_CUDA_KERNEL", bool, False),
         "cuda_kernel_name": ("PYOP2_CUDA_KERNEL_NAME", str, "cuda_kernel.cu"),
+        "cuda_timer": ("PYOP2_CUDA_TIMER", bool, False),
+        "cuda_timer_repeat": ("PYOP2_CUDA_TIMER_REPEAT", int, 1),
         "debug": ("PYOP2_DEBUG", bool, False),
         "cflags": ("PYOP2_CFLAGS", str, ""),
         "ldflags": ("PYOP2_LDFLAGS", str, ""),

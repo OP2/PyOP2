@@ -364,9 +364,21 @@ class ParLoop(petsc_base.ParLoop):
     def _compute(self, part, fun, *arglist):
         if part.size == 0:
             return
+
+        if configuration["cuda_timer"]:
+            start = cuda_driver.Event()
+            end = cuda_driver.Event()
+            start.record()
+            for _ in range(configuration["cuda_timer_repeat"]):
+                fun(part.offset, part.offset + part.size, *arglist)
+            cuda_driver.Context.synchronize()
+            end.record()
+            end.synchronize()
+            print("{0}_TIME= {1}".format(self._jitmodule._wrapper_name, start.time_till(end)/1000))
+            return
+
         with timed_region("ParLoop_{0}_{1}".format(self.iterset.name, self._jitmodule._wrapper_name)):
             fun(part.offset, part.offset + part.size, *arglist)
-            cuda_driver.Context.synchronize()
 
 
 def generate_single_cell_wrapper(iterset, args, forward_args=(), kernel_name=None, wrapper_name=None, restart_counter=True):
