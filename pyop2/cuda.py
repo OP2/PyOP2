@@ -238,11 +238,11 @@ class JITModule(base.JITModule):
 
     @cached_property
     def code_to_compile(self):
-        # if self._wrapper_name == "wrap_form0_cell_integral_otherwise":
-        #     f = open("demos/gpu/cuda_kernel_2.cu", "r")
-        #     code = f.read()
-        #     f.close()
-        #     return code
+        if configuration["load_cuda_kernel"]:
+            f = open(configuration["cuda_kernel_name"], "r")
+            code = f.read()
+            f.close()
+            return code
 
         from pyop2.codegen.builder import WrapperBuilder
         from pyop2.codegen.rep2loopy import generate
@@ -254,7 +254,12 @@ class JITModule(base.JITModule):
 
         wrapper = generate(builder)
         code = generate_cuda_kernel(wrapper)
-        print(code)
+
+        if configuration["dump_cuda_kernel"]:
+            f = open(configuration["cuda_kernel_name"], "w")
+            f.write(code)
+            f.close()
+
         return code
 
     @collective
@@ -361,6 +366,7 @@ class ParLoop(petsc_base.ParLoop):
             return
         with timed_region("ParLoop_{0}_{1}".format(self.iterset.name, self._jitmodule._wrapper_name)):
             fun(part.offset, part.offset + part.size, *arglist)
+            cuda_driver.Context.synchronize()
 
 
 def generate_single_cell_wrapper(iterset, args, forward_args=(), kernel_name=None, wrapper_name=None, restart_counter=True):

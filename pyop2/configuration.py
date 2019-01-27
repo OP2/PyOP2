@@ -79,6 +79,9 @@ class Configuration(dict):
     DEFAULTS = {
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gcc"),
         "simd_width": ("PYOP2_SIMD_WIDTH", int, 4),
+        "dump_cuda_kernel": ("PYOP2_DUMP_CUDA_KERNEL", bool, False),
+        "load_cuda_kernel": ("PYOP2_LOAD_CUDA_KERNEL", bool, False),
+        "cuda_kernel_name": ("PYOP2_CUDA_KERNEL_NAME", str, "cuda_kernel.cu"),
         "debug": ("PYOP2_DEBUG", bool, False),
         "cflags": ("PYOP2_CFLAGS", str, ""),
         "ldflags": ("PYOP2_LDFLAGS", str, ""),
