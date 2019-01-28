@@ -85,6 +85,7 @@ class Configuration(dict):
         "cuda_jitmodule_name": ("PYOP2_CUDA_JITMODULE_NAME", str, "wrap_form0_cell_integral_otherwise"),
         "cuda_timer": ("PYOP2_CUDA_TIMER", bool, False),
         "cuda_timer_repeat": ("PYOP2_CUDA_TIMER_REPEAT", int, 1),
+        "cuda_timer_profile": ("PYOP2_CUDA_TIMER_PROFILE", bool, False),
         "cuda_block_size": ("PYOP2_CUDA_BLOCK_SIZE", int, 32),
         "debug": ("PYOP2_DEBUG", bool, False),
         "cflags": ("PYOP2_CFLAGS", str, ""),

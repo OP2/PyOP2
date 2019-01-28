@@ -368,6 +368,8 @@ class ParLoop(petsc_base.ParLoop):
         if configuration["cuda_timer"]:
             start = cuda_driver.Event()
             end = cuda_driver.Event()
+            if configuration["cuda_timer_profile"]:
+                cuda_driver.start_profiler()
             start.record()
             for _ in range(configuration["cuda_timer_repeat"]):
                 fun(part.offset, part.offset + part.size, *arglist)
@@ -375,6 +377,8 @@ class ParLoop(petsc_base.ParLoop):
             end.record()
             end.synchronize()
             print("{0}_TIME= {1}".format(self._jitmodule._wrapper_name, start.time_till(end)/1000))
+            if configuration["cuda_timer_profile"]:
+                cuda_driver.stop_profiler()
             return
 
         with timed_region("ParLoop_{0}_{1}".format(self.iterset.name, self._jitmodule._wrapper_name)):
