@@ -74,7 +74,6 @@ class Map(Map):
 
     @cached_property
     def device_handle(self):
-        print(self.values.nbytes)
         m_gpu = cuda_driver.mem_alloc(int(self.values.nbytes))
         cuda_driver.memcpy_htod(m_gpu, self.values)
         return m_gpu
@@ -457,21 +456,5 @@ def generate_cuda_kernel(program):
 
     program = program.with_root_kernel(kernel)
     code = loopy.generate_code_v2(program).device_code()
-    code = """
-#if __CUDA_ARCH__ < 600
-__device__ double atomicAdd(double* address, double val)
-{
-    unsigned long long int* address_as_ull = (unsigned long long int*)address;
-    unsigned long long int old = *address_as_ull, assumed;
-
-    do {
-        assumed = old;
-        old = atomicCAS(address_as_ull, assumed, __double_as_longlong(val + __longlong_as_double(assumed)));
-    } while (assumed != old);  // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
-
-    return __longlong_as_double(old);
-}
-#endif
-""" + code
 
     return code
