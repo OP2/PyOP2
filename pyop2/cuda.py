@@ -228,7 +228,8 @@ class JITModule(base.JITModule):
     @collective
     def __call__(self, *args):
         block_size = configuration["cuda_block_size"]
-        grid = (int((args[1] - args[0]) // block_size), 1)
+        unroll_size = configuration["cuda_unroll_size"]
+        grid = (int((args[1] - args[0]) // block_size // unroll_size), 1)
         block = (block_size, 1, 1)
         return self._fun.prepared_call(grid, block, *args)
 
@@ -270,7 +271,10 @@ class JITModule(base.JITModule):
 
         from pycuda.compiler import SourceModule
 
-        func = SourceModule(self.code_to_compile)
+        options = []
+        if configuration["cuda_timer_profile"]:
+            options.append("-lineinfo")
+        func = SourceModule(self.code_to_compile, options=options)
         self._fun = func.get_function(self._wrapper_name)
         self._fun.prepare(self.argtypes)
 
@@ -373,7 +377,6 @@ class ParLoop(petsc_base.ParLoop):
             start.record()
             for _ in range(configuration["cuda_timer_repeat"]):
                 fun(part.offset, part.offset + part.size, *arglist)
-            cuda_driver.Context.synchronize()
             end.record()
             end.synchronize()
             print("{0}_TIME= {1}".format(self._jitmodule._wrapper_name, start.time_till(end)/1000))
@@ -450,13 +453,18 @@ def generate_cuda_kernel(program):
     kernel = kernel.copy(instructions=new_insns, args=new_args)
 
     # batch cells into groups
-    # assert "start" in kernel.arg_dict and "end" in kernel.arg_dict
-    
+    # essentially, each thread computes unroll_size elements, each block computes unroll_size*block_size elements
     batch_size = configuration["cuda_block_size"]
+    unroll_size = configuration["cuda_unroll_size"]
 
-    kernel = loopy.assume(kernel, "{0} mod {1} = 0".format("end", batch_size))
-    kernel = loopy.assume(kernel, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format("end", batch_size, "start"))
-    kernel = loopy.split_iname(kernel, "n", batch_size, inner_tag="l.0", outer_tag="g.0")
+    kernel = loopy.assume(kernel, "{0} mod {1} = 0".format("end", batch_size*unroll_size))
+    kernel = loopy.assume(kernel, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format("end", batch_size*unroll_size, "start"))
+
+    if unroll_size > 1:
+        kernel = loopy.split_iname(kernel, "n", unroll_size, inner_tag="ilp")
+        kernel = loopy.split_iname(kernel, "n_outer", batch_size, inner_tag="l.0", outer_tag="g.0")
+    else:
+        kernel = loopy.split_iname(kernel, "n", batch_size, inner_tag="l.0", outer_tag="g.0")
 
     program = program.with_root_kernel(kernel)
     code = loopy.generate_code_v2(program).device_code()
