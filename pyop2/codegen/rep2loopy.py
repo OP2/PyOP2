@@ -286,7 +286,6 @@ def instruction_dependencies(instructions, initialisers):
             if isinstance(op, RuntimeIndex):
                 for v in variables(op.extents):
                     yield v
-
     writers = defaultdict(list)
     for op in instructions_by_type[PackInst]:
         assert isinstance(op, Accumulate)
@@ -526,15 +525,19 @@ def statement_assign(expr, context):
     if isinstance(lvalue, Indexed):
         context.index_ordering.append(tuple(i.name for i in lvalue.index_ordering()))
     lvalue, rvalue = tuple(expression(c, context.parameters) for c in expr.children)
-    within_inames = context.within_inames[expr]
+    if isinstance(expr.label, UnpackInst):
+        tag = "scatter"
+    elif isinstance(expr.label, PackInst):
+        tag = "gather"
 
+    within_inames = context.within_inames[expr]
     id, depends_on = context.instruction_dependencies[expr]
     predicates = frozenset(context.conditions)
     insn = loopy.Assignment(lvalue, rvalue, within_inames=within_inames,
                             predicates=predicates,
                             id=id,
                             depends_on=depends_on, depends_on_is_final=True,
-                            tags=frozenset(['pyop2_assign']))
+                            tags=frozenset([tag]))
 
     return insn
 

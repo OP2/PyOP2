@@ -67,7 +67,9 @@ import pycuda
 import pycuda.autoinit
 import pycuda.driver as cuda_driver
 import numpy as np
+import islpy
 from collections import OrderedDict
+from pytools import memoize_method
 
 
 class Map(Map):
@@ -220,17 +222,26 @@ class JITModule(base.JITModule):
         self._cppargs = dcopy(type(self)._cppargs)
         self._libraries = dcopy(type(self)._libraries)
         self._system_headers = dcopy(type(self)._system_headers)
+        self.processed_program = None
 
         if not kwargs.get('delay', False):
             self.compile()
             self._initialized = True
 
+    @memoize_method
+    def grid_size(self, start, end):
+        from pymbolic import evaluate
+
+        parameters = {'start': start, 'end': end}
+        glens, llens = self.processed_program.get_grid_size_upper_bounds_as_exprs()
+        grid = (int(evaluate(glens, parameters)[0]), 1)
+        block = (int(evaluate(llens, parameters)[0]), 1, 1)
+        return grid, block
+
     @collective
     def __call__(self, *args):
-        block_size = configuration["cuda_block_size"]
-        unroll_size = configuration["cuda_unroll_size"]
-        grid = (int((args[1] - args[0]) // block_size // unroll_size), 1)
-        block = (block_size, 1, 1)
+        grid, block = self.grid_size(args[0], args[1])
+
         return self._fun.prepared_call(grid, block, *args)
 
     @cached_property
@@ -254,7 +265,7 @@ class JITModule(base.JITModule):
         builder.set_kernel(self._kernel)
 
         wrapper = generate(builder)
-        code = generate_cuda_kernel(wrapper)
+        code, self.processed_program = generate_cuda_kernel(wrapper)
 
         if self._wrapper_name == configuration["cuda_jitmodule_name"] and configuration["dump_cuda_kernel"]:
             f = open(configuration["cuda_kernel_name"], "w")
@@ -369,19 +380,17 @@ class ParLoop(petsc_base.ParLoop):
         if part.size == 0:
             return
 
-        if configuration["cuda_timer"]:
+        if self._jitmodule._wrapper_name == configuration["cuda_jitmodule_name"]:
             start = cuda_driver.Event()
             end = cuda_driver.Event()
             if configuration["cuda_timer_profile"]:
                 cuda_driver.start_profiler()
             start.record()
-            for _ in range(configuration["cuda_timer_repeat"]):
-                fun(part.offset, part.offset + part.size, *arglist)
+            fun(part.offset, part.offset + part.size, *arglist)
             end.record()
             end.synchronize()
-            print("{0}_TIME= {1}".format(self._jitmodule._wrapper_name, start.time_till(end)/1000))
-            if configuration["cuda_timer_profile"]:
-                cuda_driver.stop_profiler()
+            print("{0}_TIME= {1}".format(self._jitmodule._wrapper_name,
+                start.time_till(end)*1e-3))
             return
 
         with timed_region("ParLoop_{0}_{1}".format(self.iterset.name, self._jitmodule._wrapper_name)):
@@ -419,6 +428,258 @@ def generate_single_cell_wrapper(iterset, args, forward_args=(), kernel_name=Non
     return code.device_code()
 
 
+def thread_transposition(kernel):
+    nquad = int(loopy.symbolic.pw_aff_to_expr(
+            kernel.get_iname_bounds('form_ip', constants_only=True).size))
+    nbasis = int(loopy.symbolic.pw_aff_to_expr(
+            kernel.get_iname_bounds('form_j', constants_only=True).size))
+    nbatches = 1
+
+    ncells_per_threadblock = int(np.lcm(nquad, nbasis))
+    nthreadblocks_per_chunk = 8
+    load_within = "tag:gather"
+    quad_within = "tag:quadrature"
+    basis_within = "tag:basis"
+
+    # {{{ realizing threadblocks
+
+    kernel = loopy.split_iname(kernel, "n",
+            nbatches*nthreadblocks_per_chunk * ncells_per_threadblock,
+            outer_iname="ichunk")
+    kernel = loopy.split_iname(kernel, "n_inner",
+            nthreadblocks_per_chunk * ncells_per_threadblock,
+            outer_iname="ibatch")
+    kernel = loopy.split_iname(kernel, "n_inner_inner",
+            ncells_per_threadblock, outer_iname="ithreadblock",
+            inner_iname="icell")
+
+    # }}}
+
+    # {{{ remove noops
+
+    noop_insns = set([insn.id for insn in kernel.instructions if
+            isinstance(insn, loopy.NoOpInstruction)])
+    kernel = loopy.remove_instructions(kernel, noop_insns)
+
+    # }}}
+
+    # {{{ extracting variables that are need to be stored between stages.
+
+    temp_vars = frozenset(kernel.temporary_variables.keys())
+
+    written_in_load = frozenset().union(*[insn.write_dependency_names() for
+        insn in kernel.instructions if 'gather' in insn.tags]) & temp_vars
+
+    written_in_quad = frozenset().union(*[insn.write_dependency_names() for
+        insn in kernel.instructions if 'quadrature' in insn.tags]) & temp_vars
+
+    read_in_quad = frozenset().union(*[insn.read_dependency_names() for
+        insn in kernel.instructions if 'quadrature' in insn.tags]) & temp_vars
+
+    read_in_basis = frozenset().union(*[insn.read_dependency_names() for
+        insn in kernel.instructions if 'basis' in insn.tags]) & temp_vars
+
+    # }}}
+
+    # {{{ storing values between the stages
+
+    batch_vars = (written_in_quad & read_in_basis)
+    kernel = loopy.save_temporaries_in_loop(kernel, 'form_ip', batch_vars, within='iname:form_ip')
+
+    batch_vars = (written_in_quad & read_in_basis) | (written_in_load & (read_in_basis | read_in_quad))
+    kernel = loopy.save_temporaries_in_loop(kernel, 'icell', batch_vars)
+    kernel = loopy.save_temporaries_in_loop(kernel, 'ithreadblock', batch_vars)
+
+    # }}}
+
+    # {{{ duplicating inames
+
+    kernel = loopy.duplicate_inames(kernel, ["ichunk", "ithreadblock", "icell"],
+            new_inames=["ichunk_load", "ithreadblock_load", "icell_load"],
+            within="tag:gather")
+
+    kernel = loopy.duplicate_inames(kernel, ["ichunk", "ithreadblock", "icell"],
+            new_inames=["ichunk_quad", "ithreadblock_quad", "icell_quad"],
+            within="tag:quadrature")
+
+    kernel = loopy.duplicate_inames(kernel, ["ichunk", "ithreadblock", "icell"],
+            new_inames=["ichunk_basis", "ithreadblock_basis", "icell_basis"],
+            within="tag:basis or tag:scatter")
+
+    kernel = loopy.duplicate_inames(kernel, ["form_ip"],
+            new_inames=["form_ip_quad"], within="tag:quadrature")
+    kernel = loopy.duplicate_inames(kernel, ["form_ip"],
+            new_inames=["form_ip_basis"], within="tag:basis")
+
+    kernel = loopy.remove_unused_inames(kernel)
+
+    assert not (frozenset(["ithreadblock", "icell", "n", "ichunk"])
+            & kernel.all_inames())
+
+    # }}}
+
+    # {{{ interpreting the first domain as cuboid
+
+    new_space = kernel.domains[0].get_space()
+    new_dom = islpy.BasicSet.universe(new_space)
+    for stage in ['load', 'quad', 'basis']:
+        new_dom = new_dom.add_constraint(
+                islpy.Constraint.ineq_from_names(new_space, {
+                    'ithreadblock_%s' % stage: -1,
+                    1: nthreadblocks_per_chunk-1}))
+        new_dom = new_dom.add_constraint(
+                islpy.Constraint.ineq_from_names(new_space, {
+                    'ithreadblock_%s' % stage: 1}))
+
+        new_dom = new_dom.add_constraint(
+                islpy.Constraint.ineq_from_names(new_space, {
+                    'icell_%s' % stage: -1,
+                    1: ncells_per_threadblock-1}))
+        new_dom = new_dom.add_constraint(
+                islpy.Constraint.ineq_from_names(new_space, {
+                    'icell_%s' % stage: 1}))
+
+        new_dom = new_dom.add_constraint(
+                islpy.Constraint.ineq_from_names(new_space, {
+                    'ichunk_%s' % stage:
+                    -(nbatches*ncells_per_threadblock*nthreadblocks_per_chunk),
+                    'start': -1, 'end': 1, 1: -1}))
+        new_dom = new_dom.add_constraint(
+                islpy.Constraint.ineq_from_names(new_space, {
+                    'ichunk_%s' % stage: 1}))
+
+    new_dom = new_dom.add_constraint(
+            islpy.Constraint.ineq_from_names(new_space, {
+                'ibatch': -1,
+                1: nbatches-1}))
+    new_dom = new_dom.add_constraint(
+            islpy.Constraint.ineq_from_names(new_space, {
+                'ibatch': 1}))
+
+    kernel = kernel.copy(domains=[new_dom]+kernel.domains[1:])
+
+    # }}}
+
+    # {{{ coalescing the entire domain forest
+
+    new_space = kernel.domains[0].get_space()
+    pos = kernel.domains[0].n_dim()
+    for dom in kernel.domains[1:]:
+        # product of all the spaces
+        for dim_name, (dim_type, _) in dom.get_space().get_var_dict().items():
+            assert dim_type == 3
+            new_space = new_space.add_dims(dim_type, 1)
+            new_space = new_space.set_dim_name(dim_type, pos, dim_name)
+            pos += 1
+
+    new_domain = islpy.BasicSet.universe(new_space)
+    for dom in kernel.domains[:]:
+        for constraint in dom.get_constraints():
+            if constraint.is_equality():
+                new_domain = (
+                        new_domain.add_constraint(
+                            islpy.Constraint.eq_from_names(new_space,
+                                constraint.get_coefficients_by_name())))
+            else:
+                new_domain = (
+                        new_domain.add_constraint(
+                            islpy.Constraint.ineq_from_names(new_space,
+                                constraint.get_coefficients_by_name())))
+
+    kernel = kernel.copy(domains=[new_domain])
+
+    # }}}
+
+    # {{{ adding barriers
+
+    kernel = loopy.add_barrier(kernel, "tag:gather",
+            "tag:quadrature", synchronization_kind='local')
+    kernel = loopy.add_barrier(kernel, "tag:quadrature",
+            "tag:basis", synchronization_kind='local')
+    if nbatches > 1:
+        kernel = kernel.copy(
+                instructions=kernel.instructions+[
+                    loopy.BarrierInstruction('closing_barr',
+                        synchronization_kind="local", mem_kind="local",
+                        depends_on=frozenset([insn.id for insn in
+                            kernel.instructions]),
+                        depends_on_is_final=True,
+                        within_inames=frozenset(["ibatch", "ichunk_basis"]))])
+
+    # }}}
+
+    # {{{ re-distributing the gather work
+
+    kernel = loopy.join_inames(kernel, ["ithreadblock_load", "icell_load"],
+            "local_id1", within=load_within)
+
+    # }}}
+
+    # {{{ re-distributing the quadrature evaluation work
+
+    kernel = loopy.split_iname(kernel, "icell_quad", nquad,
+            inner_iname="inner_quad_cell", outer_iname="outer_quad_cell",
+            within=quad_within)
+
+    kernel = loopy.join_inames(kernel, ["ithreadblock_quad", "outer_quad_cell",
+        "form_ip_quad"], "local_id2", within=quad_within)
+
+    # }}}
+
+    # {{{ re-distributing the basis coeffs evaluation work
+
+    # this is the one which we need to take care about.
+    basis_inames = (set(kernel.all_inames()).intersection(*[insn.within_inames
+        for insn in kernel.instructions if 'basis' in insn.tags])
+        - set(["ithreadblock_basis", "icell_basis", "ichunk_basis",
+          "form_ip_basis", "ibatch"]))
+
+    assert len(basis_inames) == 1
+    basis_iname = basis_inames.pop()
+
+    scatter_inames = (set(kernel.all_inames()).intersection(*[insn.within_inames
+        for insn in kernel.instructions if 'scatter' in insn.tags])
+        - set(["ithreadblock_basis", "icell_basis", "ichunk_basis",
+          "ibatch"]))
+    assert len(scatter_inames) == 1
+    scatter_iname = scatter_inames.pop()
+
+    kernel = loopy.split_iname(kernel, "icell_basis", nbasis,
+            inner_iname="inner_basis_cell", outer_iname="outer_basis_cell",
+            within=basis_within+" or tag:scatter")
+    kernel = loopy.join_inames(kernel, ["ithreadblock_basis", "outer_basis_cell",
+        basis_iname], "local_id3", within=basis_within)
+    kernel = loopy.join_inames(kernel, ["ithreadblock_basis", "outer_basis_cell",
+        scatter_iname], "local_id4", within="tag:scatter")
+
+    # }}}
+
+    # tagging inames
+    kernel = loopy.tag_inames(kernel, {
+        "ichunk_load":      "g.0",
+        "ichunk_quad":      "g.0",
+        "ichunk_basis":     "g.0",
+        "local_id1":        "l.0",
+        "local_id2":        "l.0",
+        "local_id3":        "l.0",
+        "local_id4":        "l.0",
+        })
+
+    new_temps = dict((tv.name,
+        tv.copy(address_space=loopy.AddressSpace.LOCAL)) if tv.name in batch_vars
+        else (tv.name, tv) for tv in kernel.temporary_variables.values())
+    kernel = kernel.copy(temporary_variables=new_temps)
+    no_sync_with = frozenset([(insn.id, 'local') for insn in
+        kernel.instructions])
+    new_insns = [insn.copy(no_sync_with=no_sync_with) for
+        insn in kernel.instructions]
+    new_insns = [insn.copy(within_inames=frozenset(['ibatch'])) if
+            isinstance(insn, loopy.BarrierInstruction) else insn for insn in
+            new_insns]
+    kernel = kernel.copy(instructions=new_insns)
+    return kernel
+
+
 def generate_cuda_kernel(program):
 
     # Kernel transformations
@@ -427,6 +688,7 @@ def generate_cuda_kernel(program):
     kernel = program.root_kernel
 
     def insn_needs_atomic(insn):
+        return False
         # updates to global variables are atomic
         assignee_name = insn.assignee.aggregate.name
         return assignee_name in insn.read_dependency_names() and assignee_name not in kernel.temporary_variables
@@ -434,7 +696,7 @@ def generate_cuda_kernel(program):
     new_insns = []
     args_marked_for_atomic = set()
     for insn in kernel.instructions:
-        if ('pyop2_assign' in insn.tags) or ('tsfc_return_accumulate' in insn.tags):
+        if ('scatter' in insn.tags):
             if insn_needs_atomic(insn):
                 atomicity = (loopy.AtomicUpdate(insn.assignee.aggregate.name), )
                 insn = insn.copy(atomicity=atomicity)
@@ -452,21 +714,27 @@ def generate_cuda_kernel(program):
 
     kernel = kernel.copy(instructions=new_insns, args=new_args)
 
-    # batch cells into groups
-    # essentially, each thread computes unroll_size elements, each block computes unroll_size*block_size elements
-    batch_size = configuration["cuda_block_size"]
-    unroll_size = configuration["cuda_unroll_size"]
 
-    kernel = loopy.assume(kernel, "{0} mod {1} = 0".format("end", batch_size*unroll_size))
-    kernel = loopy.assume(kernel, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format("end", batch_size*unroll_size, "start"))
-
-    if unroll_size > 1:
-        kernel = loopy.split_iname(kernel, "n", unroll_size, inner_tag="ilp")
-        kernel = loopy.split_iname(kernel, "n_outer", batch_size, inner_tag="l.0", outer_tag="g.0")
+    if kernel.name == configuration["cuda_jitmodule_name"]:
+        kernel = thread_transposition(kernel)
     else:
-        kernel = loopy.split_iname(kernel, "n", batch_size, inner_tag="l.0", outer_tag="g.0")
+        # batch cells into groups
+        # essentially, each thread computes unroll_size elements, each block computes unroll_size*block_size elements
+        batch_size = configuration["cuda_block_size"]
+        unroll_size = configuration["cuda_unroll_size"]
+
+        kernel = loopy.assume(kernel, "{0} mod {1} = 0".format("end", batch_size*unroll_size))
+        kernel = loopy.assume(kernel, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format("end", batch_size*unroll_size, "start"))
+
+        if unroll_size > 1:
+            kernel = loopy.split_iname(kernel, "n", unroll_size, inner_tag="ilp")
+            kernel = loopy.split_iname(kernel, "n_outer", batch_size, inner_tag="l.0", outer_tag="g.0")
+        else:
+            kernel = loopy.split_iname(kernel, "n", batch_size, inner_tag="l.0", outer_tag="g.0")
 
     program = program.with_root_kernel(kernel)
     code = loopy.generate_code_v2(program).device_code()
 
-    return code
+    print(code)
+
+    return code, program
