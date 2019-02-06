@@ -707,7 +707,7 @@ def global_tt(kernel):
             kernel.get_iname_bounds('form_j', constants_only=True).size))
 
     ncells_per_threadblock = int(np.lcm(nquad, nbasis))
-    nthreadblocks_per_chunk = 16
+    nthreadblocks_per_chunk = 32
     load_within = "tag:gather"
     quad_within = "tag:quadrature"
     basis_within = "tag:basis"
@@ -1181,7 +1181,7 @@ def generalize_gcd_tt(kernel):
                     n_lids, within="id:%s" % insn.id)
             kernel = loopy.split_iname(kernel, "aux_local_id%d" % n_lids,
                     nthreads_per_cell, within="id:%s" % insn.id)
-            kernel = loopy.join_inames(kernel, ["icell_quad",
+            kernel = loopy.join_inames(kernel, ["icell_load",
                 "aux_local_id%d_inner"
                 % n_lids], "local_id%d" % n_lids, within="id:%s" % insn.id)
             n_lids += 1
@@ -1197,10 +1197,6 @@ def generalize_gcd_tt(kernel):
     n_lids += 1
 
     # }}}
-
-    print(kernel)
-    1/0
-
 
     # {{{ re-distributing the basis coeffs evaluation work
 
@@ -1228,14 +1224,21 @@ def generalize_gcd_tt(kernel):
     kernel = loopy.join_inames(kernel, ["icell_basis", "basis_aux_lid0"],
             "local_id%d" % n_lids, within=basis_within)
     kernel = loopy.join_inames(kernel, ["icell_basis", "basis_aux_lid1"],
-            "local_id%d" % (n_lids+1), within=basis_within)
+            "local_id%d" % (n_lids+1), within="tag:scatter")
+    n_lids += 2
 
     # }}}
 
+    iname_tags = {
+        "ichunk_load":      "g.0",
+        "ichunk_quad":      "g.0",
+        "ichunk_basis":     "g.0"}
+    for i in range(n_lids):
+        iname_tags["local_id%d" % i] = "l.0"
 
-
-
-    pass
+    kernel = loopy.tag_inames(kernel, iname_tags)
+    kernel = loopy.add_nosync(kernel, 'local', 'tag:basis', 'tag:scatter')
+    return loopy.remove_unused_inames(kernel).copy(loop_priority=frozenset())
 
 
 def generate_cuda_kernel(program):
@@ -1295,10 +1298,8 @@ def generate_cuda_kernel(program):
     code = loopy.generate_code_v2(program).device_code()
 
     if program.name == configuration["cuda_jitmodule_name"]:
-        print(code)
-        1/0
-        # with open('gcd_tt.c', 'r') as f:
-        #     code = f.read()
+        with open('gcd_tt_p4.c', 'r') as f:
+            code = f.read()
 
     print(code)
 
