@@ -1337,7 +1337,8 @@ def generalize_gcd_tt(kernel):
     kernel = loopy.rename_iname(kernel, scatter_iname+"_outer",
             basis_iname+"_outer", existing_ok=True, within="tag:scatter")
 
-    from loopy.transform.make_scalar import make_scalar
+    from loopy.transform.make_scalar import (
+            make_scalar, remove_invariant_inames)
     # FIXME: generalize this
     kernel = make_scalar(kernel, 't0')
     kernel = loopy.save_temporaries_in_loop(kernel, basis_iname+"_outer",
@@ -1354,6 +1355,7 @@ def generalize_gcd_tt(kernel):
         iname_tags["local_id%d" % i] = "l.0"
 
     kernel = loopy.tag_inames(kernel, iname_tags)
+    kernel = remove_invariant_inames(kernel)
     kernel = loopy.add_nosync(kernel, 'local', 'tag:basis', 'tag:scatter')
     return loopy.remove_unused_inames(kernel).copy(loop_priority=frozenset())
 
