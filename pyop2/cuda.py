@@ -627,7 +627,7 @@ def thread_transposition(kernel):
 
     # this is the one which we need to take care about.
     basis_inames = (set(kernel.all_inames()).intersection(*[insn.within_inames
-        for insn in kernel.instructions if 'basis' in insn.tags])
+        for insn in kernel.instructions if ('basis' in insn.tags)])
         - set(["ithreadblock_basis", "icell_basis", "ichunk_basis",
           "form_ip_basis", "ibatch"]))
 
@@ -1043,6 +1043,7 @@ def generalize_gcd_tt(kernel):
     insn_id_generator = kernel.get_instruction_id_generator()
     new_insns = []
     new_domains = []
+    priorities = []
 
     for tv in kernel.temporary_variables.values():
         if tv.address_space == loopy.AddressSpace.GLOBAL:
@@ -1053,12 +1054,14 @@ def generalize_gcd_tt(kernel):
 
             inames = tuple(var_name_generator(based_on="icopy") for _
                     in tv.shape)
+            priorities.append(inames)
             var_inames = tuple(Variable(iname) for iname in inames)
             new_temps[new_name] = old_tv.copy(name=new_name)
             new_insns.append(loopy.Assignment(
                 id=insn_id_generator(based_on="insn_copy"),
                 assignee=Subscript(Variable(old_name),
                 var_inames), expression=Subscript(Variable(new_name), var_inames),
+                within_inames=frozenset(inames),
                 tags=frozenset(["init_shared"])))
             space = islpy.Space.create_from_names(kernel.isl_context, set=inames)
             domain = islpy.BasicSet.universe(space)
@@ -1076,7 +1079,9 @@ def generalize_gcd_tt(kernel):
     kernel = kernel.copy(temporary_variables=new_temps,
             instructions=kernel.instructions+new_insns,
             domains=kernel.domains+new_domains)
-    kernel = loopy.add_dependency(kernel, "tag:quadrature", "tag:init_shared")
+    kernel = loopy.add_dependency(kernel, "tag:gather", "tag:init_shared")
+    for priority in priorities:
+        kernel = loopy.prioritize_loops(kernel, ",".join(priority))
 
     # }}}
 
@@ -1114,13 +1119,41 @@ def generalize_gcd_tt(kernel):
 
     # }}}
 
+    # {{{ remove unnecessary dependencies on quadrature instructions
+
+    vars_not_neeeded_in_quad = written_in_load - read_in_quad
+
+    # so lets just write in the basis part
+    written_in_load = written_in_load - vars_not_neeeded_in_quad
+
+    insns_to_be_added_in_basis = frozenset([insn.id for insn in
+        kernel.instructions if insn.write_dependency_names()
+        & vars_not_neeeded_in_quad and 'gather' in insn.tags])
+
+    def _remove_unnecessary_deps_on_load(insn):
+        return insn.copy(depends_on=insn.depends_on - insns_to_be_added_in_basis)
+
+    kernel = loopy.map_instructions(kernel, quad_within,
+            _remove_unnecessary_deps_on_load)
+
+    def _add_unnecessary_instructions_to_basis(insn):
+        if insn.id in insns_to_be_added_in_basis:
+            return insn.copy(tags=insn.tags-frozenset(["gather"])
+                | frozenset(["basis", "basis_init"]))
+        return insn
+    kernel = loopy.map_instructions(kernel, "id:*",
+            _add_unnecessary_instructions_to_basis)
+
+    # }}}
+
     # {{{ storing values between the stages
 
     batch_vars = (written_in_quad & read_in_basis)
     kernel = loopy.save_temporaries_in_loop(kernel, 'form_ip', batch_vars, within='iname:form_ip')
 
     batch_vars = (written_in_quad & read_in_basis) | (written_in_load & (read_in_basis | read_in_quad))
-    kernel = loopy.save_temporaries_in_loop(kernel, 'icell', batch_vars)
+    kernel = loopy.save_temporaries_in_loop(kernel, 'icell', batch_vars,
+            within="not tag:init_shared")
 
     # }}}
 
@@ -1217,6 +1250,26 @@ def generalize_gcd_tt(kernel):
     n_lids = 0
 
     for insn in kernel.instructions:
+        if "init_shared" in insn.tags:
+            inames_to_merge = insn.within_inames
+            # maybe need to split to be valid for all cases?
+            for priority in kernel.loop_priority:
+                if frozenset(priority) == inames_to_merge:
+                    inames_to_merge = priority
+                    break
+
+            inames_to_merge = list(inames_to_merge)
+
+            kernel = loopy.join_inames(kernel, inames_to_merge, "aux_local_id%d" %
+                    n_lids, within="id:%s" % insn.id)
+            kernel = loopy.split_iname(kernel, "aux_local_id%d" % n_lids,
+                    ncells_per_chunk*nthreads_per_cell, within="id:%s" % insn.id,
+                    inner_iname=("local_id%d" % n_lids))
+            kernel = loopy.tag_inames(kernel, (("aux_local_id%d_outer", "unr"),),
+                    ignore_nonexistent=True)
+            n_lids += 1
+
+    for insn in kernel.instructions:
         if "gather" in insn.tags:
             inames_to_merge = (insn.within_inames
                     - frozenset(["ichunk_load", "icell_load"]))
@@ -1235,7 +1288,7 @@ def generalize_gcd_tt(kernel):
             kernel = loopy.join_inames(kernel, ["icell_load",
                 "aux_local_id%d_inner"
                 % n_lids], "local_id%d" % n_lids, within="id:%s" % insn.id)
-            kernel = loopy.tag_inames(kernel, (("aux_local_id%d_inner", "unr"),),
+            kernel = loopy.tag_inames(kernel, (("aux_local_id%d_outer", "unr"),),
                     ignore_nonexistent=True)
             n_lids += 1
 
@@ -1255,7 +1308,8 @@ def generalize_gcd_tt(kernel):
 
     # this is the one which we need to take care about.
     basis_inames = (set(kernel.all_inames()).intersection(*[insn.within_inames
-        for insn in kernel.instructions if 'basis' in insn.tags])
+        for insn in kernel.instructions if 'basis' in insn.tags
+        and 'basis_init' not in insn.tags])
         - set(["ithreadblock_basis", "icell_basis", "ichunk_basis",
           "form_ip_basis", "ibatch"]))
 
@@ -1280,6 +1334,15 @@ def generalize_gcd_tt(kernel):
             "local_id%d" % (n_lids+1), within="tag:scatter")
     n_lids += 2
 
+    kernel = loopy.rename_iname(kernel, scatter_iname+"_outer",
+            basis_iname+"_outer", existing_ok=True, within="tag:scatter")
+
+    from loopy.transform.make_scalar import make_scalar
+    # FIXME: generalize this
+    kernel = make_scalar(kernel, 't0')
+    kernel = loopy.save_temporaries_in_loop(kernel, basis_iname+"_outer",
+            ['t0'], within="tag:basis or tag:scatter")
+
     # }}}
 
     iname_tags = {
@@ -1289,7 +1352,6 @@ def generalize_gcd_tt(kernel):
         }
     for i in range(n_lids):
         iname_tags["local_id%d" % i] = "l.0"
-
 
     kernel = loopy.tag_inames(kernel, iname_tags)
     kernel = loopy.add_nosync(kernel, 'local', 'tag:basis', 'tag:scatter')
@@ -1353,8 +1415,7 @@ def generate_cuda_kernel(program):
     code = loopy.generate_code_v2(program).device_code()
 
     if program.name == configuration["cuda_jitmodule_name"]:
-        print(code)
-        1/0
+        pass
         # with open('scpt_p4.c', 'r') as f:
         #     code = f.read()
         # with open('gcd_tt_p4.c', 'r') as f:
