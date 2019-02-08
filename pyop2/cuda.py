@@ -281,8 +281,7 @@ class JITModule(base.JITModule):
         from pycuda.compiler import SourceModule
 
         options = []
-        if configuration["cuda_timer_profile"]:
-            options.append("-lineinfo")
+        options.append("-lineinfo")
         func = SourceModule(self.code_to_compile, options=options)
         self._fun = func.get_function(self._wrapper_name)
         self._fun.prepare(self.argtypes)
@@ -1030,10 +1029,56 @@ def generalize_gcd_tt(kernel):
 
     nthreads_per_cell = int(np.gcd(nquad, nbasis))
     # should be the minimum number needed to make `nthreads_per_cell` multiple of 32
-    ncells_per_chunk = 16
+    ncells_per_chunk = 32
     load_within = "tag:gather"
     quad_within = "tag:quadrature"
     basis_within = "tag:basis"
+
+    # {{{ feeding the constants into shared memory
+
+    from pymbolic.primitives import Variable, Subscript
+
+    new_temps = {}
+    var_name_generator = kernel.get_var_name_generator()
+    insn_id_generator = kernel.get_instruction_id_generator()
+    new_insns = []
+    new_domains = []
+
+    for tv in kernel.temporary_variables.values():
+        if tv.address_space == loopy.AddressSpace.GLOBAL:
+            old_tv = tv.copy()
+
+            old_name = old_tv.name
+            new_name = var_name_generator(based_on="const_"+tv.name)
+
+            inames = tuple(var_name_generator(based_on="icopy") for _
+                    in tv.shape)
+            var_inames = tuple(Variable(iname) for iname in inames)
+            new_temps[new_name] = old_tv.copy(name=new_name)
+            new_insns.append(loopy.Assignment(
+                id=insn_id_generator(based_on="insn_copy"),
+                assignee=Subscript(Variable(old_name),
+                var_inames), expression=Subscript(Variable(new_name), var_inames),
+                tags=frozenset(["init_shared"])))
+            space = islpy.Space.create_from_names(kernel.isl_context, set=inames)
+            domain = islpy.BasicSet.universe(space)
+            from loopy.isl_helpers import make_slab
+            for iname, axis_len in zip(inames, tv.shape):
+                domain &= make_slab(space, iname, 0, axis_len)
+            new_domains.append(domain)
+            new_temps[old_name] = old_tv.copy(
+                    read_only=False,
+                    initializer=None,
+                    address_space=loopy.AddressSpace.LOCAL)
+        else:
+            new_temps[tv.name] = tv
+
+    kernel = kernel.copy(temporary_variables=new_temps,
+            instructions=kernel.instructions+new_insns,
+            domains=kernel.domains+new_domains)
+    kernel = loopy.add_dependency(kernel, "tag:quadrature", "tag:init_shared")
+
+    # }}}
 
     # {{{ realizing threadblocks
 
@@ -1173,9 +1218,15 @@ def generalize_gcd_tt(kernel):
 
     for insn in kernel.instructions:
         if "gather" in insn.tags:
-            inames_to_merge = list(insn.within_inames
+            inames_to_merge = (insn.within_inames
                     - frozenset(["ichunk_load", "icell_load"]))
             # maybe need to split to be valid for all cases?
+            for priority in kernel.loop_priority:
+                if frozenset(priority) == inames_to_merge:
+                    inames_to_merge = priority
+                    break
+
+            inames_to_merge = list(inames_to_merge)
 
             kernel = loopy.join_inames(kernel, inames_to_merge, "aux_local_id%d" %
                     n_lids, within="id:%s" % insn.id)
@@ -1184,6 +1235,8 @@ def generalize_gcd_tt(kernel):
             kernel = loopy.join_inames(kernel, ["icell_load",
                 "aux_local_id%d_inner"
                 % n_lids], "local_id%d" % n_lids, within="id:%s" % insn.id)
+            kernel = loopy.tag_inames(kernel, (("aux_local_id%d_inner", "unr"),),
+                    ignore_nonexistent=True)
             n_lids += 1
 
     # }}}
@@ -1232,9 +1285,11 @@ def generalize_gcd_tt(kernel):
     iname_tags = {
         "ichunk_load":      "g.0",
         "ichunk_quad":      "g.0",
-        "ichunk_basis":     "g.0"}
+        "ichunk_basis":     "g.0",
+        }
     for i in range(n_lids):
         iname_tags["local_id%d" % i] = "l.0"
+
 
     kernel = loopy.tag_inames(kernel, iname_tags)
     kernel = loopy.add_nosync(kernel, 'local', 'tag:basis', 'tag:scatter')
@@ -1298,8 +1353,12 @@ def generate_cuda_kernel(program):
     code = loopy.generate_code_v2(program).device_code()
 
     if program.name == configuration["cuda_jitmodule_name"]:
-        with open('gcd_tt_p4.c', 'r') as f:
-            code = f.read()
+        print(code)
+        1/0
+        # with open('scpt_p4.c', 'r') as f:
+        #     code = f.read()
+        # with open('gcd_tt_p4.c', 'r') as f:
+        #     code = f.read()
 
     print(code)
 
