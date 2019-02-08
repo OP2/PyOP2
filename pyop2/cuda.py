@@ -234,6 +234,7 @@ class JITModule(base.JITModule):
         glens, llens = self.processed_program.get_grid_size_upper_bounds_as_exprs()
         grid = (int(evaluate(glens, parameters)[0]), 1)
         block = (int(evaluate(llens, parameters)[0]), 1, 1)
+        print(grid, block)
         return grid, block
 
     @collective
@@ -281,7 +282,6 @@ class JITModule(base.JITModule):
         from pycuda.compiler import SourceModule
 
         options = []
-        options.append("-lineinfo")
         func = SourceModule(self.code_to_compile, options=options)
         self._fun = func.get_function(self._wrapper_name)
         self._fun.prepare(self.argtypes)
@@ -380,9 +380,8 @@ class ParLoop(petsc_base.ParLoop):
         if self._jitmodule._wrapper_name == configuration["cuda_jitmodule_name"]:
             start = cuda_driver.Event()
             end = cuda_driver.Event()
-            if configuration["cuda_timer_profile"]:
-                cuda_driver.start_profiler()
             start.record()
+            start.synchronize()
             fun(part.offset, part.offset + part.size, *arglist)
             end.record()
             end.synchronize()
@@ -678,10 +677,95 @@ def thread_transposition(kernel):
 
 
 def scpt(kernel):
-    kernel = loopy.split_iname(kernel, "n", 128, outer_tag="g.0",
+    batch_size = 128
+    kernel = loopy.split_iname(kernel, "n", batch_size, outer_tag="g.0",
             inner_tag="l.0")
     return kernel
 
+    # {{{ feeding the constants into shared memory
+
+    from pymbolic.primitives import Variable, Subscript
+
+    new_temps = {}
+    var_name_generator = kernel.get_var_name_generator()
+    insn_id_generator = kernel.get_instruction_id_generator()
+    new_insns = []
+    new_domains = []
+    priorities = []
+
+    for tv in kernel.temporary_variables.values():
+        if tv.address_space == loopy.AddressSpace.GLOBAL:
+            old_tv = tv.copy()
+
+            old_name = old_tv.name
+            new_name = var_name_generator(based_on="const_"+tv.name)
+
+            inames = tuple(var_name_generator(based_on="icopy") for _
+                    in tv.shape)
+            priorities.append(inames)
+            var_inames = tuple(Variable(iname) for iname in inames)
+            new_temps[new_name] = old_tv.copy(name=new_name)
+            new_insns.append(loopy.Assignment(
+                id=insn_id_generator(based_on="insn_copy"),
+                assignee=Subscript(Variable(old_name),
+                var_inames), expression=Subscript(Variable(new_name), var_inames),
+                within_inames=frozenset(inames),
+                tags=frozenset(["init_shared"])))
+            space = islpy.Space.create_from_names(kernel.isl_context, set=inames)
+            domain = islpy.BasicSet.universe(space)
+            from loopy.isl_helpers import make_slab
+            for iname, axis_len in zip(inames, tv.shape):
+                domain &= make_slab(space, iname, 0, axis_len)
+            new_domains.append(domain)
+            new_temps[old_name] = old_tv.copy(
+                    read_only=False,
+                    initializer=None,
+                    address_space=loopy.AddressSpace.LOCAL)
+        else:
+            new_temps[tv.name] = tv
+
+    kernel = kernel.copy(temporary_variables=new_temps,
+            instructions=kernel.instructions+new_insns,
+            domains=kernel.domains+new_domains)
+    kernel = loopy.add_dependency(kernel, "tag:gather", "tag:init_shared")
+    for priority in priorities:
+        kernel = loopy.prioritize_loops(kernel, ",".join(priority))
+
+    n_lids = 0
+
+    for insn in kernel.instructions:
+        if "init_shared" in insn.tags:
+            inames_to_merge = insn.within_inames
+            # maybe need to split to be valid for all cases?
+            for priority in kernel.loop_priority:
+                if frozenset(priority) == inames_to_merge:
+                    inames_to_merge = priority
+                    break
+
+            inames_to_merge = list(inames_to_merge)
+
+            kernel = loopy.join_inames(kernel, inames_to_merge, "aux_local_id%d" %
+                    n_lids, within="id:%s" % insn.id)
+            kernel = loopy.split_iname(kernel, "aux_local_id%d" % n_lids,
+                    batch_size, within="id:%s" % insn.id,
+                    inner_iname=("local_id%d" % n_lids))
+            kernel = loopy.tag_inames(kernel, (("aux_local_id%d_outer", "ilp"),),
+                    ignore_nonexistent=True)
+            n_lids += 1
+
+    # }}}
+
+    iname_tags = {}
+
+    for i in range(n_lids):
+        iname_tags["local_id%d" % i] = "l.0"
+
+    kernel = loopy.tag_inames(kernel, iname_tags)
+
+    return loopy.remove_unused_inames(kernel).copy(loop_priority=frozenset())
+
+
+# {{{ useless strategy of global tt
 
 def global_tt(kernel):
     new_insns = []
@@ -1019,8 +1103,12 @@ def global_tt(kernel):
 
     return kernel
 
+# }}}
+
 
 def generalize_gcd_tt(kernel):
+
+    copy_consts_to_shared = True
 
     nquad = int(loopy.symbolic.pw_aff_to_expr(
             kernel.get_iname_bounds('form_ip', constants_only=True).size))
@@ -1029,67 +1117,90 @@ def generalize_gcd_tt(kernel):
 
     nthreads_per_cell = int(np.gcd(nquad, nbasis))
     # should be the minimum number needed to make `nthreads_per_cell` multiple of 32
-    ncells_per_chunk = 32
+    ncells_per_batch = 16
+    nbatches_per_chunk = 32
     load_within = "tag:gather"
     quad_within = "tag:quadrature"
     basis_within = "tag:basis"
+    n_lids = 0
 
     # {{{ feeding the constants into shared memory
 
-    from pymbolic.primitives import Variable, Subscript
+    if copy_consts_to_shared:
+        from pymbolic.primitives import Variable, Subscript
 
-    new_temps = {}
-    var_name_generator = kernel.get_var_name_generator()
-    insn_id_generator = kernel.get_instruction_id_generator()
-    new_insns = []
-    new_domains = []
-    priorities = []
+        new_temps = {}
+        var_name_generator = kernel.get_var_name_generator()
+        insn_id_generator = kernel.get_instruction_id_generator()
+        new_insns = []
+        new_domains = []
+        priorities = []
 
-    for tv in kernel.temporary_variables.values():
-        if tv.address_space == loopy.AddressSpace.GLOBAL:
-            old_tv = tv.copy()
+        for tv in kernel.temporary_variables.values():
+            if tv.address_space == loopy.AddressSpace.GLOBAL:
+                old_tv = tv.copy()
 
-            old_name = old_tv.name
-            new_name = var_name_generator(based_on="const_"+tv.name)
+                old_name = old_tv.name
+                new_name = var_name_generator(based_on="const_"+tv.name)
 
-            inames = tuple(var_name_generator(based_on="icopy") for _
-                    in tv.shape)
-            priorities.append(inames)
-            var_inames = tuple(Variable(iname) for iname in inames)
-            new_temps[new_name] = old_tv.copy(name=new_name)
-            new_insns.append(loopy.Assignment(
-                id=insn_id_generator(based_on="insn_copy"),
-                assignee=Subscript(Variable(old_name),
-                var_inames), expression=Subscript(Variable(new_name), var_inames),
-                within_inames=frozenset(inames),
-                tags=frozenset(["init_shared"])))
-            space = islpy.Space.create_from_names(kernel.isl_context, set=inames)
-            domain = islpy.BasicSet.universe(space)
-            from loopy.isl_helpers import make_slab
-            for iname, axis_len in zip(inames, tv.shape):
-                domain &= make_slab(space, iname, 0, axis_len)
-            new_domains.append(domain)
-            new_temps[old_name] = old_tv.copy(
-                    read_only=False,
-                    initializer=None,
-                    address_space=loopy.AddressSpace.LOCAL)
-        else:
-            new_temps[tv.name] = tv
+                inames = tuple(var_name_generator(based_on="icopy") for _
+                        in tv.shape)
+                priorities.append(inames)
+                var_inames = tuple(Variable(iname) for iname in inames)
+                new_temps[new_name] = old_tv.copy(name=new_name)
+                new_insns.append(loopy.Assignment(
+                    id=insn_id_generator(based_on="insn_copy"),
+                    assignee=Subscript(Variable(old_name),
+                    var_inames), expression=Subscript(Variable(new_name), var_inames),
+                    within_inames=frozenset(inames),
+                    tags=frozenset(["init_shared"])))
+                space = islpy.Space.create_from_names(kernel.isl_context, set=inames)
+                domain = islpy.BasicSet.universe(space)
+                from loopy.isl_helpers import make_slab
+                for iname, axis_len in zip(inames, tv.shape):
+                    domain &= make_slab(space, iname, 0, axis_len)
+                new_domains.append(domain)
+                new_temps[old_name] = old_tv.copy(
+                        read_only=False,
+                        initializer=None,
+                        address_space=loopy.AddressSpace.LOCAL)
+            else:
+                new_temps[tv.name] = tv
 
-    kernel = kernel.copy(temporary_variables=new_temps,
-            instructions=kernel.instructions+new_insns,
-            domains=kernel.domains+new_domains)
-    kernel = loopy.add_dependency(kernel, "tag:gather", "tag:init_shared")
-    for priority in priorities:
-        kernel = loopy.prioritize_loops(kernel, ",".join(priority))
+        kernel = kernel.copy(temporary_variables=new_temps,
+                instructions=kernel.instructions+new_insns,
+                domains=kernel.domains+new_domains)
+        kernel = loopy.add_dependency(kernel, "tag:gather", "tag:init_shared")
+        for priority in priorities:
+            kernel = loopy.prioritize_loops(kernel, ",".join(priority))
+
+        for insn in kernel.instructions:
+            if "init_shared" in insn.tags:
+                inames_to_merge = insn.within_inames
+                # maybe need to split to be valid for all cases?
+                for priority in kernel.loop_priority:
+                    if frozenset(priority) == inames_to_merge:
+                        inames_to_merge = priority
+                        break
+
+                inames_to_merge = list(inames_to_merge)
+
+                kernel = loopy.join_inames(kernel, inames_to_merge,
+                        "aux_local_id%d" % n_lids, within="id:%s" % insn.id)
+                kernel = loopy.split_iname(kernel, "aux_local_id%d" % n_lids,
+                        ncells_per_batch*nthreads_per_cell, within="id:%s" % insn.id,
+                        inner_iname=("local_id%d" % n_lids))
+                n_lids += 1
 
     # }}}
 
-    # {{{ realizing threadblocks
+    # {{{ realizing batches
 
     kernel = loopy.split_iname(kernel, "n",
-            ncells_per_chunk,
-            outer_iname="ichunk", inner_iname="icell")
+            nbatches_per_chunk * ncells_per_batch,
+            outer_iname="ichunk",)
+    kernel = loopy.split_iname(kernel, "n_inner", ncells_per_batch,
+            inner_iname="icell", outer_iname="ibatch")
 
     # }}}
 
@@ -1191,7 +1302,7 @@ def generalize_gcd_tt(kernel):
         new_dom = new_dom.add_constraint(
                 islpy.Constraint.ineq_from_names(new_space, {
                     'icell_%s' % stage: -1,
-                    1: ncells_per_chunk-1}))
+                    1: ncells_per_batch-1}))
         new_dom = new_dom.add_constraint(
                 islpy.Constraint.ineq_from_names(new_space, {
                     'icell_%s' % stage: 1}))
@@ -1199,11 +1310,19 @@ def generalize_gcd_tt(kernel):
         new_dom = new_dom.add_constraint(
                 islpy.Constraint.ineq_from_names(new_space, {
                     'ichunk_%s' % stage:
-                    -(ncells_per_chunk),
+                    -(nbatches_per_chunk*ncells_per_batch),
                     'start': -1, 'end': 1, 1: -1}))
         new_dom = new_dom.add_constraint(
                 islpy.Constraint.ineq_from_names(new_space, {
                     'ichunk_%s' % stage: 1}))
+
+    new_dom = new_dom.add_constraint(
+            islpy.Constraint.ineq_from_names(new_space, {
+                'ibatch': -1,
+                1: nbatches_per_chunk-1}))
+    new_dom = new_dom.add_constraint(
+            islpy.Constraint.ineq_from_names(new_space, {
+                'ibatch': 1}))
 
     kernel = kernel.copy(domains=[new_dom]+kernel.domains[1:])
 
@@ -1241,38 +1360,15 @@ def generalize_gcd_tt(kernel):
 
     kernel = loopy.add_barrier(kernel, "tag:gather",
             "tag:quadrature", synchronization_kind='local')
-
     kernel = loopy.add_barrier(kernel, "tag:quadrature",
             "tag:basis", synchronization_kind='local')
 
     # {{{ re-distributing the gather work
 
-    n_lids = 0
-
-    for insn in kernel.instructions:
-        if "init_shared" in insn.tags:
-            inames_to_merge = insn.within_inames
-            # maybe need to split to be valid for all cases?
-            for priority in kernel.loop_priority:
-                if frozenset(priority) == inames_to_merge:
-                    inames_to_merge = priority
-                    break
-
-            inames_to_merge = list(inames_to_merge)
-
-            kernel = loopy.join_inames(kernel, inames_to_merge, "aux_local_id%d" %
-                    n_lids, within="id:%s" % insn.id)
-            kernel = loopy.split_iname(kernel, "aux_local_id%d" % n_lids,
-                    ncells_per_chunk*nthreads_per_cell, within="id:%s" % insn.id,
-                    inner_iname=("local_id%d" % n_lids))
-            kernel = loopy.tag_inames(kernel, (("aux_local_id%d_outer", "unr"),),
-                    ignore_nonexistent=True)
-            n_lids += 1
-
     for insn in kernel.instructions:
         if "gather" in insn.tags:
             inames_to_merge = (insn.within_inames
-                    - frozenset(["ichunk_load", "icell_load"]))
+                    - frozenset(["ichunk_load", "icell_load", "ibatch"]))
             # maybe need to split to be valid for all cases?
             for priority in kernel.loop_priority:
                 if frozenset(priority) == inames_to_merge:
@@ -1346,6 +1442,11 @@ def generalize_gcd_tt(kernel):
 
     # }}}
 
+    new_insns = [insn.copy(within_inames=frozenset(['ibatch'])) if
+            isinstance(insn, loopy.BarrierInstruction) else insn for insn in
+            kernel.instructions]
+    kernel = kernel.copy(instructions=new_insns)
+
     iname_tags = {
         "ichunk_load":      "g.0",
         "ichunk_quad":      "g.0",
@@ -1353,8 +1454,9 @@ def generalize_gcd_tt(kernel):
         }
     for i in range(n_lids):
         iname_tags["local_id%d" % i] = "l.0"
+        iname_tags["aux_local_id%d_outer" % i] = "ilp"
 
-    kernel = loopy.tag_inames(kernel, iname_tags)
+    kernel = loopy.tag_inames(kernel, iname_tags, ignore_nonexistent=True)
     kernel = remove_invariant_inames(kernel)
     kernel = loopy.add_nosync(kernel, 'local', 'tag:basis', 'tag:scatter')
     return loopy.remove_unused_inames(kernel).copy(loop_priority=frozenset())
@@ -1418,9 +1520,7 @@ def generate_cuda_kernel(program):
 
     if program.name == configuration["cuda_jitmodule_name"]:
         pass
-        # with open('scpt_p4.c', 'r') as f:
-        #     code = f.read()
-        # with open('gcd_tt_p4.c', 'r') as f:
+        # with open('gcd-failure.c', 'r') as f:
         #     code = f.read()
 
     print(code)
