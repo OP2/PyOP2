@@ -235,7 +235,6 @@ class JITModule(base.JITModule):
         glens, llens = self.processed_program.get_grid_size_upper_bounds_as_exprs()
         grid = (int(evaluate(glens, parameters)[0]), 1)
         block = (int(evaluate(llens, parameters)[0]), 1, 1)
-        print(grid, block)
         return grid, block
 
     @memoize_method
@@ -255,7 +254,6 @@ class JITModule(base.JITModule):
     @collective
     def __call__(self, *args):
         grid, block = self.grid_size(args[0], args[1])
-        print(grid, block)
         extra_global_args = self.get_args_marked_for_globals()
 
         return self._fun.prepared_call(grid, block, *(args+extra_global_args))
@@ -688,10 +686,31 @@ def thread_transposition(kernel):
 
 
 def scpt(kernel):
+    args_to_make_global = []
+    pack_consts_to_globals = False
     batch_size = 128
     kernel = loopy.split_iname(kernel, "n", batch_size, outer_tag="g.0",
             inner_tag="l.0")
-    return kernel
+
+    # {{{ making consts as globals
+
+    if pack_consts_to_globals:
+        args_to_make_global = [tv.initializer.flatten()
+                for tv in kernel.temporary_variables.values()
+                if (tv.initializer is not None
+                    and tv.address_space == loopy.AddressSpace.GLOBAL)]
+
+        new_temps = dict((tv.name, tv.copy(initializer=None))
+                if (tv.initializer is not None
+                    and tv.address_space == loopy.AddressSpace.GLOBAL)
+                else (tv.name, tv) for tv in
+                kernel.temporary_variables.values())
+
+        kernel = kernel.copy(temporary_variables=new_temps)
+
+    # }}}
+
+    return kernel, args_to_make_global
 
     # {{{ feeding the constants into shared memory
 
@@ -1123,8 +1142,6 @@ def generalize_gcd_tt(kernel):
     pack_consts_to_globals = True
     args_to_make_global = []
 
-    assert not (copy_consts_to_shared and pack_consts_to_globals)
-
     nquad = int(loopy.symbolic.pw_aff_to_expr(
             kernel.get_iname_bounds('form_ip', constants_only=True).size))
     nbasis = int(loopy.symbolic.pw_aff_to_expr(
@@ -1132,7 +1149,7 @@ def generalize_gcd_tt(kernel):
 
     nthreads_per_cell = int(np.gcd(nquad, nbasis))
     # should be the minimum number needed to make `nthreads_per_cell` multiple of 32
-    ncells_per_batch = 16
+    ncells_per_batch = 7
     nbatches_per_chunk = 1
     load_within = "tag:gather"
     quad_within = "tag:quadrature"
@@ -1344,6 +1361,10 @@ def generalize_gcd_tt(kernel):
                 islpy.Constraint.ineq_from_names(new_space, {
                     'ichunk_%s' % stage:
                     -(nbatches_per_chunk*ncells_per_batch),
+                    'ibatch':
+                    -(ncells_per_batch),
+                    'icell_%s' % stage:
+                    -1,
                     'start': -1, 'end': 1, 1: -1}))
         new_dom = new_dom.add_constraint(
                 islpy.Constraint.ineq_from_names(new_space, {
@@ -1358,6 +1379,9 @@ def generalize_gcd_tt(kernel):
                 'ibatch': 1}))
 
     kernel = kernel.copy(domains=[new_dom]+kernel.domains[1:])
+
+    # FIXME: Not always true
+    kernel = loopy.assume(kernel, "start = 0")
 
     # }}}
 
@@ -1533,7 +1557,7 @@ def generate_cuda_kernel(program):
 
     if kernel.name == configuration["cuda_jitmodule_name"]:
         # kernel = thread_transposition(kernel)
-        # kernel = scpt(kernel)
+        # kernel, args_to_make_global = scpt(kernel)
         # kernel = global_tt(kernel)
         kernel, args_to_make_global = generalize_gcd_tt(kernel)
     else:
@@ -1559,6 +1583,6 @@ def generate_cuda_kernel(program):
         # with open('gcd_p8.c', 'r') as f:
         #     code = f.read()
 
-    print(code)
+    # print(code)
 
     return code, program, args_to_make_global
