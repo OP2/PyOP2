@@ -221,6 +221,7 @@ class JITModule(base.JITModule):
         self._libraries = dcopy(type(self)._libraries)
         self._system_headers = dcopy(type(self)._system_headers)
         self.processed_program = None
+        self.args_to_make_global = []
 
         if not kwargs.get('delay', False):
             self.compile()
@@ -237,11 +238,27 @@ class JITModule(base.JITModule):
         print(grid, block)
         return grid, block
 
+    @memoize_method
+    def get_args_marked_for_globals(self):
+        const_args_as_globals = tuple(cuda_driver.mem_alloc(arg.nbytes) for arg in
+            self.args_to_make_global)
+        for arg_gpu, arg in zip(const_args_as_globals,
+                self.args_to_make_global):
+            cuda_driver.memcpy_htod(arg_gpu, arg)
+
+        evt = cuda_driver.Event()
+        evt.record()
+        evt.synchronize()
+
+        return const_args_as_globals
+
     @collective
     def __call__(self, *args):
         grid, block = self.grid_size(args[0], args[1])
+        print(grid, block)
+        extra_global_args = self.get_args_marked_for_globals()
 
-        return self._fun.prepared_call(grid, block, *args)
+        return self._fun.prepared_call(grid, block, *(args+extra_global_args))
 
     @cached_property
     def _wrapper_name(self):
@@ -264,12 +281,7 @@ class JITModule(base.JITModule):
         builder.set_kernel(self._kernel)
 
         wrapper = generate(builder)
-        code, self.processed_program = generate_cuda_kernel(wrapper)
-
-        if self._wrapper_name == configuration["cuda_jitmodule_name"] and configuration["dump_cuda_kernel"]:
-            f = open(configuration["cuda_kernel_name"], "w")
-            f.write(code)
-            f.close()
+        code, self.processed_program, self.args_to_make_global = generate_cuda_kernel(wrapper)
 
         return code
 
@@ -284,7 +296,7 @@ class JITModule(base.JITModule):
         options = []
         func = SourceModule(self.code_to_compile, options=options)
         self._fun = func.get_function(self._wrapper_name)
-        self._fun.prepare(self.argtypes)
+        self._fun.prepare(self.argtypes+"P"*len(self.args_to_make_global))
 
         # Blow away everything we don't need any more
         del self._args
@@ -381,7 +393,6 @@ class ParLoop(petsc_base.ParLoop):
             start = cuda_driver.Event()
             end = cuda_driver.Event()
             start.record()
-            start.synchronize()
             fun(part.offset, part.offset + part.size, *arglist)
             end.record()
             end.synchronize()
@@ -1108,7 +1119,11 @@ def global_tt(kernel):
 
 def generalize_gcd_tt(kernel):
 
-    copy_consts_to_shared = True
+    copy_consts_to_shared = False
+    pack_consts_to_globals = True
+    args_to_make_global = []
+
+    assert not (copy_consts_to_shared and pack_consts_to_globals)
 
     nquad = int(loopy.symbolic.pw_aff_to_expr(
             kernel.get_iname_bounds('form_ip', constants_only=True).size))
@@ -1118,7 +1133,7 @@ def generalize_gcd_tt(kernel):
     nthreads_per_cell = int(np.gcd(nquad, nbasis))
     # should be the minimum number needed to make `nthreads_per_cell` multiple of 32
     ncells_per_batch = 16
-    nbatches_per_chunk = 32
+    nbatches_per_chunk = 1
     load_within = "tag:gather"
     quad_within = "tag:quadrature"
     basis_within = "tag:basis"
@@ -1191,6 +1206,24 @@ def generalize_gcd_tt(kernel):
                         ncells_per_batch*nthreads_per_cell, within="id:%s" % insn.id,
                         inner_iname=("local_id%d" % n_lids))
                 n_lids += 1
+
+    # }}}
+
+    # {{{ making consts as globals
+
+    if pack_consts_to_globals:
+        args_to_make_global = [tv.initializer.flatten()
+                for tv in kernel.temporary_variables.values()
+                if (tv.initializer is not None
+                    and tv.address_space == loopy.AddressSpace.GLOBAL)]
+
+        new_temps = dict((tv.name, tv.copy(initializer=None))
+                if (tv.initializer is not None
+                    and tv.address_space == loopy.AddressSpace.GLOBAL)
+                else (tv.name, tv) for tv in
+                kernel.temporary_variables.values())
+
+        kernel = kernel.copy(temporary_variables=new_temps)
 
     # }}}
 
@@ -1459,12 +1492,15 @@ def generalize_gcd_tt(kernel):
     kernel = loopy.tag_inames(kernel, iname_tags, ignore_nonexistent=True)
     kernel = remove_invariant_inames(kernel)
     kernel = loopy.add_nosync(kernel, 'local', 'tag:basis', 'tag:scatter')
-    return loopy.remove_unused_inames(kernel).copy(loop_priority=frozenset())
+    return (loopy.remove_unused_inames(kernel).copy(loop_priority=frozenset()),
+            args_to_make_global)
 
 
 def generate_cuda_kernel(program):
 
     # Kernel transformations
+
+    args_to_make_global = []
 
     program = program.copy(target=loopy.CudaTarget())
     kernel = program.root_kernel
@@ -1499,7 +1535,7 @@ def generate_cuda_kernel(program):
         # kernel = thread_transposition(kernel)
         # kernel = scpt(kernel)
         # kernel = global_tt(kernel)
-        kernel = generalize_gcd_tt(kernel)
+        kernel, args_to_make_global = generalize_gcd_tt(kernel)
     else:
         # batch cells into groups
         # essentially, each thread computes unroll_size elements, each block computes unroll_size*block_size elements
@@ -1520,9 +1556,9 @@ def generate_cuda_kernel(program):
 
     if program.name == configuration["cuda_jitmodule_name"]:
         pass
-        # with open('gcd-failure.c', 'r') as f:
+        # with open('gcd_p8.c', 'r') as f:
         #     code = f.read()
 
     print(code)
 
-    return code, program
+    return code, program, args_to_make_global
