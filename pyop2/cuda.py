@@ -281,6 +281,11 @@ class JITModule(base.JITModule):
         wrapper = generate(builder)
         code, self.processed_program, self.args_to_make_global = generate_cuda_kernel(wrapper)
 
+        if self._wrapper_name == configuration["cuda_jitmodule_name"] and configuration["dump_cuda_kernel"]:
+            f = open(configuration["cuda_kernel_name"], "w")
+            f.write(code)
+            f.close()
+
         return code
 
     @collective
@@ -292,6 +297,8 @@ class JITModule(base.JITModule):
         from pycuda.compiler import SourceModule
 
         options = []
+        if configuration["cuda_timer_profile"]:
+            options.append("-lineinfo")
         func = SourceModule(self.code_to_compile, options=options)
         self._fun = func.get_function(self._wrapper_name)
         self._fun.prepare(self.argtypes+"P"*len(self.args_to_make_global))
@@ -387,15 +394,19 @@ class ParLoop(petsc_base.ParLoop):
         if part.size == 0:
             return
 
-        if self._jitmodule._wrapper_name == configuration["cuda_jitmodule_name"]:
+        if configuration["cuda_timer"]:
             start = cuda_driver.Event()
             end = cuda_driver.Event()
+            if configuration["cuda_timer_profile"]:
+                cuda_driver.start_profiler()
             start.record()
-            fun(part.offset, part.offset + part.size, *arglist)
+            for _ in range(configuration["cuda_timer_repeat"]):
+                fun(part.offset, part.offset + part.size, *arglist)
             end.record()
             end.synchronize()
-            print("{0}_TIME= {1}".format(self._jitmodule._wrapper_name,
-                start.time_till(end)*1e-3))
+            print("{0}_TIME= {1}".format(self._jitmodule._wrapper_name, start.time_till(end)/1000))
+            if configuration["cuda_timer_profile"]:
+                cuda_driver.stop_profiler()
             return
 
         with timed_region("ParLoop_{0}_{1}".format(self.iterset.name, self._jitmodule._wrapper_name)):
@@ -689,7 +700,7 @@ def thread_transposition(kernel):
 def scpt(kernel):
     args_to_make_global = []
     pack_consts_to_globals = True
-    batch_size = 128
+    batch_size = configuration["cuda_block_size"]
     kernel = loopy.split_iname(kernel, "n", batch_size, outer_tag="g.0",
             inner_tag="l.0")
 
@@ -801,8 +812,11 @@ def scpt(kernel):
 
 def gcd_tt(kernel):
 
+    # Experiment with these numbers to get speedup
     copy_consts_to_shared = True
     pack_consts_to_globals = True
+    ncells_per_batch = 32
+    nbatches_per_chunk = 1
     args_to_make_global = []
 
     nquad = int(loopy.symbolic.pw_aff_to_expr(
@@ -812,8 +826,6 @@ def gcd_tt(kernel):
 
     nthreads_per_cell = int(np.gcd(nquad, nbasis))
     # should be the minimum number needed to make `nthreads_per_cell` multiple of 32
-    ncells_per_batch = 32
-    nbatches_per_chunk = 1
     load_within = "tag:gather"
     quad_within = "tag:quadrature"
     basis_within = "tag:basis"

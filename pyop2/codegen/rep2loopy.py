@@ -286,6 +286,7 @@ def instruction_dependencies(instructions, initialisers):
             if isinstance(op, RuntimeIndex):
                 for v in variables(op.extents):
                     yield v
+
     writers = defaultdict(list)
     for op in instructions_by_type[PackInst]:
         assert isinstance(op, Accumulate)
