@@ -434,6 +434,7 @@ def generate_single_cell_wrapper(iterset, args, forward_args=(), kernel_name=Non
 
 
 def thread_transposition(kernel):
+    # This might need more looking into.
     nquad = int(loopy.symbolic.pw_aff_to_expr(
             kernel.get_iname_bounds('form_ip', constants_only=True).size))
     nbasis = int(loopy.symbolic.pw_aff_to_expr(
@@ -687,7 +688,7 @@ def thread_transposition(kernel):
 
 def scpt(kernel):
     args_to_make_global = []
-    pack_consts_to_globals = False
+    pack_consts_to_globals = True
     batch_size = 128
     kernel = loopy.split_iname(kernel, "n", batch_size, outer_tag="g.0",
             inner_tag="l.0")
@@ -711,6 +712,9 @@ def scpt(kernel):
     # }}}
 
     return kernel, args_to_make_global
+
+    # Remove the above return statement if want to feed consts into shared
+    # memory
 
     # {{{ feeding the constants into shared memory
 
@@ -795,350 +799,9 @@ def scpt(kernel):
     return loopy.remove_unused_inames(kernel).copy(loop_priority=frozenset())
 
 
-# {{{ useless strategy of global tt
+def gcd_tt(kernel):
 
-def global_tt(kernel):
-    new_insns = []
-    for insn in kernel.instructions:
-        if insn.id == 'statement2':
-            insn = insn.copy(tags=frozenset(['basis']),
-            depends_on='form_insn_4', depends_on_is_final=True)
-        elif 'basis' in insn.tags:
-            insn = insn.copy(depends_on=insn.depends_on
-                    | frozenset(['statement2']))
-        else:
-            insn = insn.copy(depends_on=insn.depends_on
-                    - frozenset(['statement2']))
-
-        new_insns.append(insn)
-
-    kernel = kernel.copy(instructions=new_insns)
-
-    nquad = int(loopy.symbolic.pw_aff_to_expr(
-            kernel.get_iname_bounds('form_ip', constants_only=True).size))
-    nbasis = int(loopy.symbolic.pw_aff_to_expr(
-            kernel.get_iname_bounds('form_j', constants_only=True).size))
-
-    ncells_per_threadblock = int(np.lcm(nquad, nbasis))
-    nthreadblocks_per_chunk = 32
-    load_within = "tag:gather"
-    quad_within = "tag:quadrature"
-    basis_within = "tag:basis"
-
-    # {{{ realizing threadblocks
-
-    kernel = loopy.split_iname(kernel, "n",
-            nthreadblocks_per_chunk * ncells_per_threadblock,
-            outer_iname="ichunk")
-    kernel = loopy.split_iname(kernel, "n_inner",
-            ncells_per_threadblock, outer_iname="ithreadblock",
-            inner_iname="icell")
-
-    # }}}
-
-    # {{{ remove noops
-
-    noop_insns = set([insn.id for insn in kernel.instructions if
-            isinstance(insn, loopy.NoOpInstruction)])
-    kernel = loopy.remove_instructions(kernel, noop_insns)
-
-    # }}}
-
-    # {{{ extracting variables that are need to be stored between stages.
-
-    temp_vars = frozenset(kernel.temporary_variables.keys())
-
-    written_in_load = frozenset().union(*[insn.write_dependency_names() for
-        insn in kernel.instructions if 'gather' in insn.tags]) & temp_vars
-
-    written_in_quad = frozenset().union(*[insn.write_dependency_names() for
-        insn in kernel.instructions if 'quadrature' in insn.tags]) & temp_vars
-
-    read_in_quad = frozenset().union(*[insn.read_dependency_names() for
-        insn in kernel.instructions if 'quadrature' in insn.tags]) & temp_vars
-
-    read_in_basis = frozenset().union(*[insn.read_dependency_names() for
-        insn in kernel.instructions if 'basis' in insn.tags]) & temp_vars
-
-    # }}}
-
-    # {{{ storing values between the stages
-
-    batch_vars = (written_in_quad & read_in_basis)
-    kernel = loopy.save_temporaries_in_loop(kernel, 'form_ip', batch_vars, within='iname:form_ip')
-
-    batch_vars = (written_in_quad & read_in_basis) | (written_in_load & (read_in_basis | read_in_quad))
-    kernel = loopy.save_temporaries_in_loop(kernel, 'icell', batch_vars)
-    kernel = loopy.save_temporaries_in_loop(kernel, 'ithreadblock', batch_vars)
-
-    # }}}
-
-    # {{{ duplicating inames
-
-    kernel = loopy.duplicate_inames(kernel, ["ichunk", "ithreadblock", "icell"],
-            new_inames=["ichunk_load", "ithreadblock_load", "icell_load"],
-            within="tag:gather")
-
-    kernel = loopy.duplicate_inames(kernel, ["ichunk", "ithreadblock", "icell"],
-            new_inames=["ichunk_quad", "ithreadblock_quad", "icell_quad"],
-            within="tag:quadrature")
-
-    kernel = loopy.duplicate_inames(kernel, ["ichunk", "ithreadblock", "icell"],
-            new_inames=["ichunk_basis", "ithreadblock_basis", "icell_basis"],
-            within="tag:basis or tag:scatter")
-
-    kernel = loopy.duplicate_inames(kernel, ["form_ip"],
-            new_inames=["form_ip_quad"], within="tag:quadrature")
-    kernel = loopy.duplicate_inames(kernel, ["form_ip"],
-            new_inames=["form_ip_basis"], within="tag:basis")
-
-    kernel = loopy.remove_unused_inames(kernel)
-
-    assert not (frozenset(["ithreadblock", "icell", "n", "ichunk"])
-            & kernel.all_inames())
-
-    # }}}
-
-    # {{{ interpreting the first domain as cuboid
-
-    new_space = kernel.domains[0].get_space()
-    new_dom = islpy.BasicSet.universe(new_space)
-    for stage in ['load', 'quad', 'basis']:
-        new_dom = new_dom.add_constraint(
-                islpy.Constraint.ineq_from_names(new_space, {
-                    'ithreadblock_%s' % stage: -1,
-                    1: nthreadblocks_per_chunk-1}))
-        new_dom = new_dom.add_constraint(
-                islpy.Constraint.ineq_from_names(new_space, {
-                    'ithreadblock_%s' % stage: 1}))
-
-        new_dom = new_dom.add_constraint(
-                islpy.Constraint.ineq_from_names(new_space, {
-                    'icell_%s' % stage: -1,
-                    1: ncells_per_threadblock-1}))
-        new_dom = new_dom.add_constraint(
-                islpy.Constraint.ineq_from_names(new_space, {
-                    'icell_%s' % stage: 1}))
-
-        new_dom = new_dom.add_constraint(
-                islpy.Constraint.ineq_from_names(new_space, {
-                    'ichunk_%s' % stage:
-                    -(ncells_per_threadblock*nthreadblocks_per_chunk),
-                    'start': -1, 'end': 1, 1: -1}))
-        new_dom = new_dom.add_constraint(
-                islpy.Constraint.ineq_from_names(new_space, {
-                    'ichunk_%s' % stage: 1}))
-
-    kernel = kernel.copy(domains=[new_dom]+kernel.domains[1:])
-
-    # }}}
-
-    # {{{ coalescing the entire domain forest
-
-    new_space = kernel.domains[0].get_space()
-    pos = kernel.domains[0].n_dim()
-    for dom in kernel.domains[1:]:
-        # product of all the spaces
-        for dim_name, (dim_type, _) in dom.get_space().get_var_dict().items():
-            assert dim_type == 3
-            new_space = new_space.add_dims(dim_type, 1)
-            new_space = new_space.set_dim_name(dim_type, pos, dim_name)
-            pos += 1
-
-    new_domain = islpy.BasicSet.universe(new_space)
-    for dom in kernel.domains[:]:
-        for constraint in dom.get_constraints():
-            if constraint.is_equality():
-                new_domain = (
-                        new_domain.add_constraint(
-                            islpy.Constraint.eq_from_names(new_space,
-                                constraint.get_coefficients_by_name())))
-            else:
-                new_domain = (
-                        new_domain.add_constraint(
-                            islpy.Constraint.ineq_from_names(new_space,
-                                constraint.get_coefficients_by_name())))
-
-    kernel = kernel.copy(domains=[new_domain])
-
-    # }}}
-
-    kernel = loopy.add_barrier(kernel, "tag:gather",
-            "tag:quadrature", synchronization_kind='local')
-
-    kernel = loopy.add_barrier(kernel, "tag:quadrature",
-            "tag:basis", synchronization_kind='local')
-
-    # {{{ re-distributing the gather work
-
-    kernel = loopy.join_inames(kernel, ["ithreadblock_load", "icell_load", "i6"],
-            "local_id1", within="id:statement0")
-    kernel = loopy.join_inames(kernel, ["ithreadblock_load", "icell_load",
-        "i3", "i2"],
-            "local_id2", within="id:statement1")
-
-    # }}}
-
-    # {{{ re-distributing the quadrature evaluation work
-
-    kernel = loopy.join_inames(kernel, ["ithreadblock_quad", "icell_quad",
-        "form_ip_quad"], "local_id3", within=quad_within)
-
-    # }}}
-
-    # {{{ re-distributing the basis coeffs evaluation work
-
-    kernel = loopy.join_inames(kernel, ["ithreadblock_basis", "icell_basis",
-        "form_j"], "local_id4", within=basis_within)
-    kernel = loopy.join_inames(kernel, ["ithreadblock_basis", "icell_basis",
-        "i8"], "local_id5", within="tag:scatter")
-
-    # }}}
-
-    import loopy as lp
-
-    kernel = lp.make_kernel(
-        [
-            "[end, start] -> { [ichunk_load, ichunk_quad, ichunk_basis, form_ip_basis, form_i, local_id1, local_id2, local_id3, local_id4]: ichunk_load >= 0 and 48ichunk_load < end - start and ichunk_quad >= 0 and 48ichunk_quad < end - start and ichunk_basis >= 0 and 48ichunk_basis < end - start and 0 <= form_ip_basis <= 5 and 0 <= form_i <= 5 and 0<=local_id1, local_id2, local_id3, local_id4<288 }",
-        ],
-        """
-        t2[local_id1 // 36, ((local_id1 // 6) % 6), 0, (local_id1 % 6)] = dat2[map0[ichunk_load*48 + ((local_id1 // 6) % 6) + (local_id1 // 36)*6, (local_id1 % 6)]] {id=statement0, tags=gather, inames=ichunk_load:local_id1}
-        t1[local_id2 // 36, ((local_id2 // 6) % 6), 0, (local_id2 % 3), ((local_id2 // 3) % 2)] = dat1[map1[ichunk_load*48 + ((local_id2 // 6) % 6) + (local_id2 // 36)*6, (local_id2 % 3)], ((local_id2 // 3)
- % 2)] {id=statement1, tags=gather, inames=local_id2:ichunk_load}
-        ... lbarrier{id=l_barrier, dep=statement1:statement0, mem_kind=local}
-        form_t0 = (-1.0)*t1[local_id3 // 36, ((local_id3 // 6) % 6), 0, 0, 0] {id=form_insn, dep=statement1:l_barrier:statement0, tags=quadrature, inames=local_id3:ichunk_quad}
-        form_t1 = (-1.0)*t1[local_id3 // 36, ((local_id3 // 6) % 6), 0, 0, 1] {id=form_insn_0, dep=statement0:statement1:l_barrier:form_insn, tags=quadrature, inames=local_id3:ichunk_quad}
-        form_t2 = abs((form_t0 + t1[local_id3 // 36, ((local_id3 // 6) % 6), 0, 1, 0])*(form_t1 + t1[local_id3 // 36, ((local_id3 // 6) % 6), 0, 2, 1]) + (-1.0)*(form_t0 + t1[local_id3 // 36, ((local_id3 // 6) % 6), 0, 2, 0])*(form_t1 + t1[local_id3 // 36, ((local_id3 // 6) % 6), 0, 1, 1])) {id=form_insn_1, dep=form_insn_0:statement1:l_barrier:statement0, tags=quadrature, inames=local_id3:ichunk_quad}
-        form_t5 = 0.0 {id=form_insn_2, dep=statement1:form_insn_1:l_barrier:statement0, tags=quadrature, inames=local_id3:ichunk_quad}
-        form_t5 = form_t5 + form_t4[(local_id3 % 6), form_i]*t2[local_id3 // 36, ((local_id3 // 6) % 6), form_i // 6, form_i + (-6)*(form_i // 6)] {id=form_insn_3, dep=l_barrier:statement1:form_insn_2:statement0, tags=quadrature, inames=local_id3:ichunk_quad:form_i}
-        form_t6[local_id3 // 36, ((local_id3 // 6) % 6), (local_id3 % 6)] = form_t5*form_t3[(local_id3 % 6)]*form_t2 {id=form_insn_4, dep=l_barrier:statement1:form_insn_3:statement0, tags=quadrature, inames=local_id3:ichunk_quad}
-        ... lbarrier{id=l_barrier_0, dep=form_insn_4:form_insn_1:form_insn_3:form_insn:form_insn_0:form_insn_2, mem_kind=local}
-        t0 = 0 {id=statement2, dep=form_insn_4:l_barrier_0, tags=basis, inames=local_id4:ichunk_basis}
-        t0 = t0+ form_t4[form_ip_basis, (local_id4 % 6)]*form_t6[local_id4 // 36, ((local_id4 // 6) % 6), form_ip_basis] {id=form_insn_5, dep=statement2:form_insn_4:statement0:l_barrier_0:statement1, tags=basis, inames=local_id4:form_ip_basis:ichunk_basis}
-        dat0[map0[ichunk_basis*48 + ((local_id4 // 6) % 6) + (local_id4 //
-        36)*6, (local_id4 % 6)]] = dat0[map0[ichunk_basis*48 + ((local_id4 // 6) % 6) + (local_id4 // 36)*6, (local_id4 % 6)]] + t0 {id=statement3, dep=form_insn_5, tags=scatter, inames=local_id4:ichunk_basis, atomic}
-        """, [
-            lp.ValueArg(
-                name='start', dtype=np.int32),
-            lp.ValueArg(
-                name='end', dtype=np.int32),
-            lp.GlobalArg(
-                name='dat0', dtype=np.float64,
-                shape=(None,), for_atomic=True),
-            lp.GlobalArg(
-                name='dat1', dtype=np.float64,
-                shape=(None, 2), for_atomic=False),
-            lp.GlobalArg(
-                name='dat2', dtype=np.float64,
-                shape=(None,), for_atomic=False),
-            lp.GlobalArg(
-                name='map0', dtype=np.int32,
-                shape=(None, 6), for_atomic=False),
-            lp.GlobalArg(
-                name='map1', dtype=np.int32,
-                shape=(None, 3), for_atomic=False),
-            lp.TemporaryVariable(
-                name='t0', dtype=np.float64,
-                shape=(), for_atomic=False,
-                address_space=lp.auto,
-                read_only=False,
-                ),
-            lp.TemporaryVariable(
-                name='t1', dtype=np.float64,
-                shape=(nthreadblocks_per_chunk, 6, 1, 3, 2), for_atomic=False,
-                address_space=lp.auto,
-                read_only=False,
-                ),
-            lp.TemporaryVariable(
-                name='t2', dtype=np.float64,
-                shape=(nthreadblocks_per_chunk, 6, 1, 6), for_atomic=False,
-                address_space=lp.auto,
-                read_only=False,
-                ),
-            lp.TemporaryVariable(
-                name='form_t0', dtype=np.float64,
-                shape=(), for_atomic=False,
-                address_space=lp.auto,
-                read_only=False,
-                ),
-            lp.TemporaryVariable(
-                name='form_t1', dtype=np.float64,
-                shape=(), for_atomic=False,
-                address_space=lp.auto,
-                read_only=False,
-                ),
-            lp.TemporaryVariable(
-                name='form_t2', dtype=np.float64,
-                shape=(), for_atomic=False,
-                address_space=lp.auto,
-                read_only=False,
-                ),
-            lp.TemporaryVariable(
-                name='form_t3', dtype=np.float64,
-                shape=(6,), for_atomic=False,
-                address_space=lp.AddressSpace.GLOBAL,
-                read_only=True,
-                initializer=np.array([0.05497587, 0.05497587, 0.05497587, 0.11169079, 0.11169079,
-       0.11169079]),
-                ),
-            lp.TemporaryVariable(
-                name='form_t4', dtype=np.float64,
-                shape=(6, 6), for_atomic=False,
-                address_space=lp.AddressSpace.GLOBAL,
-                read_only=True,
-                initializer=np.array([
-                    [-0.07480381,  0.51763234, -0.07480381,  0.29921523,  0.03354481, 0.29921523],
-                    [-0.07480381, -0.07480381,  0.51763234,  0.29921523,  0.29921523, 0.03354481],
-                    [ 0.51763234, -0.07480381, -0.07480381,  0.03354481,  0.29921523, 0.29921523],
-                    [-0.04820838, -0.08473049, -0.04820838,  0.19283351,  0.79548023, 0.19283351],
-                    [-0.04820838, -0.04820838, -0.08473049,  0.19283351,  0.19283351, 0.79548023],
-                    [-0.08473049, -0.04820838, -0.04820838,  0.79548023,  0.19283351, 0.19283351]]),
-                ),
-            lp.TemporaryVariable(
-                name='form_t5', dtype=np.float64,
-                shape=(), for_atomic=False,
-                address_space=lp.auto,
-                read_only=False,
-                ),
-            lp.TemporaryVariable(
-                name='form_t6', dtype=np.float64,
-                shape=(nthreadblocks_per_chunk, 6, 6), for_atomic=False,
-                address_space=lp.auto,
-                read_only=False,
-                ),
-            ], lang_version=(2018, 1),
-            name=configuration["cuda_jitmodule_name"], target=kernel.target).root_kernel
-
-    # tagging inames
-    kernel = loopy.tag_inames(kernel, {
-        "ichunk_load":      "g.0",
-        "ichunk_quad":      "g.0",
-        "ichunk_basis":     "g.0",
-        "local_id1":        "l.0",
-        "local_id2":        "l.0",
-        "local_id3":        "l.0",
-        "local_id4":        "l.0",
-        })
-
-    new_temps = dict((tv.name,
-        tv.copy(address_space=loopy.AddressSpace.LOCAL)) if tv.name in batch_vars
-        else (tv.name, tv) for tv in kernel.temporary_variables.values())
-
-    kernel = kernel.copy(temporary_variables=new_temps)
-    no_sync_with = frozenset([(insn.id, 'local') for insn in
-        kernel.instructions])
-    new_insns = [insn.copy(no_sync_with=no_sync_with) for
-        insn in kernel.instructions]
-    kernel = kernel.copy(instructions=new_insns)
-
-    return kernel
-
-# }}}
-
-
-def generalize_gcd_tt(kernel):
-
-    copy_consts_to_shared = False
+    copy_consts_to_shared = True
     pack_consts_to_globals = True
     args_to_make_global = []
 
@@ -1149,7 +812,7 @@ def generalize_gcd_tt(kernel):
 
     nthreads_per_cell = int(np.gcd(nquad, nbasis))
     # should be the minimum number needed to make `nthreads_per_cell` multiple of 32
-    ncells_per_batch = 7
+    ncells_per_batch = 32
     nbatches_per_chunk = 1
     load_within = "tag:gather"
     quad_within = "tag:quadrature"
@@ -1380,9 +1043,6 @@ def generalize_gcd_tt(kernel):
 
     kernel = kernel.copy(domains=[new_dom]+kernel.domains[1:])
 
-    # FIXME: Not always true
-    kernel = loopy.assume(kernel, "start = 0")
-
     # }}}
 
     # {{{ coalescing the entire domain forest
@@ -1521,7 +1181,6 @@ def generalize_gcd_tt(kernel):
 
 
 def generate_cuda_kernel(program):
-
     # Kernel transformations
 
     args_to_make_global = []
@@ -1556,10 +1215,10 @@ def generate_cuda_kernel(program):
     kernel = kernel.copy(instructions=new_insns, args=new_args)
 
     if kernel.name == configuration["cuda_jitmodule_name"]:
+        # choose the preferred algorithm here
         # kernel = thread_transposition(kernel)
-        # kernel, args_to_make_global = scpt(kernel)
-        # kernel = global_tt(kernel)
-        kernel, args_to_make_global = generalize_gcd_tt(kernel)
+        kernel, args_to_make_global = scpt(kernel)
+        # kernel, args_to_make_global = gcd_tt(kernel)
     else:
         # batch cells into groups
         # essentially, each thread computes unroll_size elements, each block computes unroll_size*block_size elements
@@ -1577,12 +1236,5 @@ def generate_cuda_kernel(program):
 
     program = program.with_root_kernel(kernel)
     code = loopy.generate_code_v2(program).device_code()
-
-    if program.name == configuration["cuda_jitmodule_name"]:
-        pass
-        # with open('gcd_p8.c', 'r') as f:
-        #     code = f.read()
-
-    # print(code)
 
     return code, program, args_to_make_global
