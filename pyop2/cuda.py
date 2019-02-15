@@ -699,7 +699,7 @@ def thread_transposition(kernel):
 
 def scpt(kernel):
     args_to_make_global = []
-    pack_consts_to_globals = True
+    pack_consts_to_globals = False
     batch_size = configuration["cuda_block_size"]
     kernel = loopy.split_iname(kernel, "n", batch_size, outer_tag="g.0",
             inner_tag="l.0")
@@ -1192,12 +1192,13 @@ def gcd_tt(kernel):
             args_to_make_global)
 
 
-def danda_gcd_tt(kernel):
+def danda_gcd_tt(kernel, callables_table):
     # Experiment with these numbers to get speedup
     copy_consts_to_shared = True
     pack_consts_to_globals = True
     ncells_per_batch = 32
     nbatches_per_chunk = 1
+    prefetch_length = 9
     args_to_make_global = []
 
     nquad = int(loopy.symbolic.pw_aff_to_expr(
@@ -1210,6 +1211,7 @@ def danda_gcd_tt(kernel):
     quad_within = "tag:quadrature"
     basis_within = "tag:basis"
     n_lids = 0
+
 
     # {{{ feeding the constants into shared memory
 
@@ -1263,8 +1265,16 @@ def danda_gcd_tt(kernel):
 
     # }}}
 
-    from loopy.transform.instruction import remove_unnecessary_deps
-    kernel = remove_unnecessary_deps(kernel)
+    # {{{ organize for prefetches
+
+    from loopy.transform.data import remove_unused_axes_in_temporaries
+    kernel = remove_unused_axes_in_temporaries(kernel)
+    #FIXME: The names of these symbols can be obtained automatically
+    kernel = loopy.assignment_to_subst(kernel, "form_t3")
+    kernel = loopy.assignment_to_subst(kernel, "form_t4")
+    kernel = loopy.assignment_to_subst(kernel, "t2")
+
+    # }}}
 
     # {{{ making consts as globals
 
@@ -1301,10 +1311,6 @@ def danda_gcd_tt(kernel):
     kernel = loopy.remove_instructions(kernel, noop_insns)
 
     # }}}
-
-    #FIXME: The names of these symbols can be obtained automatically
-    kernel = loopy.assignment_to_subst(kernel, "form_t3")
-    kernel = loopy.assignment_to_subst(kernel, "form_t4")
 
     # {{{ extracting variables that are need to be stored between stages.
 
@@ -1362,21 +1368,11 @@ def danda_gcd_tt(kernel):
 
     # }}}
 
-    from loopy.transform.data import remove_unused_axes_in_temporaries
-    kernel = remove_unused_axes_in_temporaries(kernel)
-    print(kernel)
-
-    1/0
-
     # {{{ duplicating inames
 
     kernel = loopy.duplicate_inames(kernel, ["ichunk", "icell"],
-            new_inames=["ichunk_load", "icell_load"],
-            within="tag:gather")
-
-    kernel = loopy.duplicate_inames(kernel, ["ichunk", "icell"],
             new_inames=["ichunk_quad", "icell_quad"],
-            within="tag:quadrature")
+            within="tag:quadrature or tag:gather")
 
     kernel = loopy.duplicate_inames(kernel, ["ichunk", "icell"],
             new_inames=["ichunk_basis", "icell_basis"],
@@ -1398,7 +1394,7 @@ def danda_gcd_tt(kernel):
 
     new_space = kernel.domains[0].get_space()
     new_dom = islpy.BasicSet.universe(new_space)
-    for stage in ['load', 'quad', 'basis']:
+    for stage in ['quad', 'basis']:
         new_dom = new_dom.add_constraint(
                 islpy.Constraint.ineq_from_names(new_space, {
                     'icell_%s' % stage: -1,
@@ -1465,39 +1461,12 @@ def danda_gcd_tt(kernel):
     kernel = loopy.add_barrier(kernel, "tag:quadrature",
             "tag:basis", synchronization_kind='local')
 
-    # {{{ re-distributing the gather work
-
-    for insn in kernel.instructions:
-        if "gather" in insn.tags:
-            inames_to_merge = (insn.within_inames
-                    - frozenset(["ichunk_load", "icell_load", "ibatch"]))
-            # maybe need to split to be valid for all cases?
-            for priority in kernel.loop_priority:
-                if frozenset(priority) == inames_to_merge:
-                    inames_to_merge = priority
-                    break
-
-            inames_to_merge = list(inames_to_merge)
-
-            kernel = loopy.join_inames(kernel, inames_to_merge, "aux_local_id%d" %
-                    n_lids, within="id:%s" % insn.id)
-            kernel = loopy.split_iname(kernel, "aux_local_id%d" % n_lids,
-                    nthreads_per_cell, within="id:%s" % insn.id)
-            kernel = loopy.join_inames(kernel, ["icell_load",
-                "aux_local_id%d_inner"
-                % n_lids], "local_id%d" % n_lids, within="id:%s" % insn.id)
-            kernel = loopy.tag_inames(kernel, (("aux_local_id%d_outer", "unr"),),
-                    ignore_nonexistent=True)
-            n_lids += 1
-
-    # }}}
-
     # {{{ re-distributing the quadrature evaluation work
 
     kernel = loopy.split_iname(kernel, "form_ip_quad", nthreads_per_cell)
 
     kernel = loopy.join_inames(kernel, ["icell_quad",
-        "form_ip_quad_inner"], "local_id%d" % n_lids, within=quad_within)
+        "form_ip_quad_inner"], "local_id%d" % n_lids, within=quad_within + " or tag:gather")
     n_lids += 1
 
     # }}}
@@ -1544,6 +1513,13 @@ def danda_gcd_tt(kernel):
 
     # }}}
 
+    # {{{ setting prefetch length
+
+    kernel = loopy.split_iname(kernel, 'form_i', prefetch_length)
+    kernel = loopy.split_iname(kernel, 'form_ip_basis', prefetch_length)
+
+    # }}}
+
     new_insns = [insn.copy(within_inames=frozenset(['ibatch'])) if
             isinstance(insn, loopy.BarrierInstruction) else insn for insn in
             kernel.instructions]
@@ -1551,7 +1527,6 @@ def danda_gcd_tt(kernel):
     kernel = kernel.copy(instructions=new_insns)
 
     iname_tags = {
-        "ichunk_load":      "g.0",
         "ichunk_quad":      "g.0",
         "ichunk_basis":     "g.0",
         }
@@ -1561,7 +1536,34 @@ def danda_gcd_tt(kernel):
 
     kernel = loopy.tag_inames(kernel, iname_tags, ignore_nonexistent=True)
     kernel = remove_invariant_inames(kernel)
-    kernel = loopy.add_nosync(kernel, 'local', 'tag:basis', 'tag:scatter')
+
+    from loopy.transform.precompute import precompute_for_single_kernel
+    kernel = loopy.save_temporaries_in_loop(kernel, 'form_ip_quad_outer',
+            ['form_t5'],
+            within="iname:form_ip_quad_outer")
+    kernel = loopy.prioritize_loops(kernel, ("form_i_outer", "form_ip_quad_outer",
+        "form_i_inner"))
+    kernel = loopy.duplicate_inames(kernel, ["form_ip_quad_outer"],
+            "id:form_insn_2")
+    kernel = loopy.duplicate_inames(kernel, ["form_ip_quad_outer"],
+            "id:form_insn_4")
+
+    kernel = precompute_for_single_kernel(kernel, callables_table,
+            subst_use="form_t4_subst", sweep_inames=[
+            'form_ip_quad_outer', 'form_i_inner', 'local_id0', ],
+            precompute_outer_inames=frozenset(['ichunk_quad',
+            'ibatch', 'form_i_outer']),
+            temporary_address_space=loopy.AddressSpace.LOCAL,
+            within='id:form_insn_3')
+
+    kernel = precompute_for_single_kernel(kernel, callables_table,
+            subst_use="t2_subst", sweep_inames=[
+            'form_ip_quad_outer', 'form_i_inner', 'local_id0', ],
+            precompute_outer_inames=frozenset(['ichunk_quad',
+            'ibatch', 'form_i_outer']),
+            temporary_address_space=loopy.AddressSpace.LOCAL,
+            within='id:form_insn_3')
+
     return (loopy.remove_unused_inames(kernel).copy(loop_priority=frozenset()),
             args_to_make_global)
 
@@ -1605,7 +1607,8 @@ def generate_cuda_kernel(program):
         # kernel = thread_transposition(kernel)
         # kernel, args_to_make_global = scpt(kernel)
         # kernel, args_to_make_global = gcd_tt(kernel)
-        kernel, args_to_make_global = danda_gcd_tt(kernel)
+        kernel, args_to_make_global = danda_gcd_tt(kernel,
+                program.callables_table)
     else:
         # batch cells into groups
         # essentially, each thread computes unroll_size elements, each block computes unroll_size*block_size elements
@@ -1622,9 +1625,11 @@ def generate_cuda_kernel(program):
             kernel = loopy.split_iname(kernel, "n", batch_size, inner_tag="l.0", outer_tag="g.0")
 
     program = program.with_root_kernel(kernel)
+
     code = loopy.generate_code_v2(program).device_code()
     if kernel.name == configuration["cuda_jitmodule_name"]:
         print(code)
         1/0
+        pass
 
     return code, program, args_to_make_global
