@@ -1483,6 +1483,8 @@ def danda_gcd_tt(kernel, callables_table):
     kernel = loopy.join_inames(kernel, ["icell_basis", "basis_aux_lid1"],
             "local_id%d" % (n_lids+1), within="tag:scatter")
     n_lids += 2
+    kernel = loopy.rename_iname(kernel, basis_iname+'_outer', scatter_iname+'_outer',
+            within='tag:scatter', existing_ok=True)
 
     from loopy.transform.make_scalar import (
             make_scalar, remove_invariant_inames)
@@ -1549,8 +1551,8 @@ def danda_gcd_tt(kernel, callables_table):
 
     kernel = loopy.duplicate_inames(kernel, 'form_j_outer',
             within='id:statement2')
-    kernel = loopy.duplicate_inames(kernel, 'form_j_outer',
-            within='id:statement3')
+    kernel = loopy.rename_iname(kernel, 'form_j_outer',
+            'i8_outer', existing_ok=True, within='id:statement3')
     kernel = loopy.prioritize_loops(kernel, ('form_ip_basis_outer',
             'form_j_outer', 'form_ip_basis_inner'))
     kernel = precompute_for_single_kernel(kernel, callables_table,
