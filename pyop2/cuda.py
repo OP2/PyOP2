@@ -1212,7 +1212,6 @@ def danda_gcd_tt(kernel, callables_table):
     basis_within = "tag:basis"
     n_lids = 0
 
-
     # {{{ feeding the constants into shared memory
 
     if copy_consts_to_shared:
@@ -1501,9 +1500,6 @@ def danda_gcd_tt(kernel, callables_table):
             "local_id%d" % (n_lids+1), within="tag:scatter")
     n_lids += 2
 
-    kernel = loopy.rename_iname(kernel, scatter_iname+"_outer",
-            basis_iname+"_outer", existing_ok=True, within="tag:scatter")
-
     from loopy.transform.make_scalar import (
             make_scalar, remove_invariant_inames)
     # FIXME: generalize this
@@ -1554,7 +1550,11 @@ def danda_gcd_tt(kernel, callables_table):
             precompute_outer_inames=frozenset(['ichunk_quad',
             'ibatch', 'form_i_outer']),
             temporary_address_space=loopy.AddressSpace.LOCAL,
+            temporary_name='jhikkar_danda',
+            precompute_inames=['icopy_0', 'icopy_1'],
+            compute_insn_id='prftch_quad',
             within='id:form_insn_3')
+
     kernel = loopy.join_inames(kernel, ["icopy_0", "icopy_1"],
             "local_id%d" % n_lids, within="id:form_t4_subst")
     kernel = loopy.tag_inames(kernel, {"local_id%d" % n_lids: "l.0"})
@@ -1567,6 +1567,30 @@ def danda_gcd_tt(kernel, callables_table):
             'ibatch', 'form_i_outer', 'local_id0']),
             temporary_address_space=loopy.AddressSpace.PRIVATE,
             within='id:form_insn_3')
+
+    kernel = loopy.duplicate_inames(kernel, 'form_j_outer',
+            within='id:statement2')
+    kernel = loopy.prioritize_loops(kernel, ('form_ip_basis_outer',
+            'form_j_outer', 'form_ip_basis_inner'))
+    kernel = precompute_for_single_kernel(kernel, callables_table,
+            'form_t4_subst', sweep_inames=['form_j_outer',
+                'form_ip_basis_inner', 'local_id1'],
+            precompute_outer_inames=frozenset(['ichunk_basis', 'ibatch',
+                'form_ip_basis_outer']),
+            temporary_address_space=loopy.AddressSpace.LOCAL,
+            temporary_name='jhikkar_danda',
+            precompute_inames=['icopy0', 'icopy1'],
+            within='id:form_insn_5', compute_insn_id='prftch_basis')
+
+    kernel = loopy.join_inames(kernel, ["icopy0", "icopy1"],
+            "local_id%d" % n_lids, within="id:form_t4_subst")
+    kernel = loopy.tag_inames(kernel, {"local_id%d" % n_lids: "l.0"})
+    n_lids += 1
+
+    kernel = loopy.add_dependency(kernel, 'id:prftch_basis', 'id:prftch_quad')
+    kernel = loopy.add_dependency(kernel, 'id:form_insn_3', 'id:prftch_quad')
+    kernel = loopy.add_dependency(kernel, 'id:form_insn_5', 'id:prftch_basis')
+    kernel = loopy.add_dependency(kernel, 'id:prftch_basis', 'id:form_insn_3')
 
     return (loopy.remove_unused_inames(kernel).copy(loop_priority=frozenset()),
             args_to_make_global)
