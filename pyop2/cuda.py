@@ -1550,18 +1550,22 @@ def danda_gcd_tt(kernel, callables_table):
 
     kernel = precompute_for_single_kernel(kernel, callables_table,
             subst_use="form_t4_subst", sweep_inames=[
-            'form_ip_quad_outer', 'form_i_inner', 'local_id0', ],
+            'form_ip_quad_outer', 'form_i_inner', 'local_id0'],
             precompute_outer_inames=frozenset(['ichunk_quad',
             'ibatch', 'form_i_outer']),
             temporary_address_space=loopy.AddressSpace.LOCAL,
             within='id:form_insn_3')
+    kernel = loopy.join_inames(kernel, ["icopy_0", "icopy_1"],
+            "local_id%d" % n_lids, within="id:form_t4_subst")
+    kernel = loopy.tag_inames(kernel, {"local_id%d" % n_lids: "l.0"})
+    n_lids += 1
 
     kernel = precompute_for_single_kernel(kernel, callables_table,
             subst_use="t2_subst", sweep_inames=[
-            'form_ip_quad_outer', 'form_i_inner', 'local_id0', ],
+            'form_i_inner'],
             precompute_outer_inames=frozenset(['ichunk_quad',
-            'ibatch', 'form_i_outer']),
-            temporary_address_space=loopy.AddressSpace.LOCAL,
+            'ibatch', 'form_i_outer', 'local_id0']),
+            temporary_address_space=loopy.AddressSpace.PRIVATE,
             within='id:form_insn_3')
 
     return (loopy.remove_unused_inames(kernel).copy(loop_priority=frozenset()),
