@@ -1196,8 +1196,7 @@ def danda_gcd_tt(kernel, callables_table):
     # Experiment with these numbers to get speedup
     copy_consts_to_shared = True
     pack_consts_to_globals = True
-    ncells_per_batch = 32
-    nbatches_per_chunk = 1
+    ncells_per_chunk = 32
     prefetch_length = 9
     args_to_make_global = []
 
@@ -1296,10 +1295,8 @@ def danda_gcd_tt(kernel, callables_table):
     # {{{ realizing batches
 
     kernel = loopy.split_iname(kernel, "n",
-            nbatches_per_chunk * ncells_per_batch,
-            outer_iname="ichunk",)
-    kernel = loopy.split_iname(kernel, "n_inner", ncells_per_batch,
-            inner_iname="icell", outer_iname="ibatch")
+            ncells_per_chunk,
+            outer_iname="ichunk", inner_iname="icell")
 
     # }}}
 
@@ -1397,7 +1394,7 @@ def danda_gcd_tt(kernel, callables_table):
         new_dom = new_dom.add_constraint(
                 islpy.Constraint.ineq_from_names(new_space, {
                     'icell_%s' % stage: -1,
-                    1: ncells_per_batch-1}))
+                    1: ncells_per_chunk-1}))
         new_dom = new_dom.add_constraint(
                 islpy.Constraint.ineq_from_names(new_space, {
                     'icell_%s' % stage: 1}))
@@ -1405,23 +1402,13 @@ def danda_gcd_tt(kernel, callables_table):
         new_dom = new_dom.add_constraint(
                 islpy.Constraint.ineq_from_names(new_space, {
                     'ichunk_%s' % stage:
-                    -(nbatches_per_chunk*ncells_per_batch),
-                    'ibatch':
-                    -(ncells_per_batch),
+                    -(ncells_per_chunk),
                     'icell_%s' % stage:
                     -1,
                     'start': -1, 'end': 1, 1: -1}))
         new_dom = new_dom.add_constraint(
                 islpy.Constraint.ineq_from_names(new_space, {
                     'ichunk_%s' % stage: 1}))
-
-    new_dom = new_dom.add_constraint(
-            islpy.Constraint.ineq_from_names(new_space, {
-                'ibatch': -1,
-                1: nbatches_per_chunk-1}))
-    new_dom = new_dom.add_constraint(
-            islpy.Constraint.ineq_from_names(new_space, {
-                'ibatch': 1}))
 
     kernel = kernel.copy(domains=[new_dom]+kernel.domains[1:])
 
@@ -1457,9 +1444,6 @@ def danda_gcd_tt(kernel, callables_table):
 
     # }}}
 
-    kernel = loopy.add_barrier(kernel, "tag:quadrature",
-            "tag:basis", synchronization_kind='local')
-
     # {{{ re-distributing the quadrature evaluation work
 
     kernel = loopy.split_iname(kernel, "form_ip_quad", nthreads_per_cell)
@@ -1477,7 +1461,7 @@ def danda_gcd_tt(kernel, callables_table):
         for insn in kernel.instructions if 'basis' in insn.tags
         and 'basis_init' not in insn.tags])
         - set(["ithreadblock_basis", "icell_basis", "ichunk_basis",
-          "form_ip_basis", "ibatch"]))
+          "form_ip_basis"]))
 
     assert len(basis_inames) == 1
     basis_iname = basis_inames.pop()
@@ -1485,7 +1469,7 @@ def danda_gcd_tt(kernel, callables_table):
     scatter_inames = (set(kernel.all_inames()).intersection(*[insn.within_inames
         for insn in kernel.instructions if 'scatter' in insn.tags])
         - set(["ithreadblock_basis", "icell_basis", "ichunk_basis",
-          "ibatch"]))
+          ]))
     assert len(scatter_inames) == 1
     scatter_iname = scatter_inames.pop()
 
@@ -1516,12 +1500,6 @@ def danda_gcd_tt(kernel, callables_table):
 
     # }}}
 
-    new_insns = [insn.copy(within_inames=frozenset(['ibatch'])) if
-            isinstance(insn, loopy.BarrierInstruction) else insn for insn in
-            kernel.instructions]
-
-    kernel = kernel.copy(instructions=new_insns)
-
     iname_tags = {
         "ichunk_quad":      "g.0",
         "ichunk_basis":     "g.0",
@@ -1548,50 +1526,54 @@ def danda_gcd_tt(kernel, callables_table):
             subst_use="form_t4_subst", sweep_inames=[
             'form_ip_quad_outer', 'form_i_inner', 'local_id0'],
             precompute_outer_inames=frozenset(['ichunk_quad',
-            'ibatch', 'form_i_outer']),
+            'form_i_outer']),
             temporary_address_space=loopy.AddressSpace.LOCAL,
-            temporary_name='jhikkar_danda',
             precompute_inames=['icopy_0', 'icopy_1'],
             compute_insn_id='prftch_quad',
             within='id:form_insn_3')
 
     kernel = loopy.join_inames(kernel, ["icopy_0", "icopy_1"],
-            "local_id%d" % n_lids, within="id:form_t4_subst")
-    kernel = loopy.tag_inames(kernel, {"local_id%d" % n_lids: "l.0"})
+            "aux_local_id%d" % n_lids, within="id:prftch_quad")
+    kernel = loopy.split_iname(kernel, "aux_local_id%d" % n_lids,
+            nthreads_per_cell * ncells_per_chunk, inner_tag="l.0",
+            outer_tag="ilp",
+            within="id:prftch_quad")
     n_lids += 1
 
     kernel = precompute_for_single_kernel(kernel, callables_table,
-            subst_use="t2_subst", sweep_inames=[
-            'form_i_inner'],
+            subst_use="t2_subst", sweep_inames=['form_i_inner'],
             precompute_outer_inames=frozenset(['ichunk_quad',
-            'ibatch', 'form_i_outer', 'local_id0']),
+                'form_i_outer', 'local_id0']),
             temporary_address_space=loopy.AddressSpace.PRIVATE,
             within='id:form_insn_3')
 
     kernel = loopy.duplicate_inames(kernel, 'form_j_outer',
             within='id:statement2')
+    kernel = loopy.duplicate_inames(kernel, 'form_j_outer',
+            within='id:statement3')
     kernel = loopy.prioritize_loops(kernel, ('form_ip_basis_outer',
             'form_j_outer', 'form_ip_basis_inner'))
     kernel = precompute_for_single_kernel(kernel, callables_table,
-            'form_t4_subst', sweep_inames=['form_j_outer',
+            subst_use='form_t4_subst', sweep_inames=['form_j_outer',
                 'form_ip_basis_inner', 'local_id1'],
-            precompute_outer_inames=frozenset(['ichunk_basis', 'ibatch',
+            precompute_outer_inames=frozenset(['ichunk_basis',
                 'form_ip_basis_outer']),
             temporary_address_space=loopy.AddressSpace.LOCAL,
-            temporary_name='jhikkar_danda',
             precompute_inames=['icopy0', 'icopy1'],
-            within='id:form_insn_5', compute_insn_id='prftch_basis')
+            fetch_bounding_box=True,
+            within='tag:basis', compute_insn_id='prftch_basis')
 
     kernel = loopy.join_inames(kernel, ["icopy0", "icopy1"],
-            "local_id%d" % n_lids, within="id:form_t4_subst")
-    kernel = loopy.tag_inames(kernel, {"local_id%d" % n_lids: "l.0"})
+            "aux_local_id%d" % n_lids, within="id:prftch_basis")
+    kernel = loopy.split_iname(kernel, "aux_local_id%d" % n_lids,
+            nthreads_per_cell * ncells_per_chunk, inner_tag="l.0",
+            outer_tag="ilp",
+            within="id:prftch_basis")
     n_lids += 1
 
-    kernel = loopy.add_dependency(kernel, 'id:prftch_basis', 'id:prftch_quad')
+    kernel = loopy.add_dependency(kernel, 'id:prftch_basis', 'id:form_insn_3')
     kernel = loopy.add_dependency(kernel, 'id:form_insn_3', 'id:prftch_quad')
     kernel = loopy.add_dependency(kernel, 'id:form_insn_5', 'id:prftch_basis')
-    kernel = loopy.add_dependency(kernel, 'id:prftch_basis', 'id:form_insn_3')
-
     return (loopy.remove_unused_inames(kernel).copy(loop_priority=frozenset()),
             args_to_make_global)
 
@@ -1656,8 +1638,6 @@ def generate_cuda_kernel(program):
 
     code = loopy.generate_code_v2(program).device_code()
     if kernel.name == configuration["cuda_jitmodule_name"]:
-        print(code)
-        1/0
         pass
 
     return code, program, args_to_make_global
