@@ -1196,8 +1196,8 @@ def danda_gcd_tt(kernel, callables_table):
     # Experiment with these numbers to get speedup
     copy_consts_to_shared = True
     pack_consts_to_globals = True
-    ncells_per_chunk = 32
-    prefetch_length = 9
+    ncells_per_chunk = 16
+    prefetch_length = 13
     args_to_make_global = []
 
     nquad = int(loopy.symbolic.pw_aff_to_expr(
@@ -1549,6 +1549,14 @@ def danda_gcd_tt(kernel, callables_table):
             temporary_address_space=loopy.AddressSpace.PRIVATE,
             within='id:form_insn_3')
 
+    kernel = precompute_for_single_kernel(kernel, callables_table,
+            subst_use="form_t3_subst", sweep_inames=['form_ip_quad_outer_1',
+            'local_id0'],
+            precompute_inames=['iquad_weights'],
+            precompute_outer_inames=frozenset(['ichunk_quad']),
+            temporary_address_space=loopy.AddressSpace.LOCAL,
+            within='id:form_insn_4', compute_insn_id='prftch_weights')
+
     kernel = loopy.duplicate_inames(kernel, 'form_j_outer',
             within='id:statement2')
     kernel = loopy.rename_iname(kernel, 'form_j_outer',
@@ -1640,6 +1648,9 @@ def generate_cuda_kernel(program):
 
     code = loopy.generate_code_v2(program).device_code()
     if kernel.name == configuration["cuda_jitmodule_name"]:
-        pass
+        print(code)
+        1/0
+        with open('danda.c', 'r') as f:
+            code = f.read()
 
     return code, program, args_to_make_global
