@@ -1193,12 +1193,6 @@ def gcd_tt(kernel):
 
 
 def danda_gcd_tt(kernel, callables_table):
-    # Experiment with these numbers to get speedup
-    copy_consts_to_shared = True
-    pack_consts_to_globals = True
-    ncells_per_chunk = 16
-    prefetch_length = 13
-    args_to_make_global = []
 
     nquad = int(loopy.symbolic.pw_aff_to_expr(
             kernel.get_iname_bounds('form_ip', constants_only=True).size))
@@ -1206,6 +1200,14 @@ def danda_gcd_tt(kernel, callables_table):
             kernel.get_iname_bounds('form_j', constants_only=True).size))
 
     nthreads_per_cell = int(np.gcd(nquad, nbasis))
+
+    # Experiment with these numbers to get speedup
+    copy_consts_to_shared = True
+    pack_consts_to_globals = True
+    ncells_per_chunk = 32
+    prefetch_length = nthreads_per_cell
+    args_to_make_global = []
+
     # should be the minimum number needed to make `nthreads_per_cell` multiple of 32
     quad_within = "tag:quadrature"
     basis_within = "tag:basis"
@@ -1531,6 +1533,7 @@ def danda_gcd_tt(kernel, callables_table):
             'form_i_outer']),
             temporary_address_space=loopy.AddressSpace.LOCAL,
             precompute_inames=['icopy_0', 'icopy_1'],
+            temporary_name='form_t4_temp_0',
             compute_insn_id='prftch_quad',
             within='id:form_insn_3')
 
@@ -1570,7 +1573,7 @@ def danda_gcd_tt(kernel, callables_table):
                 'form_ip_basis_outer']),
             temporary_address_space=loopy.AddressSpace.LOCAL,
             precompute_inames=['icopy0', 'icopy1'],
-            fetch_bounding_box=True,
+            temporary_name='form_t4_temp_1',
             within='tag:basis', compute_insn_id='prftch_basis')
 
     kernel = loopy.join_inames(kernel, ["icopy0", "icopy1"],
@@ -1579,6 +1582,13 @@ def danda_gcd_tt(kernel, callables_table):
             nthreads_per_cell * ncells_per_chunk, inner_tag="l.0",
             outer_tag="ilp",
             within="id:prftch_basis")
+
+    from loopy.transform.data import (flatten_variable, absorb_temporary_into)
+    kernel = flatten_variable(kernel, "form_t4_temp_0")
+    kernel = flatten_variable(kernel, "form_t4_temp_1")
+    #FIXME: This should check the shapes
+    kernel = absorb_temporary_into(kernel, "form_t4_temp_0", "form_t4_temp_1")
+
     n_lids += 1
 
     kernel = loopy.add_dependency(kernel, 'id:prftch_basis', 'id:form_insn_3')
@@ -1648,9 +1658,6 @@ def generate_cuda_kernel(program):
 
     code = loopy.generate_code_v2(program).device_code()
     if kernel.name == configuration["cuda_jitmodule_name"]:
-        print(code)
-        1/0
-        with open('danda.c', 'r') as f:
-            code = f.read()
+        pass
 
     return code, program, args_to_make_global
