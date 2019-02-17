@@ -1323,8 +1323,12 @@ def tiled_gcd_tt(kernel, callables_table):
                     args_to_be_interpreted_as_substs.add(
                             insn.assignee.aggregate.name)
 
-        #FIXME: This is illegal
-        args_to_be_interpreted_as_substs -= set(['t1'])
+        precomputes_to_insns = dict((var_name, []) for var_name in args_to_be_interpreted_as_substs)
+
+        for insn in kernel.instructions:
+            precompted_args_referred_in_insn = (insn.read_dependency_names() & args_to_be_interpreted_as_substs)
+            for arg_name in precompted_args_referred_in_insn:
+                precomputes_to_insns[arg_name].append(insn.id)
 
         for arg_name in args_to_be_interpreted_as_substs:
             kernel = loopy.assignment_to_subst(kernel, arg_name)
@@ -1534,28 +1538,34 @@ def tiled_gcd_tt(kernel, callables_table):
 
     # }}}
 
-    from loopy.transform.precompute import precompute_for_single_kernel
-    kernel = loopy.privatize_temporaries_with_inames(kernel,
-            'form_ip_quad_outer')
+    # {{{ privatizing the temporary of the quadrature variables
 
-    kernel = loopy.prioritize_loops(kernel, ("form_i_outer", "form_ip_quad_outer",
-        "form_i_inner"))
-    kernel = loopy.duplicate_inames(kernel, ["form_ip_quad_outer"],
-            "id:form_insn_2")
-    kernel = loopy.duplicate_inames(kernel, ["form_ip_quad_outer"],
-            "id:form_insn_4")
+    from loopy.transform.precompute import precompute_for_single_kernel
+    kernel = loopy.privatize_temporaries_with_inames(kernel, 'form_ip_quad_outer')
+
+    # }}}
+
+    for subst, insn_ids in precomputes_to_insns.items():
+        for insn_id in insn_ids:
+            for iname in (kernel.id_to_insn[insn_id].within_inames-set(["ichunk_quad", "ichunk_basis", "local_id0", "local_id1"])):
+                insn_ids_to_duplicate_iname = kernel.iname_to_insns()[iname] - set([insn_id])
+                for duplicable_insn_id in insn_ids_to_duplicate_iname:
+                    kernel = loopy.duplicate_inames(kernel, [iname], within="id:{0}".format(duplicable_insn_id))
+
+    1/0
+
+    kernel = loopy.prioritize_loops(kernel, ("form_i_outer", "form_ip_quad_outer", "form_i_inner"))
 
     kernel = precompute_for_single_kernel(kernel, callables_table,
-            subst_use="form_t4_subst", sweep_inames=[
-            'form_ip_quad_outer', 'form_i_inner', 'local_id0'],
-            precompute_outer_inames=frozenset(['ichunk_quad',
-            'form_i_outer']),
+            subst_use="form_t4_subst", sweep_inames=['form_ip_quad_outer', 'form_i_inner', 'local_id0'],
+            precompute_outer_inames=frozenset(['ichunk_quad', 'form_i_outer']),
             temporary_address_space=loopy.AddressSpace.LOCAL,
             precompute_inames=['icopy_0', 'icopy_1'],
             temporary_name='form_t4_temp_0',
             compute_insn_id='prftch_quad',
             default_tag=None,
             within='id:form_insn_3')
+
     kernel = loopy.join_inames(kernel, ["icopy_0", "icopy_1"],
             "aux_local_id%d" % n_lids, within="id:prftch_quad")
     kernel = loopy.split_iname(kernel, "aux_local_id%d" % n_lids,
@@ -1580,10 +1590,6 @@ def tiled_gcd_tt(kernel, callables_table):
             temporary_address_space=loopy.AddressSpace.LOCAL,
             default_tag=None,
             within='id:form_insn_4', compute_insn_id='prftch_weights')
-    kernel = loopy.duplicate_inames(kernel, 'form_j_outer',
-            within='id:statement2')
-    kernel = loopy.rename_iname(kernel, 'form_j_outer',
-            'i8_outer', existing_ok=True, within='id:statement3')
     kernel = loopy.prioritize_loops(kernel, ('form_ip_basis_outer',
             'form_j_outer', 'form_ip_basis_inner'))
     kernel = precompute_for_single_kernel(kernel, callables_table,
