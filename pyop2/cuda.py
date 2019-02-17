@@ -1552,78 +1552,93 @@ def tiled_gcd_tt(kernel, callables_table):
                 for duplicable_insn_id in insn_ids_to_duplicate_iname:
                     kernel = loopy.duplicate_inames(kernel, [iname], within="id:{0}".format(duplicable_insn_id))
 
+    # Changing the order of the loops to facilitate tiling
+    kernel = loopy.prioritize_loops(kernel, ("form_i_outer", "form_ip_quad_outer", "form_i_inner"))
+    kernel = loopy.prioritize_loops(kernel, ('form_ip_basis_outer', 'form_j_outer', 'form_ip_basis_inner'))
+
+    # FIXME: This is for mass matrix, need a way to generalize this
+    substs_to_be_precomputed_in_local = ['form_t4', ]
+
+    for subst, insn_ids in precomputes_to_insns.items():
+        rule = kernel.substitutions[subst+'_subst']
+        if subst in substs_to_be_precomputed_in_local:
+            address_space = loopy.AddressSpace.LOCAL
+        else:
+            address_space = loopy.AddressSpace.PRIVATE
+
+        vng = kernel.get_var_name_generator()
+
+        variables_precomputed_to = []
+        if len(insn_ids) > 2:
+            temporary_name = vng(based_on=subst+'_temp')
+            kernel = precompute_for_single_kernel(kernel, callables_table,
+                    subst_use=subst+'_subst',
+                    temporary_address_space=address_space,
+                    temporary_name=temporary_name,
+                    default_tag=None)
+
+            continue
+
+        for insn_id in insn_ids:
+            insn = kernel.id_to_insn[insn_id]
+            precompute_inames = tuple(vng(based_on='icopy') for _ in rule.arguments)
+            temporary_name = vng(based_on=subst+'_temp')
+            variables_precomputed_to.append(temporary_name)
+
+            if 'quadrature' in insn.tags:
+                if address_space == loopy.AddressSpace.PRIVATE:
+                    sweep_inames = insn.within_inames - set(["form_i_outer", "local_id0", "ichunk_quad"])
+                else:
+                    sweep_inames = insn.within_inames - set(["form_i_outer", "ichunk_quad"])
+
+            if 'basis' in insn.tags:
+                if address_space == loopy.AddressSpace.PRIVATE:
+                    sweep_inames = insn.within_inames - set(["form_ip_basis_outer", "local_id1", "ichunk_basis"])
+                else:
+                    sweep_inames = insn.within_inames - set(["form_ip_basis_outer", "ichunk_basis"])
+
+            outer_inames = insn.within_inames - sweep_inames
+
+            kernel = precompute_for_single_kernel(kernel, callables_table,
+                    subst_use=subst+'_subst',
+                    sweep_inames=sweep_inames,
+                    precompute_outer_inames=outer_inames,
+                    temporary_address_space=address_space,
+                    precompute_inames=precompute_inames,
+                    temporary_name=temporary_name,
+                    default_tag=None,
+                    within='id:{0}'.format(insn_id))
+            if len(precompute_inames) > 1:
+                iname_to_split = "aux_local_id%d" % n_lids
+                kernel = loopy.join_inames(kernel, precompute_inames, iname_to_split)
+            else:
+                iname_to_split = precompute_inames[0]
+
+            kernel = loopy.split_iname(kernel, iname_to_split,
+                    nthreads_per_cell * ncells_per_chunk, inner_tag="l.0",
+                    outer_tag="ilp")
+            n_lids += 1
+
+        if len(variables_precomputed_to) > 1:
+            assert len(variables_precomputed_to) == 2
+            temp_in_quad, temp_in_basis = variables_precomputed_to
+
+            from loopy.transform.data import flatten_variable, absorb_temporary_into
+            kernel = flatten_variable(kernel, temp_in_quad)
+            kernel = flatten_variable(kernel, temp_in_basis)
+            if np.prod(kernel.temporary_variables[temp_in_quad].shape) >= (
+                    np.prod(kernel.temporary_variables[temp_in_quad].shape)):
+                kernel = absorb_temporary_into(kernel, temp_in_quad, temp_in_basis)
+            else:
+                kernel = absorb_temporary_into(kernel, temp_in_basis, temp_in_quad)
+    print(kernel)
     1/0
 
-    kernel = loopy.prioritize_loops(kernel, ("form_i_outer", "form_ip_quad_outer", "form_i_inner"))
-
-    kernel = precompute_for_single_kernel(kernel, callables_table,
-            subst_use="form_t4_subst", sweep_inames=['form_ip_quad_outer', 'form_i_inner', 'local_id0'],
-            precompute_outer_inames=frozenset(['ichunk_quad', 'form_i_outer']),
-            temporary_address_space=loopy.AddressSpace.LOCAL,
-            precompute_inames=['icopy_0', 'icopy_1'],
-            temporary_name='form_t4_temp_0',
-            compute_insn_id='prftch_quad',
-            default_tag=None,
-            within='id:form_insn_3')
-
-    kernel = loopy.join_inames(kernel, ["icopy_0", "icopy_1"],
-            "aux_local_id%d" % n_lids, within="id:prftch_quad")
-    kernel = loopy.split_iname(kernel, "aux_local_id%d" % n_lids,
-            nthreads_per_cell * ncells_per_chunk, inner_tag="l.0",
-            outer_tag="ilp",
-            within="id:prftch_quad")
-    n_lids += 1
-
-    kernel = precompute_for_single_kernel(kernel, callables_table,
-            subst_use="t2_subst", sweep_inames=['form_i_inner'],
-            precompute_outer_inames=frozenset(['ichunk_quad',
-                'form_i_outer', 'local_id0']),
-            temporary_address_space=loopy.AddressSpace.PRIVATE,
-            default_tag=None,
-            within='id:form_insn_3')
-
-    kernel = precompute_for_single_kernel(kernel, callables_table,
-            subst_use="form_t3_subst", sweep_inames=['form_ip_quad_outer_1',
-            'local_id0'],
-            precompute_inames=['iquad_weights'],
-            precompute_outer_inames=frozenset(['ichunk_quad']),
-            temporary_address_space=loopy.AddressSpace.LOCAL,
-            default_tag=None,
-            within='id:form_insn_4', compute_insn_id='prftch_weights')
-    kernel = loopy.prioritize_loops(kernel, ('form_ip_basis_outer',
-            'form_j_outer', 'form_ip_basis_inner'))
-    kernel = precompute_for_single_kernel(kernel, callables_table,
-            subst_use='form_t4_subst', sweep_inames=['form_j_outer',
-                'form_ip_basis_inner', 'local_id1'],
-            precompute_outer_inames=frozenset(['ichunk_basis',
-                'form_ip_basis_outer']),
-            temporary_address_space=loopy.AddressSpace.LOCAL,
-            precompute_inames=['icopy0', 'icopy1'],
-            default_tag=None,
-            temporary_name='form_t4_temp_1',
-            within='tag:basis', compute_insn_id='prftch_basis')
-
-    kernel = loopy.join_inames(kernel, ["icopy0", "icopy1"],
-            "aux_local_id%d" % n_lids, within="id:prftch_basis")
-    kernel = loopy.split_iname(kernel, "aux_local_id%d" % n_lids,
-            nthreads_per_cell * ncells_per_chunk, inner_tag="l.0",
-            outer_tag="ilp",
-            within="id:prftch_basis")
-
-    from loopy.transform.data import (flatten_variable, absorb_temporary_into)
-    kernel = flatten_variable(kernel, "form_t4_temp_0")
-    kernel = flatten_variable(kernel, "form_t4_temp_1")
-    #FIXME: This should check the shapes
-    if nquad >= nbasis:
-        kernel = absorb_temporary_into(kernel, "form_t4_temp_0", "form_t4_temp_1")
-    else:
-        kernel = absorb_temporary_into(kernel, "form_t4_temp_1", "form_t4_temp_0")
-
-    n_lids += 1
-
+    """
     kernel = loopy.add_dependency(kernel, 'id:prftch_basis', 'id:form_insn_3')
     kernel = loopy.add_dependency(kernel, 'id:form_insn_3', 'id:prftch_quad')
     kernel = loopy.add_dependency(kernel, 'id:form_insn_5', 'id:prftch_basis')
+    """
 
     iname_tags = {
         "ichunk_quad":      "g.0",
