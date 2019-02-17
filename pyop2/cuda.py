@@ -1323,6 +1323,9 @@ def tiled_gcd_tt(kernel, callables_table):
                     args_to_be_interpreted_as_substs.add(
                             insn.assignee.aggregate.name)
 
+        #FIXME: This is illegal
+        args_to_be_interpreted_as_substs -= set(['t1'])
+
         for arg_name in args_to_be_interpreted_as_substs:
             kernel = loopy.assignment_to_subst(kernel, arg_name)
 
@@ -1414,7 +1417,7 @@ def tiled_gcd_tt(kernel, callables_table):
 
     kernel = loopy.duplicate_inames(kernel, ["ichunk", "icell"],
             new_inames=["ichunk_quad", "icell_quad"],
-            within="tag:quadrature")
+            within="not (tag:basis or tag:scatter)")
 
     kernel = loopy.duplicate_inames(kernel, ["ichunk", "icell"],
             new_inames=["ichunk_basis", "icell_basis"],
@@ -1433,7 +1436,6 @@ def tiled_gcd_tt(kernel, callables_table):
     # }}}
 
     # {{{ interpreting the domain as partiacuboid
-    """
 
     new_space = kernel.domains[0].get_space()
     new_dom = islpy.BasicSet.universe(new_space)
@@ -1458,7 +1460,6 @@ def tiled_gcd_tt(kernel, callables_table):
                     'ichunk_%s' % stage: 1}))
 
     kernel = kernel.copy(domains=[new_dom]+kernel.domains[1:])
-    """
 
     # }}}
 
@@ -1553,8 +1554,8 @@ def tiled_gcd_tt(kernel, callables_table):
             precompute_inames=['icopy_0', 'icopy_1'],
             temporary_name='form_t4_temp_0',
             compute_insn_id='prftch_quad',
+            default_tag=None,
             within='id:form_insn_3')
-
     kernel = loopy.join_inames(kernel, ["icopy_0", "icopy_1"],
             "aux_local_id%d" % n_lids, within="id:prftch_quad")
     kernel = loopy.split_iname(kernel, "aux_local_id%d" % n_lids,
@@ -1568,6 +1569,7 @@ def tiled_gcd_tt(kernel, callables_table):
             precompute_outer_inames=frozenset(['ichunk_quad',
                 'form_i_outer', 'local_id0']),
             temporary_address_space=loopy.AddressSpace.PRIVATE,
+            default_tag=None,
             within='id:form_insn_3')
 
     kernel = precompute_for_single_kernel(kernel, callables_table,
@@ -1576,8 +1578,8 @@ def tiled_gcd_tt(kernel, callables_table):
             precompute_inames=['iquad_weights'],
             precompute_outer_inames=frozenset(['ichunk_quad']),
             temporary_address_space=loopy.AddressSpace.LOCAL,
+            default_tag=None,
             within='id:form_insn_4', compute_insn_id='prftch_weights')
-
     kernel = loopy.duplicate_inames(kernel, 'form_j_outer',
             within='id:statement2')
     kernel = loopy.rename_iname(kernel, 'form_j_outer',
@@ -1591,6 +1593,7 @@ def tiled_gcd_tt(kernel, callables_table):
                 'form_ip_basis_outer']),
             temporary_address_space=loopy.AddressSpace.LOCAL,
             precompute_inames=['icopy0', 'icopy1'],
+            default_tag=None,
             temporary_name='form_t4_temp_1',
             within='tag:basis', compute_insn_id='prftch_basis')
 
@@ -1605,7 +1608,10 @@ def tiled_gcd_tt(kernel, callables_table):
     kernel = flatten_variable(kernel, "form_t4_temp_0")
     kernel = flatten_variable(kernel, "form_t4_temp_1")
     #FIXME: This should check the shapes
-    kernel = absorb_temporary_into(kernel, "form_t4_temp_0", "form_t4_temp_1")
+    if nquad >= nbasis:
+        kernel = absorb_temporary_into(kernel, "form_t4_temp_0", "form_t4_temp_1")
+    else:
+        kernel = absorb_temporary_into(kernel, "form_t4_temp_1", "form_t4_temp_0")
 
     n_lids += 1
 
@@ -1622,8 +1628,6 @@ def tiled_gcd_tt(kernel, callables_table):
         iname_tags["aux_local_id%d_outer" % i] = "ilp"
 
     kernel = loopy.tag_inames(kernel, iname_tags, ignore_nonexistent=True)
-
-
 
     return (loopy.remove_unused_inames(kernel).copy(loop_priority=frozenset()),
             args_to_make_global)
@@ -1688,6 +1692,8 @@ def generate_cuda_kernel(program):
 
     code = loopy.generate_code_v2(program).device_code()
     if kernel.name == configuration["cuda_jitmodule_name"]:
+        print(code)
+        1/0
         pass
 
     return code, program, args_to_make_global
