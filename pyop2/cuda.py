@@ -699,7 +699,7 @@ def thread_transposition(kernel):
 
 def scpt(kernel):
     args_to_make_global = []
-    pack_consts_to_globals = False
+    pack_consts_to_globals = True
     batch_size = configuration["cuda_block_size"]
     kernel = loopy.split_iname(kernel, "n", batch_size, outer_tag="g.0",
             inner_tag="l.0")
@@ -1192,7 +1192,9 @@ def gcd_tt(kernel):
             args_to_make_global)
 
 
-def danda_gcd_tt(kernel, callables_table):
+def tiled_gcd_tt(kernel, callables_table):
+
+    # {{{ reading info about the finite element
 
     nquad = int(loopy.symbolic.pw_aff_to_expr(
             kernel.get_iname_bounds('form_ip', constants_only=True).size))
@@ -1201,21 +1203,53 @@ def danda_gcd_tt(kernel, callables_table):
 
     nthreads_per_cell = int(np.gcd(nquad, nbasis))
 
-    # Experiment with these numbers to get speedup
+    # }}}
+
+    # {{{ performance params
+
     copy_consts_to_shared = True
     pack_consts_to_globals = True
-    ncells_per_chunk = 32
-    prefetch_length = nthreads_per_cell
-    args_to_make_global = []
+    tiled_access_to_the_vars = True
+    # we can tile only if variables are copied to shared memory
+    assert not tiled_access_to_the_vars or copy_consts_to_shared
+    ncells_per_chunk = 16
+    tile_quad = nthreads_per_cell
+    tile_basis = nthreads_per_cell
 
-    # should be the minimum number needed to make `nthreads_per_cell` multiple of 32
-    quad_within = "tag:quadrature"
-    basis_within = "tag:basis"
-    n_lids = 0
+    # }}}
+
+    args_to_make_global = []  # by default not imposing extra global args
+    n_lids = 0  # number of local ids, acts as a counter for the var_name_generation
+
+    # {{{ remove noops
+
+    noop_insns = set([insn.id for insn in kernel.instructions if
+            isinstance(insn, loopy.NoOpInstruction)])
+    kernel = loopy.remove_instructions(kernel, noop_insns)
+
+    # }}}
+
+    # {{{ identifying the inames used for loop over basis indices
+
+    basis_inames = (set(kernel.all_inames()).intersection(*[insn.within_inames
+        for insn in kernel.instructions if 'basis' in insn.tags])
+        - set(["n", "form_ip"]))
+
+    assert len(basis_inames) == 1
+    basis_iname = basis_inames.pop()
+
+    scatter_inames = (set(kernel.all_inames()).intersection(*[insn.within_inames
+        for insn in kernel.instructions if 'scatter' in insn.tags])
+        - set(["n"]))
+    assert len(scatter_inames) == 1
+    scatter_iname = scatter_inames.pop()
+
+    # }}}
 
     # {{{ feeding the constants into shared memory
 
     if copy_consts_to_shared:
+        # Add temporaries, instructions and domains for copying the constant variables
         from pymbolic.primitives import Variable, Subscript
 
         new_temps = {}
@@ -1227,6 +1261,7 @@ def danda_gcd_tt(kernel, callables_table):
 
         for tv in kernel.temporary_variables.values():
             if tv.address_space == loopy.AddressSpace.GLOBAL:
+                # if address space of temporary is GLOBAL, copy to a variables
                 old_tv = tv.copy()
 
                 old_name = old_tv.name
@@ -1265,14 +1300,31 @@ def danda_gcd_tt(kernel, callables_table):
 
     # }}}
 
-    # {{{ organize for prefetches
+    # {{{ organize for precomputes
 
-    from loopy.transform.data import remove_unused_axes_in_temporaries
-    kernel = remove_unused_axes_in_temporaries(kernel)
-    #FIXME: The names of these symbols can be obtained automatically
-    kernel = loopy.assignment_to_subst(kernel, "form_t3")
-    kernel = loopy.assignment_to_subst(kernel, "form_t4")
-    kernel = loopy.assignment_to_subst(kernel, "t2")
+    written_count = dict((written_var, 0) for written_var in
+            kernel.get_written_variables())
+    for insn in kernel.instructions:
+        if isinstance(insn.assignee, Variable):
+            written_count[insn.assignee.name] += 1
+        elif isinstance(insn.assignee, Subscript):
+            written_count[insn.assignee.aggregate.name] += 1
+
+    if tiled_access_to_the_vars:
+        from loopy.transform.data import remove_unused_axes_in_temporaries
+        kernel = remove_unused_axes_in_temporaries(kernel)
+
+        args_to_be_interpreted_as_substs = set()
+
+        for insn in kernel.instructions:
+            if frozenset(['gather', 'init_shared']) & insn.tags:
+                if isinstance(insn.assignee, Subscript) and (
+                        written_count[insn.assignee.aggregate.name] == 1):
+                    args_to_be_interpreted_as_substs.add(
+                            insn.assignee.aggregate.name)
+
+        for arg_name in args_to_be_interpreted_as_substs:
+            kernel = loopy.assignment_to_subst(kernel, arg_name)
 
     # }}}
 
@@ -1294,19 +1346,11 @@ def danda_gcd_tt(kernel, callables_table):
 
     # }}}
 
-    # {{{ realizing batches
+    # {{{ realizing CUDA blocks(i.e. chunk)
 
     kernel = loopy.split_iname(kernel, "n",
             ncells_per_chunk,
             outer_iname="ichunk", inner_iname="icell")
-
-    # }}}
-
-    # {{{ remove noops
-
-    noop_insns = set([insn.id for insn in kernel.instructions if
-            isinstance(insn, loopy.NoOpInstruction)])
-    kernel = loopy.remove_instructions(kernel, noop_insns)
 
     # }}}
 
@@ -1330,6 +1374,9 @@ def danda_gcd_tt(kernel, callables_table):
 
     # {{{ remove unnecessary dependencies on quadrature instructions
 
+    # Main aim: The variable in which the result of the basis coefficient is
+    # written should be initialized in the basis part itself
+
     vars_not_neeeded_in_quad = written_in_load - read_in_quad
 
     # so lets just write in the basis part
@@ -1342,7 +1389,7 @@ def danda_gcd_tt(kernel, callables_table):
     def _remove_unnecessary_deps_on_load(insn):
         return insn.copy(depends_on=insn.depends_on - insns_to_be_added_in_basis)
 
-    kernel = loopy.map_instructions(kernel, quad_within,
+    kernel = loopy.map_instructions(kernel, 'tag:quadrature',
             _remove_unnecessary_deps_on_load)
 
     def _add_unnecessary_instructions_to_basis(insn):
@@ -1357,12 +1404,9 @@ def danda_gcd_tt(kernel, callables_table):
 
     # {{{ storing values between the stages
 
-    batch_vars = (written_in_quad & read_in_basis)
+    batch_vars = (written_in_quad & read_in_basis)  # function evaluation at quadrature
     kernel = loopy.save_temporaries_in_loop(kernel, 'form_ip', batch_vars, within='iname:form_ip')
-
-    batch_vars = (written_in_quad & read_in_basis)
-    kernel = loopy.save_temporaries_in_loop(kernel, 'icell', batch_vars,
-            within="not tag:init_shared")
+    kernel = loopy.save_temporaries_in_loop(kernel, 'icell', batch_vars, within="not tag:init_shared")
 
     # }}}
 
@@ -1370,7 +1414,7 @@ def danda_gcd_tt(kernel, callables_table):
 
     kernel = loopy.duplicate_inames(kernel, ["ichunk", "icell"],
             new_inames=["ichunk_quad", "icell_quad"],
-            within="tag:quadrature or tag:gather")
+            within="tag:quadrature")
 
     kernel = loopy.duplicate_inames(kernel, ["ichunk", "icell"],
             new_inames=["ichunk_basis", "icell_basis"],
@@ -1383,12 +1427,13 @@ def danda_gcd_tt(kernel, callables_table):
 
     kernel = loopy.remove_unused_inames(kernel)
 
-    assert not (frozenset(["ithreadblock", "icell", "n", "ichunk"])
-            & kernel.all_inames())
+    # All these inames are split in some way and should not be used in instructions
+    assert not (frozenset(["icell", "n", "ichunk"]) & kernel.all_inames())
 
     # }}}
 
-    # {{{ interpreting the first domain as cuboid
+    # {{{ interpreting the domain as partiacuboid
+    """
 
     new_space = kernel.domains[0].get_space()
     new_dom = islpy.BasicSet.universe(new_space)
@@ -1413,10 +1458,13 @@ def danda_gcd_tt(kernel, callables_table):
                     'ichunk_%s' % stage: 1}))
 
     kernel = kernel.copy(domains=[new_dom]+kernel.domains[1:])
+    """
 
     # }}}
 
     # {{{ coalescing the entire domain forest
+
+    # Why coalsce? In order join inames we need them to be in the same iname forest
 
     new_space = kernel.domains[0].get_space()
     pos = kernel.domains[0].n_dim()
@@ -1449,43 +1497,22 @@ def danda_gcd_tt(kernel, callables_table):
     # {{{ re-distributing the quadrature evaluation work
 
     kernel = loopy.split_iname(kernel, "form_ip_quad", nthreads_per_cell)
-
-    kernel = loopy.join_inames(kernel, ["icell_quad",
-        "form_ip_quad_inner"], "local_id%d" % n_lids, within=quad_within + " or tag:gather")
+    kernel = loopy.join_inames(kernel, ["icell_quad", "form_ip_quad_inner"], "local_id%d" % n_lids, within="tag:quadrature")
     n_lids += 1
 
     # }}}
 
     # {{{ re-distributing the basis coeffs evaluation work
 
-    # this is the one which we need to take care about.
-    basis_inames = (set(kernel.all_inames()).intersection(*[insn.within_inames
-        for insn in kernel.instructions if 'basis' in insn.tags
-        and 'basis_init' not in insn.tags])
-        - set(["ithreadblock_basis", "icell_basis", "ichunk_basis",
-          "form_ip_basis"]))
+    kernel = loopy.split_iname(kernel, basis_iname, nthreads_per_cell, within='tag:basis')
+    kernel = loopy.join_inames(kernel, ["icell_basis", basis_iname+"_inner"], "local_id%d" % n_lids, within='tag:basis')
 
-    assert len(basis_inames) == 1
-    basis_iname = basis_inames.pop()
+    kernel = loopy.split_iname(kernel, scatter_iname, nthreads_per_cell, within="tag:scatter")
+    kernel = loopy.join_inames(kernel, ["icell_basis", scatter_iname+"_inner"], "local_id%d" % (n_lids+1), within="tag:scatter")
 
-    scatter_inames = (set(kernel.all_inames()).intersection(*[insn.within_inames
-        for insn in kernel.instructions if 'scatter' in insn.tags])
-        - set(["ithreadblock_basis", "icell_basis", "ichunk_basis",
-          ]))
-    assert len(scatter_inames) == 1
-    scatter_iname = scatter_inames.pop()
-
-    kernel = loopy.split_iname(kernel, basis_iname, nthreads_per_cell,
-            inner_iname="basis_aux_lid0", within=basis_within)
-    kernel = loopy.split_iname(kernel, scatter_iname, nthreads_per_cell,
-            inner_iname="basis_aux_lid1", within="tag:scatter")
-
-    kernel = loopy.join_inames(kernel, ["icell_basis", "basis_aux_lid0"],
-            "local_id%d" % n_lids, within=basis_within)
-    kernel = loopy.join_inames(kernel, ["icell_basis", "basis_aux_lid1"],
-            "local_id%d" % (n_lids+1), within="tag:scatter")
     n_lids += 2
-    kernel = loopy.rename_iname(kernel, basis_iname+'_outer', scatter_iname+'_outer',
+
+    kernel = loopy.rename_iname(kernel, scatter_iname+'_outer', basis_iname+'_outer',
             within='tag:scatter', existing_ok=True)
 
     from loopy.transform.make_scalar import (
@@ -1494,31 +1521,22 @@ def danda_gcd_tt(kernel, callables_table):
     kernel = make_scalar(kernel, 't0')
     kernel = loopy.save_temporaries_in_loop(kernel, basis_iname+"_outer",
             ['t0'], within="tag:basis or tag:scatter")
-
-    # }}}
-
-    # {{{ setting prefetch length
-
-    kernel = loopy.split_iname(kernel, 'form_i', prefetch_length)
-    kernel = loopy.split_iname(kernel, 'form_ip_basis', prefetch_length)
-
-    # }}}
-
-    iname_tags = {
-        "ichunk_quad":      "g.0",
-        "ichunk_basis":     "g.0",
-        }
-    for i in range(n_lids):
-        iname_tags["local_id%d" % i] = "l.0"
-        iname_tags["aux_local_id%d_outer" % i] = "ilp"
-
-    kernel = loopy.tag_inames(kernel, iname_tags, ignore_nonexistent=True)
     kernel = remove_invariant_inames(kernel)
 
+    # }}}
+
+    # {{{ setting tile lengths
+
+    #FIXME: Generalize the iname over basis i.e. 'form_i'
+    kernel = loopy.split_iname(kernel, 'form_i', tile_quad)
+    kernel = loopy.split_iname(kernel, 'form_ip_basis', tile_basis)
+
+    # }}}
+
     from loopy.transform.precompute import precompute_for_single_kernel
-    kernel = loopy.save_temporaries_in_loop(kernel, 'form_ip_quad_outer',
-            ['form_t5'],
-            within="iname:form_ip_quad_outer")
+    kernel = loopy.privatize_temporaries_with_inames(kernel,
+            'form_ip_quad_outer')
+
     kernel = loopy.prioritize_loops(kernel, ("form_i_outer", "form_ip_quad_outer",
         "form_i_inner"))
     kernel = loopy.duplicate_inames(kernel, ["form_ip_quad_outer"],
@@ -1594,6 +1612,19 @@ def danda_gcd_tt(kernel, callables_table):
     kernel = loopy.add_dependency(kernel, 'id:prftch_basis', 'id:form_insn_3')
     kernel = loopy.add_dependency(kernel, 'id:form_insn_3', 'id:prftch_quad')
     kernel = loopy.add_dependency(kernel, 'id:form_insn_5', 'id:prftch_basis')
+
+    iname_tags = {
+        "ichunk_quad":      "g.0",
+        "ichunk_basis":     "g.0",
+        }
+    for i in range(n_lids):
+        iname_tags["local_id%d" % i] = "l.0"
+        iname_tags["aux_local_id%d_outer" % i] = "ilp"
+
+    kernel = loopy.tag_inames(kernel, iname_tags, ignore_nonexistent=True)
+
+
+
     return (loopy.remove_unused_inames(kernel).copy(loop_priority=frozenset()),
             args_to_make_global)
 
@@ -1637,8 +1668,7 @@ def generate_cuda_kernel(program):
         # kernel = thread_transposition(kernel)
         # kernel, args_to_make_global = scpt(kernel)
         # kernel, args_to_make_global = gcd_tt(kernel)
-        kernel, args_to_make_global = danda_gcd_tt(kernel,
-                program.callables_table)
+        kernel, args_to_make_global = tiled_gcd_tt(kernel, program.callables_table)
     else:
         # batch cells into groups
         # essentially, each thread computes unroll_size elements, each block computes unroll_size*block_size elements
