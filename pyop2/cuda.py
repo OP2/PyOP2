@@ -1355,9 +1355,7 @@ def tiled_gcd_tt(kernel, callables_table):
 
     # {{{ realizing CUDA blocks(i.e. chunk)
 
-    kernel = loopy.split_iname(kernel, "n",
-            ncells_per_chunk,
-            outer_iname="ichunk", inner_iname="icell")
+    kernel = loopy.split_iname(kernel, "n", ncells_per_chunk, outer_iname="ichunk", inner_iname="icell")
 
     # }}}
 
@@ -1421,11 +1419,11 @@ def tiled_gcd_tt(kernel, callables_table):
 
     kernel = loopy.duplicate_inames(kernel, ["ichunk", "icell"],
             new_inames=["ichunk_quad", "icell_quad"],
-            within="not (tag:basis or tag:scatter)")
+            within="not (tag:basis or tag:scatter)", tags={"ichunk": "g.0"})
 
     kernel = loopy.duplicate_inames(kernel, ["ichunk", "icell"],
             new_inames=["ichunk_basis", "icell_basis"],
-            within="tag:basis or tag:scatter")
+            within="tag:basis or tag:scatter", tags={"ichunk": "g.0"})
 
     kernel = loopy.duplicate_inames(kernel, ["form_ip"],
             new_inames=["form_ip_quad"], within="tag:quadrature")
@@ -1598,6 +1596,7 @@ def tiled_gcd_tt(kernel, callables_table):
                     sweep_inames = insn.within_inames - set(["form_ip_basis_outer", "ichunk_basis"])
 
             outer_inames = insn.within_inames - sweep_inames
+            new_insn_id = kernel.get_instruction_id_generator(based_on='precompute')()
 
             kernel = precompute_for_single_kernel(kernel, callables_table,
                     subst_use=subst+'_subst',
@@ -1606,18 +1605,26 @@ def tiled_gcd_tt(kernel, callables_table):
                     temporary_address_space=address_space,
                     precompute_inames=precompute_inames,
                     temporary_name=temporary_name,
+                    compute_insn_id=new_insn_id,
                     default_tag=None,
                     within='id:{0}'.format(insn_id))
-            if len(precompute_inames) > 1:
-                iname_to_split = "aux_local_id%d" % n_lids
-                kernel = loopy.join_inames(kernel, precompute_inames, iname_to_split)
-            else:
-                iname_to_split = precompute_inames[0]
+            if tv.address_space == loopy.AddressSpace.LOCAL:
+                if len(precompute_inames) > 1:
+                    iname_to_split = "aux_local_id%d" % n_lids
+                    kernel = loopy.join_inames(kernel, precompute_inames, iname_to_split)
+                else:
+                    iname_to_split = precompute_inames[0]
 
-            kernel = loopy.split_iname(kernel, iname_to_split,
-                    nthreads_per_cell * ncells_per_chunk, inner_tag="l.0",
-                    outer_tag="ilp")
-            n_lids += 1
+                kernel = loopy.split_iname(kernel, iname_to_split,
+                        nthreads_per_cell * ncells_per_chunk, inner_tag="l.0",
+                        outer_tag="ilp")
+                n_lids += 1
+
+            def tag_precompute_instruction(precompute_insn):
+                return precompute_insn.copy(tags=insn.tags)
+
+            kernel = loopy.map_instructions(kernel,
+                    'id:{0}'.format(new_insn_id), tag_precompute_instruction)
 
         if len(variables_precomputed_to) > 1:
             assert len(variables_precomputed_to) == 2
@@ -1631,14 +1638,8 @@ def tiled_gcd_tt(kernel, callables_table):
                 kernel = absorb_temporary_into(kernel, temp_in_quad, temp_in_basis)
             else:
                 kernel = absorb_temporary_into(kernel, temp_in_basis, temp_in_quad)
-    print(kernel)
-    1/0
 
-    """
-    kernel = loopy.add_dependency(kernel, 'id:prftch_basis', 'id:form_insn_3')
-    kernel = loopy.add_dependency(kernel, 'id:form_insn_3', 'id:prftch_quad')
-    kernel = loopy.add_dependency(kernel, 'id:form_insn_5', 'id:prftch_basis')
-    """
+    kernel = loopy.add_dependency(kernel, 'tag:basis', 'tag:quadrature')
 
     iname_tags = {
         "ichunk_quad":      "g.0",
