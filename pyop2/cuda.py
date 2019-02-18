@@ -1619,7 +1619,10 @@ def tiled_gcd_tt(kernel, callables_table):
     # {{{ privatizing temporaries
 
     from loopy.transform.precompute import precompute_for_single_kernel
-    kernel = loopy.privatize_temporaries_with_inames(kernel, 'form_ip_quad_outer')
+    vars_to_duplicate_in_quad = (
+            frozenset().union(*(insn.write_dependency_names() for insn in kernel.instructions if 'quad_init' in insn.tags)) & kernel.temporary_variables.keys())
+    kernel = loopy.privatize_temporaries_with_inames(kernel,
+            'form_ip_quad_outer', only_var_names=vars_to_duplicate_in_quad)
     kernel = loopy.privatize_temporaries_with_inames(kernel, 'form_j_outer')
 
     # }}}
@@ -1672,8 +1675,6 @@ def tiled_gcd_tt(kernel, callables_table):
             variables_precomputed_to.append(temporary_name)
 
             new_insn_id = kernel.get_instruction_id_generator()(based_on='precompute')
-
-            print('Precomputed {0} in {1}'.format(subst, logical_unit))
 
             kernel = precompute_for_single_kernel(kernel, callables_table,
                     subst_use=subst+'_subst',
@@ -1796,8 +1797,6 @@ def generate_cuda_kernel(program):
 
     code = loopy.generate_code_v2(program).device_code()
     if kernel.name == configuration["cuda_jitmodule_name"]:
-        print(code)
-        1/0
         pass
 
     return code, program, args_to_make_global
