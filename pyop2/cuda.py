@@ -1212,9 +1212,9 @@ def tiled_gcd_tt(kernel, callables_table):
     tiled_access_to_the_vars = True
     # we can tile only if variables are copied to shared memory
     assert not tiled_access_to_the_vars or copy_consts_to_shared
-    ncells_per_chunk = 16
-    tile_quad = nthreads_per_cell
-    tile_basis = nthreads_per_cell
+    ncells_per_chunk = 32
+    tile_quad = 9
+    tile_basis = 9
 
     # }}}
 
@@ -1248,6 +1248,8 @@ def tiled_gcd_tt(kernel, callables_table):
 
     # {{{ feeding the constants into shared memory
 
+    consts_precomputed = set()
+
     if copy_consts_to_shared:
         # Add temporaries, instructions and domains for copying the constant variables
         from pymbolic.primitives import Variable, Subscript
@@ -1265,6 +1267,7 @@ def tiled_gcd_tt(kernel, callables_table):
                 old_tv = tv.copy()
 
                 old_name = old_tv.name
+                consts_precomputed.add(old_name)
                 new_name = var_name_generator(based_on="const_"+tv.name)
 
                 inames = tuple(var_name_generator(based_on="icopy") for _
@@ -1555,7 +1558,7 @@ def tiled_gcd_tt(kernel, callables_table):
     kernel = loopy.prioritize_loops(kernel, ('form_ip_basis_outer', 'form_j_outer', 'form_ip_basis_inner'))
 
     # FIXME: This is for mass matrix, need a way to generalize this
-    substs_to_be_precomputed_in_local = ['form_t4', ]
+    substs_to_be_precomputed_in_local = consts_precomputed
 
     for subst, insn_ids in precomputes_to_insns.items():
         rule = kernel.substitutions[subst+'_subst']
@@ -1585,17 +1588,22 @@ def tiled_gcd_tt(kernel, callables_table):
 
             if 'quadrature' in insn.tags:
                 if address_space == loopy.AddressSpace.PRIVATE:
-                    sweep_inames = insn.within_inames - set(["form_i_outer", "local_id0", "ichunk_quad"])
+                    sweep_inames = insn.within_inames - set(["form_i_outer",
+                        "local_id0", "ichunk_quad", "form_ip_quad_outer",
+                        "form_ip_quad_outer_1"])
+                    outer_inames = frozenset(["form_i_outer", "local_id0", "ichunk_quad"])
                 else:
                     sweep_inames = insn.within_inames - set(["form_i_outer", "ichunk_quad"])
+                    outer_inames = insn.within_inames - sweep_inames
 
             if 'basis' in insn.tags:
                 if address_space == loopy.AddressSpace.PRIVATE:
                     sweep_inames = insn.within_inames - set(["form_ip_basis_outer", "local_id1", "ichunk_basis"])
+                    outer_inames = insn.within_inames - sweep_inames
                 else:
                     sweep_inames = insn.within_inames - set(["form_ip_basis_outer", "ichunk_basis"])
+                    outer_inames = insn.within_inames - sweep_inames
 
-            outer_inames = insn.within_inames - sweep_inames
             new_insn_id = kernel.get_instruction_id_generator(based_on='precompute')()
 
             kernel = precompute_for_single_kernel(kernel, callables_table,
@@ -1608,7 +1616,7 @@ def tiled_gcd_tt(kernel, callables_table):
                     compute_insn_id=new_insn_id,
                     default_tag=None,
                     within='id:{0}'.format(insn_id))
-            if tv.address_space == loopy.AddressSpace.LOCAL:
+            if address_space == loopy.AddressSpace.LOCAL:
                 if len(precompute_inames) > 1:
                     iname_to_split = "aux_local_id%d" % n_lids
                     kernel = loopy.join_inames(kernel, precompute_inames, iname_to_split)
@@ -1714,8 +1722,6 @@ def generate_cuda_kernel(program):
 
     code = loopy.generate_code_v2(program).device_code()
     if kernel.name == configuration["cuda_jitmodule_name"]:
-        print(code)
-        1/0
         pass
 
     return code, program, args_to_make_global
