@@ -1166,8 +1166,6 @@ def gcd_tt(kernel):
             make_scalar, remove_invariant_inames)
     # FIXME: generalize this
     kernel = make_scalar(kernel, 't0')
-    kernel = loopy.save_temporaries_in_loop(kernel, basis_iname+"_outer",
-            ['t0'], within="tag:basis or tag:scatter")
 
     # }}}
 
@@ -1213,8 +1211,8 @@ def tiled_gcd_tt(kernel, callables_table):
     # we can tile only if variables are copied to shared memory
     assert not tiled_access_to_the_vars or copy_consts_to_shared
     ncells_per_chunk = 32
-    tile_quad = 9
-    tile_basis = 9
+    tile_quad = nthreads_per_cell
+    tile_basis = nthreads_per_cell
 
     # }}}
 
@@ -1326,12 +1324,12 @@ def tiled_gcd_tt(kernel, callables_table):
                     args_to_be_interpreted_as_substs.add(
                             insn.assignee.aggregate.name)
 
-        precomputes_to_insns = dict((var_name, []) for var_name in args_to_be_interpreted_as_substs)
+        substs_to_insns = dict((var_name, []) for var_name in args_to_be_interpreted_as_substs)
 
         for insn in kernel.instructions:
             precompted_args_referred_in_insn = (insn.read_dependency_names() & args_to_be_interpreted_as_substs)
             for arg_name in precompted_args_referred_in_insn:
-                precomputes_to_insns[arg_name].append(insn.id)
+                substs_to_insns[arg_name].append(insn.id)
 
         for arg_name in args_to_be_interpreted_as_substs:
             kernel = loopy.assignment_to_subst(kernel, arg_name)
@@ -1440,7 +1438,86 @@ def tiled_gcd_tt(kernel, callables_table):
 
     # }}}
 
-    # {{{ interpreting the domain as partiacuboid
+    # {{{ realizing which instructions belongs to which part
+
+    # Yes, this should be here. Should be realized from TSFC. But works for
+    # now. Is this the worst humanity has ever seen, no(obviously). Is this the
+    # worst use of logic in a Scientific Computing library, probably yes.
+
+    new_insns = []
+
+    done_with_jacobi_eval = False
+    done_with_quad_init = False
+    done_with_quad_reduction = False
+    done_with_quad_wrap_up = False
+    done_with_basis_init = False
+    done_with_basis_reduction = False
+
+    for insn in kernel.instructions:
+        if not done_with_jacobi_eval:
+            if 'form_ip_quad' in insn.within_inames:
+                done_with_jacobi_eval = True
+
+            else:
+                new_insns.append(insn.copy(tags=insn.tags
+                    | frozenset(["jacobi_eval"])))
+                continue
+        if not done_with_quad_init:
+            if 'form_i' in insn.within_inames:
+                done_with_quad_init = True
+            else:
+                new_insns.append(insn.copy(tags=insn.tags
+                    | frozenset(["quad_init"])))
+                continue
+        if not done_with_quad_reduction:
+            if 'form_i' not in insn.within_inames:
+                done_with_quad_reduction = True
+            else:
+                new_insns.append(insn.copy(tags=insn.tags
+                    | frozenset(["quad_redn"])))
+                continue
+        if not done_with_quad_wrap_up:
+            if 'form_ip_quad' not in insn.within_inames:
+                done_with_quad_wrap_up = True
+            else:
+                new_insns.append(insn.copy(tags=insn.tags
+                    | frozenset(["quad_wrap_up"])))
+                continue
+        if not done_with_basis_init:
+            if 'form_ip_basis' in insn.within_inames:
+                done_with_basis_init = True
+            else:
+                new_insns.append(insn.copy(tags=insn.tags
+                    | frozenset(["basis_init"])))
+                continue
+        if not done_with_basis_reduction:
+            if 'form_ip_basis' not in insn.within_inames:
+                done_with_basis_reduction = True
+            else:
+                new_insns.append(insn.copy(tags=insn.tags
+                    | frozenset(["basis_redn"])))
+                continue
+        new_insns.append(insn)
+
+    kernel = kernel.copy(instructions=new_insns)
+
+    # }}}
+
+    # {{{ dividing substitutions into logical parts
+
+    logical_units = set(['jacobi_eval', 'quad_init', 'quad_redn', 'quad_wrap_up', 'basis_init', 'basis_redn'])
+
+    subst_to_logical_part = {}
+
+    for subst, insn_ids in substs_to_insns.items():
+        logical_unit = frozenset().union(*(kernel.id_to_insn[insn_id].tags for insn_id in insn_ids))
+        logical_unit &= logical_units
+
+        subst_to_logical_part[subst] = logical_unit
+
+    # }}}
+
+    # {{{ interpreting the domain as a cuboid
 
     new_space = kernel.domains[0].get_space()
     new_dom = islpy.BasicSet.universe(new_space)
@@ -1539,72 +1616,64 @@ def tiled_gcd_tt(kernel, callables_table):
 
     # }}}
 
-    # {{{ privatizing the temporary of the quadrature variables
+    # {{{ privatizing temporaries
 
     from loopy.transform.precompute import precompute_for_single_kernel
     kernel = loopy.privatize_temporaries_with_inames(kernel, 'form_ip_quad_outer')
+    kernel = loopy.privatize_temporaries_with_inames(kernel, 'form_j_outer')
 
     # }}}
 
-    for subst, insn_ids in precomputes_to_insns.items():
-        for insn_id in insn_ids:
-            for iname in (kernel.id_to_insn[insn_id].within_inames-set(["ichunk_quad", "ichunk_basis", "local_id0", "local_id1"])):
-                insn_ids_to_duplicate_iname = kernel.iname_to_insns()[iname] - set([insn_id])
-                for duplicable_insn_id in insn_ids_to_duplicate_iname:
-                    kernel = loopy.duplicate_inames(kernel, [iname], within="id:{0}".format(duplicable_insn_id))
+    kernel = loopy.duplicate_inames(kernel, ['form_ip_quad_outer'], new_inames=['form_ip_quad_outer_init'], within='tag:quad_init')
+    kernel = loopy.duplicate_inames(kernel, ['form_ip_quad_outer'], new_inames=['form_ip_quad_outer_wrap_up'], within='tag:quad_wrap_up')
+    kernel = loopy.duplicate_inames(kernel, ['form_j_outer'], new_inames=['form_j_outer_basis_init'], within='tag:basis_init')
+    kernel = loopy.duplicate_inames(kernel, ['form_j_outer'], new_inames=['form_j_outer_scatter'], within='tag:scatter')
 
     # Changing the order of the loops to facilitate tiling
     kernel = loopy.prioritize_loops(kernel, ("form_i_outer", "form_ip_quad_outer", "form_i_inner"))
     kernel = loopy.prioritize_loops(kernel, ('form_ip_basis_outer', 'form_j_outer', 'form_ip_basis_inner'))
 
-    # FIXME: This is for mass matrix, need a way to generalize this
-    substs_to_be_precomputed_in_local = consts_precomputed
-
-    for subst, insn_ids in precomputes_to_insns.items():
+    for subst, logical_units in subst_to_logical_part.items():
         rule = kernel.substitutions[subst+'_subst']
-        if subst in substs_to_be_precomputed_in_local:
-            address_space = loopy.AddressSpace.LOCAL
-        else:
-            address_space = loopy.AddressSpace.PRIVATE
-
         vng = kernel.get_var_name_generator()
 
         variables_precomputed_to = []
-        if len(insn_ids) > 2:
-            temporary_name = vng(based_on=subst+'_temp')
-            kernel = precompute_for_single_kernel(kernel, callables_table,
-                    subst_use=subst+'_subst',
-                    temporary_address_space=address_space,
-                    temporary_name=temporary_name,
-                    default_tag=None)
 
-            continue
+        for logical_unit in logical_units:
+            if logical_unit == 'jacobi_eval':
+                sweep_inames = []
+                outer_inames = None
+                address_space = loopy.AddressSpace.PRIVATE
+            elif logical_unit == 'quad_wrap_up':
+                address_space = loopy.AddressSpace.LOCAL
+                sweep_inames = ['form_ip_quad_outer_wrap_up', 'local_id0']
+                outer_inames = frozenset(["ichunk_quad"])
+            elif logical_unit == 'quad_redn':
+                if subst in consts_precomputed:
+                    sweep_inames = ['form_ip_quad_outer', 'form_i_inner', 'local_id0']
+                    outer_inames = frozenset(['ichunk_quad', 'form_i_outer'])
+                    address_space = loopy.AddressSpace.LOCAL
+                else:
+                    sweep_inames = ['form_i_inner']
+                    outer_inames = frozenset(['ichunk_quad', 'form_i_outer', 'local_id0'])
+                    address_space = loopy.AddressSpace.PRIVATE
+            elif logical_unit == 'basis_redn':
+                if subst in consts_precomputed:
+                    sweep_inames = ['form_j_outer', 'form_ip_basis_inner', 'local_id1']
+                    outer_inames = frozenset(['ichunk_basis', 'form_ip_basis_outer'])
+                    address_space = loopy.AddressSpace.LOCAL
+                else:
+                    raise NotImplementedError('No known case of private var in basis reduction phase.')
+            else:
+                raise NotImplementedError('Unknown logical unit %s.' % logical_unit)
 
-        for insn_id in insn_ids:
-            insn = kernel.id_to_insn[insn_id]
             precompute_inames = tuple(vng(based_on='icopy') for _ in rule.arguments)
             temporary_name = vng(based_on=subst+'_temp')
             variables_precomputed_to.append(temporary_name)
 
-            if 'quadrature' in insn.tags:
-                if address_space == loopy.AddressSpace.PRIVATE:
-                    sweep_inames = insn.within_inames - set(["form_i_outer",
-                        "local_id0", "ichunk_quad", "form_ip_quad_outer",
-                        "form_ip_quad_outer_1"])
-                    outer_inames = frozenset(["form_i_outer", "local_id0", "ichunk_quad"])
-                else:
-                    sweep_inames = insn.within_inames - set(["form_i_outer", "ichunk_quad"])
-                    outer_inames = insn.within_inames - sweep_inames
+            new_insn_id = kernel.get_instruction_id_generator()(based_on='precompute')
 
-            if 'basis' in insn.tags:
-                if address_space == loopy.AddressSpace.PRIVATE:
-                    sweep_inames = insn.within_inames - set(["form_ip_basis_outer", "local_id1", "ichunk_basis"])
-                    outer_inames = insn.within_inames - sweep_inames
-                else:
-                    sweep_inames = insn.within_inames - set(["form_ip_basis_outer", "ichunk_basis"])
-                    outer_inames = insn.within_inames - sweep_inames
-
-            new_insn_id = kernel.get_instruction_id_generator(based_on='precompute')()
+            print('Precomputed {0} in {1}'.format(subst, logical_unit))
 
             kernel = precompute_for_single_kernel(kernel, callables_table,
                     subst_use=subst+'_subst',
@@ -1615,7 +1684,8 @@ def tiled_gcd_tt(kernel, callables_table):
                     temporary_name=temporary_name,
                     compute_insn_id=new_insn_id,
                     default_tag=None,
-                    within='id:{0}'.format(insn_id))
+                    within='tag:{0}'.format(logical_unit))
+
             if address_space == loopy.AddressSpace.LOCAL:
                 if len(precompute_inames) > 1:
                     iname_to_split = "aux_local_id%d" % n_lids
@@ -1629,7 +1699,7 @@ def tiled_gcd_tt(kernel, callables_table):
                 n_lids += 1
 
             def tag_precompute_instruction(precompute_insn):
-                return precompute_insn.copy(tags=insn.tags)
+                return precompute_insn.copy(tags=frozenset([logical_unit]))
 
             kernel = loopy.map_instructions(kernel,
                     'id:{0}'.format(new_insn_id), tag_precompute_instruction)
@@ -1642,12 +1712,16 @@ def tiled_gcd_tt(kernel, callables_table):
             kernel = flatten_variable(kernel, temp_in_quad)
             kernel = flatten_variable(kernel, temp_in_basis)
             if np.prod(kernel.temporary_variables[temp_in_quad].shape) >= (
-                    np.prod(kernel.temporary_variables[temp_in_quad].shape)):
+                    np.prod(kernel.temporary_variables[temp_in_basis].shape)):
                 kernel = absorb_temporary_into(kernel, temp_in_quad, temp_in_basis)
             else:
                 kernel = absorb_temporary_into(kernel, temp_in_basis, temp_in_quad)
 
-    kernel = loopy.add_dependency(kernel, 'tag:basis', 'tag:quadrature')
+    kernel = loopy.add_dependency(kernel, 'tag:quad_init', 'tag:jacobi_eval')
+    kernel = loopy.add_dependency(kernel, 'tag:quad_redn', 'tag:quad_init')
+    kernel = loopy.add_dependency(kernel, 'tag:quad_wrap_up', 'tag:quad_redn')
+    kernel = loopy.add_dependency(kernel, 'tag:basis_init', 'tag:quad_wrap_up')
+    kernel = loopy.add_dependency(kernel, 'tag:basis_redn', 'tag:basis_init')
 
     iname_tags = {
         "ichunk_quad":      "g.0",
@@ -1722,6 +1796,8 @@ def generate_cuda_kernel(program):
 
     code = loopy.generate_code_v2(program).device_code()
     if kernel.name == configuration["cuda_jitmodule_name"]:
+        print(code)
+        1/0
         pass
 
     return code, program, args_to_make_global
