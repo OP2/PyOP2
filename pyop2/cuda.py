@@ -237,7 +237,7 @@ class JITModule(base.JITModule):
         block = (int(evaluate(llens, parameters)[0]), 1, 1)
         return grid, block
 
-    @memoize_method
+    @cached_property
     def get_args_marked_for_globals(self):
         const_args_as_globals = tuple(cuda_driver.mem_alloc(arg.nbytes) for arg in
             self.args_to_make_global)
@@ -254,7 +254,7 @@ class JITModule(base.JITModule):
     @collective
     def __call__(self, *args):
         grid, block = self.grid_size(args[0], args[1])
-        extra_global_args = self.get_args_marked_for_globals()
+        extra_global_args = self.get_args_marked_for_globals
         return self._fun.prepared_call(grid, block, *(args+extra_global_args))
 
     @cached_property
@@ -263,11 +263,6 @@ class JITModule(base.JITModule):
 
     @cached_property
     def code_to_compile(self):
-        if self._wrapper_name == configuration["cuda_jitmodule_name"] and configuration["load_cuda_kernel"]:
-            f = open(configuration["cuda_kernel_name"], "r")
-            code = f.read()
-            f.close()
-            return code
 
         from pyop2.codegen.builder import WrapperBuilder
         from pyop2.codegen.rep2loopy import generate
@@ -280,10 +275,15 @@ class JITModule(base.JITModule):
         wrapper = generate(builder)
         code, self.processed_program, self.args_to_make_global = generate_cuda_kernel(wrapper)
 
-        if self._wrapper_name == configuration["cuda_jitmodule_name"] and configuration["dump_cuda_kernel"]:
-            f = open(configuration["cuda_kernel_name"], "w")
-            f.write(code)
-            f.close()
+        if self._wrapper_name == configuration["cuda_jitmodule_name"]:
+            if configuration["load_cuda_kernel"]:
+                f = open(configuration["cuda_kernel_name"], "r")
+                code = f.read()
+                f.close()
+            if configuration["dump_cuda_kernel"]:
+                f = open(configuration["cuda_kernel_name"], "w")
+                f.write(code)
+                f.close()
 
         return code
 
@@ -394,6 +394,7 @@ class ParLoop(petsc_base.ParLoop):
             return
 
         if configuration["cuda_timer"]:
+            fun(part.offset, part.offset + part.size, *arglist)  # warm up
             start = cuda_driver.Event()
             end = cuda_driver.Event()
             if configuration["cuda_timer_profile"]:
