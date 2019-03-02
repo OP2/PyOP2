@@ -183,6 +183,15 @@ class Global(petsc_Global):
         self._vec.stateIncrease()
         yield self._vec
 
+    @cached_property
+    def device_handle(self):
+        with self.vec as v:
+            return v.getCUDAHandle()
+
+    @cached_property
+    def _kernel_args_(self):
+        return (self.device_handle, )
+
 
 class JITModule(base.JITModule):
 
