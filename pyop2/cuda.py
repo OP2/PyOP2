@@ -304,7 +304,7 @@ class JITModule(base.JITModule):
 
         from pycuda.compiler import SourceModule
 
-        options = []
+        options = ["-use_fast_math"]
         if configuration["cuda_timer_profile"]:
             options.append("-lineinfo")
         func = SourceModule(self.code_to_compile, options=options)
