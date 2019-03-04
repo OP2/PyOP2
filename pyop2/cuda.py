@@ -231,6 +231,7 @@ class JITModule(base.JITModule):
         self._system_headers = dcopy(type(self)._system_headers)
         self.processed_program = None
         self.args_to_make_global = []
+        self.extruded = self._iterset._extruded
 
         if not kwargs.get('delay', False):
             self.compile()
@@ -282,7 +283,7 @@ class JITModule(base.JITModule):
         builder.set_kernel(self._kernel)
 
         wrapper = generate(builder)
-        code, self.processed_program, self.args_to_make_global = generate_cuda_kernel(wrapper)
+        code, self.processed_program, self.args_to_make_global = generate_cuda_kernel(wrapper, self.extruded)
 
         if self._wrapper_name == configuration["cuda_jitmodule_name"]:
             if configuration["load_cuda_kernel"]:
@@ -709,13 +710,47 @@ def thread_transposition(kernel):
     return kernel
 
 
-def scpt(kernel):
+def scpt(kernel, extruded=False):
     args_to_make_global = []
     pack_consts_to_globals = configuration["cuda_const_as_global"]
     batch_size = configuration["cuda_block_size"]
-    kernel = loopy.split_iname(kernel, "n", batch_size, outer_tag="g.0", inner_tag="l.0")
-    kernel = loopy.assume(kernel, "{0} mod {1} = 0".format("end", batch_size))
-    kernel = loopy.assume(kernel, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format("end", batch_size, "start"))
+
+    if extruded:
+        kernel = loopy.tag_inames(kernel, {"n": "g.0"})
+        kernel = loopy.tag_inames(kernel, {"layer": "l.0"})
+        domains = []
+        import islpy as isl
+        for d in kernel.domains:
+            if d.get_dim_name(isl.dim_type.set, 0) == "layer":
+                vars = isl.make_zero_and_vars(["layer"])
+                nd = vars["layer"].ge_set(vars[0]) & vars["layer"].lt_set(vars[0] + batch_size)  # abusing batch size as number of layers
+                nd, = nd.get_basic_sets()
+                domains.append(nd)
+            else:
+                domains.append(d)
+
+        from loopy.symbolic import SubstitutionMapper
+        from pymbolic.mapper.substitutor import make_subst_func
+        from pymbolic.primitives import Variable
+
+        subst_mapper = SubstitutionMapper(
+            make_subst_func(dict([(Variable("t0"), 0),
+                                  (Variable("t1"), batch_size)])))
+
+        insts = []
+        for inst in kernel.instructions:
+            if isinstance(inst, loopy.Assignment):
+                rhs = subst_mapper(inst.expression)
+                inst = inst.copy(expression=rhs)
+            insts.append(inst)
+        kernel = kernel.copy(domains=domains)
+        kernel = kernel.copy(instructions=insts)
+        kernel = loopy.assume(kernel, "start < end")
+
+    else:
+        kernel = loopy.split_iname(kernel, "n", batch_size, outer_tag="g.0", inner_tag="l.0")
+        kernel = loopy.assume(kernel, "{0} mod {1} = 0".format("end", batch_size))
+        kernel = loopy.assume(kernel, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format("end", batch_size, "start"))
 
     # {{{ making consts as globals
 
@@ -1205,11 +1240,9 @@ def gcd_tt(kernel):
             args_to_make_global)
 
 
-def generate_cuda_kernel(program):
+def generate_cuda_kernel(program, extruded=False):
     # Kernel transformations
-
     args_to_make_global = []
-
     program = program.copy(target=loopy.CudaTarget())
     kernel = program.root_kernel
 
@@ -1239,27 +1272,14 @@ def generate_cuda_kernel(program):
 
     kernel = kernel.copy(instructions=new_insns, args=new_args)
 
-    if kernel.name == configuration["cuda_jitmodule_name"]:
-        # choose the preferred algorithm here
-        # kernel = thread_transposition(kernel)
-        kernel, args_to_make_global = scpt(kernel)
-        # kernel, args_to_make_global = gcd_tt(kernel)
-    else:
-        # batch cells into groups
-        # essentially, each thread computes unroll_size elements, each block computes unroll_size*block_size elements
-        batch_size = configuration["cuda_block_size"]
-        unroll_size = configuration["cuda_unroll_size"]
-
-        kernel = loopy.assume(kernel, "{0} mod {1} = 0".format("end", batch_size*unroll_size))
-        kernel = loopy.assume(kernel, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format("end", batch_size*unroll_size, "start"))
-
-        if unroll_size > 1:
-            kernel = loopy.split_iname(kernel, "n", unroll_size, inner_tag="ilp")
-            kernel = loopy.split_iname(kernel, "n_outer", batch_size, inner_tag="l.0", outer_tag="g.0")
-        else:
-            kernel = loopy.split_iname(kernel, "n", batch_size, inner_tag="l.0", outer_tag="g.0")
+    # choose the preferred algorithm here
+    # kernel = thread_transposition(kernel)
+    kernel, args_to_make_global = scpt(kernel, extruded)
+    # kernel, args_to_make_global = gcd_tt(kernel)
 
     program = program.with_root_kernel(kernel)
     code = loopy.generate_code_v2(program).device_code()
+    if program.name == "wrap_pyop2_kernel_uniform_extrusion":
+        code = code.replace("inline void pyop2_kernel_uniform_extrusion", "__device__ inline void pyop2_kernel_uniform_extrusion")
 
     return code, program, args_to_make_global

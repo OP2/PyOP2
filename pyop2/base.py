@@ -65,7 +65,12 @@ import loopy
 
 
 def _make_object(name, *args, **kwargs):
-    from pyop2 import cuda as backend
+    if "backend" in kwargs:
+        if kwargs["backend"] == "host":
+            from pyop2 import sequential as backend
+            del kwargs["backend"]
+    else:
+        from pyop2 import cuda as backend
     return getattr(backend, name)(*args, **kwargs)
 
 
