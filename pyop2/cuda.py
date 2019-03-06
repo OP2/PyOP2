@@ -243,8 +243,12 @@ class JITModule(base.JITModule):
 
         parameters = {'start': start, 'end': end}
         glens, llens = self.processed_program.get_grid_size_upper_bounds_as_exprs()
-        grid = (int(evaluate(glens, parameters)[0]), 1)
+        grid_y = 1
+        if self.extruded:
+            grid_y = glens[1]
+        grid = (int(evaluate(glens, parameters)[0]), grid_y)
         block = (int(evaluate(llens, parameters)[0]), 1, 1)
+
         return grid, block
 
     @cached_property
@@ -716,14 +720,13 @@ def scpt(kernel, extruded=False):
     batch_size = configuration["cuda_block_size"]
 
     if extruded:
-        kernel = loopy.tag_inames(kernel, {"n": "g.0"})
-        kernel = loopy.tag_inames(kernel, {"layer": "l.0"})
+        nlayers = configuration["cuda_num_layer"]
         domains = []
         import islpy as isl
         for d in kernel.domains:
             if d.get_dim_name(isl.dim_type.set, 0) == "layer":
                 vars = isl.make_zero_and_vars(["layer"])
-                nd = vars["layer"].ge_set(vars[0]) & vars["layer"].lt_set(vars[0] + batch_size)  # abusing batch size as number of layers
+                nd = vars["layer"].ge_set(vars[0]) & vars["layer"].lt_set(vars[0] + nlayers)  # abusing batch size as number of layers
                 nd, = nd.get_basic_sets()
                 domains.append(nd)
             else:
@@ -735,7 +738,7 @@ def scpt(kernel, extruded=False):
 
         subst_mapper = SubstitutionMapper(
             make_subst_func(dict([(Variable("t0"), 0),
-                                  (Variable("t1"), batch_size)])))
+                                  (Variable("t1"), nlayers)])))
 
         insts = []
         for inst in kernel.instructions:
@@ -746,6 +749,9 @@ def scpt(kernel, extruded=False):
         kernel = kernel.copy(domains=domains)
         kernel = kernel.copy(instructions=insts)
         kernel = loopy.assume(kernel, "start < end")
+
+        kernel = loopy.tag_inames(kernel, {"n": "g.0"})
+        kernel = loopy.split_iname(kernel, "layer", batch_size, outer_tag="g.1", inner_tag="l.0")
 
     else:
         kernel = loopy.split_iname(kernel, "n", batch_size, outer_tag="g.0", inner_tag="l.0")
