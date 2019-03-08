@@ -714,7 +714,9 @@ def thread_transposition(kernel):
     return kernel
 
 
-def scpt(kernel, extruded=False):
+def sept(kernel, extruded=False):
+    # we don't use shared memory for sept
+    cuda_driver.Context.set_cache_config(cuda_driver.func_cache.PREFER_L1)
     args_to_make_global = []
     pack_consts_to_globals = configuration["cuda_const_as_global"]
     batch_size = configuration["cuda_block_size"]
@@ -726,7 +728,7 @@ def scpt(kernel, extruded=False):
         for d in kernel.domains:
             if d.get_dim_name(isl.dim_type.set, 0) == "layer":
                 vars = isl.make_zero_and_vars(["layer"])
-                nd = vars["layer"].ge_set(vars[0]) & vars["layer"].lt_set(vars[0] + nlayers)  # abusing batch size as number of layers
+                nd = vars["layer"].ge_set(vars[0]) & vars["layer"].lt_set(vars[0] + nlayers)
                 nd, = nd.get_basic_sets()
                 domains.append(nd)
             else:
@@ -1740,26 +1742,15 @@ def generate_cuda_kernel(program, extruded=False):
 
     kernel = kernel.copy(instructions=new_insns, args=new_args)
 
-    if kernel.name == configuration["cuda_jitmodule_name"]:
-        # choose the preferred algorithm here
-        # kernel = thread_transposition(kernel)
-        # kernel, args_to_make_global = scpt(kernel, extruded)
-        # kernel, args_to_make_global = gcd_tt(kernel)
-        kernel, args_to_make_global = tiled_gcd_tt(kernel, program.callables_table)
+    # choose the preferred algorithm here
+    if configuration["cuda_strategy"] == "sept":
+        kernel, args_to_make_global = sept(kernel, extruded)
+    elif configuration["cuda_strategy"] == "gcdtt":
+        kernel, args_to_make_global = gcd_tt(kernel)
     else:
-        # batch cells into groups
-        # essentially, each thread computes unroll_size elements, each block computes unroll_size*block_size elements
-        batch_size = configuration["cuda_block_size"]
-        unroll_size = configuration["cuda_unroll_size"]
-
-        kernel = loopy.assume(kernel, "{0} mod {1} = 0".format("end", batch_size*unroll_size))
-        kernel = loopy.assume(kernel, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format("end", batch_size*unroll_size, "start"))
-
-        if unroll_size > 1:
-            kernel = loopy.split_iname(kernel, "n", unroll_size, inner_tag="ilp")
-            kernel = loopy.split_iname(kernel, "n_outer", batch_size, inner_tag="l.0", outer_tag="g.0")
-        else:
-            kernel = loopy.split_iname(kernel, "n", batch_size, inner_tag="l.0", outer_tag="g.0")
+        raise NotImplementedError
+    # kernel = thread_transposition(kernel)
+    # kernel, args_to_make_global = tiled_gcd_tt(kernel, program.callables_table)
 
     program = program.with_root_kernel(kernel)
 
