@@ -236,10 +236,14 @@ class ParLoop(petsc_base.ParLoop):
     def prepare_arglist(self, iterset, *args):
         arglist = iterset._kernel_args_
         nbytes = 0
+        # from IPython import embed; embed()
 
         for arg in args:
             arglist += arg._kernel_args_
-            nbytes += arg.data.nbytes
+            if arg.access is INC:
+                nbytes += arg.data.nbytes * 2
+            else:
+                nbytes += arg.data.nbytes
         seen = set()
         for arg in args:
             maps = arg.map_tuple
