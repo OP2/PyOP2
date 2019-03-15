@@ -87,6 +87,7 @@ class Configuration(dict):
         "cuda_timer_repeat": ("PYOP2_CUDA_TIMER_REPEAT", int, 1),
         "cuda_timer_profile": ("PYOP2_CUDA_TIMER_PROFILE", bool, False),
         "cuda_block_size": ("PYOP2_CUDA_BLOCK_SIZE", int, 32),
+        "cuda_batch_per_block": ("PYOP2_CUDA_BATCH_PER_BLOCK", int, 32),
         "cuda_unroll_size": ("PYOP2_CUDA_UNROLL_SIZE", int, 1),
         "cuda_num_layer": ("PYOP2_CUDA_NUM_LAYER", int, 32),
         "cuda_const_as_global": ("PYOP2_CUDA_CONST_GLOBAL", bool, False),
