@@ -422,7 +422,7 @@ class LinuxIntelCompiler(Compiler):
 
 @collective
 def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
-         restype=None, compiler=None, comm=None):
+         argtypes=None, restype=None, compiler=None, comm=None):
     """Build a shared library and return a function pointer from it.
 
     :arg jitmodule: The JIT Module which can generate the code to compile, or
@@ -431,6 +431,9 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
     :arg fn_name: The name of the function to return from the resulting library
     :arg cppargs: A list of arguments to the C compiler (optional)
     :arg ldargs: A list of arguments to the linker (optional)
+    :arg argtypes: A list of ctypes argument types matching the arguments of
+         the returned function (optional, pass ``None`` for ``void``). This is
+         only used when string is passed in instead of JITModule.
     :arg restype: The return type of the function (optional, pass
          ``None`` for ``void``).
     :arg compiler: The name of the C compiler (intel, ``None`` for default).
@@ -460,6 +463,8 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
     fn = getattr(dll, fn_name)
     if isinstance(jitmodule, JITModule):
         fn.argtypes = jitmodule.argtypes
+    else:
+        fn.argtypes = argtypes
     fn.restype = restype
     return fn
 
