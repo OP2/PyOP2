@@ -1487,7 +1487,7 @@ def tiled_gcd_tt(kernel, callables_table):
     # {{{ performance params
 
     copy_consts_to_shared = True
-    pack_consts_to_globals = True
+    pack_consts_to_globals = configuration["cuda_const_as_global"]
     tiled_access_to_the_vars = True
     # we can tile only if variables are copied to shared memory
     assert not tiled_access_to_the_vars or copy_consts_to_shared
@@ -2057,6 +2057,8 @@ def generate_cuda_kernel(program, extruded=False):
             kernel, args_to_make_global = sept(kernel, extruded)
         elif configuration["cuda_strategy"] == "gcdtt":
             kernel, args_to_make_global = gcd_tt_simple(kernel)
+        elif configuration["cuda_strategy"] == "tilett":
+            kernel, args_to_make_global = tiled_gcd_tt(kernel, program.callables_table)
         else:
             raise NotImplementedError
     else:
