@@ -439,7 +439,8 @@ def generate(builder, wrapper_name=None, restart_counter=True):
                                 options=options,
                                 assumptions=assumptions,
                                 lang_version=(2018, 2),
-                                name=wrapper_name)
+                                name=wrapper_name,
+                                silenced_warnings=["write_race*"])
 
     # additional assumptions
     if builder.single_cell:

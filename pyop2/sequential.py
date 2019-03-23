@@ -60,9 +60,10 @@ from pyop2.mpi import collective
 from pyop2.profiling import timed_region
 from pyop2.utils import cached_property, get_petsc_dir
 from pyop2.configuration import configuration
+from pyop2.logger import info
 
 
-def vectorize(wrapper, iname, batch_size, start, end):
+def vectorize(wrapper, iname, batch_size):
 
     if batch_size == 1:
         return wrapper
@@ -72,7 +73,7 @@ def vectorize(wrapper, iname, batch_size, start, end):
     kernel = wrapper.root_kernel
     zeros = loopy.TemporaryVariable("_zeros", shape=loopy.auto, dtype=numpy.float64, read_only=True,
                                     initializer=numpy.array(0.0, dtype=numpy.float64),
-                                    scope=loopy.temp_var_scope.GLOBAL, zero_size=batch_size)
+                                    address_space=loopy.AddressSpace.GLOBAL, zero_size=batch_size)
     tmps = kernel.temporary_variables
     tmps["_zeros"] = zeros
     kernel = kernel.copy(temporary_variables=tmps)
@@ -80,12 +81,10 @@ def vectorize(wrapper, iname, batch_size, start, end):
     # split iname and vectorize the inner loop
     inner_iname = iname + "_batch"
 
-    kernel = loopy.assume(kernel, f"0 <= {start} < {end}")
-
     # vectorize using vector extenstions
     kernel = loopy.split_iname(kernel, iname, batch_size, slabs=(0, 1), inner_tag="c_vec", inner_iname=inner_iname)
 
-    alignment = 64
+    alignment = configuration["alignment"]
     for name in kernel.temporary_variables:
         tv = kernel.temporary_variables[name]
         kernel.temporary_variables[name] = tv.copy(alignment=alignment)
@@ -167,10 +166,9 @@ class JITModule(base.JITModule):
         # vectorization
         if isinstance(self._kernel.code, loopy.LoopKernel) and not self._is_mat_assembly:
             if self._iterset._extruded:
-                start, end = builder.layer_extents
-                wrapper = vectorize(wrapper, "layer", configuration["simd_width"], start.name, end.name)
+                wrapper = vectorize(wrapper, "layer", configuration["simd_width"])
             else:
-                wrapper = vectorize(wrapper, "n", configuration["simd_width"], "start", "end")
+                wrapper = vectorize(wrapper, "n", configuration["simd_width"])
 
         code = loopy.generate_code_v2(wrapper)
 
@@ -266,9 +264,9 @@ class ParLoop(petsc_base.ParLoop):
 
     @collective
     def _compute(self, part, fun, *arglist):
-        nbytes = self.comm.allreduce(self.nbytes)
-        if self.comm.Get_rank() == 0:
-            print("{0}_BYTES= {1}".format(self._jitmodule._wrapper_name, nbytes))
+        if configuration["log_level"] == "INFO":
+            nbytes = self.comm.allreduce(self.nbytes)
+            info(f"{self._jitmodule._wrapper_name}_BYTES= {nbytes}")
         with timed_region("ParLoop_{0}_{1}".format(self.iterset.name, self._jitmodule._wrapper_name)):
             fun(part.offset, part.offset + part.size, *arglist)
 
