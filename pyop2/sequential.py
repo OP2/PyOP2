@@ -266,7 +266,7 @@ class ParLoop(petsc_base.ParLoop):
     def _compute(self, part, fun, *arglist):
         if configuration["log_level"] == "INFO":
             nbytes = self.comm.allreduce(self.nbytes)
-            info(f"{self._jitmodule._wrapper_name}_BYTES= {nbytes}")
+            info("{0}_BYTES= {1}".format(self._jitmodule._wrapper_name, nbytes))
         with timed_region("ParLoop_{0}_{1}".format(self.iterset.name, self._jitmodule._wrapper_name)):
             fun(part.offset, part.offset + part.size, *arglist)
 
