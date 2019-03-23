@@ -235,9 +235,15 @@ class JITModule(base.JITModule):
 class ParLoop(petsc_base.ParLoop):
 
     def prepare_arglist(self, iterset, *args):
+        nbytes = 0
         arglist = iterset._kernel_args_
+
         for arg in args:
             arglist += arg._kernel_args_
+            if arg.access is INC:
+                nbytes += arg.data.nbytes * 2
+            else:
+                nbytes += arg.data.nbytes
         seen = set()
         for arg in args:
             maps = arg.map_tuple
@@ -247,6 +253,8 @@ class ParLoop(petsc_base.ParLoop):
                         continue
                     arglist += (k,)
                     seen.add(k)
+                    nbytes += map_.values.nbytes
+        self.nbytes = nbytes
         return arglist
 
     @cached_property
@@ -258,6 +266,9 @@ class ParLoop(petsc_base.ParLoop):
 
     @collective
     def _compute(self, part, fun, *arglist):
+        nbytes = self.comm.allreduce(self.nbytes)
+        if self.comm.Get_rank() == 0:
+            print("{0}_BYTES= {1}".format(self._jitmodule._wrapper_name, nbytes))
         with timed_region("ParLoop_{0}_{1}".format(self.iterset.name, self._jitmodule._wrapper_name)):
             fun(part.offset, part.offset + part.size, *arglist)
 
