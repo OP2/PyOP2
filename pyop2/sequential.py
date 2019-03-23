@@ -80,12 +80,10 @@ def vectorize(wrapper, iname, batch_size, start, end):
     # split iname and vectorize the inner loop
     inner_iname = iname + "_batch"
 
-    # TODO: use slabs to get rid of this assumption
-    kernel = loopy.assume(kernel, "{0} mod {1} = 0".format(end, batch_size))
-    kernel = loopy.assume(kernel, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format(end, batch_size, start))
+    kernel = loopy.assume(kernel, f"0 <= {start} < {end}")
 
     # vectorize using vector extenstions
-    kernel = loopy.split_iname(kernel, iname, batch_size, inner_tag="c_vec", inner_iname=inner_iname)
+    kernel = loopy.split_iname(kernel, iname, batch_size, slabs=(0, 1), inner_tag="c_vec", inner_iname=inner_iname)
 
     alignment = 64
     for name in kernel.temporary_variables:
