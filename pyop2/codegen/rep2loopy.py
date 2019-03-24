@@ -443,11 +443,7 @@ def generate(builder, wrapper_name=None, restart_counter=True):
                                 silenced_warnings=["write_race*"])
 
     # additional assumptions
-    if builder.single_cell:
-        wrapper = loopy.assume(wrapper, "start < end")
-    else:
-        wrapper = loopy.assume(wrapper, "start <= end")
-    wrapper = loopy.assume(wrapper, "start >= 0")
+    wrapper = loopy.assume(wrapper, "0 <= start < end")
     if builder.extruded:
         wrapper = loopy.assume(wrapper, "{0} <= {1}".format(parameters.layer_start, parameters.layer_end))
 

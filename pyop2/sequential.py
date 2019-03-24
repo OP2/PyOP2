@@ -264,6 +264,8 @@ class ParLoop(petsc_base.ParLoop):
 
     @collective
     def _compute(self, part, fun, *arglist):
+        if part.size <= 0:
+            return
         if configuration["log_level"] == "INFO":
             nbytes = self.comm.allreduce(self.nbytes)
             info("{0}_BYTES= {1}".format(self._jitmodule._wrapper_name, nbytes))
