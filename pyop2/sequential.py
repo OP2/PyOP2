@@ -134,6 +134,7 @@ class JITModule(base.JITModule):
         self._iteration_region = kwargs.get('iterate', ALL)
         self._pass_layer_arg = kwargs.get('pass_layer_arg', False)
         self._is_mat_assembly = kwargs.get('is_mat_assembly', False)
+        self._has_indirect_rw = any(arg.access is RW and arg.map_tuple for arg in args)
         # Copy the class variables, so we don't overwrite them
         self._cppargs = dcopy(type(self)._cppargs)
         self._libraries = dcopy(type(self)._libraries)
@@ -164,7 +165,7 @@ class JITModule(base.JITModule):
         wrapper = generate(builder)
 
         # vectorization
-        if isinstance(self._kernel.code, loopy.LoopKernel) and not self._is_mat_assembly:
+        if isinstance(self._kernel.code, loopy.LoopKernel) and not self._is_mat_assembly and not self._has_indirect_rw:
             if self._iterset._extruded:
                 wrapper = vectorize(wrapper, "layer", configuration["simd_width"])
             else:
