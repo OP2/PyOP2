@@ -76,6 +76,7 @@ class Configuration(dict):
     DEFAULTS = {
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gcc"),
         "simd_width": ("PYOP2_SIMD_WIDTH", int, 4),
+        "alignment": ("PYOP2_ALIGNMENT", int, 64),
         "debug": ("PYOP2_DEBUG", bool, False),
         "cflags": ("PYOP2_CFLAGS", str, ""),
         "ldflags": ("PYOP2_LDFLAGS", str, ""),
