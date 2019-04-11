@@ -192,13 +192,14 @@ class SolveCallable(LACallable):
 
 
 class _PreambleGen(ImmutableRecord):
-    fields = set(("preamble", ))
+    fields = {"preamble", "idx"}
 
-    def __init__(self, preamble):
+    def __init__(self, preamble, idx="0"):
         self.preamble = preamble
+        self.idx = idx
 
     def __call__(self, preamble_info):
-        yield ("0", self.preamble)
+        yield (self.idx, self.preamble)
 
 
 class PyOP2KernelCallable(loopy.ScalarCallable):
@@ -523,7 +524,9 @@ def generate(builder, wrapper_name=None):
                                 options=options,
                                 assumptions=assumptions,
                                 lang_version=(2018, 2),
-                                name=wrapper_name)
+                                name=wrapper_name,
+                                # TODO, should these really be silenced?
+                                silenced_warnings=["write_race*"])
 
     # prioritize loops
     for indices in context.index_ordering:
