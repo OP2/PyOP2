@@ -63,7 +63,7 @@ class cached_property(object):
         return result
 
 
-def as_tuple(item, type=None, length=None, allow_none=False):
+def as_tuple(item, typs=None, length=None, allow_none=False):
     # Empty list if we get passed None
     if item is None:
         t = ()
@@ -77,13 +77,16 @@ def as_tuple(item, type=None, length=None, allow_none=False):
     if configuration["type_check"]:
         if length and not len(t) == length:
             raise ValueError("Tuple needs to be of length %d" % length)
-        if type is not None:
+        if typs is not None:
+            try:
+                typs = tuple(typs)
+            except TypeError:
+                typs = tuple((typs,))
             if allow_none:
-                valid = all((isinstance(i, type) or i is None) for i in t)
-            else:
-                valid = all(isinstance(i, type) for i in t)
+                typs += (type(None),)
+            valid = all(any(isinstance(i, typ) for typ in typs) for i in t)
             if not valid:
-                raise TypeError("Items need to be of type %s" % type)
+                raise TypeError("Items need to be one of types %s" % typs)
     return t
 
 
