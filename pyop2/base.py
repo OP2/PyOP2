@@ -1294,7 +1294,7 @@ class MixedDataSet(DataSet, ObjectCached):
         # DataSets and upcast Sets to DataSets as necessary
         else:
             arg = [s if isinstance(s, DataSet) else s ** 1 for s in arg]
-            dsets = as_tuple(arg, type=DataSet)
+            dsets = as_tuple(arg, DataSet)
 
         return (dsets[0].set, ) + (dsets, ), {}
 
@@ -2851,7 +2851,7 @@ class MixedMap(Map, ObjectCached):
 
     @classmethod
     def _process_args(cls, *args, **kwargs):
-        maps = as_tuple(args[0], type=Map, allow_none=True)
+        maps = as_tuple(args[0], typs=Map, allow_none=True)
         cache = maps[0]
         return (cache, ) + (maps, ), kwargs
 
