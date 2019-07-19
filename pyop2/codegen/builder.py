@@ -16,7 +16,7 @@ from pyop2.codegen.representation import (Accumulate, Argument, Comparison,
                                           When, Zero)
 from pyop2.datatypes import IntType
 from pyop2.op2 import (ALL, INC, MAX, MIN, ON_BOTTOM, ON_INTERIOR_FACETS,
-                       ON_TOP, READ, RW, WRITE, Subset)
+                       ON_TOP, READ, RW, WRITE, Subset, ComposedMap)
 from pyop2.utils import cached_property
 
 
@@ -802,9 +802,13 @@ class WrapperBuilder(object):
         try:
             return self.maps[key]
         except KeyError:
-            map_ = Map(map_, interior_horizontal,
-                       (self.bottom_layer, self.top_layer),
-                       unroll=unroll)
+            if isinstance(map_, ComposedMap):
+                maps = tuple(self.map_(m) for m in map_.maps)
+                map_ = ComposedMap(maps)
+            else:
+                map_ = Map(map_, interior_horizontal,
+                           (self.bottom_layer, self.top_layer),
+                           unroll=unroll)
             self.maps[key] = map_
             return map_
 
