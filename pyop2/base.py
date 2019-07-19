@@ -2829,6 +2829,47 @@ class Map(object):
         return cls(iterset, toset, arity[0], values, name)
 
 
+class ComposedMap(object):
+    def __init__(self, *maps):
+        """Representation of map[0](map[1](map[2], ...))"""
+        maps = tuple(maps)
+        self.maps = maps
+        for m1, m2 in zip(maps[:-1], maps[1:]):
+            if m1.iterset != m2.toset:
+                raise ValueError("m1 o m2 is not valid")
+        self.iterset = maps[-1].iterset
+        self.toset = maps[0].toset
+        self.arity = np.prod([m.arity for m in maps], dtype=int)
+        self.shape = (self.iterset.total_size, self.arity)
+        # TODO: Must all maps have the same MPI communicator?
+        # TODO: is this the right communicator?
+        self.comm = maps[0].comm
+        # TODO: extruded offsets
+        self.offset = None
+        self.dtype = maps[0].dtype
+
+    @cached_property
+    def _kernel_args_(self):
+        return tuple(itertools.chain(*(m._kernel_args_ for m in self.maps)))
+
+    @cached_property
+    def _argtypes_(self):
+        return tuple(itertools.chain(*(m._argtypes_ for m in self.maps)))
+
+    @cached_property
+    def _wrapper_cache_key_(self):
+        return (type(self), tuple(m._wrapper_cache_key_ for m in self.maps))
+
+    def __iter__(self):
+        yield self
+
+    def __len__(self):
+        return 1
+
+    def __str__(self):
+        return " o ".join(str(m) for m in reversed(self.maps))
+
+
 class MixedMap(Map, ObjectCached):
     r"""A container for a bag of :class:`Map`\s."""
 

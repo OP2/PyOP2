@@ -14,6 +14,7 @@ from pyop2.utils import cached_property
 from pyop2.datatypes import IntType
 from pyop2.op2 import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL, Subset
 from pyop2.op2 import READ, INC, MIN, MAX, WRITE, RW
+from pyop2.op2 import ComposedMap
 from loopy.types import OpaqueType
 from functools import reduce
 import itertools
@@ -616,9 +617,13 @@ class WrapperBuilder(object):
         try:
             return self.maps[key]
         except KeyError:
-            map_ = Map(map_, interior_horizontal,
-                       (self.bottom_layer, self.top_layer),
-                       unroll=unroll)
+            if isinstance(map_, ComposedMap):
+                maps = tuple(self.map_(m) for m in map_.maps)
+                map_ = ComposedMap(maps)
+            else:
+                map_ = Map(map_, interior_horizontal,
+                           (self.bottom_layer, self.top_layer),
+                           unroll=unroll)
             self.maps[key] = map_
             return map_
 
