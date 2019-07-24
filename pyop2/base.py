@@ -2614,7 +2614,7 @@ class Map(object):
 class ComposedMap(object):
     def __init__(self, *maps):
         """Representation of map[0](map[1](map[2], ...))"""
-        maps = tuple(maps)
+        maps = as_tuple(maps)
         self.maps = maps
         for m1, m2 in zip(maps[:-1], maps[1:]):
             if m1.iterset != m2.toset:
@@ -2641,6 +2641,23 @@ class ComposedMap(object):
     @cached_property
     def _wrapper_cache_key_(self):
         return (type(self), tuple(m._wrapper_cache_key_ for m in self.maps))
+
+    @cached_property
+    def values(self):
+        """Mapping array.
+
+        This only returns the map values for local points, to see the
+        halo points too, use :meth:`values_with_halo`."""
+        return reduce(lambda a, b: a.values_with_halo[b.values_with_halo.reshape(-1,)], self.maps)[:self.iterset.size]
+
+    @cached_property
+    def values_with_halo(self):
+        """Mapping array.
+
+        This returns all map values (including halo points), see
+        :meth:`values` if you only need to look at the local
+        points."""
+        return reduce(lambda a, b: a.values_with_halo[b.values_with_halo.reshape(-1,)], self.maps)
 
     def __iter__(self):
         yield self

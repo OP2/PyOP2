@@ -802,13 +802,13 @@ class WrapperBuilder(object):
         try:
             return self.maps[key]
         except KeyError:
-            if isinstance(map_, ComposedMap):
-                maps = tuple(self.map_(m) for m in map_.maps)
-                map_ = ComposedMap(maps)
-            else:
-                map_ = Map(map_, interior_horizontal,
-                           (self.bottom_layer, self.top_layer),
-                           unroll=unroll)
+            #if isinstance(map_, ComposedMap):
+            #    maps = tuple(self.map_(m) for m in map_.maps)
+            #    map_ = ComposedMap(*maps)
+            #else:
+            map_ = Map(map_, interior_horizontal,
+                       (self.bottom_layer, self.top_layer),
+                       unroll=unroll)
             self.maps[key] = map_
             return map_
 
