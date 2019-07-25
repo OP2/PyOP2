@@ -2829,10 +2829,10 @@ class Map(object):
         return cls(iterset, toset, arity[0], values, name)
 
 
-class ComposedMap(object):
-    def __init__(self, *maps):
-        """Representation of map[0](map[1](map[2], ...))"""
-        maps = as_tuple(maps)
+class ComposedMap(Map, ObjectCached):
+    r"""Representation of map[0](map[1](map[2], ...))"""
+
+    def __init__(self, maps):
         self.maps = maps
         for m1, m2 in zip(maps[:-1], maps[1:]):
             if m1.iterset != m2.toset:
@@ -2847,6 +2847,17 @@ class ComposedMap(object):
         # TODO: extruded offsets
         self.offset = None
         self.dtype = maps[0].dtype
+        self._cache = {}
+
+    @classmethod
+    def _process_args(cls, *args, **kwargs):
+        maps = as_tuple(args[0], type=Map, allow_none=True)
+        cache = maps[0]
+        return (cache, ) + (maps, ), kwargs
+
+    @classmethod
+    def _cache_key(cls, maps):
+        return maps + ("composed", )
 
     @cached_property
     def _kernel_args_(self):
@@ -2895,8 +2906,8 @@ class MixedMap(Map, ObjectCached):
         if self._initialized:
             return
         self._maps = maps
-        if not all(m is None or m.iterset == self.iterset for m in self._maps):
-            raise MapTypeError("All maps in a MixedMap need to share the same iterset")
+        #if not all(m is None or m.iterset == self.iterset for m in self._maps):
+        #    raise MapTypeError("All maps in a MixedMap need to share the same iterset")
         # TODO: Think about different communicators on maps (c.f. MixedSet)
         # TODO: What if all maps are None?
         comms = tuple(m.comm for m in self._maps if m is not None)
@@ -3027,7 +3038,7 @@ class Sparsity(ObjectCached):
     .. _MatMPIAIJSetPreallocation: http://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Mat/MatMPIAIJSetPreallocation.html
     """
 
-    def __init__(self, dsets, maps, *, iteration_regions=None, name=None, nest=None, block_sparse=None):
+    def __init__(self, dsets, maps, *, iteration_regions=None, name=None, nest=None, block_sparse=None, map_pairs_ij=None):
         r"""
         :param dsets: :class:`DataSet`\s for the left and right function
             spaces this :class:`Sparsity` maps between
@@ -3041,6 +3052,8 @@ class Sparsity(ObjectCached):
         :param nest: Should the sparsity over mixed set be built as nested blocks?
         :param block_sparse: Should the sparsity for datasets with
             cdim > 1 be built as a block sparsity?
+        :param map_pairs_ij: list of list of map pairs used to determine sparsity of
+            sub-block (i, j).
         """
         # Protect against re-initialization when retrieved from cache
         if self._initialized:
@@ -3098,8 +3111,11 @@ class Sparsity(ObjectCached):
             for i, rds in enumerate(dsets[0]):
                 row = []
                 for j, cds in enumerate(dsets[1]):
-                    row.append(Sparsity((rds, cds), [(rm.split[i], cm.split[j]) for
-                                                     rm, cm in maps],
+                    if map_pairs_ij is None:
+                        submaps = [(rm.split[i], cm.split[j]) for rm, cm in maps]
+                    else:
+                        submaps = map_pairs_ij[i][j]
+                    row.append(Sparsity((rds, cds), submaps,
                                         iteration_regions=iteration_regions,
                                         block_sparse=block_sparse))
                 self._blocks.append(row)
@@ -3128,7 +3144,7 @@ class Sparsity(ObjectCached):
     @classmethod
     @validate_type(('dsets', (Set, DataSet, tuple, list), DataSetTypeError),
                    ('maps', (Map, tuple, list), MapTypeError))
-    def _process_args(cls, dsets, maps, *, iteration_regions=None, name=None, nest=None, block_sparse=None):
+    def _process_args(cls, dsets, maps, *, iteration_regions=None, name=None, nest=None, block_sparse=None, map_pairs_ij=None):
         "Turn maps argument into a canonical tuple of pairs."
 
         # A single data set becomes a pair of identical data sets
@@ -3198,11 +3214,14 @@ class Sparsity(ObjectCached):
             nest = configuration["matnest"]
         if block_sparse is None:
             block_sparse = configuration["block_sparsity"]
-
+        print(type(maps))
+        import sys
+        sys.stdout.flush()
         maps = frozenset(zip(maps, iteration_regions))
         kwargs = {"name": name,
                   "nest": nest,
-                  "block_sparse": block_sparse}
+                  "block_sparse": block_sparse,
+                  "map_pairs_ij": map_pairs_ij}
         return (cache,) + (tuple(dsets), maps), kwargs
 
     @classmethod
