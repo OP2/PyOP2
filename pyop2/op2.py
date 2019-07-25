@@ -54,7 +54,7 @@ __all__ = ['configuration', 'READ', 'WRITE', 'RW', 'INC', 'MIN', 'MAX',
            'debug', 'info', 'warning', 'error', 'critical', 'initialised',
            'set_log_level', 'MPI', 'init', 'exit', 'Kernel', 'Set', 'ExtrudedSet',
            'MixedSet', 'Subset', 'DataSet', 'GlobalDataSet', 'MixedDataSet',
-           'Halo', 'Dat', 'MixedDat', 'Mat', 'Global', 'Map', 'MixedMap',
+           'Halo', 'Dat', 'MixedDat', 'Mat', 'Global', 'Map', 'ComposedMap', 'MixedMap',
            'Sparsity', 'par_loop',
            'DatView']
 
