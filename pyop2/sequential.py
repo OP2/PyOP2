@@ -94,8 +94,9 @@ def vectorise(wrapper, iname, batch_size):
 
     wrapper = wrapper.with_root_kernel(kernel)
 
-    vec_types = [("double", 8), ("int", 4)]
-    preamble = ["typedef {0} {0}{1} __attribute__ ((vector_size ({2})));".format(t, batch_size, batch_size*b) for t, b in vec_types]
+    # vector data type
+    vec_types = [("double", 8), ("int", 4)]  # scalar type, bytes
+    preamble = ["typedef {0} {0}{1} __attribute__ ((vector_size ({2})));".format(t, batch_size, batch_size * b) for t, b in vec_types]
     preamble = "\n" + "\n".join(preamble)
 
     wrapper = loopy.register_preamble_generators(wrapper, [_PreambleGen(preamble, idx="01")])
@@ -186,8 +187,6 @@ class JITModule(base.JITModule):
         if not hasattr(self, '_args'):
             raise RuntimeError("JITModule has no args associated with it, should never happen")
 
-        from pyop2.configuration import configuration
-
         compiler = configuration["compiler"]
         extension = "cpp" if self._kernel._cpp else "c"
         cppargs = self._cppargs
@@ -233,6 +232,24 @@ class JITModule(base.JITModule):
 
 class ParLoop(petsc_base.ParLoop):
 
+    def set_nbytes(self, args):
+        nbytes = 0
+        seen = set()
+        for arg in args:
+            if arg.access is INC:
+                nbytes += arg.data.nbytes
+            else:
+                nbytes += arg.data.nbytes
+            for map_ in arg.map_tuple:
+                if map_ is None:
+                    continue
+                for k in map_._kernel_args_:
+                    if k in seen:
+                        continue
+                    nbytes += map_.values.nbytes
+                    seen.add(k)
+        self.nbytes = nbytes
+
     def prepare_arglist(self, iterset, *args):
         arglist = iterset._kernel_args_
         for arg in args:
@@ -248,6 +265,8 @@ class ParLoop(petsc_base.ParLoop):
                         continue
                     arglist += (k,)
                     seen.add(k)
+        if configuration["time"]:
+            self.set_nbytes(args)
         return arglist
 
     @cached_property
@@ -258,6 +277,10 @@ class ParLoop(petsc_base.ParLoop):
 
     @collective
     def _compute(self, part, fun, *arglist):
+        if configuration["time"]:
+            nbytes = self.comm.allreduce(self.nbytes)
+            if self.comm.Get_rank() == 0:
+                print("{0}_BYTES= {1}".format(self._jitmodule._wrapper_name, nbytes))
         with timed_region("ParLoop_{0}_{1}".format(self.iterset.name, self._jitmodule._wrapper_name)):
             fun(part.offset, part.offset + part.size, *arglist)
 
