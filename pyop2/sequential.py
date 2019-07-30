@@ -191,10 +191,14 @@ class ParLoop(petsc_base.ParLoop):
         seen = set()
         for arg in args:
             maps = arg.map_tuple
+            print(maps)
             for map_ in maps:
                 if map_ is None:
                     continue
                 for k in map_._kernel_args_:
+                    print(k)
+                    import sys
+                    sys.stdout.flush()
                     if k in seen:
                         continue
                     arglist += (k,)
@@ -203,6 +207,9 @@ class ParLoop(petsc_base.ParLoop):
 
     @cached_property
     def _jitmodule(self):
+        print(repr(self.iterset))
+        import sys
+        sys.stdout.flush()
         return JITModule(self.kernel, self.iterset, *self.args,
                          iterate=self.iteration_region,
                          pass_layer_arg=self._pass_layer_arg)
@@ -215,6 +222,9 @@ class ParLoop(petsc_base.ParLoop):
     def _compute(self, part, fun, *arglist):
         with self._compute_event:
             self.log_flops(part.size * self.num_flops)
+            print(arglist)
+            import sys
+            sys.stdout.flush()
             fun(part.offset, part.offset + part.size, *arglist)
 
 
