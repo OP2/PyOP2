@@ -869,6 +869,9 @@ class Subset(ExtrudedSet):
                    ('indices', (list, tuple, np.ndarray), TypeError))
     def __init__(self, superset, indices):
         # sort and remove duplicates
+        print(indices)
+        import sys
+        sys.stdout.flush()
         indices = np.unique(indices)
         if isinstance(superset, Subset):
             # Unroll indices to point to those in the parent
@@ -2701,9 +2704,9 @@ class Map(object):
     @validate_type(('iterset', Set, SetTypeError), ('toset', Set, SetTypeError),
                    ('arity', numbers.Integral, ArityTypeError), ('name', str, NameTypeError))
     def __init__(self, iterset, toset, arity, values=None, name=None, offset=None):
+        self.comm = toset.comm
         self._iterset = iterset
         self._toset = toset
-        self.comm = toset.comm
         self._arity = arity
         self._values = verify_reshape(values, IntType,
                                       (iterset.total_size, arity),
@@ -2720,6 +2723,7 @@ class Map(object):
 
     @cached_property
     def _kernel_args_(self):
+        print(self._values.ctypes.data)
         return (self._values.ctypes.data, )
 
     @cached_property
@@ -2833,21 +2837,29 @@ class ComposedMap(Map, ObjectCached):
     r"""Representation of map[0](map[1](map[2], ...))"""
 
     def __init__(self, maps):
+        if self._initialized:
+            return
+        # TODO: Must all maps have the same MPI communicator?
+        # TODO: is this the right communicator?
+        self.comm = maps[0].comm
         self.maps = maps
         for m1, m2 in zip(maps[:-1], maps[1:]):
             if m1.iterset != m2.toset:
                 raise ValueError("m1 o m2 is not valid")
-        self.iterset = maps[-1].iterset
-        self.toset = maps[0].toset
-        self.arity = np.prod([m.arity for m in maps], dtype=int)
+        self._iterset = maps[-1].iterset
+        self._toset = maps[0].toset
+        self._arity = np.prod([m.arity for m in maps], dtype=int)
+        self._values = reduce((lambda m1, m2: m1._values[m2._values.reshape(-1,)]), self.maps)
         self.shape = (self.iterset.total_size, self.arity)
-        # TODO: Must all maps have the same MPI communicator?
-        # TODO: is this the right communicator?
-        self.comm = maps[0].comm
         # TODO: extruded offsets
-        self.offset = None
+        self._offset = None
         self.dtype = maps[0].dtype
         self._cache = {}
+
+        print("remove this later")
+        self._name = "composedmaptest"
+
+        self._initialized = True
 
     @classmethod
     def _process_args(cls, *args, **kwargs):
@@ -2859,9 +2871,10 @@ class ComposedMap(Map, ObjectCached):
     def _cache_key(cls, maps):
         return maps + ("composed", )
 
-    @cached_property
-    def _kernel_args_(self):
-        return tuple(itertools.chain(*(m._kernel_args_ for m in self.maps)))
+    #@cached_property
+    #def _kernel_args_(self):
+    #    print(*(m._kernel_args_ for m in self.maps))
+    #    return tuple(itertools.chain(*(m._kernel_args_ for m in self.maps)))
 
     @cached_property
     def _argtypes_(self):
@@ -2896,6 +2909,11 @@ class ComposedMap(Map, ObjectCached):
 
     def __str__(self):
         return " o ".join(str(m) for m in reversed(self.maps))
+
+    #@cached_property
+    def name(self):
+        """User-defined labels"""
+        return tuple(m.name + ' o ' for m in self.maps)
 
 
 class MixedMap(Map, ObjectCached):
@@ -3214,9 +3232,7 @@ class Sparsity(ObjectCached):
             nest = configuration["matnest"]
         if block_sparse is None:
             block_sparse = configuration["block_sparsity"]
-        print(type(maps))
-        import sys
-        sys.stdout.flush()
+
         maps = frozenset(zip(maps, iteration_regions))
         kwargs = {"name": name,
                   "nest": nest,
@@ -3871,7 +3887,12 @@ class ParLoop(LazyComputation):
             # in case it's reused.
             for g in self._reduced_globals.keys():
                 g._data[...] = 0
+            print("before")
+            import sys
+            sys.stdout.flush()
             self._compute(iterset.core_part, fun, *arglist)
+            print("after")
+            sys.stdout.flush()
             self.global_to_local_end()
             self._compute(iterset.owned_part, fun, *arglist)
             self.reduction_begin()
