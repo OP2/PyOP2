@@ -85,8 +85,13 @@ def vectorise(wrapper, iname, batch_size):
     # split iname and vectorize the inner loop
     inner_iname = iname + "_batch"
 
-    # vectorize using vector extenstions
-    kernel = loopy.split_iname(kernel, iname, batch_size, slabs=(0, 1), inner_tag="c_vec", inner_iname=inner_iname)
+    if configuration["vectorization_strategy"] == "ve":
+        # vectorize using vector extenstions
+        kernel = loopy.split_iname(kernel, iname, batch_size, slabs=(0, 1), inner_tag="c_vec", inner_iname=inner_iname)
+    else:
+        # vectoriza using omp pragma simd
+        assert configuration["vectorization_strategy"] == "omp"
+        kernel = loopy.split_iname(kernel, iname, batch_size, slabs=(0, 1), inner_tag="omp_simd", inner_iname=inner_iname)
 
     alignment = configuration["alignment"]
     tmps = dict((name, tv.copy(alignment=alignment)) for name, tv in kernel.temporary_variables.items())
