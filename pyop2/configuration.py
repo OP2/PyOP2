@@ -76,6 +76,7 @@ class Configuration(dict):
     DEFAULTS = {
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gcc"),
         "simd_width": ("PYOP2_SIMD_WIDTH", int, 4),
+        "vectorization_strategy":("PYOP2_VECT_STRATEGY", str, "ve"),
         "alignment": ("PYOP2_ALIGNMENT", int, 64),
         "time": ("PYOP2_TIME", bool, False),
         "debug": ("PYOP2_DEBUG", bool, False),
