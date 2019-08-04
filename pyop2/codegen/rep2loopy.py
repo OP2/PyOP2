@@ -527,6 +527,15 @@ def generate(builder, wrapper_name=None):
                                 name=wrapper_name,
                                 # TODO, should these really be silenced?
                                 silenced_warnings=["write_race*"])
+    from pyop2.configuration import configuration
+    if configuration["time"]:
+        batch_size = configuration["simd_width"]
+        if builder.extruded:
+            start, end = parameters.layer_start, parameters.layer_end
+        else:
+            start, end = "start", "end"
+        wrapper = loopy.assume(wrapper, "{0} mod {1} = 0".format(end, batch_size))
+        wrapper = loopy.assume(wrapper, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format(end, configuration["simd_width"], start))
 
     # prioritize loops
     for indices in context.index_ordering:
