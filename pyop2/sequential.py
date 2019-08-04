@@ -83,15 +83,18 @@ def vectorise(wrapper, iname, batch_size):
     kernel = kernel.copy(temporary_variables=tmps)
 
     # split iname and vectorize the inner loop
+    slabs = (1, 1)
+    if configuration["time"]:
+        slabs = (0, 0)
     inner_iname = iname + "_batch"
 
     if configuration["vectorization_strategy"] == "ve":
         # vectorize using vector extenstions
-        kernel = loopy.split_iname(kernel, iname, batch_size, slabs=(0, 1), inner_tag="c_vec", inner_iname=inner_iname)
+        kernel = loopy.split_iname(kernel, iname, batch_size, slabs=slabs, inner_tag="c_vec", inner_iname=inner_iname)
     else:
         # vectoriza using omp pragma simd
         assert configuration["vectorization_strategy"] == "omp"
-        kernel = loopy.split_iname(kernel, iname, batch_size, slabs=(0, 1), inner_tag="omp_simd", inner_iname=inner_iname)
+        kernel = loopy.split_iname(kernel, iname, batch_size, slabs=slabs, inner_tag="omp_simd", inner_iname=inner_iname)
 
     alignment = configuration["alignment"]
     tmps = dict((name, tv.copy(alignment=alignment)) for name, tv in kernel.temporary_variables.items())
@@ -241,7 +244,7 @@ class ParLoop(petsc_base.ParLoop):
         seen = set()
         for arg in args:
             if arg.access is INC:
-                nbytes += arg.data.nbytes
+                nbytes += arg.data.nbytes * 2
             else:
                 nbytes += arg.data.nbytes
             for map_ in arg.map_tuple:
