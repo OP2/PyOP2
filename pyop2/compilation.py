@@ -216,7 +216,7 @@ class Compiler(object):
             if version.StrictVersion("7.3") <= ver <= version.StrictVersion("7.5"):
                 # GCC bug https://gcc.gnu.org/bugzilla/show_bug.cgi?id=90055
                 # See also https://github.com/firedrakeproject/firedrake/issues/1442
-                # And https://github.com/firedrakeproject/firedrake/issues/1717
+                return  # enable vectorization for paper
                 # Bug also on skylake with the vectoriser in this
                 # combination (disappears without
                 # -fno-tree-loop-vectorize!)
@@ -394,7 +394,7 @@ class LinuxCompiler(Compiler):
     :kwarg comm: Optional communicator to compile the code on (only
     rank 0 compiles code) (defaults to COMM_WORLD)."""
     def __init__(self, cppargs=[], ldargs=[], cpp=False, comm=None):
-        opt_flags = ['-march=native', '-O3', '-ffast-math']
+        opt_flags = ['-O3', '-ffast-math', '-fopenmp']
         if configuration['debug']:
             opt_flags = ['-O0', '-g']
         cc = "mpicc"
