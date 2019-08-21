@@ -1,7 +1,8 @@
 from pyop2.codegen.node import traversal, reuse_if_untouched, Memoizer
 from functools import singledispatch
 from pyop2.codegen.representation import (Index, RuntimeIndex, FixedIndex, Node,
-                                          FunctionCall, Variable, Argument)
+                                          FunctionCall, Variable, Argument,
+                                          NamedLiteral)
 
 
 def collect_indices(expressions):
@@ -40,7 +41,7 @@ def index_merger(instructions, cache=None):
     same level of the loop nest.
 
     :arg instructions:  Iterable of nodes to merge indices across.
-    :returns: iterable of instructions, possibly with indices replaced.
+    :returns: a memoized callable suitable for index merging.
     """
     if cache is None:
         cache = {}
@@ -102,9 +103,8 @@ _rename_node.register(Node)(reuse_if_untouched)
 
 @_rename_node.register(Index)
 def _rename_node_index(node, self):
-    if node.name in self.replace:
-        return Index(extent=node.extent, name=self.replace[node.name])
-    return node
+    name = self.replace.get(node, node.name)
+    return Index(extent=node.extent, name=name)
 
 
 @_rename_node.register(FunctionCall)
@@ -117,25 +117,26 @@ def _rename_node_func(node, self):
 @_rename_node.register(RuntimeIndex)
 def _rename_node_rtindex(node, self):
     children = tuple(map(self, node.children))
-    if node.name in self.replace:
-        name = self.replace[node.name]
-    else:
-        name = node.name
+    name = self.replace.get(node, node.name)
     return RuntimeIndex(*children, name=name)
+
+
+@_rename_node.register(NamedLiteral)
+def _rename_node_namedliteral(node, self):
+    name = self.replace.get(node, node.name)
+    return NamedLiteral(node.value, name)
 
 
 @_rename_node.register(Variable)
 def _rename_node_variable(node, self):
-    if node.name in self.replace:
-        return Variable(self.replace[node.name], node.shape, node.dtype)
-    return node
+    name = self.replace.get(node, node.name)
+    return Variable(name, node.shape, node.dtype)
 
 
 @_rename_node.register(Argument)
 def _rename_node_argument(node, self):
-    if node.name in self.replace:
-        return Argument(node.shape, node.dtype, name=self.replace[node.name])
-    return node
+    name = self.replace.get(node, node.name)
+    return Argument(node.shape, node.dtype, name=name)
 
 
 def rename_nodes(instructions, replace):

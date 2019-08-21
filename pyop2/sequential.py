@@ -45,7 +45,7 @@ from pyop2 import petsc_base
 from pyop2.base import par_loop                          # noqa: F401
 from pyop2.base import READ, WRITE, RW, INC, MIN, MAX    # noqa: F401
 from pyop2.base import ALL
-from pyop2.base import Map, MixedMap, DecoratedMap, Sparsity, Halo  # noqa: F401
+from pyop2.base import Map, MixedMap, Sparsity, Halo      # noqa: F401
 from pyop2.base import Set, ExtrudedSet, MixedSet, Subset  # noqa: F401
 from pyop2.base import DatView                           # noqa: F401
 from pyop2.base import Kernel                            # noqa: F401
@@ -191,6 +191,8 @@ class ParLoop(petsc_base.ParLoop):
         for arg in args:
             maps = arg.map_tuple
             for map_ in maps:
+                if map_ is None:
+                    continue
                 for k in map_._kernel_args_:
                     if k in seen:
                         continue
@@ -210,7 +212,7 @@ class ParLoop(petsc_base.ParLoop):
             fun(part.offset, part.offset + part.size, *arglist)
 
 
-def generate_single_cell_wrapper(iterset, args, forward_args=(), kernel_name=None, wrapper_name=None, restart_counter=True):
+def generate_single_cell_wrapper(iterset, args, forward_args=(), kernel_name=None, wrapper_name=None):
     """Generates wrapper for a single cell. No iteration loop, but cellwise data is extracted.
     Cell is expected as an argument to the wrapper. For extruded, the numbering of the cells
     is columnwise continuous, bottom to top.
@@ -235,7 +237,7 @@ def generate_single_cell_wrapper(iterset, args, forward_args=(), kernel_name=Non
     for arg in args:
         builder.add_argument(arg)
     builder.set_kernel(Kernel("", kernel_name))
-    wrapper = generate(builder, wrapper_name, restart_counter)
+    wrapper = generate(builder, wrapper_name)
     code = loopy.generate_code_v2(wrapper)
 
     return code.device_code()

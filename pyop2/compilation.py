@@ -83,18 +83,24 @@ def sniff_compiler_version(cc):
     ver = version.LooseVersion("unknown")
     if compiler in ["gcc", "icc"]:
         try:
-            # gcc-7 series only spits out patch level on dumpfullversion.
-            ver = subprocess.check_output([cc, "-dumpfullversion"],
+            ver = subprocess.check_output([cc, "-dumpversion"],
                                           stderr=subprocess.DEVNULL).decode("utf-8")
-            ver = version.StrictVersion(ver.strip())
-        except subprocess.CalledProcessError:
             try:
-                ver = subprocess.check_output([cc, "-dumpversion"],
-                                              stderr=subprocess.DEVNULL).decode("utf-8")
                 ver = version.StrictVersion(ver.strip())
-            except (subprocess.CalledProcessError, UnicodeDecodeError):
-                pass
-        except UnicodeDecodeError:
+            except ValueError:
+                # A sole digit, e.g. 7, results in a ValueError, so
+                # append a "do-nothing, but make it work" string.
+                ver = version.StrictVersion(ver.strip() + ".0")
+            if compiler == "gcc" and ver >= version.StrictVersion("7.0"):
+                try:
+                    # gcc-7 series only spits out patch level on dumpfullversion.
+                    fullver = subprocess.check_output([cc, "-dumpfullversion"],
+                                                      stderr=subprocess.DEVNULL).decode("utf-8")
+                    fullver = version.StrictVersion(fullver.strip())
+                    ver = fullver
+                except (subprocess.CalledProcessError, UnicodeDecodeError):
+                    pass
+        except (subprocess.CalledProcessError, UnicodeDecodeError):
             pass
 
     return CompilerInfo(compiler, ver)
@@ -166,20 +172,24 @@ class Compiler(object):
     def __init__(self, cc, ld=None, cppargs=[], ldargs=[],
                  cpp=False, comm=None):
         ccenv = 'CXX' if cpp else 'CC'
+        # Ensure that this is an internal communicator.
+        comm = dup_comm(comm or COMM_WORLD)
+        self.comm = compilation_comm(comm)
         self._cc = os.environ.get(ccenv, cc)
         self._ld = os.environ.get('LDSHARED', ld)
         self._cppargs = cppargs + configuration['cflags'].split() + self.workaround_cflags
         self._ldargs = ldargs + configuration['ldflags'].split()
-        # Ensure that this is an internal communicator.
-        comm = dup_comm(comm or COMM_WORLD)
-        self.comm = compilation_comm(comm)
 
     @property
     def compiler_version(self):
         try:
             return Compiler.compiler_versions[self._cc]
         except KeyError:
-            ver = sniff_compiler_version(self._cc)
+            if self.comm.rank == 0:
+                ver = sniff_compiler_version(self._cc)
+            else:
+                ver = None
+            ver = self.comm.bcast(ver, root=0)
             return Compiler.compiler_versions.setdefault(self._cc, ver)
 
     @property
@@ -198,6 +208,10 @@ class Compiler(object):
             if version.StrictVersion("7.1.0") <= ver < version.StrictVersion("7.1.2"):
                 # GCC bug https://gcc.gnu.org/bugzilla/show_bug.cgi?id=81633
                 return ["-fno-tree-loop-vectorize"]
+            if version.StrictVersion("7.3") <= ver < version.StrictVersion("7.5"):
+                # GCC bug https://gcc.gnu.org/bugzilla/show_bug.cgi?id=90055
+                # See also https://github.com/firedrakeproject/firedrake/issues/1442
+                return ["-fno-tree-loop-vectorize"]
         return []
 
     @collective
@@ -211,12 +225,7 @@ class Compiler(object):
         library."""
 
         # Determine cache key
-        if isinstance(jitmodule, JITModule):
-            code_hashee = str(jitmodule.cache_key)
-        else:
-            # we got a string
-            code_hashee = jitmodule
-        hsh = md5(code_hashee.encode())
+        hsh = md5(str(jitmodule.cache_key).encode())
         hsh.update(self._cc.encode())
         if self._ld:
             hsh.update(self._ld.encode())
@@ -226,6 +235,9 @@ class Compiler(object):
         basename = hsh.hexdigest()
 
         cachedir = configuration['cache_dir']
+
+        dirpart, basename = basename[:2], basename[2:]
+        cachedir = os.path.join(cachedir, dirpart)
         pid = os.getpid()
         cname = os.path.join(cachedir, "%s_p%d.%s" % (basename, pid, extension))
         oname = os.path.join(cachedir, "%s_p%d.o" % (basename, pid))
@@ -246,11 +258,10 @@ class Compiler(object):
                 output = os.path.join(cachedir, "mismatching-kernels")
                 srcfile = os.path.join(output, "src-rank%d.c" % self.comm.rank)
                 if self.comm.rank == 0:
-                    if not os.path.exists(output):
-                        os.makedirs(output, exist_ok=True)
+                    os.makedirs(output, exist_ok=True)
                 self.comm.barrier()
                 with open(srcfile, "w") as f:
-                    f.write(get_code(jitmodule))
+                    f.write(jitmodule.code_to_compile)
                 self.comm.barrier()
                 raise CompilationError("Generated code differs across ranks (see output in %s)" % output)
         try:
@@ -260,13 +271,12 @@ class Compiler(object):
             # No, let's go ahead and build
             if self.comm.rank == 0:
                 # No need to do this on all ranks
-                if not os.path.exists(cachedir):
-                    os.makedirs(cachedir, exist_ok=True)
+                os.makedirs(cachedir, exist_ok=True)
                 logfile = os.path.join(cachedir, "%s_p%d.log" % (basename, pid))
                 errfile = os.path.join(cachedir, "%s_p%d.err" % (basename, pid))
                 with progress(INFO, 'Compiling wrapper'):
                     with open(cname, "w") as f:
-                        f.write(get_code(jitmodule))
+                        f.write(jitmodule.code_to_compile)
                     # Compiler also links
                     if self._ld is None:
                         cc = [self._cc] + self._cppargs + \
@@ -423,7 +433,7 @@ class LinuxIntelCompiler(Compiler):
 
 @collective
 def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
-         restype=None, compiler=None, comm=None):
+         argtypes=None, restype=None, compiler=None, comm=None):
     """Build a shared library and return a function pointer from it.
 
     :arg jitmodule: The JIT Module which can generate the code to compile, or
@@ -432,13 +442,26 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
     :arg fn_name: The name of the function to return from the resulting library
     :arg cppargs: A list of arguments to the C compiler (optional)
     :arg ldargs: A list of arguments to the linker (optional)
+    :arg argtypes: A list of ctypes argument types matching the arguments of
+         the returned function (optional, pass ``None`` for ``void``). This is
+         only used when string is passed in instead of JITModule.
     :arg restype: The return type of the function (optional, pass
          ``None`` for ``void``).
     :arg compiler: The name of the C compiler (intel, ``None`` for default).
     :kwarg comm: Optional communicator to compile the code on (only
         rank 0 compiles code) (defaults to COMM_WORLD).
     """
-    assert isinstance(jitmodule, (str, JITModule))
+    if isinstance(jitmodule, str):
+        class StrCode(object):
+            def __init__(self, code, argtypes):
+                self.code_to_compile = code
+                self.cache_key = code
+                self.argtypes = argtypes
+        code = StrCode(jitmodule, argtypes)
+    elif isinstance(jitmodule, JITModule):
+        code = jitmodule
+    else:
+        raise ValueError("Don't know how to compile code of type %r" % type(jitmodule))
 
     platform = sys.platform
     cpp = extension == "cpp"
@@ -456,11 +479,10 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
     else:
         raise CompilationError("Don't know what compiler to use for platform '%s'" %
                                platform)
-    dll = compiler.get_so(jitmodule, extension)
+    dll = compiler.get_so(code, extension)
 
     fn = getattr(dll, fn_name)
-    if isinstance(jitmodule, JITModule):
-        fn.argtypes = jitmodule.argtypes
+    fn.argtypes = code.argtypes
     fn.restype = restype
     return fn
 

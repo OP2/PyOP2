@@ -2,13 +2,16 @@ import ctypes
 import numpy
 
 import loopy
-import loopy.options
+from loopy.symbolic import SubArrayRef
+from loopy.types import OpaqueType
+
 import islpy as isl
 import pymbolic.primitives as pym
 
 from collections import OrderedDict, defaultdict
 from functools import singledispatch, reduce
 import itertools
+import re
 import operator
 
 from pyop2.codegen.node import traversal, Node, Memoizer, reuse_if_untouched
@@ -25,10 +28,9 @@ from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
                                           LogicalNot, LogicalAnd, LogicalOr,
                                           Materialise, Accumulate, FunctionCall, When,
                                           Argument, Variable, Literal, NamedLiteral,
-                                          Symbol, Zero, Sum, Product)
+                                          Symbol, Zero, Sum, Min, Max, Product)
 from pyop2.codegen.representation import (PackInst, UnpackInst, KernelInst)
 from pytools import ImmutableRecord
-loopy.options.ALLOW_TERMINAL_COLORS = False
 
 
 class Bag(object):
@@ -70,7 +72,11 @@ class PetscCallable(loopy.ScalarCallable):
         return
 
 
-petsc_functions = set(['MatSetValuesBlockedLocal', 'MatSetValuesLocal'])
+petsc_functions = set()
+
+
+def register_petsc_function(name):
+    petsc_functions.add(name)
 
 
 def petsc_function_lookup(target, identifier):
@@ -217,7 +223,6 @@ def imperatives(exprs):
 
 
 def loop_nesting(instructions, deps, outer_inames, kernel_name):
-
     nesting = {}
 
     for insn in imperatives(instructions):
@@ -228,7 +233,7 @@ def loop_nesting(instructions, deps, outer_inames, kernel_name):
                 nesting[insn] = runtime_indices([insn])
         else:
             assert isinstance(insn, FunctionCall)
-            if insn.name in [kernel_name, "MatSetValuesBlockedLocal", "MatSetValuesLocal"]:
+            if insn.name in (petsc_functions | {kernel_name}):
                 nesting[insn] = outer_inames
             else:
                 nesting[insn] = runtime_indices([insn])
@@ -264,7 +269,6 @@ def loop_nesting(instructions, deps, outer_inames, kernel_name):
 
 
 def instruction_dependencies(instructions, initialisers):
-
     deps = {}
     names = {}
     instructions_by_type = defaultdict(list)
@@ -322,8 +326,7 @@ def instruction_dependencies(instructions, initialisers):
     return deps
 
 
-def generate(builder, wrapper_name=None, restart_counter=True):
-
+def generate(builder, wrapper_name=None):
     if builder.layer_index is not None:
         outer_inames = frozenset([builder._loop_index.name,
                                   builder.layer_index.name])
@@ -357,30 +360,26 @@ def generate(builder, wrapper_name=None, restart_counter=True):
     instructions = instructions + initialiser
     mapper.initialisers = [tuple(merger(i) for i in inits) for inits in mapper.initialisers]
 
-    # rename indices and nodes (so that the counter start from zero)
-    if restart_counter:
-        import re
-        pattern = re.compile(r"^([a-zA-Z_]+)([0-9]+$)")
-        replace = {}
-        names = defaultdict(list)
-        for node in traversal(instructions):
-            if isinstance(node, (Index, RuntimeIndex, Variable, Argument)):
-                match = pattern.match(node.name)
-                if match is not None:
-                    prefix, idx = match.groups()  # string, index
-                    names[prefix].append(int(idx))
+    # rename indices and nodes (so that the counters start from zero)
+    pattern = re.compile(r"^([a-zA-Z_]+)([0-9]+)(_offset)?$")
+    replacements = {}
+    counter = defaultdict(itertools.count)
+    for node in traversal(instructions):
+        if isinstance(node, (Index, RuntimeIndex, Variable, Argument, NamedLiteral)):
+            match = pattern.match(node.name)
+            if match is None:
+                continue
+            prefix, _, postfix = match.groups()
+            if postfix is None:
+                postfix = ""
+            replacements[node] = "%s%d%s" % (prefix, next(counter[(prefix, postfix)]), postfix)
 
-        for prefix, indices in names.items():
-            for old_idx, new_idx in zip(sorted(indices), range(len(indices))):
-                replace["{0}{1}".format(prefix, old_idx)] = "{0}{1}".format(prefix, new_idx)
-
-        instructions = rename_nodes(instructions, replace)
-        mapper.initialisers = [rename_nodes(inits, replace) for inits in mapper.initialisers]
-        parameters.wrapper_arguments = rename_nodes(parameters.wrapper_arguments, replace)
-        if parameters.layer_start in replace:
-            parameters.layer_start = replace[parameters.layer_start]
-        if parameters.layer_end in replace:
-            parameters.layer_end = replace[parameters.layer_end]
+    instructions = rename_nodes(instructions, replacements)
+    mapper.initialisers = [rename_nodes(inits, replacements) for inits in mapper.initialisers]
+    parameters.wrapper_arguments = rename_nodes(parameters.wrapper_arguments, replacements)
+    s, e = rename_nodes([mapper(e) for e in builder.layer_extents], replacements)
+    parameters.layer_start = s.name
+    parameters.layer_end = e.name
 
     # scheduling and loop nesting
     deps = instruction_dependencies(instructions, mapper.initialisers)
@@ -395,6 +394,8 @@ def generate(builder, wrapper_name=None, restart_counter=True):
     context.instruction_dependencies = deps
 
     statements = list(statement(insn, context) for insn in instructions)
+    # remote the dummy instructions (they were only used to ensure
+    # that the kernel knows about the outer inames).
     statements = list(s for s in statements if not isinstance(s, DummyInstruction))
 
     domains = list(parameters.domains.values())
@@ -431,6 +432,16 @@ def generate(builder, wrapper_name=None, restart_counter=True):
     if wrapper_name is None:
         wrapper_name = "wrap_%s" % builder.kernel.name
 
+    pwaffd = isl.affs_from_space(assumptions.get_space())
+    assumptions = assumptions & pwaffd["start"].ge_set(pwaffd[0])
+    if builder.single_cell:
+        assumptions = assumptions & pwaffd["start"].lt_set(pwaffd["end"])
+    else:
+        assumptions = assumptions & pwaffd["start"].le_set(pwaffd["end"])
+    if builder.extruded:
+        assumptions = assumptions & pwaffd[parameters.layer_start].le_set(pwaffd[parameters.layer_end])
+    assumptions = reduce(operator.and_, assumptions.get_basic_sets())
+
     wrapper = loopy.make_kernel(domains,
                                 statements,
                                 kernel_data=parameters.kernel_data,
@@ -450,7 +461,6 @@ def generate(builder, wrapper_name=None, restart_counter=True):
     wrapper = loopy.assume(wrapper, "start >= 0")
     if builder.extruded:
         wrapper = loopy.assume(wrapper, "{0} <= {1}".format(parameters.layer_start, parameters.layer_end))
-
     # prioritize loops
     for indices in context.index_ordering:
         wrapper = loopy.prioritize_loops(wrapper, indices)
@@ -458,6 +468,7 @@ def generate(builder, wrapper_name=None, restart_counter=True):
     # register kernel
     kernel = builder.kernel
     headers = set(kernel._headers)
+    headers = headers | set(["#include <math.h>"])
     preamble = "\n".join(sorted(headers))
 
     from coffee.base import Node
@@ -482,8 +493,7 @@ def generate(builder, wrapper_name=None, restart_counter=True):
     wrapper = loopy.register_preamble_generators(wrapper, [_PreambleGen(preamble)])
 
     # register petsc functions
-    wrapper = loopy.register_function_id_to_in_knl_callable_mapper(
-        wrapper, petsc_function_lookup)
+    wrapper = loopy.register_function_id_to_in_knl_callable_mapper(wrapper, petsc_function_lookup)
 
     return wrapper
 
@@ -534,21 +544,16 @@ def statement_assign(expr, context):
     within_inames = context.within_inames[expr]
     id, depends_on = context.instruction_dependencies[expr]
     predicates = frozenset(context.conditions)
-    insn = loopy.Assignment(lvalue, rvalue, within_inames=within_inames,
+    return loopy.Assignment(lvalue, rvalue, within_inames=within_inames,
                             predicates=predicates,
                             id=id,
                             depends_on=depends_on, depends_on_is_final=True,
                             tags=frozenset([tag]))
 
-    return insn
 
 
 @statement.register(FunctionCall)
 def statement_functioncall(expr, context):
-
-    from loopy.symbolic import SubArrayRef
-    from loopy.types import OpaqueType
-
     parameters = context.parameters
 
     free_indices = set(i.name for i in expr.free_indices)
@@ -668,6 +673,9 @@ def expression_multiindex(expr, parameters):
 @expression.register(Extent)
 def expression_extent(expr, parameters):
     multiindex, = expr.children
+    # TODO: If loopy eventually gains the ability to vectorise
+    # functions that use this, we will need a symbolic node for the
+    # index extent.
     return int(numpy.prod(tuple(i.extent for i in multiindex)))
 
 
@@ -766,6 +774,14 @@ def expression_binop(expr, parameters):
             LogicalAnd: pym.LogicalAnd,
             BitwiseOr: pym.BitwiseOr,
             BitwiseAnd: pym.BitwiseAnd}[type(expr)](children)
+
+
+@expression.register(Min)
+@expression.register(Max)
+def expression_minmax(expr, parameters):
+    children = tuple(expression(c, parameters) for c in expr.children)
+    return {Min: pym.Variable("min"),
+            Max: pym.Variable("max")}[type(expr)](*children)
 
 
 @expression.register(BitShift)

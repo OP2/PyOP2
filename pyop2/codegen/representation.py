@@ -237,6 +237,34 @@ class NamedLiteral(Terminal):
         return self.value.dtype
 
 
+class Min(Scalar):
+    __slots__ = ("children", )
+
+    def __init__(self, a, b):
+        assert not a.shape
+        assert not b.shape
+        self.children = a, b
+
+    @cached_property
+    def dtype(self):
+        a, b = self.children
+        return a.dtype
+
+
+class Max(Scalar):
+    __slots__ = ("children", )
+
+    def __init__(self, a, b):
+        assert not a.shape
+        assert not b.shape
+        self.children = a, b
+
+    @cached_property
+    def dtype(self):
+        a, b = self.children
+        return a.dtype
+
+
 class Sum(Scalar):
     __slots__ = ("children", )
 
@@ -474,70 +502,3 @@ class BitShift(Scalar, DTypeMixin):
         assert direction in {"<<", ">>"}
         self.direction = direction
         self.children = expr, shift
-
-
-class Concat(Node, DTypeMixin):
-
-    __slots__ = ("children", "shaping")
-    __front__ = ("shaping", )
-
-    def __new__(cls, shaping, *children):
-        if len(children) == 1:
-            c, = children
-            assert shaping == c.shape
-            return c
-        assert numpy.prod(shaping) == len(children)
-        assert all(len(c.shape) == len(shaping) for c in children)
-        tmp = numpy.asarray(children, dtype=object).reshape(shaping)
-        for i in range(len(shaping)):
-            index = [slice(None) for _ in range(len(shaping))]
-            for j in range(shaping[i]):
-                index[i] = j
-                assert len(set(c.shape[i] for c in tmp[index])) == 1, "Sub-shapes do not match on axis %d" % j
-
-        self = super().__new__(cls)
-        self.children = children
-        self.shaping = shaping
-        return self
-
-    @cached_property
-    def shape(self):
-        shapes = numpy.empty(self.shaping, dtype=object).reshape(-1)
-        shapes[:] = tuple(c.shape for c in self.children)
-        shapes = shapes.reshape(self.shaping)
-        shape = []
-        dim = len(self.shaping)
-        for i in range(dim):
-            index = [0 for _ in range(dim)]
-            index[i] = slice(None)
-            shape.append(sum(a[i] for a in shapes[index]))
-        return tuple(shape)
-
-
-def view(var, slices):
-    assert len(slices) == len(var.shape)
-    for (offset, index), s in zip(slices, var.shape):
-        assert isinstance(index, Index)
-        assert offset >= 0
-        assert offset + index.extent <= s
-
-    return Indexed(var, (Sum(Literal(numpy.int32(o)), i) for o, i in slices))
-
-
-class View(Node, DTypeMixin):
-
-    __slots__ = ("children", "slices")
-    __back__ = ("slices", )
-
-    def __init__(self, var, slices):
-        assert len(slices) == len(var.shape)
-        for (offset, extent), s in zip(slices, var.shape):
-            assert offset >= 0
-            assert offset + extent <= s
-
-        self.children = var,
-        self.slices = tuple(tuple(s) for s in slices)
-
-    @cached_property
-    def shape(self):
-        return tuple(e for _, e in self.slices)
