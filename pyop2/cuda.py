@@ -33,7 +33,6 @@
 
 """OP2 CUDA backend."""
 
-import os
 import ctypes
 from copy import deepcopy as dcopy
 
@@ -41,12 +40,11 @@ from contextlib import contextmanager
 
 from pyop2.datatypes import IntType, as_ctypes
 from pyop2 import base
-from pyop2 import compilation
 from pyop2 import petsc_base
 from pyop2.base import par_loop                          # noqa: F401
 from pyop2.base import READ, WRITE, RW, INC, MIN, MAX    # noqa: F401
 from pyop2.base import ALL
-from pyop2.base import Map, MixedMap, DecoratedMap, Sparsity, Halo  # noqa: F401
+from pyop2.base import Map, MixedMap, Sparsity, Halo  # noqa: F401
 from pyop2.base import Set, ExtrudedSet, MixedSet, Subset  # noqa: F401
 from pyop2.base import DatView                           # noqa: F401
 from pyop2.base import Kernel                            # noqa: F401
@@ -59,7 +57,7 @@ from pyop2.petsc_base import PETSc, MixedDat, Mat          # noqa: F401
 from pyop2.exceptions import *  # noqa: F401
 from pyop2.mpi import collective
 from pyop2.profiling import timed_region, timed_function
-from pyop2.utils import cached_property, get_petsc_dir
+from pyop2.utils import cached_property
 from pyop2.configuration import configuration
 
 import loopy
@@ -67,9 +65,6 @@ import re
 import pycuda
 import pycuda.autoinit
 import pycuda.driver as cuda_driver
-import numpy as np
-import islpy
-from collections import OrderedDict
 from pytools import memoize_method
 
 
@@ -78,7 +73,7 @@ class Map(Map):
     @cached_property
     def device_handle(self):
         m_gpu = cuda_driver.mem_alloc(int(self.values.nbytes))
-        cuda_driver.memcpy_htod(m_gpu, self.values)
+        cuda_driver.memcpy_htod(m_gpu, self.values.ravel())
         return m_gpu
 
     @cached_property
@@ -87,8 +82,9 @@ class Map(Map):
 
 
 class Arg(Arg):
-
-    pass
+    """
+    Arg for GPU
+    """
 
 
 class Dat(petsc_Dat):
@@ -468,7 +464,6 @@ def sept(kernel, extruded=False):
     """
     # we don't use shared memory for sept
     cuda_driver.Context.set_cache_config(cuda_driver.func_cache.PREFER_L1)
-    args_to_make_global = []
     pack_consts_to_globals = configuration["cuda_const_as_global"]
     batch_size = configuration["cuda_block_size"]
 
@@ -513,6 +508,8 @@ def sept(kernel, extruded=False):
 
     # {{{ making consts as globals
 
+    args_to_make_global = []
+
     if pack_consts_to_globals:
         args_to_make_global = [tv.initializer.flatten()
                 for tv in kernel.temporary_variables.values()
@@ -530,6 +527,22 @@ def sept(kernel, extruded=False):
     # }}}
 
     return kernel, args_to_make_global
+
+
+def _make_tv_array_arg(tv):
+    assert tv.address_space != loopy.AddressSpace.PRIVATE
+    arg = loopy.ArrayArg(
+            name=tv.name,
+            dtype=tv.dtype,
+            shape=tv.shape,
+            dim_tags=tv.dim_tags,
+            offset=tv.offset,
+            dim_names=tv.dim_names,
+            order=tv.order,
+            alignment=tv.alignment,
+            address_space=tv.address_space,
+            is_output_only=not tv.read_only)
+    return arg
 
 
 def transform(kernel, callables_table, ncells_per_block=32,
