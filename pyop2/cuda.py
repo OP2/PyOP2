@@ -73,7 +73,7 @@ class Map(Map):
     @cached_property
     def device_handle(self):
         m_gpu = cuda_driver.mem_alloc(int(self.values.nbytes))
-        cuda_driver.memcpy_htod(m_gpu, self.values.ravel())
+        cuda_driver.memcpy_htod(m_gpu, self.values.flatten())
         return m_gpu
 
     @cached_property

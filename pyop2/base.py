@@ -2822,7 +2822,11 @@ class Map(object):
 
         This only returns the map values for local points, to see the
         halo points too, use :meth:`values_with_halo`."""
-        return self._values[:self.iterset.size]
+        if True:
+            # Transposed maps
+            return self._values[:, :self.iterset.size]
+        else:
+            return self._values[:self.iterset.size]
 
     @cached_property
     def values_with_halo(self):
