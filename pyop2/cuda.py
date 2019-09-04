@@ -1078,6 +1078,17 @@ def transform(kernel, callables_table, ncells_per_block=32,
     return kernel, args_to_make_global
 
 
+def transpose_maps(kernel):
+    print("Caution: The map representation in the kernel is transposed")
+    from loopy.kernel.array import FixedStrideArrayDimTag
+    from pymbolic import parse
+
+    new_dim_tags = (FixedStrideArrayDimTag(1), FixedStrideArrayDimTag(parse('end')))
+    new_args = [arg.copy(dim_tags=new_dim_tags) if arg.name[:3] == 'map' else arg for arg in kernel.args]
+    kernel = kernel.copy(args=new_args)
+    return kernel
+
+
 def generate_cuda_kernel(program, extruded=False):
     # Kernel transformations
     args_to_make_global = []
@@ -1114,15 +1125,17 @@ def generate_cuda_kernel(program, extruded=False):
     if program.name == configuration["cuda_jitmodule_name"]:
         if configuration["cuda_strategy"] == "sept":
             kernel, args_to_make_global = sept(kernel, extruded)
+            kernel = transpose_maps(kernel)
         elif configuration["cuda_strategy"] == "general":
             raise NotImplementedError(
-                "The general transformation scheme is not fullly feature complete.")
+                "The general transformation scheme is not fully feature complete.")
             kernel, args_to_make_global = transform(kernel,
                     program.callables_table)
         else:
             raise ValueError("cuda strategy can be 'sept' or 'general'.")
     else:
         kernel, args_to_make_global = sept(kernel, extruded)
+        kernel = transpose_maps(kernel)
 
     program = program.with_root_kernel(kernel)
     code = loopy.generate_code_v2(program).device_code()

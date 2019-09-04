@@ -2734,9 +2734,16 @@ class Map(object):
         self._toset = toset
         self.comm = toset.comm
         self._arity = arity
-        self._values = verify_reshape(values, IntType,
-                                      (iterset.total_size, arity),
-                                      allow_none=True)
+        if True:
+            # maps indexed as `map[idof, icell]`
+            self._values = verify_reshape(values, IntType,
+                                          (arity, iterset.total_size),
+                                          allow_none=True)
+        else:
+            # maps indexed as `map[icell, idof]`
+            self._values = verify_reshape(values, IntType,
+                                          (iterset.total_size, arity),
+                                          allow_none=True)
         self.shape = (iterset.total_size, arity)
         self._name = name or "map_%d" % Map._globalcount
         if offset is None or len(offset) == 0:
