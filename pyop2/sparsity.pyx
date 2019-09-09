@@ -141,8 +141,11 @@ def build_sparsity(sparsity):
     if mixed:
         for i, r in enumerate(rset):
             for j, c in enumerate(cset):
-                maps = list(zip((m.split[i] for m in sparsity.rmaps),
-                                (m.split[j] for m in sparsity.cmaps)))
+                if sparsity.maps_ij is None:
+                    maps = list(zip((m.split[i] for m in sparsity.rmaps),
+                                    (m.split[j] for m in sparsity.cmaps)))
+                else:
+                    maps = sparsity.maps_ij[i][j]
                 mat = preallocator.getLocalSubMatrix(isrow=rset.local_ises[i],
                                                      iscol=cset.local_ises[j])
                 fill_with_zeros(mat, (r.cdim, c.cdim),

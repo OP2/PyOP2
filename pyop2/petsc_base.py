@@ -527,8 +527,12 @@ class SparsityBlock(base.Sparsity):
        its shape.  It does not provide arrays of non zero fill."""
     def __init__(self, parent, i, j):
         self._dsets = (parent.dsets[0][i], parent.dsets[1][j])
-        self._rmaps = tuple(m.split[i] for m in parent.rmaps)
-        self._cmaps = tuple(m.split[j] for m in parent.cmaps)
+        if parent.maps_ij is None:
+            self._rmaps = tuple(m.split[i] for m in parent.rmaps)
+            self._cmaps = tuple(m.split[j] for m in parent.cmaps)
+        else:
+            self._rmaps, self._cmaps = zip(*parent.maps_ij[i][j])
+        self._maps_ij = None
         self._nrows = self._dsets[0].size
         self._ncols = self._dsets[1].size
         self._has_diagonal = i == j and parent._has_diagonal
