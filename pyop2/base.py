@@ -697,9 +697,6 @@ class Subset(ExtrudedSet):
                    ('indices', (list, tuple, np.ndarray), TypeError))
     def __init__(self, superset, indices):
         # sort and remove duplicates
-        print(indices)
-        import sys
-        sys.stdout.flush()
         indices = np.unique(indices)
         if isinstance(superset, Subset):
             # Unroll indices to point to those in the parent
@@ -2520,7 +2517,6 @@ class Map(object):
 
     @cached_property
     def _kernel_args_(self):
-        print(self._values.ctypes.data)
         return (self._values.ctypes.data, )
 
     @cached_property
@@ -2619,19 +2615,25 @@ class ComposedMap(Map, ObjectCached):
     r"""Representation of map[0](map[1](map[2], ...))"""
 
     def __init__(self, maps):
+        if len(maps) == 0:
+            raise ValueError("Requires at least one map object.")
         if self._initialized:
             return
         # TODO: Must all maps have the same MPI communicator?
         # TODO: is this the right communicator?
         self.comm = maps[0].comm
         self.maps = maps
-        for m1, m2 in zip(maps[:-1], maps[1:]):
-            if m1.iterset != m2.toset:
-                raise ValueError("m1 o m2 is not valid")
+        if len(maps) > 1:
+            for m1, m2 in zip(maps[:-1], maps[1:]):
+                if m1.iterset != m2.toset:
+                    raise ValueError("m1 o m2 is not valid")
         self._iterset = maps[-1].iterset
         self._toset = maps[0].toset
         self._arity = np.prod([m.arity for m in maps], dtype=int)
-        self._values = reduce((lambda m1, m2: m1._values[m2._values.reshape(-1,)]), self.maps)
+        if len(maps) > 1:
+            self._values = reduce((lambda m1, m2: m1._values[m2._values.reshape(-1,)]), self.maps)
+        else:
+            self._values = maps[0]._values
         self.shape = (self.iterset.total_size, self.arity)
         # TODO: extruded offsets
         self._offset = None
@@ -2665,23 +2667,6 @@ class ComposedMap(Map, ObjectCached):
     @cached_property
     def _wrapper_cache_key_(self):
         return (type(self), tuple(m._wrapper_cache_key_ for m in self.maps))
-
-    @cached_property
-    def values(self):
-        """Mapping array.
-
-        This only returns the map values for local points, to see the
-        halo points too, use :meth:`values_with_halo`."""
-        return reduce(lambda a, b: a.values_with_halo[b.values_with_halo.reshape(-1,)], self.maps)[:self.iterset.size]
-
-    @cached_property
-    def values_with_halo(self):
-        """Mapping array.
-
-        This returns all map values (including halo points), see
-        :meth:`values` if you only need to look at the local
-        points."""
-        return reduce(lambda a, b: a.values_with_halo[b.values_with_halo.reshape(-1,)], self.maps)
 
     def __iter__(self):
         yield self
@@ -2838,7 +2823,7 @@ class Sparsity(ObjectCached):
     .. _MatMPIAIJSetPreallocation: http://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Mat/MatMPIAIJSetPreallocation.html
     """
 
-    def __init__(self, dsets, maps, *, iteration_regions=None, name=None, nest=None, block_sparse=None, map_pairs_ij=None):
+    def __init__(self, dsets, maps, *, iteration_regions=None, name=None, nest=None, block_sparse=None, maps_ij=None):
         r"""
         :param dsets: :class:`DataSet`\s for the left and right function
             spaces this :class:`Sparsity` maps between
@@ -2852,7 +2837,7 @@ class Sparsity(ObjectCached):
         :param nest: Should the sparsity over mixed set be built as nested blocks?
         :param block_sparse: Should the sparsity for datasets with
             cdim > 1 be built as a block sparsity?
-        :param map_pairs_ij: list of list of map pairs used to determine sparsity of
+        :param maps_ij: list of list of map pairs used to determine sparsity of
             sub-block (i, j).
         """
         # Protect against re-initialization when retrieved from cache
@@ -2864,6 +2849,7 @@ class Sparsity(ObjectCached):
         maps, iteration_regions = zip(*maps)
         self._rmaps, self._cmaps = zip(*maps)
         self._dsets = dsets
+        self._maps_ij = maps_ij
 
         if isinstance(dsets[0], GlobalDataSet) or isinstance(dsets[1], GlobalDataSet):
             self._dims = (((1, 1),),)
@@ -2910,10 +2896,10 @@ class Sparsity(ObjectCached):
             for i, rds in enumerate(dsets[0]):
                 row = []
                 for j, cds in enumerate(dsets[1]):
-                    if map_pairs_ij is None:
+                    if maps_ij is None:
                         submaps = [(rm.split[i], cm.split[j]) for rm, cm in maps]
                     else:
-                        submaps = map_pairs_ij[i][j]
+                        submaps = maps_ij[i][j]
                     row.append(Sparsity((rds, cds), submaps,
                                         iteration_regions=iteration_regions,
                                         block_sparse=block_sparse))
@@ -2942,7 +2928,7 @@ class Sparsity(ObjectCached):
     @classmethod
     @validate_type(('dsets', (Set, DataSet, tuple, list), DataSetTypeError),
                    ('maps', (Map, tuple, list), MapTypeError))
-    def _process_args(cls, dsets, maps, *, iteration_regions=None, name=None, nest=None, block_sparse=None, map_pairs_ij=None):
+    def _process_args(cls, dsets, maps, *, iteration_regions=None, name=None, nest=None, block_sparse=None, maps_ij=None):
         "Turn maps argument into a canonical tuple of pairs."
 
         # A single data set becomes a pair of identical data sets
@@ -3017,7 +3003,7 @@ class Sparsity(ObjectCached):
         kwargs = {"name": name,
                   "nest": nest,
                   "block_sparse": block_sparse,
-                  "map_pairs_ij": map_pairs_ij}
+                  "maps_ij": maps_ij}
         return (cache,) + (tuple(dsets), maps), kwargs
 
     @classmethod
@@ -3060,6 +3046,14 @@ class Sparsity(ObjectCached):
     def rmaps(self):
         """The list of row maps this sparsity is assembled from."""
         return self._rmaps
+
+    #@cached_property
+    @property
+    def maps_ij(self):
+        """A matrix of map lists this sparsity is assembled from.
+        If None (default), cmaps and rmaps are to be used.
+        """
+        return self._maps_ij
 
     @cached_property
     def dims(self):
@@ -3657,12 +3651,7 @@ class ParLoop(object):
             # in case it's reused.
             for g in self._reduced_globals.keys():
                 g._data[...] = 0
-            print("before")
-            import sys
-            sys.stdout.flush()
             self._compute(iterset.core_part, fun, *arglist)
-            print("after")
-            sys.stdout.flush()
             self.global_to_local_end()
             self._compute(iterset.owned_part, fun, *arglist)
             self.reduction_begin()
