@@ -3200,6 +3200,9 @@ class Mat(DataCarrier):
     def __call__(self, access, path, lgmaps=None, unroll_map=False):
         path_maps = as_tuple(path, Map, 2)
         if configuration["type_check"] and tuple(path_maps) not in self.sparsity:
+            print("printing from pyop2/base.py:::: path", repr(path))
+            for s in self.sparsity:
+                print("printing from pyop2/base.py:::: self.sparsity::::", s)
             raise MapValueError("Path maps not in sparsity maps")
         return _make_object('Arg', data=self, map=path_maps, access=access, lgmaps=lgmaps, unroll_map=unroll_map)
 
