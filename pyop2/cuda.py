@@ -1138,7 +1138,9 @@ def generate_cuda_kernel(program, extruded=False):
     if program.name == configuration["cuda_jitmodule_name"]:
         if configuration["cuda_strategy"] == "sept":
             kernel, args_to_make_global = sept(kernel, extruded)
-            kernel = transpose_maps(kernel)
+            if False:
+                # transposing maps
+                kernel = transpose_maps(kernel)
         elif configuration["cuda_strategy"] == "general":
             raise NotImplementedError(
                 "The general transformation scheme is not fully feature complete.")
@@ -1148,7 +1150,9 @@ def generate_cuda_kernel(program, extruded=False):
             raise ValueError("cuda strategy can be 'sept' or 'general'.")
     else:
         kernel, args_to_make_global = sept(kernel, extruded)
-        kernel = transpose_maps(kernel)
+        if False:
+            # transposing maps
+            kernel = transpose_maps(kernel)
 
     program = program.with_root_kernel(kernel)
     code = loopy.generate_code_v2(program).device_code()

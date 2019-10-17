@@ -2734,7 +2734,7 @@ class Map(object):
         self._toset = toset
         self.comm = toset.comm
         self._arity = arity
-        if True:
+        if False:
             # maps indexed as `map[idof, icell]`
             self._values = verify_reshape(values, IntType,
                                           (arity, iterset.total_size),
@@ -2822,7 +2822,7 @@ class Map(object):
 
         This only returns the map values for local points, to see the
         halo points too, use :meth:`values_with_halo`."""
-        if True:
+        if False:
             # Transposed maps
             return self._values[:, :self.iterset.size]
         else:
