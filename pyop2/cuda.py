@@ -61,6 +61,7 @@ from pyop2.utils import cached_property
 from pyop2.configuration import configuration
 
 import loopy
+import numpy
 import re
 import pycuda
 import pycuda.autoinit
@@ -73,7 +74,7 @@ class Map(Map):
     @cached_property
     def device_handle(self):
         m_gpu = cuda_driver.mem_alloc(int(self.values.nbytes))
-        cuda_driver.memcpy_htod(m_gpu, self.values.flatten())
+        cuda_driver.memcpy_htod(m_gpu, self.values)
         return m_gpu
 
     @cached_property
@@ -92,37 +93,22 @@ class Dat(petsc_Dat):
     Dat for GPU.
     """
 
-    @contextmanager
-    def vec_context(self, access):
-        """A context manager for a :class:`PETSc.Vec` from a :class:`Dat`.
-
-        :param access: Access descriptor: READ, WRITE, or RW."""
-
+    @cached_property
+    def _vec(self):
         assert self.dtype == PETSc.ScalarType, \
             "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
-        # Getting the Vec needs to ensure we've done all current
-        # necessary computation.
-        self._force_evaluation(read=access is not base.WRITE,
-                               write=access is not base.READ)
-        if not hasattr(self, '_vec'):
-            # Can't duplicate layout_vec of dataset, because we then
-            # carry around extra unnecessary data.
-            # But use getSizes to save an Allreduce in computing the
-            # global size.
-            size = self.dataset.layout_vec.getSizes()
-            data = self._data[:size[0]]
-            self._vec = PETSc.Vec().create(self.comm)
-            self._vec.setSizes(size=size, bsize=self.cdim)
-            self._vec.setType('cuda')
-            self._vec.setArray(data)
-        # PETSc Vecs have a state counter and cache norm computations
-        # to return immediately if the state counter is unchanged.
-        # Since we've updated the data behind their back, we need to
-        # change that state counter.
-        self._vec.stateIncrease()
-        yield self._vec
-        if access is not base.READ:
-            self.halo_valid = False
+        # Can't duplicate layout_vec of dataset, because we then
+        # carry around extra unnecessary data.
+        # But use getSizes to save an Allreduce in computing the
+        # global size.
+        size = self.dataset.layout_vec.getSizes()
+        data = self._data[:size[0]]
+        cuda_vec = PETSc.Vec().create(self.comm)
+        cuda_vec.setSizes(size=size, bsize=self.cdim)
+        cuda_vec.setType('cuda')
+        cuda_vec.setArray(data)
+
+        return cuda_vec
 
     @cached_property
     def device_handle(self):
@@ -137,10 +123,6 @@ class Dat(petsc_Dat):
     @property
     def data(self):
 
-        from pyop2.base import _trace
-
-        _trace.evaluate(set([self]), set([self]))
-
         with self.vec as v:
             v.restoreCUDAHandle(self.device_handle)
             return v.array
@@ -150,35 +132,28 @@ class Dat(petsc_Dat):
 
 
 class Global(petsc_Global):
-    @contextmanager
-    def vec_context(self, access):
-        """A context manager for a :class:`PETSc.Vec` from a :class:`Global`.
 
-        :param access: Access descriptor: READ, WRITE, or RW."""
-
+    @cached_property
+    def _vec(self):
         assert self.dtype == PETSc.ScalarType, \
             "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
-        # Getting the Vec needs to ensure we've done all current
-        # necessary computation.
-        self._force_evaluation(read=access is not base.WRITE,
-                               write=access is not base.READ)
+        # Can't duplicate layout_vec of dataset, because we then
+        # carry around extra unnecessary data.
+        # But use getSizes to save an Allreduce in computing the
+        # global size.
         data = self._data
-        if not hasattr(self, '_vec'):
-            # Can't duplicate layout_vec of dataset, because we then
-            # carry around extra unnecessary data.
-            # But use getSizes to save an Allreduce in computing the
-            # global size.
-            size = self.dataset.layout_vec.getSizes()
-            self._vec = PETSc.Vec().create(self.comm)
-            self._vec.setSizes(size=size, bsize=self.cdim)
-            self._vec.setType('cuda')
-            self._vec.setArray(data)
-        # PETSc Vecs have a state counter and cache norm computations
-        # to return immediately if the state counter is unchanged.
-        # Since we've updated the data behind their back, we need to
-        # change that state counter.
-        self._vec.stateIncrease()
-        yield self._vec
+        size = self.dataset.layout_vec.getSizes()
+
+        cuda_vec = PETSc.Vec().create(self.comm)
+        cuda_vec.setSizes(size=size, bsize=self.cdim)
+        cuda_vec.setType('cuda')
+
+        if self.comm.rank == 0:
+            cuda_vec.setArray(data)
+        else:
+            cuda_vec.setArray(numpy.empty(0, dtype=self.dtype))
+
+        return cuda_vec
 
     @cached_property
     def device_handle(self):
