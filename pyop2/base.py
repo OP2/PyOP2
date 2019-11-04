@@ -185,22 +185,6 @@ class Arg(object):
             map_ = self.map
         return (type(self), self.access, self.data._wrapper_cache_key_, map_, self.unroll_map)
 
-    @cached_property
-    def _kernel_args_(self):
-        return self.data._kernel_args_
-
-    @cached_property
-    def _argtypes_(self):
-        return self.data._argtypes_
-
-    @cached_property
-    def _wrapper_cache_key_(self):
-        if self.map is not None:
-            map_ = tuple(m._wrapper_cache_key_ for m in self.map)
-        else:
-            map_ = self.map
-        return (type(self), self.access, self.data._wrapper_cache_key_, map_)
-
     @property
     def _key(self):
         return (self.data, self._map, self._access)
@@ -418,15 +402,6 @@ class Set(object):
     _CORE_SIZE = 0
     _OWNED_SIZE = 1
     _GHOST_SIZE = 2
-
-    _extruded = False
-
-    _kernel_args_ = ()
-    _argtypes_ = ()
-
-    @cached_property
-    def _wrapper_cache_key_(self):
-        return (type(self), )
 
     _extruded = False
 
@@ -2554,7 +2529,6 @@ class Map(object):
         # A cache for objects built on top of this map
         self._cache = {}
         Map._globalcount += 1
-        self.ocl_buffer = None
 
     @cached_property
     def _kernel_args_(self):

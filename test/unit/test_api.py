@@ -1650,7 +1650,7 @@ class TestParLoopAPI:
     def test_illegal_iterset(self, dat, m_iterset_toset):
         """The first ParLoop argument has to be of type op2.Kernel."""
         with pytest.raises(exceptions.SetTypeError):
-            op2.par_loop(op2.Kernel("", "pyop2_kernel_k"), 'illegal_set',
+            op2.par_loop(op2.Kernel("", "k"), 'illegal_set',
                          dat(op2.READ, m_iterset_toset))
 
     def test_illegal_dat_iterset(self):
@@ -1661,7 +1661,7 @@ class TestParLoopAPI:
         dset1 = op2.DataSet(set1, 1)
         dat = op2.Dat(dset1)
         map = op2.Map(set2, set1, 1, [0, 0, 0])
-        kernel = op2.Kernel("void pyop2_kernel_k() { }", "pyop2_kernel_k")
+        kernel = op2.Kernel("void k() { }", "k")
         with pytest.raises(exceptions.MapValueError):
             base.ParLoop(kernel, set1, dat(op2.READ, map))
 

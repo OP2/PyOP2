@@ -124,7 +124,7 @@ class TestIterationSpaceDats:
 
     def test_read_1d_itspace_map(self, node, d1, vd1, node2ele):
         vd1.data[:] = numpy.arange(nele)
-        k = FunDecl("void", "pyop2_kernel_k",
+        k = FunDecl("void", "k",
                     [Decl("int*", c_sym("d")), Decl("int*", c_sym("vd"))],
                     c_for("i", 1, Assign(Symbol("d", (0,)), Symbol("vd", ("i",)))),
                     pred=["static"])
@@ -136,7 +136,7 @@ class TestIterationSpaceDats:
         assert all(d1.data[1::2] == vd1.data)
 
     def test_write_1d_itspace_map(self, node, vd1, node2ele):
-        k = FunDecl("void", "pyop2_kernel_k",
+        k = FunDecl("void", "k",
                     [Decl("int*", c_sym("vd"))],
                     c_for("i", 1, Assign(Symbol("vd", ("i",)), c_sym(2))),
                     pred=["static"])
@@ -172,7 +172,7 @@ class TestIterationSpaceDats:
                  Symbol(
                      "d", (1,)), Symbol("vd", ("i",), ((1, 1),)))],
             open_scope=True)
-        k = FunDecl("void", "pyop2_kernel_k",
+        k = FunDecl("void", "k",
                     [Decl("int*", c_sym("d")), Decl("int*", c_sym("vd"))],
                     c_for("i", 1, reads),
                     pred=["static"])
@@ -188,7 +188,7 @@ class TestIterationSpaceDats:
         writes = Block([Assign(Symbol("vd", ("i",), ((1, 0),)), c_sym(2)),
                         Assign(Symbol("vd", ("i",), ((1, 1),)), c_sym(3))],
                        open_scope=True)
-        k = FunDecl("void", "pyop2_kernel_k",
+        k = FunDecl("void", "k",
                     [Decl("int*", c_sym("vd"))],
                     c_for("i", 1, writes),
                     pred=["static"])

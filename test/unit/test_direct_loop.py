@@ -123,7 +123,7 @@ class TestDirectLoop:
         """Increment a global initialized with a non-zero value."""
         k = """static void k(unsigned int* inc) { (*inc) += 1; }"""
         g.data[0] = 10
-        op2.par_loop(op2.Kernel(k, 'pyop2_kernel_k'), elems, g(op2.INC))
+        op2.par_loop(op2.Kernel(k, 'k'), elems, g(op2.INC))
         assert g.data[0] == elems.size + 10
 
     def test_global_max_dat_is_max(self, elems, x, g):
@@ -131,7 +131,7 @@ class TestDirectLoop:
         k_code = """static void k(unsigned int *g, unsigned int *x) {
           if ( *g < *x ) { *g = *x; }
         }"""
-        k = op2.Kernel(k_code, 'pyop2_kernel_k')
+        k = op2.Kernel(k_code, 'k')
 
         op2.par_loop(k, elems, g(op2.MAX), x(op2.READ))
         assert g.data[0] == x.data.max()
@@ -143,7 +143,7 @@ class TestDirectLoop:
           if ( *g < *x ) { *g = *x; }
         }"""
 
-        k = op2.Kernel(k_code, 'pyop2_kernel_k')
+        k = op2.Kernel(k_code, 'k')
 
         g.data[0] = nelems * 2
 
@@ -156,7 +156,7 @@ class TestDirectLoop:
         k_code = """static void k(unsigned int *g, unsigned int *x) {
           if ( *g > *x ) { *g = *x; }
         }"""
-        k = op2.Kernel(k_code, 'pyop2_kernel_k')
+        k = op2.Kernel(k_code, 'k')
         g.data[0] = 1000
         op2.par_loop(k, elems, g(op2.MIN), x(op2.READ))
 
@@ -169,7 +169,7 @@ class TestDirectLoop:
           if ( *g > *x ) { *g = *x; }
         }"""
 
-        k = op2.Kernel(k_code, 'pyop2_kernel_k')
+        k = op2.Kernel(k_code, 'k')
         g.data[0] = 10
         x.data[:] = 11
         op2.par_loop(k, elems, x(op2.READ), g(op2.MIN))

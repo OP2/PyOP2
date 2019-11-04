@@ -74,21 +74,21 @@ class TestGlobalReductions:
         k = """
         static void k(unsigned int *x, unsigned int *g) { *x = *g; }
         """
-        return op2.Kernel(k, "pyop2_kernel")
+        return op2.Kernel(k, "k")
 
     @pytest.fixture(scope='module')
     def k1_inc_to_global(cls):
         k = """
         static void k(unsigned int *g, unsigned int *x) { *g += *x; }
         """
-        return op2.Kernel(k, "pyop2_kernel")
+        return op2.Kernel(k, "k")
 
     @pytest.fixture(scope='module')
     def k1_min_to_global(cls):
         k = """
         static void k(unsigned int *g, unsigned int *x) { if (*x < *g) *g = *x; }
         """
-        return op2.Kernel(k, "pyop2_kernel")
+        return op2.Kernel(k, "k")
 
     @pytest.fixture(scope='module')
     def k2_min_to_global(cls):
@@ -98,7 +98,7 @@ class TestGlobalReductions:
         if (x[1] < g[1]) g[1] = x[1];
         }
         """
-        return op2.Kernel(k, "pyop2_kernel")
+        return op2.Kernel(k, "k")
 
     @pytest.fixture(scope='module')
     def k1_max_to_global(cls):
@@ -107,7 +107,7 @@ class TestGlobalReductions:
         if (*x > *g) *g = *x;
         }
         """
-        return op2.Kernel(k, "pyop2_kernel")
+        return op2.Kernel(k, "k")
 
     @pytest.fixture(scope='module')
     def k2_max_to_global(cls):
@@ -117,21 +117,21 @@ class TestGlobalReductions:
         if (x[1] > g[1]) g[1] = x[1];
         }
         """
-        return op2.Kernel(k, "pyop2_kernel")
+        return op2.Kernel(k, "k")
 
     @pytest.fixture(scope='module')
     def k2_write_to_dat(cls, request):
         k = """
         static void k(unsigned int *x, unsigned int *g) { *x = g[0] + g[1]; }
         """
-        return op2.Kernel(k, "pyop2_kernel")
+        return op2.Kernel(k, "k")
 
     @pytest.fixture(scope='module')
     def k2_inc_to_global(cls):
         k = """
         static void k(unsigned int *g, unsigned int *x) { g[0] += x[0]; g[1] += x[1]; }
         """
-        return op2.Kernel(k, "pyop2_kernel")
+        return op2.Kernel(k, "k")
 
     @pytest.fixture
     def duint32(cls, dset):
@@ -438,12 +438,12 @@ static void k(double* g, double* x)
                      set,
                      g(op2.INC))
         assert_allclose(g.data, set.size)
-        op2.par_loop(op2.Kernel(k, "pyop2_kernel_k"),
+        op2.par_loop(op2.Kernel(k, "k"),
                      set,
                      g(op2.INC))
         assert_allclose(g.data, 2*set.size)
         g.zero()
-        op2.par_loop(op2.Kernel(k, "pyop2_kernel_k"),
+        op2.par_loop(op2.Kernel(k, "k"),
                      set,
                      g(op2.INC))
         assert_allclose(g.data, set.size)

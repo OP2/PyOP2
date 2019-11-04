@@ -144,7 +144,7 @@ class TestVectorMap:
         static void k(int *d, int *vd) {
         *d = vd[0];
         }"""
-        op2.par_loop(op2.Kernel(k, 'pyop2_kernel_k'), node,
+        op2.par_loop(op2.Kernel(k, 'k'), node,
                      d1(op2.WRITE),
                      vd1(op2.READ, node2ele))
         assert all(d1.data[::2] == vd1.data)
@@ -157,7 +157,7 @@ class TestVectorMap:
         }
         """
 
-        op2.par_loop(op2.Kernel(k, 'pyop2_kernel_k'), node,
+        op2.par_loop(op2.Kernel(k, 'k'), node,
                      vd1(op2.WRITE, node2ele))
         assert all(vd1.data == 2)
 
@@ -187,7 +187,7 @@ class TestVectorMap:
         d[0] = vd[0][0];
         d[1] = vd[0][1];
         }"""
-        op2.par_loop(op2.Kernel(k, 'pyop2_kernel_k'), node,
+        op2.par_loop(op2.Kernel(k, 'k'), node,
                      d2(op2.WRITE),
                      vd2(op2.READ, node2ele))
         assert all(d2.data[::2, 0] == vd2.data[:, 0])
@@ -203,7 +203,7 @@ class TestVectorMap:
         }
         """
 
-        op2.par_loop(op2.Kernel(k, 'pyop2_kernel_k'), node,
+        op2.par_loop(op2.Kernel(k, 'k'), node,
                      vd2(op2.WRITE, node2ele))
         assert all(vd2.data[:, 0] == 2)
         assert all(vd2.data[:, 1] == 3)

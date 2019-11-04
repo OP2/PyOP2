@@ -418,7 +418,7 @@ static void swap(unsigned int* x)
     def test_same_iteration_space_works(self, iterset, x2, iter2ind2):
         self.cache.clear()
         assert len(self.cache) == 0
-        kernel_code = FunDecl("void", "pyop2_kernel_k",
+        kernel_code = FunDecl("void", "k",
                               [Decl("int*", c_sym("x"), qualifiers=["unsigned"])],
                               c_for("i", 1, ""),
                               pred=["static"])
@@ -479,8 +479,8 @@ class TestKernelCache:
         """Kernels with same code and name should be retrieved from cache."""
         code = "static void k(void *x) {}"
         self.cache.clear()
-        k1 = op2.Kernel(code, 'pyop2_kernel_k')
-        k2 = op2.Kernel(code, 'pyop2_kernel_k')
+        k1 = op2.Kernel(code, 'k')
+        k2 = op2.Kernel(code, 'k')
         assert k1 is k2 and len(self.cache) == 1
 
     def test_kernels_same_code_differing_name(self):

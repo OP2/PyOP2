@@ -113,14 +113,14 @@ class TestIndirectLoop:
         """Accessing a par_loop argument via a Map with iterset not matching
         the par_loop's should raise an exception."""
         with pytest.raises(MapValueError):
-            op2.par_loop(op2.Kernel("", "pyop2_kernel_dummy"), iterset,
+            op2.par_loop(op2.Kernel("", "dummy"), iterset,
                          x(op2.WRITE, op2.Map(op2.Set(nelems), indset, 1)))
 
     def test_mismatching_indset(self, iterset, x):
         """Accessing a par_loop argument via a Map with toset not matching
         the Dat's should raise an exception."""
         with pytest.raises(MapValueError):
-            op2.par_loop(op2.Kernel("", "pyop2_kernel_dummy"), iterset,
+            op2.par_loop(op2.Kernel("", "dummy"), iterset,
                          x(op2.WRITE, op2.Map(iterset, op2.Set(nelems), 1)))
 
     def test_uninitialized_map(self, iterset, indset, x):
