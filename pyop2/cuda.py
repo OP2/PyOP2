@@ -383,14 +383,10 @@ class ParLoop(petsc_base.ParLoop):
             return
 
         if configuration["cuda_timer"]:
-            fun(part.offset, part.offset + part.size, *arglist)  # warm up
             start = cuda_driver.Event()
             end = cuda_driver.Event()
-            if configuration["cuda_timer_profile"]:
-                cuda_driver.start_profiler()
             start.record()
-            for _ in range(configuration["cuda_timer_repeat"]):
-                fun(part.offset, part.offset + part.size, *arglist)
+            fun(part.offset, part.offset + part.size, *arglist)
             end.record()
             end.synchronize()
             print("{0}_TIME= {1}".format(self._jitmodule._wrapper_name, start.time_till(end)/1000))
@@ -1067,6 +1063,7 @@ def transform(kernel, callables_table, ncells_per_block=32,
 
 
 def transpose_maps(kernel):
+    1/0
     print("Caution: The map representation in the kernel is transposed")
     from loopy.kernel.array import FixedStrideArrayDimTag
     from pymbolic import parse
