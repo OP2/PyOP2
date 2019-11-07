@@ -76,19 +76,23 @@ class Configuration(dict):
     DEFAULTS = {
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gcc"),
         "simd_width": ("PYOP2_SIMD_WIDTH", int, 4),
-        "dump_cuda_kernel": ("PYOP2_DUMP_CUDA_KERNEL", bool, False),
-        "load_cuda_kernel": ("PYOP2_LOAD_CUDA_KERNEL", bool, False),
-        "cuda_kernel_name": ("PYOP2_CUDA_KERNEL_NAME", str, "cuda_kernel.cu"),
+        # {{{ CUDA params
+
         "cuda_jitmodule_name": ("PYOP2_CUDA_JITMODULE_NAME", str, "wrap_form0_cell_integral_otherwise"),
         "cuda_timer": ("PYOP2_CUDA_TIMER", bool, False),
-        "cuda_timer_repeat": ("PYOP2_CUDA_TIMER_REPEAT", int, 1),
-        "cuda_timer_profile": ("PYOP2_CUDA_TIMER_PROFILE", bool, False),
-        "cuda_block_size": ("PYOP2_CUDA_BLOCK_SIZE", int, 32),
-        "cuda_batch_per_block": ("PYOP2_CUDA_BATCH_PER_BLOCK", int, 32),
-        "cuda_unroll_size": ("PYOP2_CUDA_UNROLL_SIZE", int, 1),
+        "cuda_cells_per_block": ("PYOP2_CUDA_CELLS_PER_BLOCK", int, 32),
         "cuda_num_layer": ("PYOP2_CUDA_NUM_LAYER", int, 32),
-        "cuda_const_as_global": ("PYOP2_CUDA_CONST_GLOBAL", bool, False),
         "cuda_strategy": ("PYOP2_CUDA_STRATEGY", str, "sept"),
+        "cuda_threads_per_cell": ("PYOP2_CUDA_THREADS_PER_CELL", int, 1),
+        "cuda_matvec1_rowtile_length": ("PYOP2_CUDA_MV1_ROWTILE", int, 1),
+        "cuda_matvec1_coltile_length": ("PYOP2_CUDA_MV1_COLTILE", int, 1),
+        "cuda_matvec2_rowtile_length": ("PYOP2_CUDA_MV2_ROWTILE", int, 1),
+        "cuda_matvec2_coltile_length": ("PYOP2_CUDA_MV2_COLTILE", int, 1),
+        "cuda_coords_to_shared": ("PYOP2_COORDS_TO_SHARED", bool, False),
+        "cuda_input_to_shared": ("PYOP2_INPUT_TO_SHARED", bool, False),
+        "cuda_mats_to_shared": ("PYOP2_INPUT_TO_SHARED", bool, False),
+
+        # }}}
         "debug": ("PYOP2_DEBUG", bool, False),
         "cflags": ("PYOP2_CFLAGS", str, ""),
         "ldflags": ("PYOP2_LDFLAGS", str, ""),
