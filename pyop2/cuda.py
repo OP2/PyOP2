@@ -67,6 +67,7 @@ import pycuda
 import pycuda.autoinit
 import pycuda.driver as cuda_driver
 from pytools import memoize_method
+from pyop2.logger import ExecTimeNoter
 
 
 class Map(Map):
@@ -380,7 +381,9 @@ class ParLoop(petsc_base.ParLoop):
             fun(part.offset, part.offset + part.size, *arglist)
             end.record()
             end.synchronize()
-            print("{0}_TIME= {1}".format(self._jitmodule._wrapper_name, start.time_till(end)/1000))
+            ExecTimeNoter.note(start.time_till(end)/1000)
+
+            # print("{0}_TIME= {1}".format(self._jitmodule._wrapper_name, start.time_till(end)/1000))
             return
 
         with timed_region("ParLoop_{0}_{1}".format(self.iterset.name, self._jitmodule._wrapper_name)):
@@ -509,6 +512,7 @@ def transform(kernel, callables_table, ncells_per_block,
     quad_iname_in_quad_redn = 'form_ip_quad'
     basis_iname_in_quad_redn = 'form_i'
     basis_iname_basis_redn = 'form_j'
+    input_basis_coeff_subst = input_basis_coeff_temp+'_subst'
 
     # }}}
 
@@ -657,14 +661,8 @@ def transform(kernel, callables_table, ncells_per_block,
         kernel = loopy.privatize_temporaries_with_inames(kernel, 'icell',
                 [coords_temp])
         kernel = loopy.assignment_to_subst(kernel, coords_temp)
-        raise NotImplementedError()
-
-    if load_input_to_shared:
-        #FIXME: Assumes uses the name 't2' for the input basis coeffs
-        kernel = loopy.privatize_temporaries_with_inames(kernel, 'icell',
-                [input_basis_coeff_temp])
-        kernel = loopy.assignment_to_subst(kernel, input_basis_coeff_temp)
-        raise NotImplementedError()
+        raise NotImplementedError("This might be only useful for high order"
+                " meshes.")
 
     # Splitting for tiles in matvec1
     kernel = loopy.split_iname(kernel, quad_iname_in_quad_redn, matvec1_row_tile_length, outer_iname='irowtile_matvec1')
@@ -675,6 +673,24 @@ def transform(kernel, callables_table, ncells_per_block,
     kernel = loopy.split_iname(kernel, quad_iname_in_basis_redn, matvec2_col_tile_length, outer_iname='icoltile_matvec2')
 
     # {{{ Prefetch wizardry
+
+    if load_input_to_shared:
+        from loopy.transform.precompute import precompute_for_single_kernel
+        #FIXME: Assumes uses the name 't2' for the input basis coeffs
+        kernel = loopy.privatize_temporaries_with_inames(kernel, 'icell',
+                [input_basis_coeff_temp])
+        kernel = loopy.assignment_to_subst(kernel, input_basis_coeff_temp)
+        input_prcmpt_iname = 'input_basis_prcmpt'
+        kernel = precompute_for_single_kernel(kernel, callables_table,
+                subst_use=input_basis_coeff_subst,
+                sweep_inames=('icell', basis_iname_in_quad_redn+'_inner', ),
+                precompute_outer_inames='iblock,icoltile_matvec1,irowtile_matvec1',
+                precompute_inames=(input_prcmpt_iname, 'icell'),
+                temporary_address_space=loopy.AddressSpace.LOCAL,
+                default_tag=None,
+                )
+        kernel = loopy.split_iname(kernel, input_prcmpt_iname,
+                nthreads_per_cell, inner_tag="l.0")
 
     if load_local_mats_to_shared:
         from loopy.transform.data import add_prefetch_for_single_kernel
@@ -830,23 +846,22 @@ def transform(kernel, callables_table, ncells_per_block,
                 'form_ip_quad_inner_outer',
                 only_var_names=['form_t16', 'form_t17'])
         kernel = loopy.duplicate_inames(kernel, ['form_ip_quad_inner_outer', ],
-                within='tag:quad_wrap_up or'
-                ' id:red_assign_form_insn_14 or id:red_assign_form_insn_15')
-
+                within='tag:quad_wrap_up')
         kernel = loopy.duplicate_inames(kernel,
                 ['form_ip_quad_inner_outer'],
-                'id:form_insn_14_icoltile_matvec1_form_i_inner_init or id:form_insn_15_icoltile_matvec1_form_i_inner_init')
+                'tag:quad_init')
+    else:
+        kernel = loopy.add_inames_to_insn(kernel, 'icoltile_matvec1', 'tag:quad_wrap_up or tag:quad_init')
 
     # before this point 't2' should be made a scalar.
 
     if matvec2_col_tile_length < nquad:
         kernel = loopy.privatize_temporaries_with_inames(kernel, 'form_j_inner_outer',
                 only_var_names=['t2'])
-        kernel = loopy.duplicate_inames(kernel, ['form_j_inner_outer'], within='tag:scatter or'
-                ' id:red_assign_form_insn_21')
-        kernel = loopy.duplicate_inames(kernel,
-                ['form_j_inner_outer'],
-                'id:form_insn_21_icoltile_matvec2_form_ip_basis_inner_init')
+        kernel = loopy.duplicate_inames(kernel, ['form_j_inner_outer'], within='tag:scatter')
+        kernel = loopy.duplicate_inames(kernel, ['form_j_inner_outer'], within='id:statement2')
+    else:
+        kernel = loopy.add_inames_to_insn(kernel, 'icoltile_matvec2', 'tag:scatter or id:statement2')
 
     kernel = loopy.tag_inames(kernel, "icell:l.1, iblock:g.0")
 
@@ -922,8 +937,6 @@ def generate_cuda_kernel(program, extruded=False):
                     configuration["cuda_input_to_shared"],
                     configuration["cuda_mats_to_shared"]
                     )
-
-
         else:
             raise ValueError("cuda strategy can be 'sept' or 'general'.")
     else:
@@ -935,6 +948,11 @@ def generate_cuda_kernel(program, extruded=False):
     program = program.with_root_kernel(kernel)
 
     code = loopy.generate_code_v2(program).device_code()
+
+    if program.name == configuration["cuda_jitmodule_name"]:
+        print(code)
+        1/0
+
 
     if program.name == "wrap_pyop2_kernel_uniform_extrusion":
         code = code.replace("inline void pyop2_kernel_uniform_extrusion", "__device__ inline void pyop2_kernel_uniform_extrusion")
