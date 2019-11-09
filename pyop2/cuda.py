@@ -493,7 +493,10 @@ def transform(kernel, callables_table, ncells_per_block,
         matvec2_row_tile_length, matvec2_col_tile_length,
         load_coordinates_to_shared,
         load_input_to_shared,
-        load_local_mats_to_shared):
+        load_local_mats_to_shared,
+        load_quad_weights_to_shared,
+        tiled_prefetch_of_inputs,
+        tiled_prefetch_of_quad_weights):
     """
     Matvec1 is the function evaluation part at the quad points.
     Matvec2 is the basis coefficients computation part.
@@ -681,10 +684,16 @@ def transform(kernel, callables_table, ncells_per_block,
                 [input_basis_coeff_temp])
         kernel = loopy.assignment_to_subst(kernel, input_basis_coeff_temp)
         input_prcmpt_iname = 'input_basis_prcmpt'
+        if tiled_prefetch_of_inputs:
+            sweep_inames = ('icell', basis_iname_in_quad_redn+'_inner')
+            outer_inames = 'iblock,icoltile_matvec1,irowtile_matvec1'
+        else:
+            sweep_inames = ('icell', 'icoltile_matvec1', basis_iname_in_quad_redn+'_inner')
+            outer_inames = 'iblock'
         kernel = precompute_for_single_kernel(kernel, callables_table,
                 subst_use=input_basis_coeff_subst,
-                sweep_inames=('icell', basis_iname_in_quad_redn+'_inner', ),
-                precompute_outer_inames='iblock,icoltile_matvec1,irowtile_matvec1',
+                sweep_inames=sweep_inames,
+                precompute_outer_inames=outer_inames,
                 precompute_inames=(input_prcmpt_iname, 'icell'),
                 temporary_address_space=loopy.AddressSpace.LOCAL,
                 default_tag=None,
@@ -700,7 +709,6 @@ def transform(kernel, callables_table, ncells_per_block,
         # FIXME: Sweep inames depends on the parallelization strategies for
         # both the matvecs, that needs to be taken care of.
         const_matrices_names = set([tv.name for tv in old_temps.values() if tv.initializer is not None and len(tv.shape)>1])
-        quad_weights, = [tv.name for tv in old_temps.values() if tv.initializer is not None and len(tv.shape) == 1]
 
         # {{{ Prefetching: QUAD PART
 
@@ -773,32 +781,6 @@ def transform(kernel, callables_table, ncells_per_block,
 
         # }}}
 
-        # {{{ Prefetch: Quad Weights(Set to false now)
-
-        # Unless we load this into the shared memory and do a collective read
-        # in a block, this is no good. As the quad weights are accessed only
-        # once. So the only way prefetching would help is through a
-        # parallelized read.
-
-        prefetch_quad_weights = False
-
-        if prefetch_quad_weights:
-            quad_weight_prefetch_insns = []
-
-            sweep_inames = (quad_iname_in_quad_redn+'_inner_outer', quad_iname_in_quad_redn+'_inner_inner',)
-            fetch_outer_inames = 'irowtile_matvec1, icell, iblock'
-            quad_weight_prefetch_insns.append(ing("basis_prftch_insn"))
-
-            kernel = add_prefetch_for_single_kernel(kernel, callables_table,
-                    var_name=quad_weights,
-                    sweep_inames=sweep_inames,
-                    temporary_address_space=loopy.AddressSpace.PRIVATE,
-                    temporary_name='cnst_quad_weight_prftch',
-                    compute_insn_id=quad_weight_prefetch_insns[-1],
-                    fetch_outer_inames=fetch_outer_inames,
-                    within="tag:quad_wrap_up")
-        # }}}
-
         # {{{ Adding dependency between the prefetch instructions
 
         kernel = loopy.add_dependency(kernel,
@@ -826,6 +808,42 @@ def transform(kernel, callables_table, ncells_per_block,
         kernel = loopy.remove_dependency(kernel, 'tag:quad_redn', 'tag:quad_redn')
         kernel = loopy.remove_dependency(kernel, 'tag:basis_redn', 'tag:basis_redn')
         kernel = loopy.add_dependency(kernel, 'tag:quad_wrap_up', 'tag:quad_redn')
+
+    # }}}
+
+    # {{{ Prefetch: Quad Weights(Set to false now)
+
+    if load_quad_weights_to_shared:
+        from loopy.transform.data import add_prefetch_for_single_kernel
+        quad_weights, = [tv.name for tv in old_temps.values() if tv.initializer is not None and len(tv.shape) == 1]
+        vng = kernel.get_var_name_generator()
+        ing = kernel.get_instruction_id_generator()
+        quad_weight_prefetch_insn = ing("quad_wt_prftch_insn")
+        quad_weight_prefetch_iname = vng("iprtftch")
+
+        if tiled_prefetch_of_quad_weights:
+            sweep_inames = (quad_iname_in_quad_redn+'_inner')
+            fetch_outer_inames = 'irowtile_matvec1, iblock'
+        else:
+            sweep_inames = ('irowtile_matvec1', quad_iname_in_quad_redn+'_inner',)
+            fetch_outer_inames = 'iblock'
+
+        kernel = add_prefetch_for_single_kernel(kernel, callables_table,
+                var_name=quad_weights,
+                sweep_inames=sweep_inames,
+                temporary_address_space=loopy.AddressSpace.LOCAL,
+                dim_arg_names=(quad_weight_prefetch_iname,),
+                temporary_name='cnst_quad_weight_prftch',
+                compute_insn_id=quad_weight_prefetch_insn,
+                fetch_outer_inames=fetch_outer_inames,
+                default_tag=None,
+                within="tag:quad_wrap_up")
+
+        kernel = loopy.split_iname(kernel, quad_weight_prefetch_iname,
+                ncells_per_block*nthreads_per_cell)
+        kernel = loopy.split_iname(kernel, quad_weight_prefetch_iname+'_inner',
+                nthreads_per_cell,
+                outer_tag="l.1", inner_tag="l.0")
 
     # }}}
 
@@ -935,7 +953,10 @@ def generate_cuda_kernel(program, extruded=False):
                     configuration["cuda_matvec2_coltile_length"],
                     configuration["cuda_coords_to_shared"],
                     configuration["cuda_input_to_shared"],
-                    configuration["cuda_mats_to_shared"]
+                    configuration["cuda_mats_to_shared"],
+                    configuration["cuda_quad_weights_to_shared"],
+                    configuration["cuda_tiled_prefetch_of_input"],
+                    configuration["cuda_tiled_prefetch_of_quad_weights"]
                     )
         else:
             raise ValueError("cuda strategy can be 'sept' or 'general'.")
@@ -948,11 +969,6 @@ def generate_cuda_kernel(program, extruded=False):
     program = program.with_root_kernel(kernel)
 
     code = loopy.generate_code_v2(program).device_code()
-
-    if program.name == configuration["cuda_jitmodule_name"]:
-        print(code)
-        1/0
-
 
     if program.name == "wrap_pyop2_kernel_uniform_extrusion":
         code = code.replace("inline void pyop2_kernel_uniform_extrusion", "__device__ inline void pyop2_kernel_uniform_extrusion")

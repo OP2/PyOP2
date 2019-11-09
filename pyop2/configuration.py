@@ -76,6 +76,7 @@ class Configuration(dict):
     DEFAULTS = {
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gcc"),
         "simd_width": ("PYOP2_SIMD_WIDTH", int, 4),
+
         # {{{ CUDA params
 
         "cuda_jitmodule_name": ("PYOP2_CUDA_JITMODULE_NAME", str, "wrap_form0_cell_integral_otherwise"),
@@ -88,11 +89,15 @@ class Configuration(dict):
         "cuda_matvec1_coltile_length": ("PYOP2_CUDA_MV1_COLTILE", int, 1),
         "cuda_matvec2_rowtile_length": ("PYOP2_CUDA_MV2_ROWTILE", int, 1),
         "cuda_matvec2_coltile_length": ("PYOP2_CUDA_MV2_COLTILE", int, 1),
-        "cuda_coords_to_shared": ("PYOP2_COORDS_TO_SHARED", bool, False),
-        "cuda_input_to_shared": ("PYOP2_INPUT_TO_SHARED", bool, False),
+        "cuda_coords_to_shared": ("PYOP2_CUDA_COORDS_TO_SHARED", bool, False),
+        "cuda_input_to_shared": ("PYOP2_CUDA_INPUT_TO_SHARED", bool, False),
+        "cuda_tiled_prefetch_of_input": ("PYOP2_CUDA_TILED_PREFETCH_OF_INPUTS", bool, False),
+        "cuda_tiled_prefetch_of_quad_weights": ("PYOP2_CUDA_TILED_PREFETCH_OF_QUAD_WEIGHTS", bool, False),
         "cuda_mats_to_shared": ("PYOP2_INPUT_TO_SHARED", bool, False),
+        "cuda_quad_weights_to_shared": ("PYOP2_QUAD_WEIGHTS_TO_SHARED", bool, False),
 
         # }}}
+
         "debug": ("PYOP2_DEBUG", bool, False),
         "cflags": ("PYOP2_CFLAGS", str, ""),
         "ldflags": ("PYOP2_LDFLAGS", str, ""),
