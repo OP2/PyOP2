@@ -275,7 +275,7 @@ class JITModule(base.JITModule):
         from pycuda.compiler import SourceModule
 
         options = ["-use_fast_math"]
-        # options.append("-lineinfo")
+        options.append("-lineinfo")
         func = SourceModule(self.code_to_compile, options=options)
         self._fun = func.get_function(self._wrapper_name)
         self._fun.prepare(self.argtypes+"P"*len(self.args_to_make_global))
@@ -378,11 +378,11 @@ class ParLoop(petsc_base.ParLoop):
             start = cuda_driver.Event()
             end = cuda_driver.Event()
             start.record()
+            start.synchronize()
             fun(part.offset, part.offset + part.size, *arglist)
             end.record()
             end.synchronize()
             ExecTimeNoter.note(start.time_till(end)/1000)
-
             # print("{0}_TIME= {1}".format(self._jitmodule._wrapper_name, start.time_till(end)/1000))
             return
 
@@ -468,7 +468,29 @@ def sept(kernel, extruded=False):
         kernel = loopy.assume(kernel, "{0} mod {1} = 0".format("end", batch_size))
         kernel = loopy.assume(kernel, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format("end", batch_size, "start"))
 
-    return kernel, []
+
+    # {{{ making consts as globals
+
+    args_to_make_global = []
+    pack_consts_to_globals = True
+
+    if pack_consts_to_globals:
+        args_to_make_global = [tv.initializer.flatten()
+                for tv in kernel.temporary_variables.values()
+                if (tv.initializer is not None
+                    and tv.address_space == loopy.AddressSpace.GLOBAL)]
+
+        new_temps = dict((tv.name, tv.copy(initializer=None))
+                if (tv.initializer is not None
+                    and tv.address_space == loopy.AddressSpace.GLOBAL)
+                else (tv.name, tv) for tv in
+                kernel.temporary_variables.values())
+
+        kernel = kernel.copy(temporary_variables=new_temps)
+
+    # }}}
+
+    return kernel, args_to_make_global
 
 
 def _make_tv_array_arg(tv):
@@ -493,7 +515,7 @@ def transform(kernel, callables_table, ncells_per_block,
         matvec2_row_tile_length, matvec2_col_tile_length,
         load_coordinates_to_shared,
         load_input_to_shared,
-        load_local_mats_to_shared,
+        load_mats_to_shared,
         load_quad_weights_to_shared,
         tiled_prefetch_of_inputs,
         tiled_prefetch_of_quad_weights):
@@ -514,7 +536,6 @@ def transform(kernel, callables_table, ncells_per_block,
     quad_iname_in_basis_redn = 'form_ip_basis'
     quad_iname_in_quad_redn = 'form_ip_quad'
     basis_iname_in_quad_redn = 'form_i'
-    basis_iname_basis_redn = 'form_j'
     input_basis_coeff_subst = input_basis_coeff_temp+'_subst'
 
     # }}}
@@ -660,7 +681,8 @@ def transform(kernel, callables_table, ncells_per_block,
             'tag:quad_wrap_up')
 
     if load_coordinates_to_shared:
-        #FIXME: Assumes uses the name 't1' for coordinates
+        # FIXME: This seems unnecessary as of now. I might choose to not
+        # support it.
         kernel = loopy.privatize_temporaries_with_inames(kernel, 'icell',
                 [coords_temp])
         kernel = loopy.assignment_to_subst(kernel, coords_temp)
@@ -701,7 +723,7 @@ def transform(kernel, callables_table, ncells_per_block,
         kernel = loopy.split_iname(kernel, input_prcmpt_iname,
                 nthreads_per_cell, inner_tag="l.0")
 
-    if load_local_mats_to_shared:
+    if load_mats_to_shared:
         from loopy.transform.data import add_prefetch_for_single_kernel
         #FIXME: Assuming that in all the constants the one with single axis is
         # the one corresponding to quadrature weights. fix it by passing some
@@ -811,7 +833,7 @@ def transform(kernel, callables_table, ncells_per_block,
 
     # }}}
 
-    # {{{ Prefetch: Quad Weights(Set to false now)
+    # {{{ Prefetch: Quad Weights
 
     if load_quad_weights_to_shared:
         from loopy.transform.data import add_prefetch_for_single_kernel
@@ -840,7 +862,7 @@ def transform(kernel, callables_table, ncells_per_block,
                 within="tag:quad_wrap_up")
 
         kernel = loopy.split_iname(kernel, quad_weight_prefetch_iname,
-                ncells_per_block*nthreads_per_cell)
+                ncells_per_block*nthreads_per_cell, outer_tag="ilp")
         kernel = loopy.split_iname(kernel, quad_weight_prefetch_iname+'_inner',
                 nthreads_per_cell,
                 outer_tag="l.1", inner_tag="l.0")
@@ -860,13 +882,16 @@ def transform(kernel, callables_table, ncells_per_block,
     # }}}
 
     if matvec1_col_tile_length < nbasis:
+        only_var_names = [insn.assignee.name for insn in kernel.instructions if
+                'quad_init' in insn.tags]
         kernel = loopy.privatize_temporaries_with_inames(kernel,
-                'form_ip_quad_inner_outer',
-                only_var_names=['form_t16', 'form_t17'])
-        kernel = loopy.duplicate_inames(kernel, ['form_ip_quad_inner_outer', ],
+                quad_iname_in_quad_redn+'_inner_outer',
+                only_var_names=only_var_names)
+        kernel = loopy.duplicate_inames(kernel,
+                [quad_iname_in_quad_redn+'_inner_outer', ],
                 within='tag:quad_wrap_up')
         kernel = loopy.duplicate_inames(kernel,
-                ['form_ip_quad_inner_outer'],
+                [quad_iname_in_quad_redn+'_inner_outer'],
                 'tag:quad_init')
     else:
         kernel = loopy.add_inames_to_insn(kernel, 'icoltile_matvec1', 'tag:quad_wrap_up or tag:quad_init')
@@ -874,12 +899,26 @@ def transform(kernel, callables_table, ncells_per_block,
     # before this point 't2' should be made a scalar.
 
     if matvec2_col_tile_length < nquad:
-        kernel = loopy.privatize_temporaries_with_inames(kernel, 'form_j_inner_outer',
-                only_var_names=['t2'])
-        kernel = loopy.duplicate_inames(kernel, ['form_j_inner_outer'], within='tag:scatter')
-        kernel = loopy.duplicate_inames(kernel, ['form_j_inner_outer'], within='id:statement2')
+        #@TODO; 't2' is not generalized enough.
+        kernel = loopy.privatize_temporaries_with_inames(kernel,
+                basis_iname_in_basis_redn+'_inner_outer',
+                only_var_names=[output_basis_coeff_temp])
+        kernel = loopy.duplicate_inames(kernel, [basis_iname_in_basis_redn+'_inner_outer'], within='tag:scatter')
+        kernel = loopy.duplicate_inames(kernel,
+                [basis_iname_in_basis_redn+'_inner_outer'],
+                within='tag:gather and writes:{}'.format(output_basis_coeff_temp))
     else:
-        kernel = loopy.add_inames_to_insn(kernel, 'icoltile_matvec2', 'tag:scatter or id:statement2')
+        kernel = loopy.add_inames_to_insn(kernel, 'icoltile_matvec2',
+                'tag:scatter or (tag:gather and writes:{})'.format(output_basis_coeff_temp))
+
+    # {{{ micro-optimizations
+
+    if nthreads_per_cell == 1 and not load_mats_to_shared:
+        #@TODO: form_insn_19 and form_insn20 aren't general enough!
+        kernel = loopy.add_nosync(kernel, "local", "id:form_insn_19 or id:form_insn_20",
+                "id:form_insn_21")
+
+    # }}}
 
     kernel = loopy.tag_inames(kernel, "icell:l.1, iblock:g.0")
 
