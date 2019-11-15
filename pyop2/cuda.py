@@ -210,6 +210,24 @@ class JITModule(base.JITModule):
             self.compile()
             self._initialized = True
 
+    @classmethod
+    def _cache_key(cls, *args, **kwargs):
+        key = super(JITModule, cls)._cache_key(*args, **kwargs)
+        key += (
+                configuration["cuda_cells_per_block"],
+                configuration["cuda_strategy"],
+                configuration["cuda_threads_per_cell"],
+                configuration["cuda_matvec1_rowtile_length"],
+                configuration["cuda_matvec1_coltile_length"],
+                configuration["cuda_matvec2_rowtile_length"],
+                configuration["cuda_matvec2_coltile_length"],
+                configuration["cuda_input_to_shared"],
+                configuration["cuda_quad_weights_to_shared"],
+                configuration["cuda_mats_to_shared"],
+                configuration["cuda_tiled_prefetch_of_input"],
+                configuration["cuda_tiled_prefetch_of_quad_weights"],)
+        return key
+
     @memoize_method
     def grid_size(self, start, end):
         from pymbolic import evaluate
@@ -276,6 +294,7 @@ class JITModule(base.JITModule):
 
         options = ["-use_fast_math"]
         options.append("-lineinfo")
+        options.append("-w")
         func = SourceModule(self.code_to_compile, options=options)
         self._fun = func.get_function(self._wrapper_name)
         self._fun.prepare(self.argtypes+"P"*len(self.args_to_make_global))
@@ -468,11 +487,10 @@ def sept(kernel, extruded=False):
         kernel = loopy.assume(kernel, "{0} mod {1} = 0".format("end", batch_size))
         kernel = loopy.assume(kernel, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format("end", batch_size, "start"))
 
-
     # {{{ making consts as globals
 
     args_to_make_global = []
-    pack_consts_to_globals = True
+    pack_consts_to_globals = False
 
     if pack_consts_to_globals:
         args_to_make_global = [tv.initializer.flatten()
@@ -523,7 +541,6 @@ def transform(kernel, callables_table, ncells_per_block,
     Matvec1 is the function evaluation part at the quad points.
     Matvec2 is the basis coefficients computation part.
     """
-
     # {{{ FIXME: Setting names which should be set by TSFC
 
     quad_iname = 'form_ip'
@@ -732,6 +749,9 @@ def transform(kernel, callables_table, ncells_per_block,
         # both the matvecs, that needs to be taken care of.
         const_matrices_names = set([tv.name for tv in old_temps.values() if tv.initializer is not None and len(tv.shape)>1])
 
+        vng = kernel.get_var_name_generator()
+        ing = kernel.get_instruction_id_generator()
+
         # {{{ Prefetching: QUAD PART
 
         quad_const_matrices = const_matrices_names & frozenset().union(*[insn.read_dependency_names() for insn in
@@ -742,8 +762,6 @@ def transform(kernel, callables_table, ncells_per_block,
 
         quad_prefetch_insns = []
 
-        vng = kernel.get_var_name_generator()
-        ing = kernel.get_instruction_id_generator()
         quad_temp_names = [vng('quad_cnst_mtrix_prftch') for _ in quad_const_matrices]
         prefetch_inames = [vng("iprftch") for _ in range(2)]
         for temp_name, var_name in zip(quad_temp_names, quad_const_matrices):
@@ -765,8 +783,9 @@ def transform(kernel, callables_table, ncells_per_block,
         # then split into nthreads_per_cell
 
         kernel = loopy.split_iname(kernel, prefetch_inames[1],
-                nthreads_per_cell, inner_tag="l.0")
-        kernel = loopy.tag_inames(kernel, {prefetch_inames[0]: "l.1"})
+                nthreads_per_cell, inner_tag="l.0", outer_tag="ilp")
+        kernel = loopy.split_iname(kernel, prefetch_inames[0],
+                ncells_per_block, inner_tag="l.1", outer_tag="ilp")
 
         # }}}
 
@@ -798,18 +817,14 @@ def transform(kernel, callables_table, ncells_per_block,
 
         # See FIXME for the quad part at this point
         kernel = loopy.split_iname(kernel, prefetch_inames[1],
-                nthreads_per_cell, inner_tag="l.0")
-        kernel = loopy.tag_inames(kernel, {prefetch_inames[0]: "l.1"})
+                nthreads_per_cell, inner_tag="l.0", outer_tag="ilp")
+        kernel = loopy.split_iname(kernel, prefetch_inames[0],
+                ncells_per_block, inner_tag="l.1", outer_tag="ilp")
+        # kernel = loopy.tag_inames(kernel, {prefetch_inames[0]: "l.1"})
 
         # }}}
 
-        # {{{ Adding dependency between the prefetch instructions
-
-        kernel = loopy.add_dependency(kernel,
-                " or ".join("id:{}".format(insn_id) for insn_id in
-                    basis_prefetch_insns), "tag:quadrature")
-
-        # }}}
+        # {{{ using the same variable for both the prefetch shared mems
 
         from loopy.transform.data import flatten_variable, absorb_temporary_into
         for var_name in quad_temp_names+basis_temp_names:
@@ -821,8 +836,18 @@ def transform(kernel, callables_table, ncells_per_block,
             else:
                 kernel = absorb_temporary_into(kernel, quad_temp_name, basis_temp_name)
 
+        # }}}
+
+        # {{{ Adding dependency between the prefetch instructions
+
+        kernel = loopy.add_dependency(kernel,
+                " or ".join("id:{}".format(insn_id) for insn_id in
+                    basis_prefetch_insns), "tag:quadrature")
+
         kernel = loopy.add_dependency(kernel, 'tag:quad_redn', 'id:quad_prftch_insn*')
         kernel = loopy.add_dependency(kernel, 'tag:basis_redn', 'id:basis_prftch_insn*')
+
+        # }}}
 
         # do not enforce any dependency between the basis reductions and the
         # quadrature reductions.
@@ -871,13 +896,15 @@ def transform(kernel, callables_table, ncells_per_block,
 
     # {{{ divide matvec1-tile's work across threads
 
-    kernel = loopy.split_iname(kernel, quad_iname_in_quad_redn+'_inner', nthreads_per_cell, inner_tag="l.0")
+    kernel = loopy.split_iname(kernel, quad_iname_in_quad_redn+'_inner',
+            nthreads_per_cell, inner_tag="l.0", outer_tag="ilp")
 
     # }}}
 
     # {{{ diving matvec2-tile's work across threads
 
-    kernel = loopy.split_iname(kernel, basis_iname_in_basis_redn+'_inner', nthreads_per_cell, inner_tag="l.0")
+    kernel = loopy.split_iname(kernel, basis_iname_in_basis_redn+'_inner',
+            nthreads_per_cell, inner_tag="l.0", outer_tag="ilp")
 
     # }}}
 
@@ -971,6 +998,10 @@ def generate_cuda_kernel(program, extruded=False):
             new_args.append(arg)
 
     kernel = kernel.copy(instructions=new_insns, args=new_args)
+    # CAUTION: These might not always be true
+    # Might need to be removed before going full production
+    kernel = loopy.assume(kernel, "start=0")
+    kernel = loopy.assume(kernel, "end>0")
 
     # choose the preferred algorithm here
     if program.name == configuration["cuda_jitmodule_name"]:
@@ -980,8 +1011,6 @@ def generate_cuda_kernel(program, extruded=False):
                 # transposing maps
                 kernel = transpose_maps(kernel)
         elif configuration["cuda_strategy"] == "general":
-            kernel = loopy.assume(kernel, "{0} mod {1} = 0".format("end", 32))
-            kernel = loopy.assume(kernel, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format("end", 32, "start"))
             kernel, args_to_make_global = transform(kernel,
                     program.callables_table,
                     configuration["cuda_cells_per_block"],
