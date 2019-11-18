@@ -527,6 +527,35 @@ def _make_tv_array_arg(tv):
     return arg
 
 
+def work_which_should_be_done_by_passing_metadata(kernel,
+        output_basis_coeff_temp, quad_iname):
+    from pymbolic.primitives import Variable
+
+    # {{{ scatter iname
+
+    scatter_insn, = [insn for insn in kernel.instructions if 'scatter' in
+            insn.tags]
+    scatter_map = scatter_insn.assignee.index_tuple[0]
+    scatter_iname, = set(scatter_map.index_tuple) - set([Variable('n')])
+
+    # }}}
+
+    # {{{ basis init iname
+
+    basis_gather_insn, = [insn for insn in kernel.instructions if 'gather' in
+            insn.tags and output_basis_coeff_temp in
+            insn.write_dependency_names()]
+    basis_gather_iname = basis_gather_insn.assignee.index_tuple[1].name
+
+    # }}}
+
+    basis_redn_insn = [insn for insn in kernel.instructions if 'basis' in
+            insn.tags][0]
+    basis_iname_in_basis_redn, = basis_redn_insn.within_inames - frozenset(['n', quad_iname])
+
+    return basis_gather_iname, scatter_iname, basis_iname_in_basis_redn
+
+
 def transform(kernel, callables_table, ncells_per_block,
         nthreads_per_cell,
         matvec1_row_tile_length, matvec1_col_tile_length,
@@ -548,9 +577,9 @@ def transform(kernel, callables_table, ncells_per_block,
     input_basis_coeff_temp = 't0'
     coords_temp = 't1'
     output_basis_coeff_temp = 't2'
-    basis_init_iname = 'i3'
-    scatter_iname = 'i4'
-    basis_iname_in_basis_redn = 'form_j'
+    basis_init_iname, scatter_iname, basis_iname_in_basis_redn = (
+            work_which_should_be_done_by_passing_metadata(kernel,
+                output_basis_coeff_temp, quad_iname))
     quad_iname_in_basis_redn = 'form_ip_basis'
     quad_iname_in_quad_redn = 'form_ip_quad'
     basis_iname_in_quad_redn = 'form_i'
