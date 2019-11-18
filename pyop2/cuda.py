@@ -541,6 +541,7 @@ def transform(kernel, callables_table, ncells_per_block,
     Matvec1 is the function evaluation part at the quad points.
     Matvec2 is the basis coefficients computation part.
     """
+
     # {{{ FIXME: Setting names which should be set by TSFC
 
     quad_iname = 'form_ip'
@@ -781,11 +782,17 @@ def transform(kernel, callables_table, ncells_per_block,
         #FIXME: In order to save on compilation time we are not sticking to
         # coalesced accesses Otherwise we should join the following inames and
         # then split into nthreads_per_cell
+        kernel = loopy.join_inames(kernel, prefetch_inames,
+                new_iname='quad_prftch_iname')
+        kernel = loopy.split_iname(kernel, 'quad_prftch_iname',
+                ncells_per_block*nthreads_per_cell, outer_tag="ilp")
+        kernel = loopy.split_iname(kernel, 'quad_prftch_iname_inner',
+                nthreads_per_cell, inner_tag='l.0', outer_tag='l.1')
 
-        kernel = loopy.split_iname(kernel, prefetch_inames[1],
-                nthreads_per_cell, inner_tag="l.0", outer_tag="ilp")
-        kernel = loopy.split_iname(kernel, prefetch_inames[0],
-                ncells_per_block, inner_tag="l.1", outer_tag="ilp")
+        # kernel = loopy.split_iname(kernel, prefetch_inames[1],
+        #         nthreads_per_cell, inner_tag="l.0", outer_tag="ilp")
+        # kernel = loopy.split_iname(kernel, prefetch_inames[0],
+        #         ncells_per_block, inner_tag="l.1", outer_tag="ilp")
 
         # }}}
 
@@ -816,11 +823,17 @@ def transform(kernel, callables_table, ncells_per_block,
                     within="tag:basis_redn")
 
         # See FIXME for the quad part at this point
-        kernel = loopy.split_iname(kernel, prefetch_inames[1],
-                nthreads_per_cell, inner_tag="l.0", outer_tag="ilp")
-        kernel = loopy.split_iname(kernel, prefetch_inames[0],
-                ncells_per_block, inner_tag="l.1", outer_tag="ilp")
-        # kernel = loopy.tag_inames(kernel, {prefetch_inames[0]: "l.1"})
+        kernel = loopy.join_inames(kernel, prefetch_inames,
+                new_iname='basis_prftch_iname')
+        kernel = loopy.split_iname(kernel, 'basis_prftch_iname',
+                ncells_per_block*nthreads_per_cell, outer_tag="ilp")
+        kernel = loopy.split_iname(kernel, 'basis_prftch_iname_inner',
+                nthreads_per_cell, inner_tag='l.0', outer_tag='l.1')
+
+        # kernel = loopy.split_iname(kernel, prefetch_inames[1],
+        #         nthreads_per_cell, inner_tag="l.0", outer_tag="ilp")
+        # kernel = loopy.split_iname(kernel, prefetch_inames[0],
+        #         ncells_per_block, inner_tag="l.1", outer_tag="ilp")
 
         # }}}
 
