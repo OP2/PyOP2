@@ -537,6 +537,7 @@ def work_which_should_be_done_by_passing_metadata(kernel,
             insn.tags]
     scatter_map = scatter_insn.assignee.index_tuple[0]
     scatter_iname, = set(scatter_map.index_tuple) - set([Variable('n')])
+    scatter_iname = scatter_iname.name
 
     # }}}
 
@@ -592,7 +593,7 @@ def transform(kernel, callables_table, ncells_per_block,
     nquad = int(loopy.symbolic.pw_aff_to_expr(
             kernel.get_iname_bounds('form_ip', constants_only=True).size))
     nbasis = int(loopy.symbolic.pw_aff_to_expr(
-            kernel.get_iname_bounds('form_j', constants_only=True).size))
+            kernel.get_iname_bounds(basis_iname_in_basis_redn, constants_only=True).size))
 
     # }}}
 
@@ -720,8 +721,8 @@ def transform(kernel, callables_table, ncells_per_block,
     from loopy.transform.instruction import remove_unnecessary_deps
     kernel = remove_unnecessary_deps(kernel)
 
-    from loopy.transform.make_scalar import make_scalar
-    kernel = make_scalar(kernel, output_basis_coeff_temp)
+    from loopy.transform.make_scalar import remove_axis
+    kernel = remove_axis(kernel, output_basis_coeff_temp, 0)
 
     kernel = loopy.add_dependency(kernel,
             'writes:{}'.format(output_basis_coeff_temp),
