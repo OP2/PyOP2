@@ -445,7 +445,6 @@ def sept(kernel, extruded=False):
     SEPT := Single Element Per Thread transformation.
     """
     # we don't use shared memory for sept
-    cuda_driver.Context.set_cache_config(cuda_driver.func_cache.PREFER_L1)
     batch_size = configuration["cuda_cells_per_block"]
 
     if extruded:
@@ -749,8 +748,7 @@ def transform(kernel, callables_table, ncells_per_block,
 
     if load_input_to_shared:
         from loopy.transform.precompute import precompute_for_single_kernel
-        #FIXME: Assumes uses the name 't2' for the input basis coeffs
-        kernel = loopy.privatize_temporaries_with_inames(kernel, 'icell',
+        kernel = save_temporaries_in_loop(kernel, 'icell',
                 [input_basis_coeff_temp])
         kernel = loopy.assignment_to_subst(kernel, input_basis_coeff_temp)
         input_prcmpt_iname = 'input_basis_prcmpt'
@@ -764,7 +762,7 @@ def transform(kernel, callables_table, ncells_per_block,
                 subst_use=input_basis_coeff_subst,
                 sweep_inames=sweep_inames,
                 precompute_outer_inames=outer_inames,
-                precompute_inames=(input_prcmpt_iname, 'icell'),
+                precompute_inames=('icell', input_prcmpt_iname),
                 temporary_address_space=loopy.AddressSpace.LOCAL,
                 default_tag=None,
                 )
