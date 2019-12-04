@@ -64,7 +64,6 @@ import loopy
 import numpy
 import re
 import pycuda
-import pycuda.autoinit
 import pycuda.driver as cuda_driver
 from pytools import memoize_method
 from pyop2.logger import ExecTimeNoter
@@ -482,9 +481,8 @@ def sept(kernel, extruded=False):
         kernel = loopy.split_iname(kernel, "layer", batch_size, outer_tag="g.1", inner_tag="l.0")
 
     else:
+        kernel = loopy.assume(kernel, "start < end")
         kernel = loopy.split_iname(kernel, "n", batch_size, outer_tag="g.0", inner_tag="l.0")
-        kernel = loopy.assume(kernel, "{0} mod {1} = 0".format("end", batch_size))
-        kernel = loopy.assume(kernel, "exists zz: zz > 0 and {0} = {1}*zz + {2}".format("end", batch_size, "start"))
 
     # {{{ making consts as globals
 
