@@ -33,13 +33,16 @@
 
 """OP2 CUDA backend."""
 
+import os
 import ctypes
 from copy import deepcopy as dcopy
 
 from contextlib import contextmanager
+from hashlib import md5
 
 from pyop2.datatypes import IntType, as_ctypes
 from pyop2 import base
+from pyop2 import compilation
 from pyop2 import petsc_base
 from pyop2.base import par_loop                          # noqa: F401
 from pyop2.base import READ, WRITE, RW, INC, MIN, MAX    # noqa: F401
@@ -134,31 +137,10 @@ class Dat(petsc_Dat):
 class Global(petsc_Global):
 
     @cached_property
-    def _vec(self):
-        assert self.dtype == PETSc.ScalarType, \
-            "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
-        # Can't duplicate layout_vec of dataset, because we then
-        # carry around extra unnecessary data.
-        # But use getSizes to save an Allreduce in computing the
-        # global size.
-        data = self._data
-        size = self.dataset.layout_vec.getSizes()
-
-        cuda_vec = PETSc.Vec().create(self.comm)
-        cuda_vec.setSizes(size=size, bsize=self.cdim)
-        cuda_vec.setType('cuda')
-
-        if self.comm.rank == 0:
-            cuda_vec.setArray(data)
-        else:
-            cuda_vec.setArray(numpy.empty(0, dtype=self.dtype))
-
-        return cuda_vec
-
-    @cached_property
     def device_handle(self):
-        with self.vec as v:
-            return v.getCUDAHandle()
+        dev_data = cuda_driver.mem_alloc(self._data.nbytes)
+        cuda_driver.memcpy_htod(dev_data, self._data)
+        return dev_data
 
     @cached_property
     def _kernel_args_(self):
@@ -201,8 +183,6 @@ class JITModule(base.JITModule):
         self._cppargs = dcopy(type(self)._cppargs)
         self._libraries = dcopy(type(self)._libraries)
         self._system_headers = dcopy(type(self)._system_headers)
-        self.processed_program = None
-        self.args_to_make_global = []
         self.extruded = self._iterset._extruded
 
         if not kwargs.get('delay', False):
@@ -229,10 +209,15 @@ class JITModule(base.JITModule):
 
     @memoize_method
     def grid_size(self, start, end):
-        from pymbolic import evaluate
+        with open(self.config_file_path, 'r') as f:
+            glens_llens = f.read()
+
+        _, glens, llens = glens_llens.split('\n')
+        from pymbolic import parse, evaluate
+        glens = parse(glens)
+        llens = parse(llens)
 
         parameters = {'start': start, 'end': end}
-        glens, llens = self.processed_program.get_grid_size_upper_bounds_as_exprs()
 
         grid_y = 1
         if self.extruded:
@@ -245,10 +230,15 @@ class JITModule(base.JITModule):
 
     @cached_property
     def get_args_marked_for_globals(self):
+        args_to_make_global = []
+        for i in range(len(self._fun.arg_format)-len(self.argtypes)):
+            args_to_make_global.append(
+                    numpy.load(self.ith_added_global_arg_i(i)))
+
         const_args_as_globals = tuple(cuda_driver.mem_alloc(arg.nbytes) for arg in
-            self.args_to_make_global)
+            args_to_make_global)
         for arg_gpu, arg in zip(const_args_as_globals,
-                self.args_to_make_global):
+                args_to_make_global):
             cuda_driver.memcpy_htod(arg_gpu, arg)
 
         evt = cuda_driver.Event()
@@ -256,6 +246,16 @@ class JITModule(base.JITModule):
         evt.synchronize()
 
         return const_args_as_globals
+
+    @cached_property
+    def config_file_path(self):
+        cachedir = configuration['cache_dir']
+        return os.path.join(cachedir, '{}_num_args_to_load_glens_llens'.format(self.get_encoded_cache_key))
+
+    @memoize_method
+    def ith_added_global_arg_i(self, i):
+        cachedir = configuration['cache_dir']
+        return os.path.join(cachedir, '{}_dat_{}.npy'.format(self.get_encoded_cache_key, i))
 
     @collective
     def __call__(self, *args):
@@ -268,8 +268,17 @@ class JITModule(base.JITModule):
         return 'wrap_%s' % self._kernel.name
 
     @cached_property
-    def code_to_compile(self):
+    def num_args_to_make_global(self):
+        with open(self.config_file_path, 'r') as f:
+            return int(f.readline().strip())
 
+    @cached_property
+    def get_encoded_cache_key(self):
+        a = md5(str(self.cache_key).encode()).hexdigest()
+        return a
+
+    @cached_property
+    def code_to_compile(self):
         from pyop2.codegen.builder import WrapperBuilder
         from pyop2.codegen.rep2loopy import generate
 
@@ -279,24 +288,38 @@ class JITModule(base.JITModule):
         builder.set_kernel(self._kernel)
 
         wrapper = generate(builder)
-        code, self.processed_program, self.args_to_make_global = generate_cuda_kernel(wrapper, self.extruded)
+        code, processed_program, args_to_make_global = generate_cuda_kernel(wrapper, self.extruded)
+        for i, arg_to_make_global in enumerate(args_to_make_global):
+            numpy.save(self.ith_added_global_arg_i(i),
+                    arg_to_make_global)
+
+        with open(self.config_file_path, 'w') as f:
+            glens, llens = processed_program.get_grid_size_upper_bounds_as_exprs()
+            f.write(str(len(args_to_make_global)))
+            f.write('\n')
+            f.write('('+','.join(str(glen) for glen in glens)+',)')
+            f.write('\n')
+            f.write('('+','.join(str(llen) for llen in llens)+',)')
 
         return code
 
     @collective
     def compile(self):
+
         # If we weren't in the cache we /must/ have arguments
         if not hasattr(self, '_args'):
             raise RuntimeError("JITModule has no args associated with it, should never happen")
 
-        from pycuda.compiler import SourceModule
-
-        options = ["-use_fast_math"]
-        options.append("-lineinfo")
-        options.append("-w")
-        func = SourceModule(self.code_to_compile, options=options)
-        self._fun = func.get_function(self._wrapper_name)
-        self._fun.prepare(self.argtypes+"P"*len(self.args_to_make_global))
+        compiler = "nvcc"
+        extension = "cu"
+        self._fun = compilation.load(self,
+                                     extension,
+                                     self._wrapper_name,
+                                     cppargs=[],
+                                     ldargs=[],
+                                     compiler=compiler,
+                                     comm=self.comm)
+        self._fun.prepare(self.argtypes+"P"*self.num_args_to_make_global)
 
         # Blow away everything we don't need any more
         del self._args
@@ -356,30 +379,22 @@ class ParLoop(petsc_base.ParLoop):
                     nbytes += map_.values.nbytes
 
         self.nbytes = nbytes
-        wrapper_name = "wrap_" + self._kernel.name
-        if wrapper_name not in ParLoop.printed:
-            print("{0}_BYTES= {1}".format("wrap_" + self._kernel.name, self.nbytes))
-            ParLoop.printed.add(wrapper_name)
 
         return arglist
 
     @collective
-    @timed_function("ParLoopRednEnd")
     def reduction_end(self):
         """End reductions"""
-        for arg in self.global_reduction_args:
-            arg.reduction_end(self.comm)
-        # Finalise global increments
-        for tmp, glob in self._reduced_globals.items():
-            # These can safely access the _data member directly
-            # because lazy evaluation has ensured that any pending
-            # updates to glob happened before this par_loop started
-            # and the reduction_end on the temporary global pulled
-            # data back from the device if necessary.
-            # In fact we can't access the properties directly because
-            # that forces an infinite loop.
-            with tmp.vec as v:
-                glob._data += v.array_r
+        if not self._has_reduction:
+            return
+        with self._reduction_event_end:
+            for arg in self.global_reduction_args:
+                arg.reduction_end(self.comm)
+            # Finalise global increments
+            for tmp, glob in self._reduced_globals.items():
+                # copy results to the host
+                cuda_driver.memcpy_dtoh(tmp._data, tmp.device_handle)
+                glob._data += tmp._data
 
     @cached_property
     def _jitmodule(self):
@@ -1014,17 +1029,25 @@ def generate_cuda_kernel(program, extruded=False):
 
     def insn_needs_atomic(insn):
         # updates to global variables are atomic
-        assignee_name = insn.assignee.aggregate.name
-        return assignee_name in insn.read_dependency_names() and assignee_name not in kernel.temporary_variables
+        import pymbolic
+        if isinstance(insn, loopy.MultiAssignmentBase):
+            if isinstance(insn.assignee, pymbolic.primitives.Subscript):
+                assignee_name = insn.assignee.aggregate.name
+            else:
+                assert isinstance(insn.assignee, pymbolic.primitives.Variable)
+                assignee_name = insn.assignee.name
+
+            if assignee_name in kernel.arg_dict:
+                return assignee_name in insn.read_dependency_names()
+        return False
 
     new_insns = []
     args_marked_for_atomic = set()
     for insn in kernel.instructions:
-        if ('scatter' in insn.tags):
-            if insn_needs_atomic(insn):
-                atomicity = (loopy.AtomicUpdate(insn.assignee.aggregate.name), )
-                insn = insn.copy(atomicity=atomicity)
-                args_marked_for_atomic |= set([insn.assignee.aggregate.name])
+        if insn_needs_atomic(insn):
+            atomicity = (loopy.AtomicUpdate(insn.assignee.aggregate.name), )
+            insn = insn.copy(atomicity=atomicity)
+            args_marked_for_atomic |= set([insn.assignee.aggregate.name])
 
         new_insns.append(insn)
 
