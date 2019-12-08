@@ -480,11 +480,11 @@ class CUDACompiler(Compiler):
                 # No need to do this on all ranks
                 os.makedirs(cachedir, exist_ok=True)
                 with progress(INFO, 'Compiling wrapper'):
+                    # make sure that compiles successfully before writing to file
+                    source_module = SourceModule(jitmodule.code_to_compile,
+                            nvcc=self._cc, options=self._cppargs,
+                            cache_dir=cachedir)
                     with open(cname, "w") as f:
-                        # make sure that it compiles before writing to file
-                        source_module = SourceModule(jitmodule.code_to_compile,
-                                nvcc=self._cc, options=self._cppargs,
-                                cache_dir=cachedir)
                         f.write(jitmodule.code_to_compile)
             self.comm.barrier()
 
