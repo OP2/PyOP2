@@ -70,7 +70,7 @@ def _make_object(name, *args, **kwargs):
             from pyop2 import sequential as backend
             del kwargs["backend"]
     else:
-        from pyop2 import cuda as backend
+        from pyop2.gpu import cuda as backend
     return getattr(backend, name)(*args, **kwargs)
 
 
@@ -642,9 +642,6 @@ class ExtrudedSet(Set):
             self.constant_layers = True
 
         self._layers = layers
-        if masks:
-            section = self.masks.section
-            self.offset = np.asanyarray([section.getOffset(p) for p in range(*section.getChart())], dtype=IntType)
         self._extruded = True
 
     @cached_property
