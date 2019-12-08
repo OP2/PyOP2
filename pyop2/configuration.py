@@ -77,24 +77,25 @@ class Configuration(dict):
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gcc"),
         "simd_width": ("PYOP2_SIMD_WIDTH", int, 4),
 
-        # {{{ CUDA params
+        # {{{ GPU params
 
-        "cuda_jitmodule_name": ("PYOP2_CUDA_JITMODULE_NAME", str, "wrap_form0_cell_integral_otherwise"),
-        "cuda_timer": ("PYOP2_CUDA_TIMER", bool, False),
-        "cuda_cells_per_block": ("PYOP2_CUDA_CELLS_PER_BLOCK", int, 32),
-        "cuda_num_layer": ("PYOP2_CUDA_NUM_LAYER", int, 32),
-        "cuda_strategy": ("PYOP2_CUDA_STRATEGY", str, "sept"),
-        "cuda_threads_per_cell": ("PYOP2_CUDA_THREADS_PER_CELL", int, 1),
-        "cuda_matvec1_rowtile_length": ("PYOP2_CUDA_MV1_ROWTILE", int, 1),
-        "cuda_matvec1_coltile_length": ("PYOP2_CUDA_MV1_COLTILE", int, 1),
-        "cuda_matvec2_rowtile_length": ("PYOP2_CUDA_MV2_ROWTILE", int, 1),
-        "cuda_matvec2_coltile_length": ("PYOP2_CUDA_MV2_COLTILE", int, 1),
-        "cuda_coords_to_shared": ("PYOP2_CUDA_COORDS_TO_SHARED", bool, False),
-        "cuda_input_to_shared": ("PYOP2_CUDA_INPUT_TO_SHARED", bool, False),
-        "cuda_tiled_prefetch_of_input": ("PYOP2_CUDA_TILED_PREFETCH_OF_INPUTS", bool, False),
-        "cuda_tiled_prefetch_of_quad_weights": ("PYOP2_CUDA_TILED_PREFETCH_OF_QUAD_WEIGHTS", bool, False),
-        "cuda_mats_to_shared": ("PYOP2_INPUT_TO_SHARED", bool, False),
-        "cuda_quad_weights_to_shared": ("PYOP2_QUAD_WEIGHTS_TO_SHARED", bool, False),
+        "gpu_jitmodule_name": ("PYOP2_CUDA_JITMODULE_NAME", str, "wrap_form0_cell_integral_otherwise"),
+        "gpu_timer": ("PYOP2_GPU_TIMER", bool, False),
+        "gpu_cells_per_block": ("PYOP2_GPU_CELLS_PER_BLOCK", int, 32),
+        "gpu_layers_per_block": ("PYOP2_GPU_LAYERS_PER_BLOCK", int, 32),
+        "gpu_strategy": ("PYOP2_GPU_STRATEGY", str, "scpt"),
+        "gpu_threads_per_cell": ("PYOP2_GPU_THREADS_PER_CELL", int, 1),
+        "gpu_matvec1_rowtile_length": ("PYOP2_GPU_MV1_ROWTILE", int, 1),
+        "gpu_matvec1_coltile_length": ("PYOP2_GPU_MV1_COLTILE", int, 1),
+        "gpu_matvec2_rowtile_length": ("PYOP2_GPU_MV2_ROWTILE", int, 1),
+        "gpu_matvec2_coltile_length": ("PYOP2_GPU_MV2_COLTILE", int, 1),
+        "gpu_coords_to_shared": ("PYOP2_GPU_COORDS_TO_SHARED", bool, False),
+        "gpu_input_to_shared": ("PYOP2_GPU_INPUT_TO_SHARED", bool, False),
+        "gpu_mats_to_shared": ("PYOP2_GPU_MATS_TO_SHARED", bool, False),
+        "gpu_quad_weights_to_shared": ("PYOP2_GPU_QUAD_WEIGHTS_TO_SHARED", bool, False),
+        "gpu_tiled_prefetch_of_input": ("PYOP2_GPU_TILED_PREFETCH_OF_INPUTS", bool, False),
+        "gpu_tiled_prefetch_of_quad_weights": ("PYOP2_GPU_TILED_PREFETCH_OF_QUAD_WEIGHTS", bool, False),
+        "gpu_planner_kernel_evals": ("PYOP2_GPU_PLANNER_KNL_EVLS", int, 10),
 
         # }}}
 
