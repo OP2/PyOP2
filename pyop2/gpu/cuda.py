@@ -544,22 +544,19 @@ def generate_gpu_kernel(program):
         else:
             raise ValueError("gpu_strategy can be 'scpt',"
                     " 'user_specified_tile' or 'auto_tile'.")
-    elif program.name in ["wrap_zero", "wrap_expression_kernel"]:
+    elif program.name in ["wrap_zero", "wrap_expression_kernel",
+            "wrap_pyop2_kernel_uniform_extrusion",
+            "wrap_form_cell_integral_otherwise"]:
         from pyop2.gpu.snpt import snpt_transform
         kernel, args_to_make_global = snpt_transform(kernel,
                     configuration["gpu_cells_per_block"])
-    elif program.name == "wrap_pyop2_kernel_uniform_extrusion":
-        from pyop2.gpu.extrusion import extrude_transform
-        kernel, args_to_make_global = extrude_transform(kernel,
-                    configuration["gpu_cells_per_block"],
-                    configuration["gpu_layers_per_block"])
     else:
-        raise NotImplementedError("Tranformation for '%s'." % program.name)
+        raise NotImplementedError("Transformation for '%s'." % program.name)
 
     if False:
         # FIXME
-        # optimization for lower order but needs some help from firedrake.mesh
-        # in setting the data layout
+        # optimization for lower order but needs some help from
+        # ~firedrake.mesh~ in setting the data layout
         kernel = transpose_maps(kernel)
 
     program = program.with_root_kernel(kernel)
