@@ -178,10 +178,10 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
 
     # }}}
 
-    from lp.loop import fuse_loop_domains
+    from loopy.loop import fuse_loop_domains
     kernel = fuse_loop_domains(kernel)
 
-    from lp.transform.data import remove_unused_axes_in_temporaries
+    from loopy.transform.data import remove_unused_axes_in_temporaries
     kernel = remove_unused_axes_in_temporaries(kernel)
 
     # {{{ remove noops
@@ -196,9 +196,11 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
     kernel = lp.split_iname(kernel, "n", ncells_per_block,
             outer_iname="iblock", inner_iname="icell")
 
-    from lp.transform.batch import save_temporaries_in_loop
-    kernel = save_temporaries_in_loop(kernel, 'icell',
-            evaluation_variables)
+    kernel = lp.privatize_temporaries_with_inames(kernel, 'icell',
+            only_var_names=evaluation_variables)
+    # from loopy.transform.batch import save_temporaries_in_loop
+    # kernel = save_temporaries_in_loop(kernel, 'icell',
+    #         evaluation_variables)
 
     #FIXME: Do not use hard-coded inames, this change should also be in TSFC.
     # We need this statement because we have to cut down the size of the number
@@ -208,10 +210,10 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
     kernel = lp.rename_iname(kernel, basis_init_iname,
             basis_iname_in_basis_redn, True)
 
-    from lp.transform.instruction import remove_unnecessary_deps
+    from loopy.transform.instruction import remove_unnecessary_deps
     kernel = remove_unnecessary_deps(kernel)
 
-    from lp.transform.make_scalar import remove_axis
+    from loopy.transform.make_scalar import remove_axis
     kernel = remove_axis(kernel, output_basis_coeff_temp, 0)
 
     kernel = lp.add_dependency(kernel,
@@ -238,22 +240,24 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
     # {{{ Prefetch wizardry
 
     if load_input_to_shared:
-        from lp.transform.precompute import precompute_for_single_kernel
-        kernel = save_temporaries_in_loop(kernel, 'icell',
-                [input_basis_coeff_temp])
+        kernel = lp.privatize_temporaries_with_inames(kernel, 'icell',
+                only_var_names=[input_basis_coeff_temp])
+        from loopy.transform.precompute import precompute_for_single_kernel
+        # kernel = save_temporaries_in_loop(kernel, 'icell',
+        #         [input_basis_coeff_temp])
         kernel = lp.assignment_to_subst(kernel, input_basis_coeff_temp)
         input_prcmpt_iname = 'input_basis_prcmpt'
         if tiled_prefetch_of_inputs:
-            sweep_inames = ('icell', basis_iname_in_quad_redn+'_inner')
+            sweep_inames = (basis_iname_in_quad_redn+'_inner', 'icell')
             outer_inames = 'iblock,icoltile_matvec1,irowtile_matvec1'
         else:
-            sweep_inames = ('icell', 'icoltile_matvec1', basis_iname_in_quad_redn+'_inner')
+            sweep_inames = ('icoltile_matvec1', basis_iname_in_quad_redn+'_inner', 'icell')
             outer_inames = 'iblock'
         kernel = precompute_for_single_kernel(kernel, callables_table,
                 subst_use=input_basis_coeff_subst,
                 sweep_inames=sweep_inames,
                 precompute_outer_inames=outer_inames,
-                precompute_inames=('icell', input_prcmpt_iname),
+                precompute_inames=(input_prcmpt_iname, 'icell'),
                 temporary_address_space=lp.AddressSpace.LOCAL,
                 default_tag=None,
                 )
@@ -261,7 +265,7 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
                 nthreads_per_cell, inner_tag="l.0")
 
     if load_mats_to_shared:
-        from lp.transform.data import add_prefetch_for_single_kernel
+        from loopy.transform.data import add_prefetch_for_single_kernel
         #FIXME: Assuming that in all the constants the one with single axis is
         # the one corresponding to quadrature weights. fix it by passing some
         # metadata from TSFC.
@@ -358,15 +362,23 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
 
         # {{{ using the same variable for both the prefetch shared mems
 
-        from lp.transform.data import flatten_variable, absorb_temporary_into
-        for var_name in quad_temp_names+basis_temp_names:
-            kernel = flatten_variable(kernel, var_name)
-        for quad_temp_name, basis_temp_name in zip(quad_temp_names,
-                basis_temp_names):
-            if (matvec2_row_tile_length*matvec2_col_tile_length >= matvec1_row_tile_length*matvec1_col_tile_length):
-                kernel = absorb_temporary_into(kernel, basis_temp_name, quad_temp_name)
-            else:
-                kernel = absorb_temporary_into(kernel, quad_temp_name, basis_temp_name)
+        if True:
+            # TODO: Temporary transformation path until
+            # https://gitlab.tiker.net/inducer/loopy/issues/205 is resolved.
+            from loopy.transform.data import flatten_variable, absorb_temporary_into
+            for var_name in quad_temp_names+basis_temp_names:
+                kernel = flatten_variable(kernel, var_name)
+            for quad_temp_name, basis_temp_name in zip(quad_temp_names,
+                    basis_temp_names):
+                if (matvec2_row_tile_length*matvec2_col_tile_length >= matvec1_row_tile_length*matvec1_col_tile_length):
+                    kernel = absorb_temporary_into(kernel, basis_temp_name, quad_temp_name)
+                else:
+                    kernel = absorb_temporary_into(kernel, quad_temp_name, basis_temp_name)
+        else:
+            for quad_temp_name, basis_temp_name in zip(quad_temp_names,
+                    basis_temp_names):
+                kernel = lp.alias_temporaries(kernel, (quad_temp_name,
+                    basis_temp_name), synchronize_for_exclusive_use=False)
 
         # }}}
 
@@ -393,7 +405,7 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
     # {{{ Prefetch: Quad Weights
 
     if load_quad_weights_to_shared:
-        from lp.transform.data import add_prefetch_for_single_kernel
+        from loopy.transform.data import add_prefetch_for_single_kernel
         quad_weights, = [tv.name for tv in old_temps.values() if tv.initializer is not None and len(tv.shape) == 1]
         vng = kernel.get_var_name_generator()
         ing = kernel.get_instruction_id_generator()
@@ -485,4 +497,3 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
     kernel = kernel.copy(loop_priority=frozenset())
 
     return kernel, args_to_make_global
-
