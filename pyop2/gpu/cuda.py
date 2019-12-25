@@ -264,8 +264,15 @@ class JITModule(base.JITModule):
 
     @collective
     def __call__(self, *args):
-        grid, block = self.grid_size(args[0], args[1])
-        extra_global_args = self.get_args_marked_for_globals
+        if self._initialized:
+            grid, block = self.grid_size(args[0], args[1])
+            extra_global_args = self.get_args_marked_for_globals
+        else:
+            raise NotImplementedError()
+            self.compile(args)
+            self._initialized = True
+            return self.__call__(*args)
+
         return self._fun.prepared_call(grid, block, *(args+extra_global_args))
 
     @cached_property
@@ -310,6 +317,7 @@ class JITModule(base.JITModule):
 
     @collective
     def compile(self):
+        import pudb; pu.db
 
         # If we weren't in the cache we /must/ have arguments
         if not hasattr(self, '_args'):
@@ -405,12 +413,15 @@ class ParLoop(petsc_base.ParLoop):
     def _jitmodule(self):
         return JITModule(self.kernel, self.iterset, *self.args,
                          iterate=self.iteration_region,
-                         pass_layer_arg=self._pass_layer_arg)
+                         pass_layer_arg=self._pass_layer_arg,
+                         delay=True)
 
     @collective
     def _compute(self, part, fun, *arglist):
         if part.size == 0:
             return
+
+        # how about over here we decide what should the strategy be..
 
         if configuration["gpu_timer"]:
             start = cuda_driver.Event()
