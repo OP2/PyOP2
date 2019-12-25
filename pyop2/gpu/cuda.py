@@ -472,7 +472,6 @@ def transpose_maps(kernel):
 
 def generate_gpu_kernel(program):
     # Kernel transformations
-    args_to_make_global = []
     program = program.copy(target=loopy.CudaTarget())
     kernel = program.root_kernel
 
@@ -509,7 +508,7 @@ def generate_gpu_kernel(program):
             new_args.append(arg)
 
     kernel = kernel.copy(instructions=new_insns, args=new_args)
-    # CAUTION: These might not always be true
+    #FIXME: These might not always be true
     # Might need to be removed before going full production
     kernel = loopy.assume(kernel, "start=0")
     kernel = loopy.assume(kernel, "end>0")
