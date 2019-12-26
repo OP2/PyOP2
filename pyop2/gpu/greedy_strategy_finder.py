@@ -10,22 +10,22 @@ WARP_SIZE = 32
 
 
 class GreedyKernelGenerator:
-    def __init__(self, fem_kernel, num_candidate_knls):
-        self.fem_kernel = fem_kernel
+    def __init__(self, fem_program, num_candidate_knls):
+        self.fem_program = fem_program
         self.num_candidate_knls = num_candidate_knls
 
     @cached_property
     def nbasis(self):
         #FIXME: Not sure if this will hold all the times
         return int(lp.symbolic.pw_aff_to_expr(
-            self.fem_kernel.get_iname_bounds('form_i',
+            self.fem_program.root_kernel.get_iname_bounds('form_i',
                 constants_only=True).size))
 
     @cached_property
     def nquad(self):
         #FIXME: Not sure if this will hold all the times
         return int(lp.symbolic.pw_aff_to_expr(
-                self.fem_kernel.get_iname_bounds('form_ip',
+                self.fem_program.root_kernel.get_iname_bounds('form_ip',
                     constants_only=True).size))
 
     @cached_property
@@ -34,10 +34,10 @@ class GreedyKernelGenerator:
         const_matrices_in_quad = set()
         const_matrices_in_basis = set()
         const_matrices = frozenset([tv.name for tv in
-            self.fem_kernel.temporary_variables.values() if tv.initializer is
-            not None and len(tv.initializer.shape) == 2])
+            self.fem_program.root_kernel.temporary_variables.values() if
+            tv.initializer is not None and len(tv.initializer.shape) == 2])
 
-        for insn in self.fem_kernel.instructions:
+        for insn in self.fem_program.root_kernel.instructions:
             if 'quadrature' in insn.tags:
                 const_matrices_in_quad.update(insn.read_dependency_names() &
                         const_matrices)
@@ -45,26 +45,15 @@ class GreedyKernelGenerator:
                 const_matrices_in_basis.update(insn.read_dependency_names() &
                         const_matrices)
 
-        # check once.
-        # remove these comments as well
-        print(const_matrices_in_quad)
-        print(const_matrices_in_basis)
-        1/0
-
         return max(len(const_matrices_in_quad), len(const_matrices_in_basis))
 
     @cached_property
     def num_func_eval_vars(self):
         #FIXME: Terrible naming
         evaluation_variables = (set().union(*[insn.write_dependency_names() for
-            insn in self.fem_kernel.instructions if 'quad_wrap_up' in insn.tags]) &
+            insn in self.fem_program.root_kernel.instructions if 'quadrature' in insn.tags]) &
             set().union(*[insn.read_dependency_names() for insn in
-                self.fem_kernel.instructions if 'basis' in insn.tags]))
-
-        # check once.
-        # remove these comments as well
-        print(evaluation_variables)
-        1/0
+                self.fem_program.root_kernel.instructions if 'basis' in insn.tags]))
 
         return len(evaluation_variables)
 
@@ -127,7 +116,7 @@ class GreedyKernelGenerator:
     def estimated_exec_time(self, cells_per_block, threads_per_cell,
             t1_r, t1_c, t2_r, t2_c):
         nb, nq = self.nbasis, self.nquad
-        n_w = self.actual_warps_per_sm(nb, nq, cells_per_block,
+        n_w = self.actual_warps_per_sm(cells_per_block,
                 threads_per_cell, t1_r, t1_c, t2_r, t2_c)
         if n_w == 0:
             return float("inf")
@@ -188,15 +177,32 @@ class GreedyKernelGenerator:
 
         return params[:self.num_candidate_knls]
 
-    def __call__(self, args):
+    @memoize_method
+    def convert_numpy_arrays_to_cuda_mems(self, ary):
+        ary = np.array(ary)
+        ary_gpu = cuda.mem_alloc(ary.nbytes)
+        cuda.memcpy_htod(src=ary, dest=ary_gpu)
+        return ary_gpu
+
+    def __call__(self, args, argshapes):
         best_performing_time = float("inf")
-        best_performing_kernel = None
+        best_performing_param = None
         nrounds = 15
         nwarmup = 5
 
         # TODO: Need to make copies of the data given by the user.
-        copied_args = []
-        copied_args.extend(args[:2])
+        # for getting the copies we somehow need the sizes of the arrays. :o
+        # not sure how do we get the data
+        copied_args = args[:2]
+        for i, arg in enumerate(self.fem_program.args[2:]):
+            if arg.name in self.fem_program.root_kernel.get_written_variables():
+                arg_gpu = cuda.mem_alloc(
+                        int(np.prod(argshapes[i])*arg.dtype.itemsize))
+                cuda.memcpy_dtod(src=args[i+2], dest=arg_gpu,
+                        size=int(np.prod(argshapes[i])*arg.dtype.itemsize))
+                copied_args += (arg_gpu,)
+            else:
+                copied_args += (args[i+2],)
 
         from pyop2.gpu.tile import tiled_transform
 
@@ -218,7 +224,8 @@ class GreedyKernelGenerator:
                     for i in range(3))
             executable_knl = SourceModule(code).get_function(kernel.name)
             executable_knl.prepare("i"*2+"P"*len(args[2:])+"P"*len(extra_args))
-
+            extra_args = tuple(self.convert_numpy_arrays_to_cuda_mems(tuple(arg)) for arg
+                    in extra_args)
             runtimes = []
 
             for i in range(nrounds):
@@ -233,8 +240,15 @@ class GreedyKernelGenerator:
 
             exec_time = np.mean(runtimes[nwarmup:])
 
+            print("Params: {}, time={}".format(
+                params, exec_time))
+
             if exec_time < best_performing_time:
                 best_performing_time = exec_time
-                best_performing_kernel = kernel
+                best_performing_param = params
 
-        return best_performing_kernel
+        nc, nt, t1_r, t1_c, t2_r, t2_c = best_performing_param
+        return tiled_transform(
+                self.fem_program.root_kernel, self.fem_program.callables_table,
+                nc, nt, t1_r, t1_c, t2_r, t2_c, False, False, True, True,
+                False, False)

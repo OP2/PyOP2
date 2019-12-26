@@ -2,10 +2,7 @@
 #
 # PyOP2 is Copyright (c) 2012, Imperial College London and
 # others. Please see the AUTHORS file in the main source directory for
-# a full list of copyright holders.  All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
+# a full list of copyright holders.  All rights reserved.  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions
 # are met:
 #
 #     * Redistributions of source code must retain the above copyright
@@ -65,9 +62,7 @@ from pyop2.configuration import configuration
 
 import loopy
 import numpy
-import re
-import pycuda
-import pycuda.driver as cuda_driver
+import pycuda.driver as cuda
 from pytools import memoize_method
 from pyop2.logger import ExecTimeNoter
 
@@ -76,8 +71,8 @@ class Map(Map):
 
     @cached_property
     def device_handle(self):
-        m_gpu = cuda_driver.mem_alloc(int(self.values.nbytes))
-        cuda_driver.memcpy_htod(m_gpu, self.values)
+        m_gpu = cuda.mem_alloc(int(self.values.nbytes))
+        cuda.memcpy_htod(m_gpu, self.values)
         return m_gpu
 
     @cached_property
@@ -130,16 +125,13 @@ class Dat(petsc_Dat):
             v.restoreCUDAHandle(self.device_handle)
             return v.array
 
-        # cuda_driver.memcpy_dtoh(self.data, self.device_handle)
-        # return self.data
-
 
 class Global(petsc_Global):
 
     @cached_property
     def device_handle(self):
-        dev_data = cuda_driver.mem_alloc(self._data.nbytes)
-        cuda_driver.memcpy_htod(dev_data, self._data)
+        dev_data = cuda.mem_alloc(self._data.nbytes)
+        cuda.memcpy_htod(dev_data, self._data)
         return dev_data
 
     @cached_property
@@ -209,6 +201,13 @@ class JITModule(base.JITModule):
         elif configuration["gpu_strategy"] == "auto_tile":
             key += (
                     configuration["gpu_planner_kernel_evals"],)
+            assert isinstance(args[1], Set)
+            problem_size = args[1].size
+            # FIXME: is this a good heuristic?
+            # perform experiments to verify it.
+            # Also this number should not exceed certain number i.e. when the
+            # device would be saturated.
+            key += (min(int(numpy.log2(problem_size)), 18),)
         else:
             raise NotImplementedError('For strategy: {}'.format(
                 configuration["gpu_strategy"]))
@@ -240,13 +239,13 @@ class JITModule(base.JITModule):
             args_to_make_global.append(
                     numpy.load(self.ith_added_global_arg_i(i)))
 
-        const_args_as_globals = tuple(cuda_driver.mem_alloc(arg.nbytes) for arg in
+        const_args_as_globals = tuple(cuda.mem_alloc(arg.nbytes) for arg in
             args_to_make_global)
         for arg_gpu, arg in zip(const_args_as_globals,
                 args_to_make_global):
-            cuda_driver.memcpy_htod(arg_gpu, arg)
+            cuda.memcpy_htod(arg_gpu, arg)
 
-        evt = cuda_driver.Event()
+        evt = cuda.Event()
         evt.record()
         evt.synchronize()
 
@@ -268,8 +267,8 @@ class JITModule(base.JITModule):
             grid, block = self.grid_size(args[0], args[1])
             extra_global_args = self.get_args_marked_for_globals
         else:
-            raise NotImplementedError()
-            self.compile(args)
+            self.args = args[:]
+            self.compile()
             self._initialized = True
             return self.__call__(*args)
 
@@ -291,6 +290,7 @@ class JITModule(base.JITModule):
 
     @cached_property
     def code_to_compile(self):
+        assert self.args is not None
         from pyop2.codegen.builder import WrapperBuilder
         from pyop2.codegen.rep2loopy import generate
 
@@ -300,7 +300,7 @@ class JITModule(base.JITModule):
         builder.set_kernel(self._kernel)
 
         wrapper = generate(builder)
-        code, processed_program, args_to_make_global = generate_gpu_kernel(wrapper)
+        code, processed_program, args_to_make_global = generate_gpu_kernel(wrapper, self.args, self.argshapes)
         for i, arg_to_make_global in enumerate(args_to_make_global):
             numpy.save(self.ith_added_global_arg_i(i),
                     arg_to_make_global)
@@ -317,7 +317,6 @@ class JITModule(base.JITModule):
 
     @collective
     def compile(self):
-        import pudb; pu.db
 
         # If we weren't in the cache we /must/ have arguments
         if not hasattr(self, '_args'):
@@ -335,6 +334,7 @@ class JITModule(base.JITModule):
         self._fun.prepare(self.argtypes+"P"*self.num_args_to_make_global)
 
         # Blow away everything we don't need any more
+        del self.args
         del self._args
         del self._kernel
         del self._iterset
@@ -360,6 +360,29 @@ class JITModule(base.JITModule):
         argtypes = "".join(type_map[t] for t in argtypes)
 
         return argtypes
+
+    @cached_property
+    def argshapes(self):
+        argshapes = ((), ())
+        # argtypes += self._iterset._argtypes_
+        if self._iterset._argtypes_:
+            raise NotImplementedError("Do not know what to do when"
+                    " self._iterset._argtypes is not empty, is this the case"
+                    " when we have extruded mesh")
+
+        for arg in self._args:
+            argshapes += (arg.data._shape, )
+        seen = set()
+        for arg in self._args:
+            maps = arg.map_tuple
+            for map_ in maps:
+                for k, t in zip(map_._kernel_args_, map_._argtypes_):
+                    if k in seen:
+                        continue
+                    argshapes += (map_.shape, )
+                    seen.add(k)
+
+        return argshapes
 
 
 class ParLoop(petsc_base.ParLoop):
@@ -406,7 +429,7 @@ class ParLoop(petsc_base.ParLoop):
             # Finalise global increments
             for tmp, glob in self._reduced_globals.items():
                 # copy results to the host
-                cuda_driver.memcpy_dtoh(tmp._data, tmp.device_handle)
+                cuda.memcpy_dtoh(tmp._data, tmp.device_handle)
                 glob._data += tmp._data
 
     @cached_property
@@ -424,8 +447,8 @@ class ParLoop(petsc_base.ParLoop):
         # how about over here we decide what should the strategy be..
 
         if configuration["gpu_timer"]:
-            start = cuda_driver.Event()
-            end = cuda_driver.Event()
+            start = cuda.Event()
+            end = cuda.Event()
             start.record()
             start.synchronize()
             fun(part.offset, part.offset + part.size, *arglist)
@@ -475,13 +498,14 @@ def transpose_maps(kernel):
     from loopy.kernel.array import FixedStrideArrayDimTag
     from pymbolic import parse
 
-    new_dim_tags = (FixedStrideArrayDimTag(1), FixedStrideArrayDimTag(parse('end')))
+    new_dim_tags = (FixedStrideArrayDimTag(1),
+            FixedStrideArrayDimTag(parse('end-start')))
     new_args = [arg.copy(dim_tags=new_dim_tags) if arg.name[:3] == 'map' else arg for arg in kernel.args]
     kernel = kernel.copy(args=new_args)
     return kernel
 
 
-def generate_gpu_kernel(program):
+def generate_gpu_kernel(program, args=None, argshapes=None):
     # Kernel transformations
     program = program.copy(target=loopy.CudaTarget())
     kernel = program.root_kernel
@@ -550,7 +574,12 @@ def generate_gpu_kernel(program):
                     configuration["gpu_tiled_prefetch_of_quad_weights"]
                     )
         elif configuration["gpu_strategy"] == "auto_tile":
-            raise NotImplementedError()
+            assert args is not None
+            assert argshapes is not None
+            from pyop2.gpu.greedy_strategy_finder import GreedyKernelGenerator
+            kernel, args_to_make_global = GreedyKernelGenerator(
+                    program.with_root_kernel(kernel),
+                    configuration["gpu_planner_kernel_evals"])(args, argshapes)
         else:
             raise ValueError("gpu_strategy can be 'scpt',"
                     " 'user_specified_tile' or 'auto_tile'.")
