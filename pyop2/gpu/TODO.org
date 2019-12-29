@@ -1,0 +1,35 @@
+* Limitations/TODOs
+** Changes in TSFC so that PyOP2 could have a better understanding of the variable names
+- [[https://github.com/OP2/PyOP2/blob/630e55118013966e84dcc62328c45fc9061196e6/pyop2/gpu/tile.py#L65-L79][Currently]] variable names have been hard coded for CG type FE kernel on
+  triangular meshes.
+- Once this has been done it would then be reasonable to tackle other elements
+
+*** Information to be fed from TSFC
+- [ ] variable name of the action input
+- [ ] variable name of the action output
+- [ ] variable name of mesh coordinates
+- [ ] variable name of quadrature weights
+- [ ] quadrature iname
+- [ ] DOF iname(s)
+- [ ] tagging instructions responsible for computing the Jacobian
+- [ ] tagging the stages(init, update, assign) for each of the two sum
+  reductions in the TSFC kernel
+
+** Adding support for explicit matrix assembly
+*** Proposed path
+- The pyop2 configuration should have a configuration parameter ~backend~ which
+  would be one of ~"cpu", "gpu.cuda", "gpu.opencl"~
+- And based on the "backend" parameter the appropriate instance of ~Dat, Mat, Map, ...~
+  should be init-ed at runtime.
+
+*** Obstacles
+- [[https://github.com/OP2/PyOP2/blob/8e1c5720fe0a8f7b4e870a49c43608d97c66ad14/pyop2/op2.py#L45-L49][Current in PyOP2]], backend selection happens only once which would be incorrect
+  for ex. when we are running the matrix-free kernel ~op2.Map~ should stay in
+  the device's address space while during explicit assembly it should be a part
+  of host's address space.(similarly the kernel execution in matrix free
+  happens on device which is not the case for explicit assembly)
+- This might lead to some refactoring in ~firedrake~, especially where the
+  objects are instantiated.
+- Backend switching would be a bit tricky for subclasses like [[https://github.com/firedrakeproject/firedrake/blob/3498fdf3e33721adda448755addc11c20bef75a9/firedrake/preconditioners/patch.py#L77][here.]]
+
+** CI for the GPU target
