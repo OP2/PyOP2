@@ -202,9 +202,8 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
     # kernel = save_temporaries_in_loop(kernel, 'icell',
     #         evaluation_variables)
 
-    #FIXME: Do not use hard-coded inames, this change should also be in TSFC.
-    # We need this statement because we have to cut down the size of the number
-    # of basis coeffs controlled by each thread(if there are multiple threads)
+    # cut down the size of the number of basis coeffs controlled by each
+    # thread(if there are multiple threads)
     kernel = lp.rename_iname(kernel, scatter_iname,
             basis_iname_in_basis_redn, True)
     kernel = lp.rename_iname(kernel, basis_init_iname,
@@ -302,20 +301,12 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
                     default_tag=None,
                     within="tag:quad_redn")
 
-        #FIXME: In order to save on compilation time we are not sticking to
-        # coalesced accesses Otherwise we should join the following inames and
-        # then split into nthreads_per_cell
         kernel = lp.join_inames(kernel, prefetch_inames,
                 new_iname='quad_prftch_iname')
         kernel = lp.split_iname(kernel, 'quad_prftch_iname',
                 ncells_per_block*nthreads_per_cell, outer_tag="ilp")
         kernel = lp.split_iname(kernel, 'quad_prftch_iname_inner',
                 nthreads_per_cell, inner_tag='l.0', outer_tag='l.1')
-
-        # kernel = lp.split_iname(kernel, prefetch_inames[1],
-        #         nthreads_per_cell, inner_tag="l.0", outer_tag="ilp")
-        # kernel = lp.split_iname(kernel, prefetch_inames[0],
-        #         ncells_per_block, inner_tag="l.1", outer_tag="ilp")
 
         # }}}
 
@@ -345,18 +336,12 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
                     default_tag=None,
                     within="tag:basis_redn")
 
-        # See FIXME for the quad part at this point
         kernel = lp.join_inames(kernel, prefetch_inames,
                 new_iname='basis_prftch_iname')
         kernel = lp.split_iname(kernel, 'basis_prftch_iname',
                 ncells_per_block*nthreads_per_cell, outer_tag="ilp")
         kernel = lp.split_iname(kernel, 'basis_prftch_iname_inner',
                 nthreads_per_cell, inner_tag='l.0', outer_tag='l.1')
-
-        # kernel = lp.split_iname(kernel, prefetch_inames[1],
-        #         nthreads_per_cell, inner_tag="l.0", outer_tag="ilp")
-        # kernel = lp.split_iname(kernel, prefetch_inames[0],
-        #         ncells_per_block, inner_tag="l.1", outer_tag="ilp")
 
         # }}}
 
@@ -470,7 +455,6 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
     # before this point 't2' should be made a scalar.
 
     if matvec2_col_tile_length < nquad:
-        #@TODO; 't2' is not generalized enough.
         kernel = lp.privatize_temporaries_with_inames(kernel,
                 basis_iname_in_basis_redn+'_inner_outer',
                 only_var_names=[output_basis_coeff_temp])
@@ -485,6 +469,8 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
     # {{{ micro-optimizations
 
     if nthreads_per_cell == 1 and not load_mats_to_shared:
+        # FIXME: not general enough!
+        1/0
         #@TODO: form_insn_19 and form_insn20 aren't general enough!
         kernel = lp.add_nosync(kernel, "local", "id:form_insn_19 or id:form_insn_20",
                 "id:form_insn_21")

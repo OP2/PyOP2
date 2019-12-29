@@ -347,7 +347,7 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
             return ctypes.CDLL(soname)
 
     def get_function(self, code, extension, fn_name, argtypes, restype):
-        dll = self.get_so(code)
+        dll = self.get_so(code, extension)
 
         fn = getattr(dll, fn_name)
         fn.argtypes = code.argtypes
