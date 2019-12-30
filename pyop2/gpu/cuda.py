@@ -331,7 +331,11 @@ class JITModule(base.JITModule):
                                      ldargs=[],
                                      compiler=compiler,
                                      comm=self.comm)
-        self._fun.prepare(self.argtypes+"P"*self.num_args_to_make_global)
+
+        type_map = dict([(ctypes.c_void_p, "P"), (ctypes.c_int, "i")])
+        argtypes = "".join(type_map[t] for t in self.argtypes)
+
+        self._fun.prepare(argtypes+"P"*self.num_args_to_make_global)
 
         # Blow away everything we don't need any more
         del self.args
@@ -355,9 +359,6 @@ class JITModule(base.JITModule):
                         continue
                     argtypes += (ctypes.c_void_p,)
                     seen.add(k)
-
-        type_map = dict([(ctypes.c_void_p, "P"), (ctypes.c_int, "i")])
-        argtypes = "".join(type_map[t] for t in argtypes)
 
         return argtypes
 
@@ -558,20 +559,21 @@ def generate_gpu_kernel(program, args=None, argshapes=None):
                         configuration["gpu_cells_per_block"])
         elif configuration["gpu_strategy"] == "user_specified_tile":
             from pyop2.gpu.tile import tiled_transform
+            from pyop2.gpu.tile import TilingConfiguration
             kernel, args_to_make_global = tiled_transform(kernel,
                     program.callables_table,
-                    configuration["gpu_cells_per_block"],
-                    configuration["gpu_threads_per_cell"],
-                    configuration["gpu_matvec1_rowtile_length"],
-                    configuration["gpu_matvec1_coltile_length"],
-                    configuration["gpu_matvec2_rowtile_length"],
-                    configuration["gpu_matvec2_coltile_length"],
-                    configuration["gpu_coords_to_shared"],
-                    configuration["gpu_input_to_shared"],
-                    configuration["gpu_mats_to_shared"],
-                    configuration["gpu_quad_weights_to_shared"],
-                    configuration["gpu_tiled_prefetch_of_input"],
-                    configuration["gpu_tiled_prefetch_of_quad_weights"]
+                    TilingConfiguration(configuration["gpu_cells_per_block"],
+                        configuration["gpu_threads_per_cell"],
+                        configuration["gpu_matvec1_rowtile_length"],
+                        configuration["gpu_matvec1_coltile_length"],
+                        configuration["gpu_matvec2_rowtile_length"],
+                        configuration["gpu_matvec2_coltile_length"],
+                        configuration["gpu_coords_to_shared"],
+                        configuration["gpu_input_to_shared"],
+                        configuration["gpu_mats_to_shared"],
+                        configuration["gpu_quad_weights_to_shared"],
+                        configuration["gpu_tiled_prefetch_of_input"],
+                        configuration["gpu_tiled_prefetch_of_quad_weights"])
                     )
         elif configuration["gpu_strategy"] == "auto_tile":
             assert args is not None

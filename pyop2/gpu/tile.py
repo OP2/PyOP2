@@ -1,4 +1,66 @@
 import loopy as lp
+import numpy as np
+import pycuda.driver as cuda
+from math import ceil, sqrt, floor
+from pytools import memoize_method
+from pycuda.compiler import SourceModule
+from pyop2.utils import cached_property
+
+
+# {{{ implementing the tiling transformation
+
+class TilingConfiguration:
+    """
+    Records the configuration for :func:`pyop2.gpu.tile.tiled_transform`.
+
+    :attr ncells_per_block: Number of cells whose computation workload is to be
+        given to one CUDA block.
+    :attr nthreads_per_cell: Number of CUDA threads to be launched for one each
+        cell in the mesh.
+    :attr matvec1_row_tile_length: Number of rows in the tile of the first
+        matvec (first matvec := quadrature stage)
+    :attr matvec1_col_tile_length: Number of columns in the tile of the first
+        matvec (first matvec := quadrature stage)
+    :attr matvec2_row_tile_length: Number of rows in the tile of the second
+        matvec (second matvec := output DoF stage)
+    :attr matvec2_col_tile_length: Number of columns in the tile of the second
+        matvec (second matvec := output DoF stage)
+    :attr load_coordinates_to_shared: Should the coordinates of the cell be
+        prefeteched to shared memory?
+    :attr load_input_to_shared: Should the input DoFs be prefetched to shared
+        memory?
+    :attr load_mats_to_shared: Should the local FEM operator matrices be loaded
+        to shared memory?
+    :attr load_quad_weights_to_shared: Should the quadrature weigts be loaded
+        to shared memory?
+    :attr tiled_prefetch_of_inputs: If input DoFs are prefetched to shared
+        memory, should they be prefetched in tile lengths?
+    :attr tiled_prefetch_of_quad_weights: If the quadrature weights are
+        prefethced to shared memory, should they in prefetched in tile lengths?
+    """
+    def __init__(self,
+            ncells_per_block,
+            nthreads_per_cell,
+            t1_r, t1_c,
+            t2_r, t2_c,
+            load_coordinates_to_shared,
+            load_input_to_shared,
+            load_mats_to_shared,
+            load_quad_weights_to_shared,
+            tiled_prefetch_of_inputs,
+            tiled_prefetch_of_quad_weights):
+        self.ncells_per_block = ncells_per_block
+        self.nthreads_per_cell = nthreads_per_cell
+        self.matvec1_row_tile_length = t1_r
+        self.matvec1_col_tile_length = t1_c
+        self.matvec2_row_tile_length = t2_r
+        self.matvec2_col_tile_length = t2_c
+        self.load_coordinates_to_shared = load_coordinates_to_shared
+        self.load_input_to_shared = load_input_to_shared
+        self.load_mats_to_shared = load_mats_to_shared
+        self.load_quad_weights_to_shared = load_quad_weights_to_shared
+        self.tiled_prefetch_of_inputs = tiled_prefetch_of_inputs
+        self.tiled_prefetch_of_quad_weights = tiled_prefetch_of_quad_weights
 
 
 def _make_tv_array_arg(tv):
@@ -41,26 +103,22 @@ def work_which_should_be_done_by_passing_metadata(kernel,
     # }}}
 
     basis_redn_insn = [insn for insn in kernel.instructions if 'basis' in
-            insn.tags][0]
+                insn.tags][0]
     basis_iname_in_basis_redn, = basis_redn_insn.within_inames - frozenset(['n', quad_iname])
 
     return basis_gather_iname, scatter_iname, basis_iname_in_basis_redn
 
 
-def tiled_transform(kernel, callables_table, ncells_per_block,
-        nthreads_per_cell,
-        matvec1_row_tile_length, matvec1_col_tile_length,
-        matvec2_row_tile_length, matvec2_col_tile_length,
-        load_coordinates_to_shared,
-        load_input_to_shared,
-        load_mats_to_shared,
-        load_quad_weights_to_shared,
-        tiled_prefetch_of_inputs,
-        tiled_prefetch_of_quad_weights):
+def tiled_transform(kernel, callables_table, tiling_config):
     """
-    Matvec1 is the function evaluation part at the quad points.
-    Matvec2 is the basis coefficients computation part.
+    :param tiling_config: An instance of :class:`pyop2.gpu.tiling_config
     """
+    assert isinstance(tiling_config, TilingConfiguration)
+
+    nc = tiling_config.ncells_per_block
+    nt = tiling_config.nthreads_per_cell,
+    t1_r, t1_c = tiling_config.matvec1_row_tile_length, tiling_config.matvec1_col_tile_length
+    t2_r, t2_c = tiling_config.matvec2_row_tile_length, tiling_config.matvec2_col_tile_length
 
     # {{{ FIXME: Setting names which should be set by TSFC
 
@@ -193,7 +251,7 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
     # }}}
 
     # Realize CUDA blocks
-    kernel = lp.split_iname(kernel, "n", ncells_per_block,
+    kernel = lp.split_iname(kernel, "n", nc,
             outer_iname="iblock", inner_iname="icell")
 
     kernel = lp.privatize_temporaries_with_inames(kernel, 'icell',
@@ -219,9 +277,9 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
             'writes:{}'.format(output_basis_coeff_temp),
             'tag:quad_wrap_up')
 
-    if load_coordinates_to_shared:
-        # FIXME: This seems unnecessary as of now. I might choose to not
-        # support it.
+    if tiling_config.load_coordinates_to_shared:
+        # FIXME: This configuration parameter seems unnecessary as of now. I
+        # might choose not to support it.
         kernel = lp.privatize_temporaries_with_inames(kernel, 'icell',
                 [coords_temp])
         kernel = lp.assignment_to_subst(kernel, coords_temp)
@@ -229,16 +287,16 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
                 " meshes.")
 
     # Splitting for tiles in matvec1
-    kernel = lp.split_iname(kernel, quad_iname_in_quad_redn, matvec1_row_tile_length, outer_iname='irowtile_matvec1')
-    kernel = lp.split_iname(kernel, basis_iname_in_quad_redn, matvec1_col_tile_length, outer_iname='icoltile_matvec1')
+    kernel = lp.split_iname(kernel, quad_iname_in_quad_redn, t1_r, outer_iname='irowtile_matvec1')
+    kernel = lp.split_iname(kernel, basis_iname_in_quad_redn, t1_c, outer_iname='icoltile_matvec1')
 
     # Splitting for tiles in matvec2
-    kernel = lp.split_iname(kernel, basis_iname_in_basis_redn, matvec2_row_tile_length, outer_iname='irowtile_matvec2')
-    kernel = lp.split_iname(kernel, quad_iname_in_basis_redn, matvec2_col_tile_length, outer_iname='icoltile_matvec2')
+    kernel = lp.split_iname(kernel, basis_iname_in_basis_redn, t2_r, outer_iname='irowtile_matvec2')
+    kernel = lp.split_iname(kernel, quad_iname_in_basis_redn, t2_c, outer_iname='icoltile_matvec2')
 
     # {{{ Prefetch wizardry
 
-    if load_input_to_shared:
+    if tiling_config.load_input_to_shared:
         kernel = lp.privatize_temporaries_with_inames(kernel, 'icell',
                 only_var_names=[input_basis_coeff_temp])
         from loopy.transform.precompute import precompute_for_single_kernel
@@ -246,7 +304,7 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
         #         [input_basis_coeff_temp])
         kernel = lp.assignment_to_subst(kernel, input_basis_coeff_temp)
         input_prcmpt_iname = 'input_basis_prcmpt'
-        if tiled_prefetch_of_inputs:
+        if tiling_config.tiled_prefetch_of_inputs:
             sweep_inames = (basis_iname_in_quad_redn+'_inner', 'icell')
             outer_inames = 'iblock,icoltile_matvec1,irowtile_matvec1'
         else:
@@ -261,16 +319,16 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
                 default_tag=None,
                 )
         kernel = lp.split_iname(kernel, input_prcmpt_iname,
-                nthreads_per_cell, inner_tag="l.0")
+                nt, inner_tag="l.0")
 
-    if load_mats_to_shared:
+    if tiling_config.load_mats_to_shared:
         from loopy.transform.data import add_prefetch_for_single_kernel
         #FIXME: Assuming that in all the constants the one with single axis is
         # the one corresponding to quadrature weights. fix it by passing some
         # metadata from TSFC.
         # FIXME: Sweep inames depends on the parallelization strategies for
         # both the matvecs, that needs to be taken care of.
-        const_matrices_names = set([tv.name for tv in old_temps.values() if tv.initializer is not None and len(tv.shape)>1])
+        const_matrices_names = set([tv.name for tv in old_temps.values() if tv.initializer is not None and len(tv.shape) > 1])
 
         vng = kernel.get_var_name_generator()
         ing = kernel.get_instruction_id_generator()
@@ -304,9 +362,9 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
         kernel = lp.join_inames(kernel, prefetch_inames,
                 new_iname='quad_prftch_iname')
         kernel = lp.split_iname(kernel, 'quad_prftch_iname',
-                ncells_per_block*nthreads_per_cell, outer_tag="ilp")
+                nc*nt, outer_tag="ilp")
         kernel = lp.split_iname(kernel, 'quad_prftch_iname_inner',
-                nthreads_per_cell, inner_tag='l.0', outer_tag='l.1')
+                nt, inner_tag='l.0', outer_tag='l.1')
 
         # }}}
 
@@ -339,9 +397,9 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
         kernel = lp.join_inames(kernel, prefetch_inames,
                 new_iname='basis_prftch_iname')
         kernel = lp.split_iname(kernel, 'basis_prftch_iname',
-                ncells_per_block*nthreads_per_cell, outer_tag="ilp")
+                nc*nt, outer_tag="ilp")
         kernel = lp.split_iname(kernel, 'basis_prftch_iname_inner',
-                nthreads_per_cell, inner_tag='l.0', outer_tag='l.1')
+                nt, inner_tag='l.0', outer_tag='l.1')
 
         # }}}
 
@@ -355,7 +413,7 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
                 kernel = flatten_variable(kernel, var_name)
             for quad_temp_name, basis_temp_name in zip(quad_temp_names,
                     basis_temp_names):
-                if (matvec2_row_tile_length*matvec2_col_tile_length >= matvec1_row_tile_length*matvec1_col_tile_length):
+                if (t1_r*t1_c >= t2_r*t2_c):
                     kernel = absorb_temporary_into(kernel, basis_temp_name, quad_temp_name)
                 else:
                     kernel = absorb_temporary_into(kernel, quad_temp_name, basis_temp_name)
@@ -389,7 +447,7 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
 
     # {{{ Prefetch: Quad Weights
 
-    if load_quad_weights_to_shared:
+    if tiling_config.load_quad_weights_to_shared:
         from loopy.transform.data import add_prefetch_for_single_kernel
         quad_weights, = [tv.name for tv in old_temps.values() if tv.initializer is not None and len(tv.shape) == 1]
         vng = kernel.get_var_name_generator()
@@ -397,7 +455,7 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
         quad_weight_prefetch_insn = ing("quad_wt_prftch_insn")
         quad_weight_prefetch_iname = vng("iprtftch")
 
-        if tiled_prefetch_of_quad_weights:
+        if tiling_config.tiled_prefetch_of_quad_weights:
             sweep_inames = (quad_iname_in_quad_redn+'_inner')
             fetch_outer_inames = 'irowtile_matvec1, iblock'
         else:
@@ -416,9 +474,9 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
                 within="tag:quad_wrap_up")
 
         kernel = lp.split_iname(kernel, quad_weight_prefetch_iname,
-                ncells_per_block*nthreads_per_cell, outer_tag="ilp")
+                nc * nt, outer_tag="ilp")
         kernel = lp.split_iname(kernel, quad_weight_prefetch_iname+'_inner',
-                nthreads_per_cell,
+                nt,
                 outer_tag="l.1", inner_tag="l.0")
 
     # }}}
@@ -426,18 +484,18 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
     # {{{ divide matvec1-tile's work across threads
 
     kernel = lp.split_iname(kernel, quad_iname_in_quad_redn+'_inner',
-            nthreads_per_cell, inner_tag="l.0", outer_tag="ilp")
+            nt, inner_tag="l.0", outer_tag="ilp")
 
     # }}}
 
-    # {{{ diving matvec2-tile's work across threads
+    # {{{ divide matvec2-tile's work across threads
 
     kernel = lp.split_iname(kernel, basis_iname_in_basis_redn+'_inner',
-            nthreads_per_cell, inner_tag="l.0", outer_tag="ilp")
+            nt, inner_tag="l.0", outer_tag="ilp")
 
     # }}}
 
-    if matvec1_col_tile_length < nbasis:
+    if t1_c < nbasis:
         only_var_names = [insn.assignee.name for insn in kernel.instructions if
                 'quad_init' in insn.tags]
         kernel = lp.privatize_temporaries_with_inames(kernel,
@@ -454,7 +512,7 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
 
     # before this point 't2' should be made a scalar.
 
-    if matvec2_col_tile_length < nquad:
+    if t2_c < nquad:
         kernel = lp.privatize_temporaries_with_inames(kernel,
                 basis_iname_in_basis_redn+'_inner_outer',
                 only_var_names=[output_basis_coeff_temp])
@@ -468,9 +526,9 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
 
     # {{{ micro-optimizations
 
-    if nthreads_per_cell == 1 and not load_mats_to_shared:
+    if nt == 1 and not tiling_config.load_mats_to_shared:
         # FIXME: not general enough!
-        1/0
+        raise RuntimeError()
         #@TODO: form_insn_19 and form_insn20 aren't general enough!
         kernel = lp.add_nosync(kernel, "local", "id:form_insn_19 or id:form_insn_20",
                 "id:form_insn_21")
@@ -483,3 +541,296 @@ def tiled_transform(kernel, callables_table, ncells_per_block,
     kernel = kernel.copy(loop_priority=frozenset())
 
     return kernel, args_to_make_global
+
+# }}}
+
+
+# {{{ auto tile
+
+WARP_SIZE = 32
+
+
+class AutoTiler:
+    """
+    Helper class to tune the :class:`pyop2.gpu.tile.TilingConfiguration` for
+    :func:`pyop2.gpu.tile.tiled_transform`.
+
+    :attr fem_program: An instance of :class:`loopy.program.Program` which is
+        the FEM computational kernel to be tuned.
+
+    See the entrypoint :func:`pyop2.gpu.tile.Autotiler.__call__`
+    """
+    def __init__(self, fem_program, num_candidate_knls):
+        self.fem_program = fem_program
+        self.num_candidate_knls = num_candidate_knls
+
+    @cached_property
+    def nbasis(self):
+        return int(lp.symbolic.pw_aff_to_expr(
+            self.fem_program.root_kernel.get_iname_bounds('form_i',
+                constants_only=True).size))
+
+    @cached_property
+    def nquad(self):
+        return int(lp.symbolic.pw_aff_to_expr(
+                self.fem_program.root_kernel.get_iname_bounds('form_ip',
+                    constants_only=True).size))
+
+    @cached_property
+    def num_const_matrices(self):
+        """
+        Returns the number of constant matrices in the FEM kernel.
+        """
+        const_matrices_in_quad = set()
+        const_matrices_in_basis = set()
+        const_matrices = frozenset([tv.name for tv in
+            self.fem_program.root_kernel.temporary_variables.values() if
+            tv.initializer is not None and len(tv.initializer.shape) == 2])
+
+        for insn in self.fem_program.root_kernel.instructions:
+            if 'quadrature' in insn.tags:
+                const_matrices_in_quad.update(insn.read_dependency_names() &
+                        const_matrices)
+            if 'basis' in insn.tags:
+                const_matrices_in_basis.update(insn.read_dependency_names() &
+                        const_matrices)
+
+        return max(len(const_matrices_in_quad), len(const_matrices_in_basis))
+
+    @cached_property
+    def num_func_eval_vars(self):
+        """
+        Returns the number of variables evaluated at the quadrature nodes.
+        """
+        evaluation_variables = (set().union(*[insn.write_dependency_names() for
+            insn in self.fem_program.root_kernel.instructions if 'quadrature' in insn.tags]) &
+            set().union(*[insn.read_dependency_names() for insn in
+                self.fem_program.root_kernel.instructions if 'basis' in insn.tags]))
+
+        return len(evaluation_variables)
+
+    def get_local_barriers(self, t1_r, t1_c, t2_r, t2_c):
+        """
+        Returns the number of block level synchronization instructions in a
+        single kernel execution.
+        """
+        return (
+                ceil(self.nquad/t1_r) * ceil(self.nbasis/t1_c)
+                + ceil(self.nbasis/t2_r) * ceil(self.nquad/t2_c))
+
+    def theoretical_warps_per_sm(self, tiling_config):
+        """
+        Returns the number of warps residing on an Streaming Multiprocessor.
+        """
+
+        cells_per_block = tiling_config.ncells_per_block
+        threads_per_cell = tiling_config.nthreads_per_cell
+        t1_r, t1_c = tiling_config.matvec1_row_tile_length, tiling_config.matvec1_col_tile_length
+        t2_r, t2_c = tiling_config.matvec2_row_tile_length, tiling_config.matvec2_col_tile_length
+
+        # {{{ computing shared mem usage per block
+
+        shared_usage = (
+                self.num_matrices*max(t1_r*t1_c, t2_r*t2_c)
+                + self.nquad
+                + self.num_func_eval_vars*self.nquad*cells_per_block
+                )
+
+        # convert doubles to KB
+        shared_usage *= 8e-3
+
+        # }}}
+
+        warps_per_block = floor((threads_per_cell*cells_per_block)/32)
+        blocks_per_sm = min(96//shared_usage if shared_usage < 48 else 0, 32)
+        warps_per_sm = blocks_per_sm*warps_per_block
+
+        return warps_per_sm
+
+    def get_work_efficiency(self, tiling_config):
+        """
+        Returns the efficieny(as a fraction) for a tile defined by t1_r x t1_c,
+        t2_r x t2_c.
+
+        One reason for inefficiency is if the number of threads in a CUDA block
+        aren't a multiple of the warp size.
+        """
+        cells_per_block = tiling_config.ncells_per_block
+        threads_per_cell = tiling_config.nthreads_per_cell
+        t1_r = tiling_config.matvec1_row_tile_length
+        t2_r = tiling_config.matvec2_row_tile_length
+
+        # wasted work in the function evaluation stage
+        wasted_work = self.nbasis*(
+                (t1_r % threads_per_cell)*(self.nquad//t1_r)
+                + ((self.nquad % t1_r) % threads_per_cell))
+
+        wasted_work += self.nquad*(
+                (t2_r % threads_per_cell)*(self.nbasis//t2_r)
+                + ((self.nbasis % t2_r) % threads_per_cell))
+
+        wasted_work_fraction = wasted_work / (2*self.nquad*self.nbasis)
+
+        threads_in_block = threads_per_cell * cells_per_block
+        warp_mismatch_factor = threads_in_block / (
+                threads_in_block + (WARP_SIZE - (threads_in_block % WARP_SIZE)))
+
+        return warp_mismatch_factor*(1-wasted_work_fraction)
+
+    def actual_warps_per_sm(self, tiling_config):
+        """
+        Returns "actual warps residing per SM" = Efficiency * "theoretical
+        warps reising per SM".
+        """
+        return (
+                self.theoretical_warps_per_sm(tiling_config)
+                * self.get_work_efficiency(tiling_config))
+
+    @memoize_method
+    def estimated_exec_time(self, tiling_config):
+        """
+        Returns a metric proportional to the execution time for a
+        configuration.
+        """
+
+        n_c = tiling_config.ncells_per_block
+        n_t = tiling_config.nthreads_per_cell
+        t1_r, t1_c = tiling_config.matvec1_row_tile_length, tiling_config.matvec1_col_tile_length
+        t2_r, t2_c = tiling_config.matvec2_row_tile_length, tiling_config.matvec2_col_tile_length
+        n_w = self.actual_warps_per_sm(tiling_config)
+
+        if n_w == 0:
+            return float("inf")
+        n_lb = self.get_local_barriers(t1_r, t1_c, t2_r, t2_c)
+        n_blocks = (n_w * 32)/(n_t*n_c)
+
+        # nb, nq = self.nbasis, self.nquad
+        # return (n_t*nb + nb*nq/(n_t*n_c) + nb*nq*(n_t+n_c)/20.0)/n_w
+        return n_lb/n_blocks
+
+    def get_candiate_configs(self):
+
+        threads_to_cells = {
+                9: (7, ),
+                8: (4, 8, 16),
+                7: (9, ),
+                4: (8, 16),
+                3: (21, ),
+                2: (16, 32, 64),
+                1: (32, 64),
+                }
+
+        tiles = []
+
+        for i in range(1, ceil(sqrt(self.nbasis))+1):
+            t1_c = ceil(self.nbasis/i)
+            for j in range(1, ceil(sqrt(self.nquad))+1):
+                t1_r = ceil(self.nquad/j)
+                for k in range(1, ceil(sqrt(self.nbasis))+1):
+                    t2_r = ceil(self.nbasis/k)
+                    for l in range(1, ceil(sqrt(self.nquad))+1):
+                        t2_c = ceil(self.nquad/l)
+                        if abs(t1_r*t1_c-t2_r*t2_c)/max(t1_r*t1_c, t2_c*t2_r) < 0.2:
+                            tiles.append((t1_r, t1_c, t2_r, t2_c))
+
+        # sort by least sync-ed config first
+        tiles.sort(key=lambda T: self.get_local_barriers(*T))
+
+        params = []
+
+        for tile in tiles:
+            for threads in threads_to_cells:
+                best_cells = 10000
+                for cells in threads_to_cells[threads]:
+                    if (self.estimated_exec_time(cells, threads,
+                        *tile) < self.estimated_exec_time(best_cells,
+                            threads, *tile)):
+                        best_cells = cells
+
+                if best_cells != 10000:
+                    params.append((best_cells, threads)+tile)
+
+        # sort the parameters with highest occupancy.
+        params.sort(key=lambda P:  self.estimated_exec_time(*P))
+
+        return params[:self.num_candidate_knls]
+
+    @memoize_method
+    def convert_numpy_arrays_to_cuda_mems(self, ary):
+        ary = np.array(ary)
+        ary_gpu = cuda.mem_alloc(ary.nbytes)
+        cuda.memcpy_htod(src=ary, dest=ary_gpu)
+        return ary_gpu
+
+    def __call__(self, args, argshapes):
+
+        best_performing_time = float("inf")
+        best_performing_param = None
+        nrounds = 15
+        nwarmup = 5
+
+        copied_args = args[:2]
+        for i, arg in enumerate(self.fem_program.args[2:]):
+            if arg.name in self.fem_program.root_kernel.get_written_variables():
+                # arg is written during kernel execution => make a copy
+                arg_gpu = cuda.mem_alloc(
+                        int(np.prod(argshapes[i])*arg.dtype.itemsize))
+                cuda.memcpy_dtod(src=args[i+2], dest=arg_gpu,
+                        size=int(np.prod(argshapes[i])*arg.dtype.itemsize))
+                copied_args += (arg_gpu,)
+            else:
+                # arg is read only => pass the same arg to the knl
+                copied_args += (args[i+2],)
+
+        from pyop2.gpu.tile import tiled_transform
+
+        for params in self.get_candiate_configs():
+            nc, nt, t1_r, t1_c, t2_r, t2_c = params
+            kernel, extra_args = tiled_transform(
+                    self.fem_program.root_kernel, self.fem_program.callables_table,
+                    TilingConfiguration(nc, nt, t1_r, t1_c, t2_r, t2_c, False,
+                        False, True, True, False, False))
+            from pymbolic import evaluate
+            kernel = self.fem_program.with_root_kernel(kernel)
+            code = lp.generate_code_v2(kernel).device_code()
+            glens, llens = kernel.get_grid_size_upper_bounds_as_exprs()
+            grid = tuple(int(evaluate(glens[i], {"start": args[0], "end":
+                args[1]})) if i < len(glens) else 1
+                    for i in range(2))
+            block = tuple(int(evaluate(llens[i], {"start": args[0], "end":
+                args[1]})) if i < len(llens) else 1
+                    for i in range(3))
+            executable_knl = SourceModule(code).get_function(kernel.name)
+            executable_knl.prepare("i"*2+"P"*len(args[2:])+"P"*len(extra_args))
+            extra_args = tuple(self.convert_numpy_arrays_to_cuda_mems(tuple(arg)) for arg
+                    in extra_args)
+            runtimes = []
+
+            for i in range(nrounds):
+                start_evt = cuda.Event()
+                end_evt = cuda.Event()
+                start_evt.record()
+                start_evt.synchronize()
+                executable_knl.prepared_call(grid, block, *(copied_args+extra_args))
+                end_evt.record()
+                end_evt.synchronize()
+                runtimes.append(start_evt.time_till(end_evt)/1000)
+
+            exec_time = np.mean(runtimes[nwarmup:])
+
+            print("Params: {}, time={}".format(
+                params, exec_time))
+
+            if exec_time < best_performing_time:
+                best_performing_time = exec_time
+                best_performing_param = params
+
+        nc, nt, t1_r, t1_c, t2_r, t2_c = best_performing_param
+        return tiled_transform(
+                self.fem_program.root_kernel, self.fem_program.callables_table,
+                TilingConfiguration(nc, nt, t1_r, t1_c, t2_r, t2_c, False,
+                    False, True, True, False, False))
+
+# }}}
+
+# vim: fdm=marker
