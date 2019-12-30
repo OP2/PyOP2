@@ -578,8 +578,8 @@ def generate_gpu_kernel(program, args=None, argshapes=None):
         elif configuration["gpu_strategy"] == "auto_tile":
             assert args is not None
             assert argshapes is not None
-            from pyop2.gpu.greedy_strategy_finder import GreedyKernelGenerator
-            kernel, args_to_make_global = GreedyKernelGenerator(
+            from pyop2.gpu.tile import AutoTiler
+            kernel, args_to_make_global = AutoTiler(
                     program.with_root_kernel(kernel),
                     configuration["gpu_planner_kernel_evals"])(args, argshapes)
         else:

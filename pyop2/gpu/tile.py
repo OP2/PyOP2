@@ -5,11 +5,12 @@ from math import ceil, sqrt, floor
 from pytools import memoize_method
 from pycuda.compiler import SourceModule
 from pyop2.utils import cached_property
+from pytools import ImmutableRecord
 
 
 # {{{ implementing the tiling transformation
 
-class TilingConfiguration:
+class TilingConfiguration(ImmutableRecord):
     """
     Records the configuration for :func:`pyop2.gpu.tile.tiled_transform`.
 
@@ -49,18 +50,19 @@ class TilingConfiguration:
             load_quad_weights_to_shared,
             tiled_prefetch_of_inputs,
             tiled_prefetch_of_quad_weights):
-        self.ncells_per_block = ncells_per_block
-        self.nthreads_per_cell = nthreads_per_cell
-        self.matvec1_row_tile_length = t1_r
-        self.matvec1_col_tile_length = t1_c
-        self.matvec2_row_tile_length = t2_r
-        self.matvec2_col_tile_length = t2_c
-        self.load_coordinates_to_shared = load_coordinates_to_shared
-        self.load_input_to_shared = load_input_to_shared
-        self.load_mats_to_shared = load_mats_to_shared
-        self.load_quad_weights_to_shared = load_quad_weights_to_shared
-        self.tiled_prefetch_of_inputs = tiled_prefetch_of_inputs
-        self.tiled_prefetch_of_quad_weights = tiled_prefetch_of_quad_weights
+        super(TilingConfiguration, self).__init__(
+                ncells_per_block=ncells_per_block,
+                nthreads_per_cell=nthreads_per_cell,
+                matvec1_row_tile_length=t1_r,
+                matvec1_col_tile_length=t1_c,
+                matvec2_row_tile_length=t2_r,
+                matvec2_col_tile_length=t2_c,
+                load_coordinates_to_shared=load_coordinates_to_shared,
+                load_input_to_shared=load_input_to_shared,
+                load_mats_to_shared=load_mats_to_shared,
+                load_quad_weights_to_shared=load_quad_weights_to_shared,
+                tiled_prefetch_of_inputs=tiled_prefetch_of_inputs,
+                tiled_prefetch_of_quad_weights=tiled_prefetch_of_quad_weights)
 
 
 def _make_tv_array_arg(tv):
@@ -116,7 +118,7 @@ def tiled_transform(kernel, callables_table, tiling_config):
     assert isinstance(tiling_config, TilingConfiguration)
 
     nc = tiling_config.ncells_per_block
-    nt = tiling_config.nthreads_per_cell,
+    nt = tiling_config.nthreads_per_cell
     t1_r, t1_c = tiling_config.matvec1_row_tile_length, tiling_config.matvec1_col_tile_length
     t2_r, t2_c = tiling_config.matvec2_row_tile_length, tiling_config.matvec2_col_tile_length
 
@@ -413,7 +415,7 @@ def tiled_transform(kernel, callables_table, tiling_config):
                 kernel = flatten_variable(kernel, var_name)
             for quad_temp_name, basis_temp_name in zip(quad_temp_names,
                     basis_temp_names):
-                if (t1_r*t1_c >= t2_r*t2_c):
+                if (t1_r*t1_c <= t2_r*t2_c):
                     kernel = absorb_temporary_into(kernel, basis_temp_name, quad_temp_name)
                 else:
                     kernel = absorb_temporary_into(kernel, quad_temp_name, basis_temp_name)
@@ -631,7 +633,7 @@ class AutoTiler:
         # {{{ computing shared mem usage per block
 
         shared_usage = (
-                self.num_matrices*max(t1_r*t1_c, t2_r*t2_c)
+                self.num_const_matrices*max(t1_r*t1_c, t2_r*t2_c)
                 + self.nquad
                 + self.num_func_eval_vars*self.nquad*cells_per_block
                 )
@@ -742,16 +744,18 @@ class AutoTiler:
             for threads in threads_to_cells:
                 best_cells = 10000
                 for cells in threads_to_cells[threads]:
-                    if (self.estimated_exec_time(cells, threads,
-                        *tile) < self.estimated_exec_time(best_cells,
-                            threads, *tile)):
+                    if (self.estimated_exec_time(TilingConfiguration(cells, threads,
+                        *tile, False, False, True, True, False, False)) < self.estimated_exec_time(
+                            TilingConfiguration(best_cells, threads, *tile,
+                                False, False, True, True, False, False))):
                         best_cells = cells
 
                 if best_cells != 10000:
-                    params.append((best_cells, threads)+tile)
+                    params.append(TilingConfiguration(best_cells, threads, *tile,
+                                False, False, True, True, False, False))
 
         # sort the parameters with highest occupancy.
-        params.sort(key=lambda P:  self.estimated_exec_time(*P))
+        params.sort(key=lambda P:  self.estimated_exec_time(P))
 
         return params[:self.num_candidate_knls]
 
@@ -765,7 +769,7 @@ class AutoTiler:
     def __call__(self, args, argshapes):
 
         best_performing_time = float("inf")
-        best_performing_param = None
+        best_performing_config = None
         nrounds = 15
         nwarmup = 5
 
@@ -784,12 +788,10 @@ class AutoTiler:
 
         from pyop2.gpu.tile import tiled_transform
 
-        for params in self.get_candiate_configs():
-            nc, nt, t1_r, t1_c, t2_r, t2_c = params
+        for tiling_config in self.get_candiate_configs():
             kernel, extra_args = tiled_transform(
                     self.fem_program.root_kernel, self.fem_program.callables_table,
-                    TilingConfiguration(nc, nt, t1_r, t1_c, t2_r, t2_c, False,
-                        False, True, True, False, False))
+                    tiling_config)
             from pymbolic import evaluate
             kernel = self.fem_program.with_root_kernel(kernel)
             code = lp.generate_code_v2(kernel).device_code()
@@ -819,17 +821,15 @@ class AutoTiler:
             exec_time = np.mean(runtimes[nwarmup:])
 
             print("Params: {}, time={}".format(
-                params, exec_time))
+                tiling_config, exec_time))
 
             if exec_time < best_performing_time:
                 best_performing_time = exec_time
-                best_performing_param = params
+                best_performing_config = tiling_config
 
-        nc, nt, t1_r, t1_c, t2_r, t2_c = best_performing_param
         return tiled_transform(
                 self.fem_program.root_kernel, self.fem_program.callables_table,
-                TilingConfiguration(nc, nt, t1_r, t1_c, t2_r, t2_c, False,
-                    False, True, True, False, False))
+                best_performing_config)
 
 # }}}
 
