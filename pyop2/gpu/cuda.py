@@ -110,8 +110,14 @@ class Dat(petsc_Dat):
 
     @cached_property
     def device_handle(self):
-        with self.vec as v:
-            return v.getCUDAHandle()
+        if self.dtype == PETSc.ScalarType:
+            with self.vec as v:
+                return v.getCUDAHandle()
+        else:
+            # handle for ex. facet numbers
+            m_gpu = cuda.mem_alloc(int(self._data.nbytes))
+            cuda.memcpy_htod(m_gpu, self._data)
+            return m_gpu
 
     @cached_property
     def _kernel_args_(self):
@@ -300,6 +306,7 @@ class JITModule(base.JITModule):
         builder.set_kernel(self._kernel)
 
         wrapper = generate(builder)
+
         code, processed_program, args_to_make_global = generate_gpu_kernel(wrapper, self.args, self.argshapes)
         for i, arg_to_make_global in enumerate(args_to_make_global):
             numpy.save(self.ith_added_global_arg_i(i),
@@ -372,7 +379,7 @@ class JITModule(base.JITModule):
                     " when we have extruded mesh")
 
         for arg in self._args:
-            argshapes += (arg.data._shape, )
+            argshapes += (arg.data.shape, )
         seen = set()
         for arg in self._args:
             maps = arg.map_tuple
@@ -552,7 +559,10 @@ def generate_gpu_kernel(program, args=None, argshapes=None):
     # choose the preferred algorithm here
     # TODO: Not sure if this is the right way to select different
     # transformation strategies based on kernels
-    if program.name == "wrap_form0_cell_integral_otherwise":
+    if program.name in [
+            "wrap_form0_cell_integral_otherwise",
+            "wrap_form0_exterior_facet_integral_otherwise",
+            "wrap_form0_interior_facet_integral_otherwise", ]:
         if configuration["gpu_strategy"] == "scpt":
             from pyop2.gpu.snpt import snpt_transform
             kernel, args_to_make_global = snpt_transform(kernel,
@@ -587,7 +597,8 @@ def generate_gpu_kernel(program, args=None, argshapes=None):
                     " 'user_specified_tile' or 'auto_tile'.")
     elif program.name in ["wrap_zero", "wrap_expression_kernel",
             "wrap_pyop2_kernel_uniform_extrusion",
-            "wrap_form_cell_integral_otherwise"]:
+            "wrap_form_cell_integral_otherwise",
+            ]:
         from pyop2.gpu.snpt import snpt_transform
         kernel, args_to_make_global = snpt_transform(kernel,
                     configuration["gpu_cells_per_block"])
