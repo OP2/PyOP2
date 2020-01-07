@@ -155,7 +155,7 @@ class ObjectCached(object):
             return cache[key]
         except KeyError:
             obj = make_obj()
-            cache[key] = obj
+            # cache[key] = obj
             return obj
 
 
