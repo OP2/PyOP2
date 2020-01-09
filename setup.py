@@ -41,10 +41,19 @@ except ImportError:
 from glob import glob
 from os import environ as env
 import sys
+import argparse
 import numpy as np
 import petsc4py
 import versioneer
 import os
+
+
+argparser = argparse.ArgumentParser(add_help=False)
+argparser.add_argument('--include-dirs', nargs='+', help="Directories to be"
+        " included while compiling .pyx files", required=False,
+        metavar='INCLUDE_DIR')
+args, unknown = argparser.parse_known_args()
+sys.argv = [sys.argv[0]] + unknown
 
 
 def get_petsc_dir():
