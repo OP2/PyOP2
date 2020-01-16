@@ -15,6 +15,9 @@
 - [ ] tagging the stages(init, update, assign) for each of the two sum
   reductions in the TSFC kernel
 
+One way to solve this is tagging these names into loopy kernels from TSFC while
+we are going from GEM representation to loopy kernel.
+
 ** Adding support for explicit matrix assembly
 *** Proposed path
 - The pyop2 configuration should have a configuration parameter ~backend~ which
@@ -32,4 +35,14 @@
   objects are instantiated.
 - Backend switching would be a bit tricky for subclasses like [[https://github.com/firedrakeproject/firedrake/blob/3498fdf3e33721adda448755addc11c20bef75a9/firedrake/preconditioners/patch.py#L77][here.]]
 
+** Global reduction kernels. For ex. ~assemble(dot(f,f)*dx)~
+- Currently all the threads write to a single memory location atomically,
+  thereby losing concurrency.
+- Possible solution:
+    - Fix the block size, say 256.
+    - Map single cell to single thread.
+    - Reduce across threads and get the result for each block
+    - Write the solution of each group to a global intermediary variable.
+    - Finally another reduction across the newly created intermediary variable.
+    - One starting step would be to map the '+=' to a loopy's sum node.
 ** CI for the GPU target
