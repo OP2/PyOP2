@@ -45,4 +45,10 @@ we are going from GEM representation to loopy kernel.
     - Write the solution of each group to a global intermediary variable.
     - Finally another reduction across the newly created intermediary variable.
     - One starting step would be to map the '+=' to a loopy's sum node.
+
+** Tiling transformation logic fails for low orders
+- The TSFC kernel receive has a slightly different representation at low orders
+like P_0, P_1, DG0, DG1, etc. because some loops are unrolled, causing to
+diverge from the "assumed" template of all the kernel's loop structures.
+
 ** CI for the GPU target
