@@ -81,11 +81,70 @@ def _make_tv_array_arg(tv):
     return arg
 
 
-def work_which_should_be_done_by_passing_metadata(kernel,
-        output_basis_coeff_temp, quad_iname):
+class KernelMetadata(ImmutableRecord):
+    def __init__(self, **kwargs):
+        assert isinstance(kwargs['quad_iname'], str)
+        assert isinstance(kwargs['inputDoFs'], list)
+        assert isinstance(kwargs['coords'], str)
+        assert isinstance(kwargs['outputDoF'], str)
+        assert isinstance(kwargs['outputDoF_init_iname'], str)
+        assert isinstance(kwargs['quad_iname_in_quad_stage'], str)
+        assert isinstance(kwargs['quad_iname_in_basis_stage'], str)
+        assert isinstance(kwargs['doF_inames_in_quad_stage'], list)
+        assert isinstance(kwargs['doF_iname_in_basis_stage'], str)
+        assert isinstance(kwargs['scatter_iname'], str)
+        assert isinstance(kwargs['nquad'], int)
+        assert isinstance(kwargs['n_inputDoFs'], list)
+        assert isinstance(kwargs['n_outputDoF'], int)
+        # FIXME: non-obvious styling
+        # just choose the lengthy route
+        assert len(kwargs) == 13
+        super(KernelMetadata, self).__init__(**kwargs)
+
+
+def work_which_should_be_done_by_passing_metadata(kernel):
     from pymbolic.primitives import Variable
 
+    # quad iname
+    # Logic: assumes that there is only one iname responsible for the
+    # quadrature. TPEs do not fit within this model
+    quad_iname, = [iname for iname in kernel.all_inames() if iname.startswith('form_ip')]
+
+    # inputDof_x_outputDofs_x_coords: A set containing the variable names for the
+    # temporaries of inputDofs, outputDofs and the coordinates.
+    inputDof_x_outputDof_x_coords = set().union(*(insn.write_dependency_names() for
+            insn in kernel.instructions if 'gather' in insn.tags)) - kernel.all_inames()
+
+    # outputDof names
+    # Logic: The only temporaries which are written during basis stage tagged
+    # by TSFC.
+    outputDoF = set()
+    for insn in kernel.instructions:
+        if 'basis' in insn.tags:
+            outputDoF.update(insn.write_dependency_names()-kernel.all_inames())
+
+    outputDoF, = outputDoF
+
+    # coords name
+    # Logic: assumming that the coordinate transformation is affine i.e. one
+    # Jacobian computation for each cell.
+    coords = set()
+    for insn in kernel.instructions:
+        if 'quadrature' in insn.tags and (insn.within_inames == frozenset(["n"])):
+            coords = coords | (insn.read_dependency_names() &
+                    inputDof_x_outputDof_x_coords)
+
+    coords, = coords
+
+    # inputDof names
+    inputDoFs = list(inputDof_x_outputDof_x_coords - frozenset([coords, outputDoF]))
+
+    # 1. Figure out the input basis iname
+
     # {{{ scatter iname
+
+    # Logic: Assumes that there is only DoFs of one component of the basis
+    # functions computed per kernel i.e. one component in a mixed FEM setting.
 
     scatter_insn, = [insn for insn in kernel.instructions if 'scatter' in
             insn.tags]
@@ -97,55 +156,19 @@ def work_which_should_be_done_by_passing_metadata(kernel,
 
     # {{{ basis init iname
 
-    basis_gather_insn, = [insn for insn in kernel.instructions if 'gather' in
-            insn.tags and output_basis_coeff_temp in
-            insn.write_dependency_names()]
-    basis_gather_iname = basis_gather_insn.assignee.index_tuple[1].name
+    # iname over the DoFs for the input variable inputDofs[i]
+
+    outputDoF_init_iname, = [insn.assignee.index_tuple[1].name for insn in
+            kernel.instructions if ('gather' in insn.tags) and (outputDoF in
+                insn.write_dependency_names())]
 
     # }}}
 
-    basis_redn_insn = [insn for insn in kernel.instructions if 'basis' in
-                insn.tags][0]
-    basis_iname_in_basis_redn, = basis_redn_insn.within_inames - frozenset(['n', quad_iname])
+    # Assumption: only one variable for the outputDoF supported.
+    (doF_iname_in_basis_stage,), = set([insn.within_inames - frozenset(['n', quad_iname]) for insn in kernel.instructions if 'basis' in insn.tags])
 
-    return basis_gather_iname, scatter_iname, basis_iname_in_basis_redn
-
-
-def tiled_transform(kernel, callables_table, tiling_config):
-    """
-    :param tiling_config: An instance of :class:`pyop2.gpu.tiling_config
-    """
-    assert isinstance(tiling_config, TilingConfiguration)
-
-    nc = tiling_config.ncells_per_block
-    nt = tiling_config.nthreads_per_cell
-    t1_r, t1_c = tiling_config.matvec1_row_tile_length, tiling_config.matvec1_col_tile_length
-    t2_r, t2_c = tiling_config.matvec2_row_tile_length, tiling_config.matvec2_col_tile_length
-
-    # {{{ FIXME: Setting names which should be set by TSFC
-
-    quad_iname = 'form_ip'
-    input_basis_coeff_temp = 't0'
-    coords_temp = 't1'
-    output_basis_coeff_temp = 't2'
-    basis_init_iname, scatter_iname, basis_iname_in_basis_redn = (
-            work_which_should_be_done_by_passing_metadata(kernel,
-                output_basis_coeff_temp, quad_iname))
-    quad_iname_in_basis_redn = 'form_ip_basis'
-    quad_iname_in_quad_redn = 'form_ip_quad'
-    basis_iname_in_quad_redn = 'form_i'
-    input_basis_coeff_subst = input_basis_coeff_temp+'_subst'
-
-    # }}}
-
-    # {{{ reading info about the finite element
-
-    nquad = int(lp.symbolic.pw_aff_to_expr(
-            kernel.get_iname_bounds('form_ip', constants_only=True).size))
-    nbasis = int(lp.symbolic.pw_aff_to_expr(
-            kernel.get_iname_bounds(basis_iname_in_basis_redn, constants_only=True).size))
-
-    # }}}
+    # Assumption: All such inames match: 'form_i(?_([0-9]+))'
+    doF_inames_in_quad_stage = set([iname.startswith('form_i') for iname in kernel.all_inames()])
 
     # {{{ tagging the stages of the kernel
 
@@ -161,7 +184,7 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
     for insn in kernel.instructions:
         if not done_with_jacobi_eval:
-            if 'form_ip' in insn.within_inames:
+            if quad_iname in insn.within_inames:
                 done_with_jacobi_eval = True
 
             else:
@@ -169,19 +192,19 @@ def tiled_transform(kernel, callables_table, tiling_config):
                     | frozenset(["jacobi_eval"])))
                 continue
         if not done_with_quad_init:
-            if 'form_i' in insn.within_inames:
+            if doF_inames_in_quad_stage & insn.within_inames:
                 done_with_quad_init = True
             else:
                 new_insns.append(insn.copy(tags=insn.tags
                     | frozenset(["quad_init"])))
                 continue
         if not done_with_quad_reduction:
-            if 'form_i' not in insn.within_inames:
-                done_with_quad_reduction = True
-            else:
+            if doF_inames_in_quad_stage & insn.within_inames:
                 new_insns.append(insn.copy(tags=insn.tags
                     | frozenset(["quad_redn"])))
                 continue
+            else:
+                done_with_quad_reduction = True
         if not done_with_quad_wrap_up:
             if 'basis' in insn.tags:
                 done_with_quad_wrap_up = True
@@ -190,7 +213,7 @@ def tiled_transform(kernel, callables_table, tiling_config):
                     | frozenset(["quad_wrap_up"])))
                 continue
         if not done_with_basis_reduction:
-            if 'form_ip' not in insn.within_inames:
+            if quad_iname not in insn.within_inames:
                 done_with_basis_reduction = True
             else:
                 new_insns.append(insn.copy(tags=insn.tags
@@ -204,13 +227,70 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
     # }}}
 
+    # {{{ reading info about the finite element
+
+    nquad = int(lp.symbolic.pw_aff_to_expr(
+            kernel.get_iname_bounds(quad_iname, constants_only=True).size))
+    n_inputDoFs = [int(lp.symbolic.pw_aff_to_expr(
+        kernel.get_iname_bounds(iname, constants_only=True).size)) for iname in
+        doF_inames_in_quad_stage]
+    n_outputDoF = int(lp.symbolic.pw_aff_to_expr(
+            kernel.get_iname_bounds(outputDoF,
+                constants_only=True).size))
+
+    # }}}
+
+    return kernel, KernelMetadata(
+            quad_iname=quad_iname,
+            inputDoFs=inputDoFs,
+            coords=coords,
+            outputDoF=outputDoF,
+            quad_iname_in_basis_stage=quad_iname+'_basis',
+            quad_iname_in_quad_stage=quad_iname+'_quad',
+            doF_inames_in_quad_stage=doF_inames_in_quad_stage,
+            outputDoF_init_iname=outputDoF_init_iname,
+            scatter_iname=scatter_iname,
+            doF_iname_in_basis_stage=doF_iname_in_basis_stage,
+            nquad=nquad,
+            n_inputDoFs=n_inputDoFs,
+            n_outputDoF=n_outputDoF
+            )
+
+
+def tiled_transform(kernel, callables_table, tiling_config):
+    """
+    :param tiling_config: An instance of :class:`pyop2.gpu.tiling_config
+    """
+    assert isinstance(tiling_config, TilingConfiguration)
+
+    nc = tiling_config.ncells_per_block
+    nt = tiling_config.nthreads_per_cell
+    t1_r, t1_c = tiling_config.matvec1_row_tile_length, tiling_config.matvec1_col_tile_length
+    t2_r, t2_c = tiling_config.matvec2_row_tile_length, tiling_config.matvec2_col_tile_length
+
+    # {{{ Inferring variables
+
+    kernel, metadata = work_which_should_be_done_by_passing_metadata(kernel)
+    quad_iname = metadata.quad_iname
+    inputDoFs = metadata.inputDoFs
+    coords = metadata.coords
+    outputDoF = metadata.outputDoF
+    quad_iname_in_basis_stage = metadata.quad_iname_in_basis_stage
+    quad_iname_in_quad_stage = metadata.quad_iname_in_quad_stage
+    doF_inames_in_quad_stage = metadata.doF_inames_in_quad_stage
+    outputDoF_init_iname = metadata.outputDoF_init_iname
+    scatter_iname = metadata.scatter_iname
+    doF_iname_in_basis_stage = metadata.doF_iname_in_basis_stage
+
+    # }}}
+
     # {{{ privatize temps for function evals and make them LOCAL
 
     #FIXME: Need these variables from TSFC's metadata
     evaluation_variables = (set().union(*[insn.write_dependency_names() for insn in kernel.instructions if 'quad_wrap_up' in insn.tags])
             & set().union(*[insn.read_dependency_names() for insn in kernel.instructions if 'basis' in insn.tags]))
 
-    kernel = lp.privatize_temporaries_with_inames(kernel, 'form_ip',
+    kernel = lp.privatize_temporaries_with_inames(kernel, quad_iname,
             evaluation_variables)
     new_temps = kernel.temporary_variables.copy()
     for eval_var in evaluation_variables:
@@ -220,9 +300,9 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
     # Duplicate inames to separate transformation logic for quadrature and basis part
     kernel = lp.duplicate_inames(kernel, quad_iname, "tag:quadrature",
-            quad_iname_in_quad_redn)
+            quad_iname_in_quad_stage)
     kernel = lp.duplicate_inames(kernel, quad_iname, "tag:basis",
-            quad_iname_in_basis_redn)
+            quad_iname_in_basis_stage)
 
     # }}}
 
@@ -262,11 +342,11 @@ def tiled_transform(kernel, callables_table, tiling_config):
     # kernel = save_temporaries_in_loop(kernel, 'icell',
     #         evaluation_variables)
 
-    # cut down the size of the number of basis coeffs controlled by each
+    # cut down the size of the number of basis coeffs written by each
     # thread(if there are multiple threads)
     kernel = lp.rename_iname(kernel, scatter_iname,
-            basis_iname_in_basis_redn, True)
-    kernel = lp.rename_iname(kernel, basis_init_iname,
+            doF_iname_in_basis_stage, True)
+    kernel = lp.rename_iname(kernel, input_basis_coeff_temp,
             basis_iname_in_basis_redn, True)
 
     from loopy.transform.instruction import remove_unnecessary_deps
@@ -289,12 +369,12 @@ def tiled_transform(kernel, callables_table, tiling_config):
                 " meshes.")
 
     # Splitting for tiles in matvec1
-    kernel = lp.split_iname(kernel, quad_iname_in_quad_redn, t1_r, outer_iname='irowtile_matvec1')
+    kernel = lp.split_iname(kernel, quad_iname_in_quad_stage, t1_r, outer_iname='irowtile_matvec1')
     kernel = lp.split_iname(kernel, basis_iname_in_quad_redn, t1_c, outer_iname='icoltile_matvec1')
 
     # Splitting for tiles in matvec2
     kernel = lp.split_iname(kernel, basis_iname_in_basis_redn, t2_r, outer_iname='irowtile_matvec2')
-    kernel = lp.split_iname(kernel, quad_iname_in_basis_redn, t2_c, outer_iname='icoltile_matvec2')
+    kernel = lp.split_iname(kernel, quad_iname_in_basis_stage, t2_c, outer_iname='icoltile_matvec2')
 
     # {{{ Prefetch wizardry
 
@@ -339,7 +419,7 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
         quad_const_matrices = const_matrices_names & frozenset().union(*[insn.read_dependency_names() for insn in
             kernel.instructions if 'quad_redn' in insn.tags])
-        sweep_inames = (quad_iname_in_quad_redn+'_inner',
+        sweep_inames = (quad_iname_in_quad_stage+'_inner',
                 basis_iname_in_quad_redn+'_inner')
         fetch_outer_inames = 'iblock,icoltile_matvec1,irowtile_matvec1'
 
@@ -377,7 +457,7 @@ def tiled_transform(kernel, callables_table, tiling_config):
         basis_temp_names = [vng('basis_cnst_mtrix_prftch') for _ in basis_const_matrices]
 
         sweep_inames = (basis_iname_in_basis_redn+'_inner',
-                quad_iname_in_basis_redn+'_inner')
+                quad_iname_in_basis_stage+'_inner')
         fetch_outer_inames = 'iblock,icoltile_matvec2,irowtile_matvec2'
 
         basis_prefetch_insns = []
@@ -458,10 +538,10 @@ def tiled_transform(kernel, callables_table, tiling_config):
         quad_weight_prefetch_iname = vng("iprtftch")
 
         if tiling_config.tiled_prefetch_of_quad_weights:
-            sweep_inames = (quad_iname_in_quad_redn+'_inner')
+            sweep_inames = (quad_iname_in_quad_stage+'_inner')
             fetch_outer_inames = 'irowtile_matvec1, iblock'
         else:
-            sweep_inames = ('irowtile_matvec1', quad_iname_in_quad_redn+'_inner',)
+            sweep_inames = ('irowtile_matvec1', quad_iname_in_quad_stage+'_inner',)
             fetch_outer_inames = 'iblock'
 
         kernel = add_prefetch_for_single_kernel(kernel, callables_table,
@@ -485,7 +565,7 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
     # {{{ divide matvec1-tile's work across threads
 
-    kernel = lp.split_iname(kernel, quad_iname_in_quad_redn+'_inner',
+    kernel = lp.split_iname(kernel, quad_iname_in_quad_stage+'_inner',
             nt, inner_tag="l.0", outer_tag="ilp")
 
     # }}}
@@ -497,17 +577,21 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
     # }}}
 
+    # not sure what this condition would be for multiple inputs.
+    # let it break for now.
+    raise NotImplementedError("Developer wants to focus on other features now.."
+            " hahahaaha. sob sob sob")
     if t1_c < nbasis:
         only_var_names = [insn.assignee.name for insn in kernel.instructions if
                 'quad_init' in insn.tags]
         kernel = lp.privatize_temporaries_with_inames(kernel,
-                quad_iname_in_quad_redn+'_inner_outer',
+                quad_iname_in_quad_stage+'_inner_outer',
                 only_var_names=only_var_names)
         kernel = lp.duplicate_inames(kernel,
-                [quad_iname_in_quad_redn+'_inner_outer', ],
+                [quad_iname_in_quad_stage+'_inner_outer', ],
                 within='tag:quad_wrap_up')
         kernel = lp.duplicate_inames(kernel,
-                [quad_iname_in_quad_redn+'_inner_outer'],
+                [quad_iname_in_quad_stage+'_inner_outer'],
                 'tag:quad_init')
     else:
         kernel = lp.add_inames_to_insn(kernel, 'icoltile_matvec1', 'tag:quad_wrap_up or tag:quad_init')
