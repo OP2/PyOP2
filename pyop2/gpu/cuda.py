@@ -195,10 +195,7 @@ class JITModule(base.JITModule):
             key += (
                     configuration["gpu_cells_per_block"],
                     configuration["gpu_threads_per_cell"],
-                    configuration["gpu_matvec1_rowtile_length"],
-                    configuration["gpu_matvec1_coltile_length"],
-                    configuration["gpu_matvec2_rowtile_length"],
-                    configuration["gpu_matvec2_coltile_length"],
+                    configuration["gpu_tile_description"],
                     configuration["gpu_input_to_shared"],
                     configuration["gpu_quad_weights_to_shared"],
                     configuration["gpu_mats_to_shared"],
@@ -575,16 +572,7 @@ def generate_gpu_kernel(program, args=None, argshapes=None):
                     program.callables_table,
                     TilingConfiguration(configuration["gpu_cells_per_block"],
                         configuration["gpu_threads_per_cell"],
-                        (
-                            (
-                                configuration["gpu_matvec1_rowtile_length"],
-                                configuration["gpu_matvec1_coltile_length"],
-                            ),
-                            (
-                                configuration["gpu_matvec2_rowtile_length"],
-                                configuration["gpu_matvec2_coltile_length"],
-                            ),
-                        ),
+                        configuration["gpu_tile_description"],
                         configuration["gpu_coords_to_shared"],
                         configuration["gpu_input_to_shared"],
                         configuration["gpu_mats_to_shared"],

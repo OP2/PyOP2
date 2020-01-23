@@ -163,9 +163,11 @@ def work_which_should_be_done_by_passing_metadata(kernel):
     # Assumption: only one variable for the outputDoF supported.
     (doF_iname_in_basis_stage,), = set([insn.within_inames - frozenset(['n', quad_iname]) for insn in kernel.instructions if 'basis' in insn.tags])
 
-    # Assumption: All such inames match: 'form_i(?_([0-9]+))'
-    doF_inames_in_quad_stage = set([iname for iname in kernel.all_inames() if
-        (iname.startswith('form_i') and iname != quad_iname)])
+    doF_inames_in_quad_stage = []
+    for inputDoF in inputDoFs:
+        iname, = frozenset().union(*(insn.within_inames for insn in
+            kernel.instructions if inputDoF in insn.read_dependency_names())) - frozenset(["n", quad_iname])
+        doF_inames_in_quad_stage.append(iname)
 
     # {{{ tagging the stages of the kernel
 
@@ -189,14 +191,14 @@ def work_which_should_be_done_by_passing_metadata(kernel):
                     | frozenset(["jacobi_eval"])))
                 continue
         if not done_with_quad_init:
-            if doF_inames_in_quad_stage & insn.within_inames:
+            if frozenset(doF_inames_in_quad_stage) & insn.within_inames:
                 done_with_quad_init = True
             else:
                 new_insns.append(insn.copy(tags=insn.tags
                     | frozenset(["quad_init"])))
                 continue
         if not done_with_quad_reduction:
-            if doF_inames_in_quad_stage & insn.within_inames:
+            if frozenset(doF_inames_in_quad_stage) & insn.within_inames:
                 new_insns.append(insn.copy(tags=insn.tags
                     | frozenset(["quad_redn"])))
                 continue
@@ -240,8 +242,6 @@ def work_which_should_be_done_by_passing_metadata(kernel):
 
     from loopy.match import parse_match
 
-    i = 0
-
     for i, inputDoF in enumerate(inputDoFs):
         insn_id = None
         within = parse_match("writes:{}".format(inputDoF))
@@ -267,10 +267,10 @@ def work_which_should_be_done_by_passing_metadata(kernel):
                 ' or '.join(['id:%s' % quad_init_insn_id for quad_init_insn_id in
                     quad_init_insn_ids]))
 
-    # }}}
+    kernel = lp.tag_instructions(kernel, 'matvec%d' % (i+1),
+            'tag:basis_*')
 
-    print(kernel)
-    1/0
+    # }}}
 
     return kernel, KernelMetadata(
             quad_iname=quad_iname,
@@ -294,10 +294,6 @@ def tiled_transform(kernel, callables_table, tiling_config):
     :param tiling_config: An instance of :class:`pyop2.gpu.tiling_config
     """
     assert isinstance(tiling_config, TilingConfiguration)
-
-    nc = tiling_config.ncells_per_block
-    nt = tiling_config.nthreads_per_cell
-    tile_descrs = tiling_config.tile_descriptions
 
     # {{{ remove noops
 
@@ -323,10 +319,17 @@ def tiled_transform(kernel, callables_table, tiling_config):
     outputDoF_init_iname = metadata.outputDoF_init_iname
     scatter_iname = metadata.scatter_iname
     doF_iname_in_basis_stage = metadata.doF_iname_in_basis_stage
+    nquad = metadata.nquad
+    n_inputDoFs = metadata.n_inputDoFs
+    n_outputDoF = metadata.n_outputDoF
 
     # }}}
 
-    1/0
+    nc = tiling_config.ncells_per_block
+    nt = tiling_config.nthreads_per_cell
+    tile_descrs = tiling_config.tile_descriptions
+    if tile_descrs == ():
+        tile_descrs = tuple((nquad, nDoF) for nDoF in n_inputDoFs) + ((n_outputDoF, nquad),)
 
     assert len(tile_descrs) == len(inputDoFs) + 1  # currently we have only outputDoF
     assert all(len(tile_descr) == 2 for tile_descr in tile_descrs)
@@ -345,11 +348,30 @@ def tiled_transform(kernel, callables_table, tiling_config):
                 address_space=lp.AddressSpace.LOCAL)
     kernel = kernel.copy(temporary_variables=new_temps)
 
-    # Duplicate inames to separate transformation logic for quadrature and basis part
-    kernel = lp.duplicate_inames(kernel, quad_iname, "tag:quadrature",
-            quad_iname_in_quad_stage)
-    kernel = lp.duplicate_inames(kernel, quad_iname, "tag:basis",
-            quad_iname_in_basis_stage)
+    # }}}
+
+    #{{{ Duplicate inames to separate transformation logic for different matvecs
+    for i, iname in enumerate(doF_inames_in_quad_stage):
+        kernel = lp.duplicate_inames(kernel, quad_iname, "tag:matvec%d" % i,
+            "irow%d" % i)
+        kernel = lp.duplicate_inames(kernel, iname, "tag:matvec%d" % i,
+            "icol%d" % i)
+
+    kernel = lp.duplicate_inames(kernel, quad_iname, "tag:matvec%d" % (i+1),
+        "icol%d" % (i+1))
+    kernel = lp.duplicate_inames(kernel, doF_iname_in_basis_stage, "tag:matvec%d" % (i+1),
+        "irow%d" % (i+1))
+
+    # }}}
+
+    # {{{ cast scalars which occur in both the matvecs as substs
+
+    scalars = frozenset().union(*(insn.write_dependency_names() for insn in
+        kernel.instructions if quad_iname in insn.within_inames))
+
+    for scalar in scalars:
+        assert kernel.temporary_variables[scalar].shape == ()
+        kernel = lp.assignment_to_subst(kernel, scalar)
 
     # }}}
 
@@ -377,23 +399,24 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
     kernel = lp.privatize_temporaries_with_inames(kernel, 'icell',
             only_var_names=evaluation_variables)
-    # from loopy.transform.batch import save_temporaries_in_loop
-    # kernel = save_temporaries_in_loop(kernel, 'icell',
-    #         evaluation_variables)
 
     # cut down the size of the number of basis coeffs written by each
     # thread(if there are multiple threads)
     kernel = lp.rename_iname(kernel, scatter_iname,
-            doF_iname_in_basis_stage, True)
+            'irow%d' % len(inputDoFs), True)
     kernel = lp.rename_iname(kernel, outputDoF_init_iname,
-            doF_iname_in_basis_stage, True)
+            'irow%d' % len(inputDoFs), True)
 
     from loopy.transform.make_scalar import remove_axis
     kernel = remove_axis(kernel, outputDoF, 0)
 
-    kernel = lp.add_dependency(kernel,
-            'writes:{}'.format(outputDoF),
-            'tag:quad_wrap_up')
+    for i, _ in enumerate(inputDoFs):
+        kernel = lp.add_dependency(kernel, 'tag:matvec%d' % (i+1),
+                'tag:matvec%d' % i)
+
+    print(kernel)
+    1/0
+
 
     if tiling_config.load_coordinates_to_shared:
         # FIXME: This configuration parameter seems unnecessary as of now. I
@@ -407,10 +430,8 @@ def tiled_transform(kernel, callables_table, tiling_config):
     # Splitting for tiles in matvec1
     # Realizing tiles in the quadrature stage
 
-
-
-
-
+    print(kernel)
+    1/0
 
 
 
