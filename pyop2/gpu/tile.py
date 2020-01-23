@@ -42,8 +42,7 @@ class TilingConfiguration(ImmutableRecord):
     def __init__(self,
             ncells_per_block,
             nthreads_per_cell,
-            t1_r, t1_c,
-            t2_r, t2_c,
+            tile_descriptions,
             load_coordinates_to_shared,
             load_input_to_shared,
             load_mats_to_shared,
@@ -53,10 +52,7 @@ class TilingConfiguration(ImmutableRecord):
         super(TilingConfiguration, self).__init__(
                 ncells_per_block=ncells_per_block,
                 nthreads_per_cell=nthreads_per_cell,
-                matvec1_row_tile_length=t1_r,
-                matvec1_col_tile_length=t1_c,
-                matvec2_row_tile_length=t2_r,
-                matvec2_col_tile_length=t2_c,
+                tile_descriptions=tile_descriptions,
                 load_coordinates_to_shared=load_coordinates_to_shared,
                 load_input_to_shared=load_input_to_shared,
                 load_mats_to_shared=load_mats_to_shared,
@@ -168,7 +164,8 @@ def work_which_should_be_done_by_passing_metadata(kernel):
     (doF_iname_in_basis_stage,), = set([insn.within_inames - frozenset(['n', quad_iname]) for insn in kernel.instructions if 'basis' in insn.tags])
 
     # Assumption: All such inames match: 'form_i(?_([0-9]+))'
-    doF_inames_in_quad_stage = set([iname.startswith('form_i') for iname in kernel.all_inames()])
+    doF_inames_in_quad_stage = set([iname for iname in kernel.all_inames() if
+        (iname.startswith('form_i') and iname != quad_iname)])
 
     # {{{ tagging the stages of the kernel
 
@@ -221,13 +218,12 @@ def work_which_should_be_done_by_passing_metadata(kernel):
                 continue
         new_insns.append(insn)
 
-    assert done_with_basis_reduction
-
     kernel = kernel.copy(instructions=new_insns)
+    assert done_with_basis_reduction
 
     # }}}
 
-    # {{{ reading info about the finite element
+    # {{{ compute nDofs, nquads
 
     nquad = int(lp.symbolic.pw_aff_to_expr(
             kernel.get_iname_bounds(quad_iname, constants_only=True).size))
@@ -235,10 +231,46 @@ def work_which_should_be_done_by_passing_metadata(kernel):
         kernel.get_iname_bounds(iname, constants_only=True).size)) for iname in
         doF_inames_in_quad_stage]
     n_outputDoF = int(lp.symbolic.pw_aff_to_expr(
-            kernel.get_iname_bounds(outputDoF,
+            kernel.get_iname_bounds(outputDoF_init_iname,
                 constants_only=True).size))
 
     # }}}
+
+    # {{{ tag the different matvecs of a kernel
+
+    from loopy.match import parse_match
+
+    i = 0
+
+    for i, inputDoF in enumerate(inputDoFs):
+        insn_id = None
+        within = parse_match("writes:{}".format(inputDoF))
+        for insn in kernel.instructions:
+            if within(kernel, insn):
+                insn_id = insn.id
+                break
+
+        assert insn_id
+        from loopy.kernel.tools import find_recursive_reverse_dependencies
+        matvec_insn_ids = find_recursive_reverse_dependencies(kernel, set([insn_id]))
+        kernel = lp.tag_instructions(kernel, 'matvec%d' % i,
+                '(' + ' or '.join(['id:%s' % matvec_insn_id for matvec_insn_id in
+                    matvec_insn_ids]) + ') and tag:quadrature')
+        vars_written_in_matvec = frozenset().union(*(
+            insn.write_dependency_names() for insn in kernel.instructions if
+            'matvec%d' % i in insn.tags))
+        quad_init_insn_ids = [insn.id for insn in kernel.instructions if
+                (insn.write_dependency_names() & vars_written_in_matvec) and
+                'quad_init' in insn.tags]
+
+        kernel = lp.tag_instructions(kernel, 'matvec%d' % i,
+                ' or '.join(['id:%s' % quad_init_insn_id for quad_init_insn_id in
+                    quad_init_insn_ids]))
+
+    # }}}
+
+    print(kernel)
+    1/0
 
     return kernel, KernelMetadata(
             quad_iname=quad_iname,
@@ -265,8 +297,18 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
     nc = tiling_config.ncells_per_block
     nt = tiling_config.nthreads_per_cell
-    t1_r, t1_c = tiling_config.matvec1_row_tile_length, tiling_config.matvec1_col_tile_length
-    t2_r, t2_c = tiling_config.matvec2_row_tile_length, tiling_config.matvec2_col_tile_length
+    tile_descrs = tiling_config.tile_descriptions
+
+    # {{{ remove noops
+
+    noop_insns = set([insn.id for insn in kernel.instructions if
+            isinstance(insn, lp.NoOpInstruction)])
+    kernel = lp.remove_instructions(kernel, noop_insns)
+
+    from loopy.transform.instruction import remove_unnecessary_deps
+    kernel = remove_unnecessary_deps(kernel)
+
+    # }}}
 
     # {{{ Inferring variables
 
@@ -283,6 +325,11 @@ def tiled_transform(kernel, callables_table, tiling_config):
     doF_iname_in_basis_stage = metadata.doF_iname_in_basis_stage
 
     # }}}
+
+    1/0
+
+    assert len(tile_descrs) == len(inputDoFs) + 1  # currently we have only outputDoF
+    assert all(len(tile_descr) == 2 for tile_descr in tile_descrs)
 
     # {{{ privatize temps for function evals and make them LOCAL
 
@@ -324,14 +371,6 @@ def tiled_transform(kernel, callables_table, tiling_config):
     from loopy.transform.data import remove_unused_axes_in_temporaries
     kernel = remove_unused_axes_in_temporaries(kernel)
 
-    # {{{ remove noops
-
-    noop_insns = set([insn.id for insn in kernel.instructions if
-            isinstance(insn, lp.NoOpInstruction)])
-    kernel = lp.remove_instructions(kernel, noop_insns)
-
-    # }}}
-
     # Realize CUDA blocks
     kernel = lp.split_iname(kernel, "n", nc,
             outer_iname="iblock", inner_iname="icell")
@@ -346,62 +385,71 @@ def tiled_transform(kernel, callables_table, tiling_config):
     # thread(if there are multiple threads)
     kernel = lp.rename_iname(kernel, scatter_iname,
             doF_iname_in_basis_stage, True)
-    kernel = lp.rename_iname(kernel, input_basis_coeff_temp,
-            basis_iname_in_basis_redn, True)
-
-    from loopy.transform.instruction import remove_unnecessary_deps
-    kernel = remove_unnecessary_deps(kernel)
+    kernel = lp.rename_iname(kernel, outputDoF_init_iname,
+            doF_iname_in_basis_stage, True)
 
     from loopy.transform.make_scalar import remove_axis
-    kernel = remove_axis(kernel, output_basis_coeff_temp, 0)
+    kernel = remove_axis(kernel, outputDoF, 0)
 
     kernel = lp.add_dependency(kernel,
-            'writes:{}'.format(output_basis_coeff_temp),
+            'writes:{}'.format(outputDoF),
             'tag:quad_wrap_up')
 
     if tiling_config.load_coordinates_to_shared:
         # FIXME: This configuration parameter seems unnecessary as of now. I
         # might choose not to support it.
         kernel = lp.privatize_temporaries_with_inames(kernel, 'icell',
-                [coords_temp])
-        kernel = lp.assignment_to_subst(kernel, coords_temp)
+                [coords])
+        kernel = lp.assignment_to_subst(kernel, coords)
         raise NotImplementedError("This might be only useful for high order"
                 " meshes.")
 
     # Splitting for tiles in matvec1
+    # Realizing tiles in the quadrature stage
+
+
+
+
+
+
+
+
     kernel = lp.split_iname(kernel, quad_iname_in_quad_stage, t1_r, outer_iname='irowtile_matvec1')
-    kernel = lp.split_iname(kernel, basis_iname_in_quad_redn, t1_c, outer_iname='icoltile_matvec1')
+    if len(doF_inames_in_quad_stage) != 1:
+        raise NotImplementedError("Fix this.")
+
+    for doF_iname in doF_inames_in_quad_stage:
+        kernel = lp.split_iname(kernel, doF_iname, t1_c, outer_iname='icoltile_matvec1')
 
     # Splitting for tiles in matvec2
-    kernel = lp.split_iname(kernel, basis_iname_in_basis_redn, t2_r, outer_iname='irowtile_matvec2')
+    kernel = lp.split_iname(kernel, doF_iname_in_basis_stage, t2_r, outer_iname='irowtile_matvec2')
     kernel = lp.split_iname(kernel, quad_iname_in_basis_stage, t2_c, outer_iname='icoltile_matvec2')
 
     # {{{ Prefetch wizardry
 
     if tiling_config.load_input_to_shared:
         kernel = lp.privatize_temporaries_with_inames(kernel, 'icell',
-                only_var_names=[input_basis_coeff_temp])
+                only_var_names=inputDoFs)
         from loopy.transform.precompute import precompute_for_single_kernel
-        # kernel = save_temporaries_in_loop(kernel, 'icell',
-        #         [input_basis_coeff_temp])
-        kernel = lp.assignment_to_subst(kernel, input_basis_coeff_temp)
-        input_prcmpt_iname = 'input_basis_prcmpt'
-        if tiling_config.tiled_prefetch_of_inputs:
-            sweep_inames = (basis_iname_in_quad_redn+'_inner', 'icell')
-            outer_inames = 'iblock,icoltile_matvec1,irowtile_matvec1'
-        else:
-            sweep_inames = ('icoltile_matvec1', basis_iname_in_quad_redn+'_inner', 'icell')
-            outer_inames = 'iblock'
-        kernel = precompute_for_single_kernel(kernel, callables_table,
-                subst_use=input_basis_coeff_subst,
-                sweep_inames=sweep_inames,
-                precompute_outer_inames=outer_inames,
-                precompute_inames=(input_prcmpt_iname, 'icell'),
-                temporary_address_space=lp.AddressSpace.LOCAL,
-                default_tag=None,
-                )
-        kernel = lp.split_iname(kernel, input_prcmpt_iname,
-                nt, inner_tag="l.0")
+        for i, inputDoF in enumerate(inputDoFs):
+            kernel = lp.assignment_to_subst(kernel, inputDoF)
+            input_prcmpt_iname = 'input_basis_prcmpt'
+            if tiling_config.tiled_prefetch_of_inputs:
+                sweep_inames = (doF_inames_in_quad_stage[i]+'_inner', 'icell')
+                outer_inames = 'iblock,icoltile_matvec1,irowtile_matvec1'
+            else:
+                sweep_inames = ('icoltile_matvec1', doF_inames_in_quad_stage[i]+'_inner', 'icell')
+                outer_inames = 'iblock'
+            kernel = precompute_for_single_kernel(kernel, callables_table,
+                    subst_use=doF_inames_in_quad_stage[i]+'_subst',
+                    sweep_inames=sweep_inames,
+                    precompute_outer_inames=outer_inames,
+                    precompute_inames=(input_prcmpt_iname, 'icell'),
+                    temporary_address_space=lp.AddressSpace.LOCAL,
+                    default_tag=None,
+                    )
+            kernel = lp.split_iname(kernel, input_prcmpt_iname,
+                    nt, inner_tag="l.0")
 
     if tiling_config.load_mats_to_shared:
         from loopy.transform.data import add_prefetch_for_single_kernel
