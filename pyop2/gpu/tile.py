@@ -175,6 +175,7 @@ def work_which_should_be_done_by_passing_metadata(kernel):
 
     new_insns = []
 
+    done_with_gather=False
     done_with_jacobi_eval = False
     done_with_quad_init = False
     done_with_quad_reduction = False
@@ -182,6 +183,12 @@ def work_which_should_be_done_by_passing_metadata(kernel):
     done_with_basis_reduction = False
 
     for insn in kernel.instructions:
+        if not done_with_gather:
+            if 'gather' not in insn.tags:
+                done_with_gather = True
+            else:
+                new_insns.append(insn)
+                continue
         if not done_with_jacobi_eval:
             if quad_iname in insn.within_inames:
                 done_with_jacobi_eval = True
@@ -268,7 +275,17 @@ def work_which_should_be_done_by_passing_metadata(kernel):
                     quad_init_insn_ids]))
 
     kernel = lp.tag_instructions(kernel, 'matvec%d' % (i+1),
-            'tag:basis_*')
+            '(reads:{0} or writes:{0})and not tag:scatter'.format(outputDoF))
+
+    # }}}
+
+    # {{{ identifying the constants
+
+    op_matrices = tuple(tv.name for tv in kernel.temporary_variable.values()
+            if tv.initializer is not None and len(tv.initializer.shape) != 1)
+    quad_weights, = [tv.name for tv in kernel.temporary_variable.values()
+            if tv.is_read_only and tv.initializer is not None and
+            len(tv.initializer.shape) == 1]
 
     # }}}
 
@@ -285,7 +302,9 @@ def work_which_should_be_done_by_passing_metadata(kernel):
             doF_iname_in_basis_stage=doF_iname_in_basis_stage,
             nquad=nquad,
             n_inputDoFs=n_inputDoFs,
-            n_outputDoF=n_outputDoF
+            n_outputDoF=n_outputDoF,
+            op_matrices=op_matrices,
+            quad_weights=quad_weights
             )
 
 
@@ -322,17 +341,32 @@ def tiled_transform(kernel, callables_table, tiling_config):
     nquad = metadata.nquad
     n_inputDoFs = metadata.n_inputDoFs
     n_outputDoF = metadata.n_outputDoF
+    op_matrices = metadata.op_matrices
+    quad_weights = metadata.quad_weights
 
     # }}}
 
     nc = tiling_config.ncells_per_block
     nt = tiling_config.nthreads_per_cell
-    tile_descrs = tiling_config.tile_descriptions
-    if tile_descrs == ():
-        tile_descrs = tuple((nquad, nDoF) for nDoF in n_inputDoFs) + ((n_outputDoF, nquad),)
+    op_tile_descrs = tiling_config.operator_tile_descriptions
+    q_tile_lens = tiling_config.quad_rowtile_lengths[:]
 
-    assert len(tile_descrs) == len(inputDoFs) + 1  # currently we have only outputDoF
-    assert all(len(tile_descr) == 2 for tile_descr in tile_descrs)
+    if op_tile_descrs == ():
+        op_tile_descrs = tuple((nquad, nDoF) for nDoF in n_inputDoFs) + ((n_outputDoF, nquad),)
+
+    if q_tile_lens == ():
+        q_tile_lens = (nquad,)
+        # if later firedrake decides to fuse the kernels then we might have
+        # multiple quadrature loops per kernel and that's the reason we are
+        # allowing a tuple input. One spec for each quadrature loop.
+
+    assert len(op_tile_descrs) == len(inputDoFs) + 1  # currently we have only outputDoF
+    assert len(q_tile_lens) == 1  # currently we have only one outputDoF
+
+    if q_tile_lens != (nquad,):
+        raise NotImplementedError("Yep, not implemented!")
+
+    assert all(len(tile_descr) == 2 for tile_descr in op_tile_descrs)
 
     # {{{ privatize temps for function evals and make them LOCAL
 
@@ -351,6 +385,7 @@ def tiled_transform(kernel, callables_table, tiling_config):
     # }}}
 
     #{{{ Duplicate inames to separate transformation logic for different matvecs
+
     for i, iname in enumerate(doF_inames_in_quad_stage):
         kernel = lp.duplicate_inames(kernel, quad_iname, "tag:matvec%d" % i,
             "irow%d" % i)
@@ -410,13 +445,11 @@ def tiled_transform(kernel, callables_table, tiling_config):
     from loopy.transform.make_scalar import remove_axis
     kernel = remove_axis(kernel, outputDoF, 0)
 
+    kernel = lp.add_dependency(kernel, 'tag:matvec0', 'tag:jacobi_eval')
+
     for i, _ in enumerate(inputDoFs):
         kernel = lp.add_dependency(kernel, 'tag:matvec%d' % (i+1),
                 'tag:matvec%d' % i)
-
-    print(kernel)
-    1/0
-
 
     if tiling_config.load_coordinates_to_shared:
         # FIXME: This configuration parameter seems unnecessary as of now. I
@@ -430,25 +463,16 @@ def tiled_transform(kernel, callables_table, tiling_config):
     # Splitting for tiles in matvec1
     # Realizing tiles in the quadrature stage
 
-    print(kernel)
-    1/0
-
-
-
-    kernel = lp.split_iname(kernel, quad_iname_in_quad_stage, t1_r, outer_iname='irowtile_matvec1')
-    if len(doF_inames_in_quad_stage) != 1:
-        raise NotImplementedError("Fix this.")
-
-    for doF_iname in doF_inames_in_quad_stage:
-        kernel = lp.split_iname(kernel, doF_iname, t1_c, outer_iname='icoltile_matvec1')
-
-    # Splitting for tiles in matvec2
-    kernel = lp.split_iname(kernel, doF_iname_in_basis_stage, t2_r, outer_iname='irowtile_matvec2')
-    kernel = lp.split_iname(kernel, quad_iname_in_basis_stage, t2_c, outer_iname='icoltile_matvec2')
+    for i, (t_r, t_c) in op_tile_descrs:
+        kernel = lp.split_iname(kernel, "irow%d" % i, t_r,
+                outer_iname='irowtile%d' % i)
+        kernel = lp.split_iname(kernel, "icol%d" % i, t_r,
+                outer_iname='icoltile%d' % i)
 
     # {{{ Prefetch wizardry
 
     if tiling_config.load_input_to_shared:
+        raise NotImplementedError("More like NotYetImplementedError.")
         kernel = lp.privatize_temporaries_with_inames(kernel, 'icell',
                 only_var_names=inputDoFs)
         from loopy.transform.precompute import precompute_for_single_kernel
@@ -479,78 +503,39 @@ def tiled_transform(kernel, callables_table, tiling_config):
         # metadata from TSFC.
         # FIXME: Sweep inames depends on the parallelization strategies for
         # both the matvecs, that needs to be taken care of.
-        const_matrices_names = set([tv.name for tv in old_temps.values() if tv.initializer is not None and len(tv.shape) > 1])
 
         vng = kernel.get_var_name_generator()
         ing = kernel.get_instruction_id_generator()
 
-        # {{{ Prefetching: QUAD PART
+        for i, (tr, tc) in enumerate(op_tile_descrs):
+            ith_matvec_stage_op_matrices = op_matrices & frozenset().union(
+                    *[insn.read_dependency_names() for insn in
+                        kernel.instructions if 'matvec%d' % i in insn.tags])
+            sweep_inames = ('irow{}_inner'.format(i), 'icol{}_inner'.format(i))
+            fetch_outer_inames = 'iblock,icoltile{0},irowtile{0}'.format(
+                    i)
 
-        quad_const_matrices = const_matrices_names & frozenset().union(*[insn.read_dependency_names() for insn in
-            kernel.instructions if 'quad_redn' in insn.tags])
-        sweep_inames = (quad_iname_in_quad_stage+'_inner',
-                basis_iname_in_quad_redn+'_inner')
-        fetch_outer_inames = 'iblock,icoltile_matvec1,irowtile_matvec1'
+            temp_names = [vng('matvec%d_cnst_mtrix_prftch' % i) for _ in
+                    ith_matvec_stage_op_matrices]
+            prefetch_inames = [vng("iprftch") for _ in range(2)]
+            for temp_name, var_name in zip(temp_names,
+                    ith_matvec_stage_op_matrices):
+                kernel = add_prefetch_for_single_kernel(kernel, callables_table,
+                        var_name=var_name,
+                        sweep_inames=sweep_inames,
+                        temporary_address_space=lp.AddressSpace.LOCAL,
+                        dim_arg_names=prefetch_inames,
+                        temporary_name=temp_name,
+                        fetch_outer_inames=fetch_outer_inames,
+                        default_tag=None,
+                        within="tag:matvec{}".format(i))
 
-        quad_prefetch_insns = []
-
-        quad_temp_names = [vng('quad_cnst_mtrix_prftch') for _ in quad_const_matrices]
-        prefetch_inames = [vng("iprftch") for _ in range(2)]
-        for temp_name, var_name in zip(quad_temp_names, quad_const_matrices):
-            quad_prefetch_insns.append(ing("quad_prftch_insn"))
-
-            kernel = add_prefetch_for_single_kernel(kernel, callables_table,
-                    var_name=var_name,
-                    sweep_inames=sweep_inames,
-                    temporary_address_space=lp.AddressSpace.LOCAL,
-                    dim_arg_names=prefetch_inames,
-                    temporary_name=temp_name,
-                    compute_insn_id=quad_prefetch_insns[-1],
-                    fetch_outer_inames=fetch_outer_inames,
-                    default_tag=None,
-                    within="tag:quad_redn")
-
-        kernel = lp.join_inames(kernel, prefetch_inames,
-                new_iname='quad_prftch_iname')
-        kernel = lp.split_iname(kernel, 'quad_prftch_iname',
-                nc*nt, outer_tag="ilp")
-        kernel = lp.split_iname(kernel, 'quad_prftch_iname_inner',
-                nt, inner_tag='l.0', outer_tag='l.1')
-
-        # }}}
-
-        # {{{ Prefetching: BASIS PART
-
-        basis_const_matrices = const_matrices_names & frozenset().union(*[insn.read_dependency_names() for insn in
-            kernel.instructions if 'basis_redn' in insn.tags])
-        basis_temp_names = [vng('basis_cnst_mtrix_prftch') for _ in basis_const_matrices]
-
-        sweep_inames = (basis_iname_in_basis_redn+'_inner',
-                quad_iname_in_basis_stage+'_inner')
-        fetch_outer_inames = 'iblock,icoltile_matvec2,irowtile_matvec2'
-
-        basis_prefetch_insns = []
-        prefetch_inames = [vng("iprftch") for _ in range(2)]
-        for temp_name, var_name in zip(basis_temp_names, basis_const_matrices):
-            basis_prefetch_insns.append(ing("basis_prftch_insn"))
-
-            kernel = add_prefetch_for_single_kernel(kernel, callables_table,
-                    var_name=var_name,
-                    sweep_inames=sweep_inames,
-                    temporary_address_space=lp.AddressSpace.LOCAL,
-                    dim_arg_names=prefetch_inames,
-                    temporary_name=temp_name,
-                    compute_insn_id=basis_prefetch_insns[-1],
-                    fetch_outer_inames=fetch_outer_inames,
-                    default_tag=None,
-                    within="tag:basis_redn")
-
-        kernel = lp.join_inames(kernel, prefetch_inames,
-                new_iname='basis_prftch_iname')
-        kernel = lp.split_iname(kernel, 'basis_prftch_iname',
-                nc*nt, outer_tag="ilp")
-        kernel = lp.split_iname(kernel, 'basis_prftch_iname_inner',
-                nt, inner_tag='l.0', outer_tag='l.1')
+            kernel = lp.join_inames(kernel, prefetch_inames,
+                    new_iname='i_matvec%d_prftch' % i)
+            kernel = lp.split_iname(kernel, 'i_matvec%d_prftch' % i,
+                    nc*nt, outer_tag="ilp")
+            kernel = lp.split_iname(kernel, 'i_matvec%d_prftch_inner' % i,
+                    nt, inner_tag='l.0', outer_tag='l.1')
 
         # }}}
 
@@ -600,7 +585,6 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
     if tiling_config.load_quad_weights_to_shared:
         from loopy.transform.data import add_prefetch_for_single_kernel
-        quad_weights, = [tv.name for tv in old_temps.values() if tv.initializer is not None and len(tv.shape) == 1]
         vng = kernel.get_var_name_generator()
         ing = kernel.get_instruction_id_generator()
         quad_weight_prefetch_insn = ing("quad_wt_prftch_insn")

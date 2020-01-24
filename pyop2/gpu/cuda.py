@@ -195,7 +195,8 @@ class JITModule(base.JITModule):
             key += (
                     configuration["gpu_cells_per_block"],
                     configuration["gpu_threads_per_cell"],
-                    configuration["gpu_tile_description"],
+                    configuration["gpu_op_tile_descriptions"],
+                    configuration["gpu_quad_rowtile_lengths"],
                     configuration["gpu_input_to_shared"],
                     configuration["gpu_quad_weights_to_shared"],
                     configuration["gpu_mats_to_shared"],
