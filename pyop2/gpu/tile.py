@@ -279,8 +279,10 @@ def work_which_should_be_done_by_passing_metadata(kernel):
                     quad_init_insn_ids]))
 
     kernel = lp.tag_instructions(kernel, 'matvec%d' % (i+1),
-            '(reads:{0} or writes:{0})and not tag:scatter'.format(outputDoF))
+            'reads:{0} or writes:{0}'.format(outputDoF))
     kernel = lp.tag_instructions(kernel, 'basis_init', 'tag:gather and'
+            ' tag:matvec%d' % (i+1))
+    kernel = lp.tag_instructions(kernel, 'basis_wrap_up', 'tag:scatter and'
             ' tag:matvec%d' % (i+1))
 
     # }}}
@@ -415,16 +417,6 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
     # }}}
 
-    # {{{ extract all the local operators as substs
-
-    for op_matrix in op_matrices:
-        subst_args = ['arg%d' % i for i in
-                range(len(kernel.temporary_variables[op_matrix].shape))]
-        template = op_matrix + '[' + ', '.join(subst_args) + ']'
-        kernel = lp.extract_subst(kernel, op_matrix+'_subst', template, subst_args)
-
-    # }}}
-
     #{{{ Duplicate inames to separate transformation logic for different matvecs
 
     for i, iname in enumerate(doF_inames_in_quad_stage):
@@ -535,7 +527,7 @@ def tiled_transform(kernel, callables_table, tiling_config):
     total_shared_vars = []
 
     if tiling_config.load_mats_to_shared:
-        from loopy.transform.precompute import precompute_for_single_kernel
+        from loopy.transform.data import add_prefetch_for_single_kernel
         #FIXME: Assuming that in all the constants the one with single axis is
         # the one corresponding to quadrature weights. fix it by passing some
         # metadata from TSFC.
@@ -552,24 +544,20 @@ def tiled_transform(kernel, callables_table, tiling_config):
                     i)
             prefetch_inames = [vng("iprftch") for _ in range(2)]
 
-            for prcmpt_from in ith_matvec_stage_op_matrices:
-                if prcmpt_from + '_subst' not in kernel.substitutions:
-                    # this might have already been prefetched from one of the
-                    # earlier
-                    assert any(prcmpt_from in k for k in matvec_stage_to_op_matrices[:i])
-                    continue
-                prcmpt_into = vng('matvec%d_cnst_mtrix_prftch' % i)
-                total_shared_vars.append(prcmpt_into)
+            for prftch_from in ith_matvec_stage_op_matrices:
+                prftch_into = vng('matvec%d_cnst_mtrix_prftch' % i)
+                total_shared_vars.append(prftch_into)
 
-                kernel = precompute_for_single_kernel(kernel, callables_table,
-                        subst_use=prcmpt_from+'_subst',
+                kernel = add_prefetch_for_single_kernel(kernel, callables_table,
+                        var_name=prftch_from,
                         sweep_inames=sweep_inames,
                         temporary_address_space=lp.AddressSpace.LOCAL,
-                        precompute_inames=prefetch_inames,
-                        temporary_name=prcmpt_into,
+                        dim_arg_names=prefetch_inames,
+                        temporary_name=prftch_into,
                         compute_insn_id=ing("prftch_matvec%d" % i),
-                        precompute_outer_inames=fetch_outer_inames,
-                        default_tag=None)
+                        fetch_outer_inames=fetch_outer_inames,
+                        default_tag=None,
+                        within='tag:matvec%d' % i)
 
             if frozenset(prefetch_inames) & kernel.all_inames():
                 # if all the local operators corresponding to this stage have
@@ -577,18 +565,9 @@ def tiled_transform(kernel, callables_table, tiling_config):
                 kernel = lp.join_inames(kernel, prefetch_inames,
                         new_iname='i_matvec%d_prftch' % i)
                 kernel = lp.split_iname(kernel, 'i_matvec%d_prftch' % i,
-                        nc*nt, outer_tag="ilp")
+                        nc*nt)  # , outer_tag="ilp")
                 kernel = lp.split_iname(kernel, 'i_matvec%d_prftch_inner' % i,
                         nt, inner_tag='l.0', outer_tag='l.1')
-
-        print(kernel)
-        print(75*'=')
-        print('icoltile0:', kernel.get_iname_bounds('icoltile0'))
-        print('icoltile1:', kernel.get_iname_bounds('icoltile1'))
-        print('irowtile0:', kernel.get_iname_bounds('irowtile0'))
-        print('irowtile1:', kernel.get_iname_bounds('irowtile1'))
-        print(75*'=')
-        exit()
 
         # {{{ alias shared mem. variables => helps in latency hiding.
 
@@ -619,22 +598,22 @@ def tiled_transform(kernel, callables_table, tiling_config):
                     if absorber != absorbee:
                         kernel = absorb_temporary_into(kernel, absorber, absorbee)
         else:
-            raise NotImplementedError()
-            # for quad_temp_name, basis_temp_name in zip(quad_temp_names,
-            #         basis_temp_names):
-            #     kernel = lp.alias_temporaries(kernel, (quad_temp_name,
-            #         basis_temp_name), synchronize_for_exclusive_use=False)
+            # Do we do this later?
+            # i.e. when quadrature weights are prefetched as well....
+            kernel = lp.alias_temporaries(kernel, total_shared_vars)
 
         # }}}
 
         # {{{ Adding dependency between the prefetch instructions
 
-        for i in range(1, len(op_tile_descrs)):
-            kernel = lp.add_dependency(kernel, "id:prftch_matvec%d*" % i,
-                    "tag:matvec%d" % (i-1))
+        # We have already added the depedencies earlier.
+        # So probably this is good to go.
 
         # FIXME: See if this is necessary...
         # we already enforce dependencies between different matvecs.
+        for i in range(len(inputDoFs)):
+            kernel = lp.add_dependency(kernel, 'id:prftch_matvec%d*' % (i+1),
+                    'tag:quad_wrap_up and tag:matvec%d' % i)
         # kernel = lp.add_dependency(kernel, 'tag:quad_redn', 'id:quad_prftch_insn*')
         # kernel = lp.add_dependency(kernel, 'tag:basis_redn', 'id:basis_prftch_insn*')
 
@@ -663,30 +642,30 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
         if tiling_config.tiled_prefetch_of_quad_weights:
             raise NotImplementedError("Not sure if this is any fruitful!")
-            sweep_inames = (quad_iname_in_quad_stage+'_inner')
-            fetch_outer_inames = 'irowtile_matvec1, iblock'
+            # sweep_inames = (quad_iname_in_quad_stage+'_inner')
+            # fetch_outer_inames = 'irowtile_matvec1, iblock'
         else:
             sweep_inames = ()
             for i in range(len(inputDoFs)):
                 sweep_inames += ('irow%d_inner' % i, 'irowtile%d' % i)
             fetch_outer_inames = 'iblock'
 
-        from loopy.transform.precompute import precompute_for_single_kernel
-        kernel = precompute_for_single_kernel(kernel, callables_table,
-                subst_use=proxy_quad_wt_scalar+'_subst',
+        from loopy.transform.data import add_prefetch_for_single_kernel
+        kernel = add_prefetch_for_single_kernel(kernel, callables_table,
+                var_name=quad_weights,
                 sweep_inames=sweep_inames,
                 temporary_address_space=lp.AddressSpace.LOCAL,
-                precompute_inames=(quad_weight_prefetch_iname,),
+                dim_arg_names=(quad_weight_prefetch_iname,),
                 temporary_name='cnst_quad_weight_prftch',
                 compute_insn_id=quad_weight_prefetch_insn,
-                precompute_outer_inames=fetch_outer_inames,
+                fetch_outer_inames=fetch_outer_inames,
                 default_tag=None)
 
-        kernel = lp.add_dependency(kernel, "tag:matvec0", "id:%s" %
+        kernel = lp.add_dependency(kernel, "tag:matvec0 and tag:quad_init", "id:%s" %
                 quad_weight_prefetch_insn)
 
         kernel = lp.split_iname(kernel, quad_weight_prefetch_iname,
-                nc * nt, outer_tag="ilp")
+                nc * nt)  # , outer_tag="ilp")
         kernel = lp.split_iname(kernel, quad_weight_prefetch_iname+'_inner',
                 nt,
                 outer_tag="l.1", inner_tag="l.0")
@@ -697,45 +676,32 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
     for i in range(len(op_tile_descrs)):
         kernel = lp.split_iname(kernel, 'irow%d_inner' % i,
-                nt, inner_tag="l.0", outer_tag="ilp")
+                nt, inner_tag="l.0")  # , outer_tag="ilp")
 
     # }}}
 
-    for i, (nDoF, (tr, tc)) in enumerate(zip(nDofs, op_tile_descrs)):
-        if tc < nDoF:
+    # post splitting, some variables must be privatized to preserve the logic
+    for i, (op_mat_col_length, (tr, tc)) in enumerate(zip(n_inputDoFs+[nquad], op_tile_descrs)):
+        if tc < op_mat_col_length:
+            from loopy.match import parse_match
             only_var_names = [
                     insn.assignee.name
                     for insn in kernel.instructions
-                    if frozenset(['quad_init', 'matvec%d' % i]) <= insn.tags]
+                    if parse_match("(tag:quad_init or tag:basis_init) and"
+                        " tag:matvec%d" % i)(kernel, insn)]
 
-            # FIXME: Fix these things.
             kernel = lp.privatize_temporaries_with_inames(kernel,
-                    quad_iname_in_quad_stage+'_inner_outer',
+                    'irow%d_inner_outer' % i,
                     only_var_names=only_var_names)
             kernel = lp.duplicate_inames(kernel,
-                    [quad_iname_in_quad_stage+'_inner_outer', ],
-                    within='tag:quad_wrap_up')
+                    ['irow%d_inner_outer' % i],
+                    within='tag:matvec%d and (tag:quad_wrap_up or tag:basis_wrap_up)' % i)
             kernel = lp.duplicate_inames(kernel,
-                    [quad_iname_in_quad_stage+'_inner_outer'],
-                    'tag:quad_init')
+                    ['irow%d_inner_outer' % i],
+                    within='tag:matvec%d and (tag:quad_init or tag:basis_init)' % i)
         else:
-            kernel = lp.add_inames_to_insn(kernel, 'icoltile_matvec%d' % i,
+            kernel = lp.add_inames_to_insn(kernel, 'icoltile%d' % i,
                 'tag:matvec%d' % i)
-
-    # before this point 't2' should be made a scalar.
-    # FIXME: Fix these things.
-
-    if t2_c < nquad:
-        kernel = lp.privatize_temporaries_with_inames(kernel,
-                basis_iname_in_basis_redn+'_inner_outer',
-                only_var_names=[output_basis_coeff_temp])
-        kernel = lp.duplicate_inames(kernel, [basis_iname_in_basis_redn+'_inner_outer'], within='tag:scatter')
-        kernel = lp.duplicate_inames(kernel,
-                [basis_iname_in_basis_redn+'_inner_outer'],
-                within='tag:gather and writes:{}'.format(output_basis_coeff_temp))
-    else:
-        kernel = lp.add_inames_to_insn(kernel, 'icoltile_matvec2',
-                'tag:scatter or (tag:gather and writes:{})'.format(output_basis_coeff_temp))
 
     # {{{ micro-optimizations
 
