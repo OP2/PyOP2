@@ -79,13 +79,12 @@ class Configuration(dict):
 
         # {{{ GPU params
 
-        "gpu_jitmodule_name": ("PYOP2_CUDA_JITMODULE_NAME", str, "wrap_form0_cell_integral_otherwise"),
         "gpu_timer": ("PYOP2_GPU_TIMER", bool, False),
         "gpu_cells_per_block": ("PYOP2_GPU_CELLS_PER_BLOCK", int, 32),
-        "gpu_layers_per_block": ("PYOP2_GPU_LAYERS_PER_BLOCK", int, 32),
         "gpu_strategy": ("PYOP2_GPU_STRATEGY", str, "scpt"),
         "gpu_threads_per_cell": ("PYOP2_GPU_THREADS_PER_CELL", int, 1),
-        "gpu_tile_description": ("PYOP2_GPU_TILE_DESCR", tuple, ()),
+        "gpu_op_tile_descriptions": ("PYOP2_GPU_OP_TILE_DESCRS", tuple, ()),
+        "gpu_quad_rowtile_lengths": ("PYOP2_GPU_QUAD_ROWTILE_LENGTHS", tuple, ()),
         "gpu_coords_to_shared": ("PYOP2_GPU_COORDS_TO_SHARED", bool, False),
         "gpu_input_to_shared": ("PYOP2_GPU_INPUT_TO_SHARED", bool, False),
         "gpu_mats_to_shared": ("PYOP2_GPU_MATS_TO_SHARED", bool, False),

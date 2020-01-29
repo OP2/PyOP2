@@ -2,7 +2,10 @@
 #
 # PyOP2 is Copyright (c) 2012, Imperial College London and
 # others. Please see the AUTHORS file in the main source directory for
-# a full list of copyright holders.  All rights reserved.  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions
+# a full list of copyright holders.  All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
 # are met:
 #
 #     * Redistributions of source code must retain the above copyright
@@ -573,7 +576,8 @@ def generate_gpu_kernel(program, args=None, argshapes=None):
                     program.callables_table,
                     TilingConfiguration(configuration["gpu_cells_per_block"],
                         configuration["gpu_threads_per_cell"],
-                        configuration["gpu_tile_description"],
+                        configuration["gpu_op_tile_descriptions"],
+                        configuration["gpu_quad_rowtile_lengths"],
                         configuration["gpu_coords_to_shared"],
                         configuration["gpu_input_to_shared"],
                         configuration["gpu_mats_to_shared"],
