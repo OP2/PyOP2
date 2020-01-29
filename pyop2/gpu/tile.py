@@ -537,15 +537,15 @@ def tiled_transform(kernel, callables_table, tiling_config):
         vng = kernel.get_var_name_generator()
         ing = kernel.get_instruction_id_generator()
 
-        for i, (tr, tc) in enumerate(op_tile_descrs):
-            ith_matvec_stage_op_matrices = matvec_stage_to_op_matrices[i]
-            sweep_inames = ('irow{}_inner'.format(i), 'icol{}_inner'.format(i))
+        for istage, (tr, tc) in enumerate(op_tile_descrs):
+            sweep_inames = ('irow{}_inner'.format(istage),
+                    'icol{}_inner'.format(istage))
             fetch_outer_inames = 'iblock,icoltile{0},irowtile{0}'.format(
-                    i)
+                    istage)
             prefetch_inames = [vng("iprftch") for _ in range(2)]
 
-            for prftch_from in ith_matvec_stage_op_matrices:
-                prftch_into = vng('matvec%d_cnst_mtrix_prftch' % i)
+            for i_op_pos, prftch_from in enumerate(matvec_stage_to_op_matrices[istage]):
+                prftch_into = vng('matvec%d_cnst_mtrix_prftch' % istage)
                 total_shared_vars.append(prftch_into)
 
                 kernel = add_prefetch_for_single_kernel(kernel, callables_table,
@@ -554,19 +554,37 @@ def tiled_transform(kernel, callables_table, tiling_config):
                         temporary_address_space=lp.AddressSpace.LOCAL,
                         dim_arg_names=prefetch_inames,
                         temporary_name=prftch_into,
-                        compute_insn_id=ing("prftch_matvec%d" % i),
+                        compute_insn_id=ing("prftch_matvec%d" % istage),
                         fetch_outer_inames=fetch_outer_inames,
                         default_tag=None,
-                        within='tag:matvec%d' % i)
+                        within='tag:matvec%d' % istage)
+
+                new_temps = kernel.temporary_variables.copy()
+
+                lx, ly = kernel.temporary_variables[prftch_into].shape
+                assert lx*ly == tr*tc
+                new_temps[prftch_into] = (
+                        kernel.temporary_variables[prftch_into].copy(
+                            base_storage='prftch_matrix_base',
+                            offset=i_op_pos*tr*tc,
+                            shape=((i_op_pos+1)*lx, ly)
+                            ))
+
+                kernel = kernel.copy(temporary_variables=new_temps)
+
+            kernel = lp.add_nosync(kernel, source='id:prftch_matvec%d*' % istage,
+                    sink='id:prftch_matvec%d*' % istage,
+                    scope='local', empty_ok=True)
 
             if frozenset(prefetch_inames) & kernel.all_inames():
                 # if all the local operators corresponding to this stage have
                 # been precomputed earlier.
                 kernel = lp.join_inames(kernel, prefetch_inames,
-                        new_iname='i_matvec%d_prftch' % i)
-                kernel = lp.split_iname(kernel, 'i_matvec%d_prftch' % i,
-                        nc*nt)  # , outer_tag="ilp")
-                kernel = lp.split_iname(kernel, 'i_matvec%d_prftch_inner' % i,
+                        new_iname='i_matvec%d_prftch' % istage)
+                kernel = lp.split_iname(kernel, 'i_matvec%d_prftch' % istage,
+                        nc*nt, outer_tag="unr")
+                kernel = lp.split_iname(kernel,
+                        'i_matvec%d_prftch_inner' % istage,
                         nt, inner_tag='l.0', outer_tag='l.1')
 
         # {{{ alias shared mem. variables => helps in latency hiding.
@@ -598,9 +616,8 @@ def tiled_transform(kernel, callables_table, tiling_config):
                     if absorber != absorbee:
                         kernel = absorb_temporary_into(kernel, absorber, absorbee)
         else:
-            # Do we do this later?
-            # i.e. when quadrature weights are prefetched as well....
-            kernel = lp.alias_temporaries(kernel, total_shared_vars)
+            pass
+            # kernel = lp.alias_temporaries(kernel, total_shared_vars)
 
         # }}}
 
@@ -665,7 +682,7 @@ def tiled_transform(kernel, callables_table, tiling_config):
                 quad_weight_prefetch_insn)
 
         kernel = lp.split_iname(kernel, quad_weight_prefetch_iname,
-                nc * nt)  # , outer_tag="ilp")
+                nc * nt, outer_tag="unr")
         kernel = lp.split_iname(kernel, quad_weight_prefetch_iname+'_inner',
                 nt,
                 outer_tag="l.1", inner_tag="l.0")
@@ -676,7 +693,7 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
     for i in range(len(op_tile_descrs)):
         kernel = lp.split_iname(kernel, 'irow%d_inner' % i,
-                nt, inner_tag="l.0")  # , outer_tag="ilp")
+                nt, inner_tag="l.0", outer_tag="unr")
 
     # }}}
 
