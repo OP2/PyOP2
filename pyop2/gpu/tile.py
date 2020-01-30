@@ -572,20 +572,20 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
                 kernel = kernel.copy(temporary_variables=new_temps)
 
+            kernel = lp.add_dependency(kernel,
+                    'tag:matvec%d and (tag:quad_redn or tag:basis_redn)' % istage,
+                    'id:prftch_matvec%d*' % istage)
             kernel = lp.add_nosync(kernel, source='id:prftch_matvec%d*' % istage,
                     sink='id:prftch_matvec%d*' % istage,
-                    scope='local', empty_ok=True)
+                    scope='local', empty_ok=True, force=True)
 
-            if frozenset(prefetch_inames) & kernel.all_inames():
-                # if all the local operators corresponding to this stage have
-                # been precomputed earlier.
-                kernel = lp.join_inames(kernel, prefetch_inames,
-                        new_iname='i_matvec%d_prftch' % istage)
-                kernel = lp.split_iname(kernel, 'i_matvec%d_prftch' % istage,
-                        nc*nt, outer_tag="unr")
-                kernel = lp.split_iname(kernel,
-                        'i_matvec%d_prftch_inner' % istage,
-                        nt, inner_tag='l.0', outer_tag='l.1')
+            kernel = lp.join_inames(kernel, prefetch_inames,
+                    new_iname='i_matvec%d_prftch' % istage)
+            kernel = lp.split_iname(kernel, 'i_matvec%d_prftch' % istage,
+                    nc*nt, outer_tag="unr")
+            kernel = lp.split_iname(kernel,
+                    'i_matvec%d_prftch_inner' % istage,
+                    nt, inner_tag='l.0', outer_tag='l.1')
 
         # {{{ alias shared mem. variables => helps in latency hiding.
 
