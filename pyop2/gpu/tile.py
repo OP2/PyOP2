@@ -95,10 +95,11 @@ class KernelMetadata(ImmutableRecord):
         assert isinstance(kwargs["op_matrices"], frozenset)
         assert isinstance(kwargs["quad_weights"], str)
         assert isinstance(kwargs["matvec_stage_to_op_matrices"], list)
+        assert isinstance(kwargs["evaluation_variables"], frozenset)
 
         # FIXME: non-obvious styling
         # just choose the lengthy route
-        assert len(kwargs) == 14
+        assert len(kwargs) == 15
         super(KernelMetadata, self).__init__(**kwargs)
 
 
@@ -310,6 +311,9 @@ def work_which_should_be_done_by_passing_metadata(kernel):
 
     # }}}
 
+    evaluation_variables = (frozenset().union(*[insn.write_dependency_names() for insn in kernel.instructions if 'quad_wrap_up' in insn.tags])
+            & set().union(*[insn.read_dependency_names() for insn in kernel.instructions if 'basis' in insn.tags]))
+
     return kernel, KernelMetadata(
             quad_iname=quad_iname,
             inputDoFs=inputDoFs,
@@ -324,7 +328,8 @@ def work_which_should_be_done_by_passing_metadata(kernel):
             n_outputDoF=n_outputDoF,
             op_matrices=op_matrices,
             quad_weights=quad_weights,
-            matvec_stage_to_op_matrices=matvec_stage_to_op_matrices
+            matvec_stage_to_op_matrices=matvec_stage_to_op_matrices,
+            evaluation_variables=evaluation_variables
             )
 
 
@@ -363,6 +368,7 @@ def tiled_transform(kernel, callables_table, tiling_config):
     op_matrices = metadata.op_matrices
     quad_weights = metadata.quad_weights
     matvec_stage_to_op_matrices = metadata.matvec_stage_to_op_matrices
+    evaluation_variables = metadata.evaluation_variables
 
     # }}}
 
@@ -383,20 +389,19 @@ def tiled_transform(kernel, callables_table, tiling_config):
     assert len(op_tile_descrs) == len(inputDoFs) + 1  # currently we have only outputDoF
     assert len(q_tile_lens) == 1  # currently we have only one outputDoF
 
-    if q_tile_lens != (nquad,):
-        raise NotImplementedError("Yep, not implemented!")
+    kernel = lp.split_iname(kernel, quad_iname, q_tile_lens[0],
+            outer_iname='iquad_tile')
+    kernel = lp.rename_iname(kernel, quad_iname+"_inner", quad_iname)
 
     assert all(len(tile_descr) == 2 for tile_descr in op_tile_descrs)
 
     # {{{ privatize temps for function evals and make them LOCAL
 
-    #FIXME: Need these variables from TSFC's metadata
-    evaluation_variables = (set().union(*[insn.write_dependency_names() for insn in kernel.instructions if 'quad_wrap_up' in insn.tags])
-            & set().union(*[insn.read_dependency_names() for insn in kernel.instructions if 'basis' in insn.tags]))
-
     kernel = lp.privatize_temporaries_with_inames(kernel, quad_iname,
             evaluation_variables)
     new_temps = kernel.temporary_variables.copy()
+    # FIXME: converting to shared is not needed when the quadrature count is 1.
+    # and probably when the nt == 1
     for eval_var in evaluation_variables:
         new_temps[eval_var] = new_temps[eval_var].copy(
                 address_space=lp.AddressSpace.LOCAL)
@@ -497,7 +502,6 @@ def tiled_transform(kernel, callables_table, tiling_config):
         kernel = lp.split_iname(kernel, "icol%d" % i, t_c,
                 outer_iname='icoltile%d' % i)
 
-
     # {{{ Prefetch inputDoFs
 
     if tiling_config.load_input_to_shared:
@@ -545,7 +549,7 @@ def tiled_transform(kernel, callables_table, tiling_config):
         for istage, (tr, tc) in enumerate(op_tile_descrs):
             sweep_inames = ('irow{}_inner'.format(istage),
                     'icol{}_inner'.format(istage))
-            fetch_outer_inames = 'iblock,icoltile{0},irowtile{0}'.format(
+            fetch_outer_inames = 'iblock,iquad_tile,icoltile{0},irowtile{0}'.format(
                     istage)
             prefetch_inames = [vng("iprftch") for _ in range(2)]
 
@@ -587,7 +591,7 @@ def tiled_transform(kernel, callables_table, tiling_config):
             kernel = lp.join_inames(kernel, prefetch_inames,
                     new_iname='i_matvec%d_prftch' % istage)
             kernel = lp.split_iname(kernel, 'i_matvec%d_prftch' % istage,
-                    nc*nt, outer_tag="unr")
+                    nc*nt)  # , outer_tag="unr")
             kernel = lp.split_iname(kernel,
                     'i_matvec%d_prftch_inner' % istage,
                     nt, inner_tag='l.0', outer_tag='l.1')
@@ -670,7 +674,7 @@ def tiled_transform(kernel, callables_table, tiling_config):
             sweep_inames = ()
             for i in range(len(inputDoFs)):
                 sweep_inames += ('irow%d_inner' % i, 'irowtile%d' % i)
-            fetch_outer_inames = 'iblock'
+            fetch_outer_inames = 'iblock,iquad_tile'
 
         from loopy.transform.data import add_prefetch_for_single_kernel
         kernel = add_prefetch_for_single_kernel(kernel, callables_table,
@@ -687,7 +691,7 @@ def tiled_transform(kernel, callables_table, tiling_config):
                 quad_weight_prefetch_insn)
 
         kernel = lp.split_iname(kernel, quad_weight_prefetch_iname,
-                nc * nt, outer_tag="unr")
+                nc * nt)  # , outer_tag="unr")
         kernel = lp.split_iname(kernel, quad_weight_prefetch_iname+'_inner',
                 nt,
                 outer_tag="l.1", inner_tag="l.0")
@@ -698,13 +702,16 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
     for i in range(len(op_tile_descrs)):
         kernel = lp.split_iname(kernel, 'irow%d_inner' % i,
-                nt, inner_tag="l.0", outer_tag="unr")
+                nt, inner_tag="l.0")  # , outer_tag="unr")
 
     # }}}
 
+
     # post splitting, some variables must be privatized to preserve the logic
     for i, (op_mat_col_length, (tr, tc)) in enumerate(zip(n_inputDoFs+[nquad], op_tile_descrs)):
-        if tc < op_mat_col_length:
+        #FIXME: This condition should be better than this.
+        if tc < op_mat_col_length or ((i == len(inputDoFs) and
+                q_tile_lens[0] != nquad)):
             from loopy.match import parse_match
             only_var_names = [
                     insn.assignee.name
@@ -724,6 +731,21 @@ def tiled_transform(kernel, callables_table, tiling_config):
         else:
             kernel = lp.add_inames_to_insn(kernel, 'icoltile%d' % i,
                 'tag:matvec%d' % i)
+
+    if q_tile_lens[0] != nquad:
+        # essentially privatize irow_tileblahblah for outputDoF.
+        kernel = lp.privatize_temporaries_with_inames(kernel,
+                'irowtile%d' % len(inputDoFs),
+                only_var_names=[outputDoF])
+        kernel = lp.duplicate_inames(kernel,
+                'irowtile%d' % len(inputDoFs),
+                within='tag:basis_wrap_up')
+        kernel = lp.duplicate_inames(kernel,
+                'irowtile%d' % len(inputDoFs),
+                within='tag:basis_init')
+        kernel = lp.remove_dependency(kernel,
+                'tag:basis_init',
+                'tag:quad_wrap_up')
 
     # {{{ micro-optimizations
 
