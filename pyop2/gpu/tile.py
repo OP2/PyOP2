@@ -168,10 +168,15 @@ def work_which_should_be_done_by_passing_metadata(kernel):
     (doF_iname_in_basis_stage,), = set([insn.within_inames - frozenset(['n', quad_iname]) for insn in kernel.instructions if 'basis' in insn.tags])
 
     doF_inames_in_quad_stage = []
+    real_inputDoFs = []
     for inputDoF in inputDoFs:
         iname, = frozenset().union(*(insn.within_inames for insn in
-            kernel.instructions if inputDoF in insn.read_dependency_names())) - frozenset(["n", quad_iname])
-        doF_inames_in_quad_stage.append(iname)
+            kernel.instructions if inputDoF in insn.read_dependency_names())) - frozenset(["n", quad_iname]) or (None,)
+        if iname:
+            doF_inames_in_quad_stage.append(iname)
+            real_inputDoFs.append(inputDoF)
+
+    inputDoFs = real_inputDoFs[:]
 
     # {{{ tagging the stages of the kernel
 
