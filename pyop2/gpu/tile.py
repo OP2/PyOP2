@@ -399,13 +399,10 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
     kernel = lp.privatize_temporaries_with_inames(kernel, quad_iname,
             evaluation_variables)
-    new_temps = kernel.temporary_variables.copy()
-    # FIXME: converting to shared is not needed when the quadrature count is 1.
-    # and probably when the nt == 1
-    for eval_var in evaluation_variables:
-        new_temps[eval_var] = new_temps[eval_var].copy(
-                address_space=lp.AddressSpace.LOCAL)
-    kernel = kernel.copy(temporary_variables=new_temps)
+
+    # FIXME: Probably needs some fixing when quad_tile_lens = (nquad,)
+    kernel = lp.set_temporary_scope(kernel, evaluation_variables,
+            lp.AddressSpace.LOCAL)
 
     # }}}
 
@@ -706,7 +703,6 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
     # }}}
 
-
     # post splitting, some variables must be privatized to preserve the logic
     for i, (op_mat_col_length, (tr, tc)) in enumerate(zip(n_inputDoFs+[nquad], op_tile_descrs)):
         #FIXME: This condition should be better than this.
@@ -746,6 +742,8 @@ def tiled_transform(kernel, callables_table, tiling_config):
         kernel = lp.remove_dependency(kernel,
                 'tag:basis_init',
                 'tag:quad_wrap_up')
+    else:
+        kernel = lp.add_inames_to_insn(kernel, 'iquad_tile', 'tag:matvec*')
 
     # {{{ micro-optimizations
 
@@ -832,11 +830,12 @@ class AutoTiler:
 
         return len(evaluation_variables)
 
-    def get_local_barriers(self, t1_r, t1_c, t2_r, t2_c):
+    def get_local_barriers(self, tile_descrs, quad_rowtile_length):
         """
         Returns the number of block level synchronization instructions in a
         single kernel execution.
         """
+        (t1_r, t1_c), (t2_r, t2_c) = tile_descrs
         return (
                 ceil(self.nquad/t1_r) * ceil(self.nbasis/t1_c)
                 + ceil(self.nbasis/t2_r) * ceil(self.nquad/t2_c))
@@ -848,8 +847,7 @@ class AutoTiler:
 
         cells_per_block = tiling_config.ncells_per_block
         threads_per_cell = tiling_config.nthreads_per_cell
-        t1_r, t1_c = tiling_config.matvec1_row_tile_length, tiling_config.matvec1_col_tile_length
-        t2_r, t2_c = tiling_config.matvec2_row_tile_length, tiling_config.matvec2_col_tile_length
+        (t1_r, t1_c), (t2_r, t2_c) = tiling_config.operator_tile_descriptions
 
         # {{{ computing shared mem usage per block
 
@@ -880,8 +878,7 @@ class AutoTiler:
         """
         cells_per_block = tiling_config.ncells_per_block
         threads_per_cell = tiling_config.nthreads_per_cell
-        t1_r = tiling_config.matvec1_row_tile_length
-        t2_r = tiling_config.matvec2_row_tile_length
+        (t1_r, t1_c), (t2_r, t2_c) = tiling_config.operator_tile_descriptions
 
         # wasted work in the function evaluation stage
         wasted_work = self.nbasis*(
@@ -918,13 +915,13 @@ class AutoTiler:
 
         n_c = tiling_config.ncells_per_block
         n_t = tiling_config.nthreads_per_cell
-        t1_r, t1_c = tiling_config.matvec1_row_tile_length, tiling_config.matvec1_col_tile_length
-        t2_r, t2_c = tiling_config.matvec2_row_tile_length, tiling_config.matvec2_col_tile_length
+        (t1_r, t1_c), (t2_r, t2_c) = tiling_config.operator_tile_descriptions
         n_w = self.actual_warps_per_sm(tiling_config)
 
         if n_w == 0:
             return float("inf")
-        n_lb = self.get_local_barriers(t1_r, t1_c, t2_r, t2_c)
+        n_lb = self.get_local_barriers(tiling_config.operator_tile_descriptions,
+                tiling_config.quad_rowtile_lengths)
         n_blocks = (n_w * 32)/(n_t*n_c)
 
         # nb, nq = self.nbasis, self.nquad
@@ -945,6 +942,8 @@ class AutoTiler:
 
         tiles = []
 
+        quad_rowtile_length = ()
+
         for i in range(1, ceil(sqrt(self.nbasis))+1):
             t1_c = ceil(self.nbasis/i)
             for j in range(1, ceil(sqrt(self.nquad))+1):
@@ -954,10 +953,11 @@ class AutoTiler:
                     for l in range(1, ceil(sqrt(self.nquad))+1):
                         t2_c = ceil(self.nquad/l)
                         if abs(t1_r*t1_c-t2_r*t2_c)/max(t1_r*t1_c, t2_c*t2_r) < 0.2:
-                            tiles.append((t1_r, t1_c, t2_r, t2_c))
+                            tiles.append(((t1_r, t1_c), (t2_r, t2_c)))
 
         # sort by least sync-ed config first
-        tiles.sort(key=lambda T: self.get_local_barriers(*T))
+        tiles.sort(key=lambda T: self.get_local_barriers(T,
+            quad_rowtile_length))
 
         params = []
 
@@ -966,14 +966,14 @@ class AutoTiler:
                 best_cells = 10000
                 for cells in threads_to_cells[threads]:
                     if (self.estimated_exec_time(TilingConfiguration(cells, threads,
-                        *tile, False, False, True, True, False, False)) < self.estimated_exec_time(
-                            TilingConfiguration(best_cells, threads, *tile,
-                                False, False, True, True, False, False))):
+                        tile, quad_rowtile_length, False, False, True, True, False, False)) < self.estimated_exec_time(
+                            TilingConfiguration(best_cells, threads, tile,
+                                quad_rowtile_length, False, False, True, True, False, False))):
                         best_cells = cells
 
                 if best_cells != 10000:
-                    params.append(TilingConfiguration(best_cells, threads, *tile,
-                                False, False, True, True, False, False))
+                    params.append(TilingConfiguration(best_cells, threads, tile,
+                                (), False, False, True, True, False, False))
 
         # sort the parameters with highest occupancy.
         params.sort(key=lambda P:  self.estimated_exec_time(P))
