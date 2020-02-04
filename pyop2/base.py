@@ -2636,13 +2636,13 @@ class ComposedMap(Map, ObjectCached):
             self._values = maps[0]._values
         self.shape = (self.iterset.total_size, self.arity)
         # TODO: extruded offsets
-        self._offset = None
+        self._offset = maps[0]._offset
         self.dtype = maps[0].dtype
         self._cache = {}
 
-        print("remove this later")
+        print("remove this later, _globalcount?")
         self._name = "composedmaptest"
-
+        #Map._globalcount += 1
         self._initialized = True
 
     @classmethod
@@ -3107,11 +3107,11 @@ class Sparsity(ObjectCached):
                 yield s
 
     def __str__(self):
-        return "OP2 Sparsity: dsets %s, rmaps %s, cmaps %s, name %s" % \
-               (self._dsets, self._rmaps, self._cmaps, self._name)
+        return "OP2 Sparsity: dsets %s, rmaps %s, cmaps %s, maps_ij %s, name %s" % \
+               (self._dsets, self._rmaps, self._cmaps, self._maps_ij, self._name)
 
     def __repr__(self):
-        return "Sparsity(%r, %r, %r)" % (self.dsets, self.maps, self.name)
+        return "Sparsity(%r, %r, %r, maps_ij=%r)" % (self.dsets, self.maps, self.name, self._maps_ij)
 
     @cached_property
     def nnz(self):
@@ -3147,6 +3147,11 @@ class Sparsity(ObjectCached):
         for maps in self.maps:
             if tuple(other) <= maps:
                 return True
+
+        for maps_i in self._maps_ij:
+            for maps in maps_i:
+                if other in maps:
+                    return True
 
         return False
 
