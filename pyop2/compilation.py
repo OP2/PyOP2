@@ -422,7 +422,7 @@ class CUDACompiler(Compiler):
     :kwarg comm: Optional communicator to compile the code on (only
     rank 0 compiles code) (defaults to COMM_WORLD)."""
     def __init__(self, cppargs=[], ldargs=[], cpp=False, comm=None):
-        cppargs = ["-use_fast_math", "-w"]
+        cppargs = ["-use_fast_math", "-w"]  # , "-lineinfo"]
         # TODO: Should we get the nvcc from petsc config?
         cc = "nvcc"
 
