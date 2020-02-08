@@ -607,7 +607,7 @@ def tiled_transform(kernel, callables_table, tiling_config):
             kernel = lp.join_inames(kernel, prefetch_inames,
                     new_iname='i_matvec%d_prftch' % istage)
             kernel = lp.split_iname(kernel, 'i_matvec%d_prftch' % istage,
-                    nc*nt, outer_tag="ilp")
+                    nc*nt)  # , outer_tag="ilp")
             kernel = lp.split_iname(kernel,
                     'i_matvec%d_prftch_inner' % istage,
                     nt, inner_tag='l.0', outer_tag='l.1')
@@ -707,7 +707,7 @@ def tiled_transform(kernel, callables_table, tiling_config):
                 quad_weight_prefetch_insn)
 
         kernel = lp.split_iname(kernel, quad_weight_prefetch_iname,
-                nc * nt, outer_tag="ilp")
+                nc * nt)  # , outer_tag="ilp")
         kernel = lp.split_iname(kernel, quad_weight_prefetch_iname+'_inner',
                 nt,
                 outer_tag="l.1", inner_tag="l.0")
@@ -948,9 +948,8 @@ class AutoTiler:
 
         # nb, nq = self.nbasis, self.nquad
         # return (n_t*nb + nb*nq/(n_t*n_c) + nb*nq*(n_t+n_c)/20.0)/n_w
+        # return n_lb/n_blocks
         return 4.0/n_w + n_lb/n_blocks
-        return 1.0/(float(n_w) + 0.1/n_lb)
-        return 1/(min(n_blocks, 16)**2)
 
     def get_candiate_configs(self):
 
@@ -1050,6 +1049,7 @@ class AutoTiler:
             block = tuple(int(evaluate(llens[i], {"start": args[0], "end":
                 args[1]})) if i < len(llens) else 1
                     for i in range(3))
+
             executable_knl = SourceModule(code, options=["-use_fast_math", "-w"]).get_function(kernel.name)
             executable_knl.prepare("i"*2+"P"*len(args[2:])+"P"*len(extra_args))
             extra_args = tuple(self.convert_numpy_arrays_to_cuda_mems(tuple(arg)) for arg
