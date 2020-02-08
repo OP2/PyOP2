@@ -1012,24 +1012,23 @@ class AutoTiler:
         return ary_gpu
 
     def __call__(self, args, argshapes):
-
         best_performing_time = float("inf")
         best_performing_config = None
         nrounds = 15
         nwarmup = 5
 
-        copied_args = args[:2]
-        for i, arg in enumerate(self.fem_program.args[2:]):
+        copied_args = ()
+        for i, arg in enumerate(self.fem_program.args):
             if arg.name in self.fem_program.root_kernel.get_written_variables():
                 # arg is written during kernel execution => make a copy
                 arg_gpu = cuda.mem_alloc(
                         int(np.prod(argshapes[i])*arg.dtype.itemsize))
-                cuda.memcpy_dtod(src=args[i+2], dest=arg_gpu,
+                cuda.memcpy_dtod(src=args[i], dest=arg_gpu,
                         size=int(np.prod(argshapes[i])*arg.dtype.itemsize))
                 copied_args += (arg_gpu,)
             else:
                 # arg is read only => pass the same arg to the knl
-                copied_args += (args[i+2],)
+                copied_args += (args[i],)
 
         from pyop2.gpu.tile import tiled_transform
 
