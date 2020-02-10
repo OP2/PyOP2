@@ -31,6 +31,7 @@ we are going from GEM representation to loopy kernel.
   the device's address space while during explicit assembly it should be a part
   of host's address space.(similarly the kernel execution in matrix free
   happens on device which is not the case for explicit assembly)
+- Transformation strategy selection, sufficient?
 - This might lead to some refactoring in ~firedrake~, especially where the
   objects are instantiated.
 - Backend switching would be a bit tricky for subclasses like [[https://github.com/firedrakeproject/firedrake/blob/3498fdf3e33721adda448755addc11c20bef75a9/firedrake/preconditioners/patch.py#L77][here.]]
