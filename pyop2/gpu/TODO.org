@@ -1,8 +1,8 @@
 * Limitations/TODOs
 ** Changes in TSFC so that PyOP2 could have a better understanding of the variable names
-- [[https://github.com/OP2/PyOP2/blob/630e55118013966e84dcc62328c45fc9061196e6/pyop2/gpu/tile.py#L65-L79][Currently]] variable names have been hard coded for CG type FE kernel on
-  triangular meshes.
-- Once this has been done it would then be reasonable to tackle other elements
+- [[https://github.com/OP2/PyOP2/blob/f50af5e819e726b97b1997f00b1ad4f66b0b574b/pyop2/gpu/tile.py#L117][Currently]], we go through a phase of metadata inference assuming a homogeneity
+  of kernel structure.
+- Once this has been done it would then be reasonable to tackle more elements
 
 *** Information to be fed from TSFC
 - [ ] variable name of the action input
@@ -38,7 +38,7 @@ we are going from GEM representation to loopy kernel.
 
 ** Global reduction kernels. For ex. ~assemble(dot(f,f)*dx)~
 - Currently all the threads write to a single memory location atomically,
-  thereby losing concurrency.
+  thereby losing some concurrency.
 - Possible solution:
     - Fix the block size, say 256.
     - Map single cell to single thread.
@@ -47,9 +47,8 @@ we are going from GEM representation to loopy kernel.
     - Finally another reduction across the newly created intermediary variable.
     - One starting step would be to map the '+=' to a loopy's sum node.
 
-** Do we need atomic additions of the output DoFs for a DG kernel?
-
-** Tiling transformation logic fails for low orders
+** Atomic scatter redutions for DG elements, necessary?
+** Inner loop parallelization logic fails for low orders
 - The received TSFC kernel has a slightly different representation at low orders
   like P_0, P_1, DG0, DG1, etc. because some loops are unrolled, causing to
   diverge from the "assumed" template of all the kernel's loop structures.
