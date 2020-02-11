@@ -50,7 +50,7 @@ we are going from GEM representation to loopy kernel.
 ** Do we need atomic additions of the output DoFs for a DG kernel?
 
 ** Tiling transformation logic fails for low orders
-- The TSFC kernel receive has a slightly different representation at low orders
+- The received TSFC kernel has a slightly different representation at low orders
   like P_0, P_1, DG0, DG1, etc. because some loops are unrolled, causing to
   diverge from the "assumed" template of all the kernel's loop structures.
 
