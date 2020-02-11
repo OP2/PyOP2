@@ -219,6 +219,7 @@ class Compiler(object):
                 # combination (disappears without
                 # -fno-tree-loop-vectorize!)
                 return ["-fno-tree-loop-vectorize", "-mno-avx512f"]
+
         return []
 
     @collective
@@ -349,6 +350,14 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
             # Load resulting library
             return ctypes.CDLL(soname)
 
+    def get_function(self, code, extension, fn_name, argtypes, restype):
+        dll = self.get_so(code, extension)
+
+        fn = getattr(dll, fn_name)
+        fn.argtypes = code.argtypes
+        fn.restype = restype
+        return fn
+
 
 class MacCompiler(Compiler):
     """A compiler for building a shared library on mac systems.
@@ -405,6 +414,97 @@ class LinuxCompiler(Compiler):
 
         super(LinuxCompiler, self).__init__(cc, cppargs=cppargs, ldargs=ldargs,
                                             cpp=cpp, comm=comm)
+
+
+class CUDACompiler(Compiler):
+    """Compiler for the Nvidia CUDA backend.
+
+    :arg cppargs: A list of arguments to pass to the nvcc compiler
+         (optional).
+    :arg ldargs: A list of arguments to pass to the linker (optional).
+    :arg cpp: Are we actually using the C++ compiler?
+    :kwarg comm: Optional communicator to compile the code on (only
+    rank 0 compiles code) (defaults to COMM_WORLD)."""
+    def __init__(self, cppargs=[], ldargs=[], cpp=False, comm=None):
+        cppargs = ["-use_fast_math", "-w"]  # , "-lineinfo"]
+        # TODO: Should we get the nvcc from petsc config?
+        cc = "nvcc"
+
+        super(CUDACompiler, self).__init__(cc, cppargs=cppargs, ldargs=[],
+                                            cpp=False, comm=comm)
+
+    @collective
+    def get_source_module(self, jitmodule):
+        """Build a shared library and load it
+
+        :arg jitmodule: The JIT Module which can generate the code to compile.
+        :arg extension: extension of the source file (c, cpp).
+
+        Returns a :class:`ctypes.CDLL` object of the resulting shared
+        library."""
+
+        from pycuda.compiler import SourceModule
+
+        # Determine cache key
+        hsh = md5(str(jitmodule.cache_key).encode())
+        hsh.update(self._cc.encode())
+        hsh.update("".join(self._cppargs).encode())
+        hsh.update("".join(self._ldargs).encode())
+
+        basename = hsh.hexdigest()
+
+        cachedir = configuration['cache_dir']
+
+        dirpart, basename = basename[:2], basename[2:]
+        cachedir = os.path.join(cachedir, dirpart)
+        cname = os.path.join(cachedir, "%s_code.cu" % basename)
+
+        if configuration['check_src_hashes'] or configuration['debug']:
+            matching = self.comm.allreduce(basename, op=_check_op)
+            if matching != basename:
+                # Dump all src code to disk for debugging
+                output = os.path.join(cachedir, "mismatching-kernels")
+                srcfile = os.path.join(output, "src-rank%d.c" % self.comm.rank)
+                if self.comm.rank == 0:
+                    os.makedirs(output, exist_ok=True)
+                self.comm.barrier()
+                with open(srcfile, "w") as f:
+                    f.write(jitmodule.code_to_compile)
+                self.comm.barrier()
+                raise CompilationError("Generated code differs across ranks (see output in %s)" % output)
+
+        if os.path.isfile(cname):
+            # Are we in the cache?
+            with open(cname, 'r') as f:
+                source_module = SourceModule(f.read(), nvcc=self._cc,
+                        options=self._cppargs, cache_dir=cachedir)
+        else:
+            # No, let's go ahead and build
+            if self.comm.rank == 0:
+                # No need to do this on all ranks
+                os.makedirs(cachedir, exist_ok=True)
+                with progress(INFO, 'Compiling wrapper'):
+                    # make sure that compiles successfully before writing to file
+                    source_module = SourceModule(jitmodule.code_to_compile,
+                            nvcc=self._cc, options=self._cppargs,
+                            cache_dir=cachedir)
+                    with open(cname, "w") as f:
+                        f.write(jitmodule.code_to_compile)
+            self.comm.barrier()
+
+        return source_module
+
+    def get_function(self, code, extension, fn_name, argtypes=None,
+            restype=None):
+        """
+        .. warning::
+            Callee does not prepare the function
+        """
+
+        assert argtypes is None
+        assert restype is None
+        fn = self.get_source_module(code).get_function(fn_name)
+        return fn
 
 
 class LinuxIntelCompiler(Compiler):
@@ -473,6 +573,8 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
             compiler = LinuxIntelCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
         elif compiler == 'gcc':
             compiler = LinuxCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
+        elif compiler == 'nvcc':
+            compiler = CUDACompiler(cppargs, ldargs, cpp=cpp, comm=comm)
         else:
             raise CompilationError("Unrecognized compiler name '%s'" % compiler)
     elif platform.find('darwin') == 0:
@@ -480,12 +582,8 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
     else:
         raise CompilationError("Don't know what compiler to use for platform '%s'" %
                                platform)
-    dll = compiler.get_so(code, extension)
 
-    fn = getattr(dll, fn_name)
-    fn.argtypes = code.argtypes
-    fn.restype = restype
-    return fn
+    return compiler.get_function(code, extension, fn_name, argtypes, restype)
 
 
 def clear_cache(prompt=False):

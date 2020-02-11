@@ -65,8 +65,8 @@ import loopy
 
 
 def _make_object(name, *args, **kwargs):
-    from pyop2 import sequential
-    return getattr(sequential, name)(*args, **kwargs)
+    from pyop2.gpu import cuda as backend
+    return getattr(backend, name)(*args, **kwargs)
 
 
 # Data API
@@ -2475,10 +2475,6 @@ class Global(DataCarrier, _EmptyDataMixin):
         """Pointwise division or scaling of fields."""
         return self._iop(other, operator.itruediv)
 
-    def inner(self, other):
-        assert isinstance(other, Global)
-        return np.dot(self.data_ro, other.data_ro)
-
 
 class Map(object):
 
@@ -2506,9 +2502,16 @@ class Map(object):
         self._toset = toset
         self.comm = toset.comm
         self._arity = arity
-        self._values = verify_reshape(values, IntType,
-                                      (iterset.total_size, arity),
-                                      allow_none=True)
+        if False:
+            # maps indexed as `map[idof, icell]`
+            self._values = verify_reshape(values, IntType,
+                                          (arity, iterset.total_size),
+                                          allow_none=True)
+        else:
+            # maps indexed as `map[icell, idof]`
+            self._values = verify_reshape(values, IntType,
+                                          (iterset.total_size, arity),
+                                          allow_none=True)
         self.shape = (iterset.total_size, arity)
         self._name = name or "map_%d" % Map._globalcount
         if offset is None or len(offset) == 0:
@@ -2586,7 +2589,11 @@ class Map(object):
 
         This only returns the map values for local points, to see the
         halo points too, use :meth:`values_with_halo`."""
-        return self._values[:self.iterset.size]
+        if False:
+            # Transposed maps
+            return self._values[:, :self.iterset.size]
+        else:
+            return self._values[:self.iterset.size]
 
     @cached_property
     def values_with_halo(self):
@@ -3655,6 +3662,8 @@ class ParLoop(object):
                 state = {WRITE: Mat.INSERT_VALUES,
                          INC: Mat.ADD_VALUES}[access]
                 arg.data.assembly_state = state
+            if arg._is_global and arg.access is not READ:
+                pass
 
     @cached_property
     def dat_args(self):

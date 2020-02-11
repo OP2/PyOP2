@@ -528,14 +528,20 @@ def statement_assign(expr, context):
     if isinstance(lvalue, Indexed):
         context.index_ordering.append(tuple(i.name for i in lvalue.index_ordering()))
     lvalue, rvalue = tuple(expression(c, context.parameters) for c in expr.children)
-    within_inames = context.within_inames[expr]
+    if isinstance(expr.label, UnpackInst):
+        tag = "scatter"
+    elif isinstance(expr.label, PackInst):
+        tag = "gather"
 
+    within_inames = context.within_inames[expr]
     id, depends_on = context.instruction_dependencies[expr]
     predicates = frozenset(context.conditions)
     return loopy.Assignment(lvalue, rvalue, within_inames=within_inames,
                             predicates=predicates,
                             id=id,
-                            depends_on=depends_on, depends_on_is_final=True)
+                            depends_on=depends_on, depends_on_is_final=True,
+                            tags=frozenset([tag]))
+
 
 
 @statement.register(FunctionCall)
@@ -719,7 +725,7 @@ def expression_namedliteral(expr, parameters):
     val = loopy.TemporaryVariable(name,
                                   dtype=expr.dtype,
                                   shape=expr.shape,
-                                  address_space=loopy.AddressSpace.LOCAL,
+                                  address_space=loopy.AddressSpace.GLOBAL,
                                   read_only=True,
                                   initializer=expr.value)
     parameters.temporaries[name] = val

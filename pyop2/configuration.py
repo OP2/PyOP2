@@ -76,6 +76,25 @@ class Configuration(dict):
     DEFAULTS = {
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gcc"),
         "simd_width": ("PYOP2_SIMD_WIDTH", int, 4),
+
+        # {{{ GPU params
+
+        "gpu_timer": ("PYOP2_GPU_TIMER", bool, False),
+        "gpu_cells_per_block": ("PYOP2_GPU_CELLS_PER_BLOCK", int, 32),
+        "gpu_strategy": ("PYOP2_GPU_STRATEGY", str, "scpt"),
+        "gpu_threads_per_cell": ("PYOP2_GPU_THREADS_PER_CELL", int, 1),
+        "gpu_op_tile_descriptions": ("PYOP2_GPU_OP_TILE_DESCRS", tuple, ()),
+        "gpu_quad_rowtile_lengths": ("PYOP2_GPU_QUAD_ROWTILE_LENGTHS", tuple, ()),
+        "gpu_coords_to_shared": ("PYOP2_GPU_COORDS_TO_SHARED", bool, False),
+        "gpu_input_to_shared": ("PYOP2_GPU_INPUT_TO_SHARED", bool, False),
+        "gpu_mats_to_shared": ("PYOP2_GPU_MATS_TO_SHARED", bool, False),
+        "gpu_quad_weights_to_shared": ("PYOP2_GPU_QUAD_WEIGHTS_TO_SHARED", bool, False),
+        "gpu_tiled_prefetch_of_input": ("PYOP2_GPU_TILED_PREFETCH_OF_INPUTS", bool, False),
+        "gpu_tiled_prefetch_of_quad_weights": ("PYOP2_GPU_TILED_PREFETCH_OF_QUAD_WEIGHTS", bool, False),
+        "gpu_planner_kernel_evals": ("PYOP2_GPU_PLANNER_KNL_EVLS", int, 10),
+
+        # }}}
+
         "debug": ("PYOP2_DEBUG", bool, False),
         "cflags": ("PYOP2_CFLAGS", str, ""),
         "ldflags": ("PYOP2_LDFLAGS", str, ""),
