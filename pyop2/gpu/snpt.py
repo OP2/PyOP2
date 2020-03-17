@@ -3,7 +3,9 @@ import loopy as lp
 
 def snpt_transform(kernel, block_size):
     """
-    SNPT := Single 'n' Per Thread transformation.
+    SNPT := Single 'n' Per Thread.
+
+    Implements outer-loop parallelization strategy.
 
     PyOP2 uses 'n' as the outer loop iname. In Firedrake 'n' might denote
     either a cell or a DOF.

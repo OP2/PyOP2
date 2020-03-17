@@ -85,8 +85,19 @@ class Map(Map):
 
 class Arg(Arg):
     """
-    Arg for GPU
+    Arg for GPU.
     """
+
+
+class ExtrudedSet(ExtrudedSet):
+    """
+    ExtrudedSet for GPU.
+    """
+    @cached_property
+    def _kernel_args_(self):
+        m_gpu = cuda.mem_alloc(int(self.layers_array.nbytes))
+        cuda.memcpy_htod(m_gpu, self.layers_array)
+        return (m_gpu,)
 
 
 class Dat(petsc_Dat):
@@ -373,11 +384,9 @@ class JITModule(base.JITModule):
     @cached_property
     def argshapes(self):
         argshapes = ((), ())
-        # argtypes += self._iterset._argtypes_
         if self._iterset._argtypes_:
-            raise NotImplementedError("Do not know what to do when"
-                    " self._iterset._argtypes is not empty, is this the case"
-                    " when we have extruded mesh")
+            # TODO: verify that this bogus value doesn't affect anyone.
+            argshapes += ((), )
 
         for arg in self._args:
             argshapes += (arg.data.shape, )
