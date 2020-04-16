@@ -215,7 +215,10 @@ class Compiler(object):
             if version.StrictVersion("7.3") <= ver < version.StrictVersion("7.5"):
                 # GCC bug https://gcc.gnu.org/bugzilla/show_bug.cgi?id=90055
                 # See also https://github.com/firedrakeproject/firedrake/issues/1442
-                return ["-fno-tree-loop-vectorize"]
+                # Bug also on skylake with the vectoriser in this
+                # combination (disappears without
+                # -fno-tree-loop-vectorize!)
+                return ["-fno-tree-loop-vectorize", "-mno-avx512f"]
         return []
 
     @collective
@@ -254,7 +257,7 @@ class Compiler(object):
             matching = self.comm.allreduce(basename, op=_check_op)
             if matching != basename:
                 # Dump all src code to disk for debugging
-                output = os.path.join(cachedir, "mismatching-kernels")
+                output = os.path.join(configuration["cache_dir"], "mismatching-kernels")
                 srcfile = os.path.join(output, "src-rank%d.c" % self.comm.rank)
                 if self.comm.rank == 0:
                     os.makedirs(output, exist_ok=True)

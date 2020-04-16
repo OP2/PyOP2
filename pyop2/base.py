@@ -2652,15 +2652,15 @@ class MixedMap(Map, ObjectCached):
 
     @cached_property
     def _kernel_args_(self):
-        return tuple(itertools.chain(*(m._kernel_args_ for m in self)))
+        return tuple(itertools.chain(*(m._kernel_args_ for m in self if m is not None)))
 
     @cached_property
     def _argtypes_(self):
-        return tuple(itertools.chain(*(m._argtypes_ for m in self)))
+        return tuple(itertools.chain(*(m._argtypes_ for m in self if m is not None)))
 
     @cached_property
     def _wrapper_cache_key_(self):
-        return tuple(m._wrapper_cache_key_ for m in self)
+        return tuple(m._wrapper_cache_key_ for m in self if m is not None)
 
     @cached_property
     def split(self):
@@ -3371,6 +3371,8 @@ class Kernel(Cached):
 
     @cached_property
     def num_flops(self):
+        if not configuration["compute_kernel_flops"]:
+            return 0
         if isinstance(self.code, Node):
             v = EstimateFlops()
             return v.visit(self.code)
