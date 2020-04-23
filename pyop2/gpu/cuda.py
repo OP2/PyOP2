@@ -102,7 +102,7 @@ class ExtrudedSet(ExtrudedSet):
 
 class Subset(Subset):
     """
-    ExtrudedSet for GPU.
+    Subset for GPU.
     """
     @cached_property
     def _kernel_args_(self):
