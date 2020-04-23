@@ -14,6 +14,7 @@ from pyop2.utils import cached_property
 from pyop2.datatypes import IntType
 from pyop2.op2 import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL, Subset
 from pyop2.op2 import READ, INC, MIN, MAX, WRITE, RW
+from loopy import ValueArg
 from loopy.types import OpaqueType
 from functools import reduce
 import itertools
@@ -669,6 +670,8 @@ class WrapperBuilder(object):
         if self.pass_layer_to_kernel:
             args = args + (self.layer_index, )
             access = access + (READ,)
+            if self.layer_index.name not in [arg.name for arg in self.kernel._code.args]: 
+                self.kernel._code.args.append(ValueArg(self.layer_index.name)) 
         if self.forward_arguments:
             args = self.forward_arguments + args
             access = tuple([WRITE] * len(self.forward_arguments)) + access
