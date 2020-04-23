@@ -100,6 +100,17 @@ class ExtrudedSet(ExtrudedSet):
         return (m_gpu,)
 
 
+class Subset(Subset):
+    """
+    ExtrudedSet for GPU.
+    """
+    @cached_property
+    def _kernel_args_(self):
+        m_gpu = cuda.mem_alloc(int(self._indices.nbytes))
+        cuda.memcpy_htod(m_gpu, self._indices)
+        return self._superset._kernel_args_ + (m_gpu, )
+
+
 class Dat(petsc_Dat):
     """
     Dat for GPU.
@@ -385,7 +396,7 @@ class JITModule(base.JITModule):
     def argshapes(self):
         argshapes = ((), ())
         if self._iterset._argtypes_:
-            # TODO: verify that this bogus value doesn't affect anyone.
+            # FIXME: Do not put in a bogus value
             argshapes += ((), )
 
         for arg in self._args:
@@ -605,7 +616,7 @@ def generate_gpu_kernel(program, args=None, argshapes=None):
             raise ValueError("gpu_strategy can be 'scpt',"
                     " 'user_specified_tile' or 'auto_tile'.")
     elif program.name in ["wrap_zero", "wrap_expression_kernel",
-            "wrap_pyop2_kernel_uniform_extrusion",
+            "wrap_expression", "wrap_pyop2_kernel_uniform_extrusion",
             "wrap_form_cell_integral_otherwise",
             ]:
         from pyop2.gpu.snpt import snpt_transform
