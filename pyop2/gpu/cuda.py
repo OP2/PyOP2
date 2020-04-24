@@ -87,7 +87,15 @@ class Arg(Arg):
     """
     Arg for GPU
     """
-
+class Subset(Subset):
+    """
+    Subset for GPU.
+    """
+    @cached_property
+    def _kernel_args_(self):
+        m_gpu = cuda.mem_alloc(int(self._indices.nbytes))
+        cuda.memcpy_htod(m_gpu, self._indices)
+        return self._superset._kernel_args_ + (m_gpu, )
 
 class Dat(petsc_Dat):
     """
@@ -383,9 +391,10 @@ class JITModule(base.JITModule):
         argshapes = ((), ())
         # argtypes += self._iterset._argtypes_
         if self._iterset._argtypes_:
-            raise NotImplementedError("Do not know what to do when"
-                    " self._iterset._argtypes is not empty, is this the case"
-                    " when we have extruded mesh")
+            argshapes += ((),)
+            # raise NotImplementedError("Do not know what to do when"
+            #         " self._iterset._argtypes is not empty, is this the case"
+            #         " when we have extruded mesh")
 
         for arg in self._args:
             argshapes += (arg.data.shape, )
@@ -608,7 +617,8 @@ def generate_gpu_kernel(program, args=None, argshapes=None):
             "wrap_pyop2_kernel_uniform_extrusion",
             "wrap_form_cell_integral_otherwise",
             "wrap_loopy_kernel_prolong",
-            "wrap_loopy_kernel_restrict"
+            "wrap_loopy_kernel_restrict",
+            "wrap_loopy_kernel_inject"
             ]:
         from pyop2.gpu.snpt import snpt_transform
         kernel, args_to_make_global = snpt_transform(kernel,
