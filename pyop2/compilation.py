@@ -220,7 +220,7 @@ class Compiler(object):
                 # combination (disappears without
                 # -fno-tree-loop-vectorize!)
                 return ["-fno-tree-loop-vectorize", "-mno-avx512f"]
-            if ver <= version.StrictVersion("7.5.0") and ScalarType.kind == 'c':
+            if ver == version.StrictVersion("7.5.0") and ScalarType.kind == 'c':
                 return ["-fno-tree-loop-vectorize"]
         return []
 
