@@ -104,7 +104,10 @@ class TestLinAlgOp:
 
     def test_div_complex(self, x, y):
         x._data = (2+2j) * y.data
-        assert all((x / y).data == 2.0+2.j)
+        # Note complex division does not have the same stability as 
+        # floating point when vectorised
+        assert all(x.data / y.data == 2.0+2.j)
+        assert np.allclose((x / y).data, 2.0+2.j)
 
     def test_mul(self, x, y):
         x._data = 2 * y.data
@@ -112,7 +115,11 @@ class TestLinAlgOp:
 
     def test_div(self, x, y):
         x._data = 2 * y.data
-        assert all((x / y).data == 2.0+0.j)
+        x.data / y.data
+        # Note complex division does not have the same stability as 
+        # floating point when vectorised
+        assert all(x.data/y.data == 2.0+0.j)
+        assert np.allclose((x / y).data, 2.0+0.j)
 
     def test_add_shape_mismatch(self, x2, y2):
         with pytest.raises(ValueError):
@@ -273,7 +280,9 @@ class TestLinAlgIop:
     def test_idiv(self, x, y):
         x._data = 2 * y.data
         x /= y
-        assert all(x.data == 2.0 + 0.j)
+        # Note complex division does not have the same stability as 
+        # floating point when vectorised
+        assert np.allclose(x.data, 2.0 + 0.j)
 
     def test_iadd_shape_mismatch(self, x2, y2):
         with pytest.raises(ValueError):
