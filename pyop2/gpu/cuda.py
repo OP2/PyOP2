@@ -156,6 +156,14 @@ class Dat(petsc_Dat):
             v.restoreCUDAHandle(self.device_handle)
             return v.array
 
+    ## TODO: fail when trying to acess elems from data_ro
+    @collective
+    @property
+    def data_ro(self):
+        with self.vec_ro as v:
+            v.restoreCUDAHandle(self.device_handle)
+            return v.array
+
 
 class Global(petsc_Global):
 
@@ -618,6 +626,9 @@ def generate_gpu_kernel(program, args=None, argshapes=None):
     elif program.name in ["wrap_zero", "wrap_expression_kernel",
             "wrap_expression", "wrap_pyop2_kernel_uniform_extrusion",
             "wrap_form_cell_integral_otherwise",
+            "wrap_loopy_kernel_prolong",
+            "wrap_loopy_kernel_restrict",
+            "wrap_loopy_kernel_inject"
             ]:
         from pyop2.gpu.snpt import snpt_transform
         kernel, args_to_make_global = snpt_transform(kernel,
