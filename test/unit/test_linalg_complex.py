@@ -59,13 +59,16 @@ def x(dset):
 def y(dset):
     return op2.Dat(dset, np.arange(1, nelems + 1) + np.arange(1, nelems + 1)*1.j, np.complex128, "y")
 
+
 @pytest.fixture
 def yf(dset):
     return op2.Dat(dset, np.arange(1, nelems + 1), np.float64, "y")
 
+
 @pytest.fixture
 def yc(dset):
     return op2.Dat(dset, np.arange(1, nelems + 1), np.complex128, "y")
+
 
 @pytest.fixture
 def yi(dset):
@@ -104,7 +107,7 @@ class TestLinAlgOp:
 
     def test_div_complex(self, x, y):
         x._data = (2+2j) * y.data
-        # Note complex division does not have the same stability as 
+        # Note complex division does not have the same stability as
         # floating point when vectorised
         assert all(x.data / y.data == 2.0+2.j)
         assert np.allclose((x / y).data, 2.0+2.j)
@@ -116,7 +119,7 @@ class TestLinAlgOp:
     def test_div(self, x, y):
         x._data = 2 * y.data
         x.data / y.data
-        # Note complex division does not have the same stability as 
+        # Note complex division does not have the same stability as
         # floating point when vectorised
         assert all(x.data/y.data == 2.0+0.j)
         assert np.allclose((x / y).data, 2.0+0.j)
@@ -280,7 +283,7 @@ class TestLinAlgIop:
     def test_idiv(self, x, y):
         x._data = 2 * y.data
         x /= y
-        # Note complex division does not have the same stability as 
+        # Note complex division does not have the same stability as
         # floating point when vectorised
         assert np.allclose(x.data, 2.0 + 0.j)
 
