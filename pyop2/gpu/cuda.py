@@ -111,6 +111,17 @@ class Subset(Subset):
         return self._superset._kernel_args_ + (m_gpu, )
 
 
+class DataSet(DataSet):
+    @cached_property
+    def layout_vec(self):
+        """A PETSc Vec compatible with the dof layout of this DataSet."""
+        size = (self.size * self.cdim, None)
+        vec = PETSc.Vec().create(comm=self.comm)
+        vec.setSizes(size, bsize=self.cdim)
+        vec.setType('cuda')
+        vec.setUp()
+        return vec
+
 class Dat(petsc_Dat):
     """
     Dat for GPU.
