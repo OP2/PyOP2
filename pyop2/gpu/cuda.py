@@ -639,7 +639,7 @@ def generate_gpu_kernel(program, args=None, argshapes=None):
             "wrap_form_cell_integral_otherwise",
             "wrap_loopy_kernel_prolong",
             "wrap_loopy_kernel_restrict",
-            "wrap_loopy_kernel_inject"
+            "wrap_loopy_kernel_inject", "wrap_copy"
             ]:
         from pyop2.gpu.snpt import snpt_transform
         kernel, args_to_make_global = snpt_transform(kernel,
