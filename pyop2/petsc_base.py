@@ -45,6 +45,8 @@ from pyop2 import utils
 from pyop2.base import _make_object, Subset
 from pyop2.mpi import collective
 from pyop2.profiling import timed_region
+from pyop2.configuration import configuration
+from pyop2.backend import AbstractComputeBackend
 
 
 class DataSet(base.DataSet):
@@ -358,6 +360,68 @@ class Dat(base.Dat, VecAccessMixin):
         yield self._vec
         if access is not base.READ:
             self.halo_valid = False
+
+    def _update_petsc_vec_type(self, vec, to_type):
+        from_type = vec.type
+        if from_type == to_type:
+            return
+
+        unknown_conversion_err = NotImplementedError("Cannot convert petsc vec"
+                " type from '{}' to '{}'.".format(from_type, to_type))
+
+        if from_type == 'seq':
+            if to_type == 'seqcuda':
+                data = vec.array.copy()
+                vec.setType('seqcuda')
+                vec.setArray(data)
+                # FIXME: update '._data'
+            else:
+                raise unknown_conversion_err
+        elif from_type == 'seqcuda':
+            if to_type == 'seq':
+                size = self.dataset.layout_vec.getSizes()
+                #FIXME: This is probably more involved
+                self._data = self.data.copy()
+                vec.setType('seq')
+                vec.setArray(self._data[:size[0]])
+            else:
+                raise unknown_conversion_err
+        else:
+            raise unknown_conversion_err
+
+    def ensure_availability_on(self, backend):
+        with self.vec as petsc_vec:
+            self._update_petsc_vec_type(petsc_vec,
+                    backend.PETScVecType)
+
+    @property
+    def _kernel_args_(self):
+        from pyop2.op2 import compute_backend
+        with self.vec as petsc_vec:
+            if petsc_vec.type != compute_backend.PETScVecType:
+                if configuration['only_explicit_host_device_data_transfers']:
+                    raise RuntimeError("Memory location mismatch for"
+                            " '{}'.".format(self.name))
+                else:
+                    self.ensure_availability_on(compute_backend)
+            if petsc_vec.type == 'seq':
+                return (self._data.ctypes.data, )
+            elif petsc_vec.type == 'seqcuda':
+                return (petsc_vec.getCUDAHandle(), )
+            else:
+                raise NotImplementedError()
+
+    @collective
+    @property
+    def data(self):
+        with self.vec as v:
+            if v.type == 'seq':
+                return v.array
+            elif v.type == 'seqcuda':
+                v.restoreCUDAHandle(v.getCUDAHandle())
+                return v.array
+            else:
+                raise NotImplementedError("Unknown vec type %s." % v.type)
 
 
 class MixedDat(base.MixedDat, VecAccessMixin):
@@ -1066,3 +1130,8 @@ class _GlobalMatPayload(object):
             return _GlobalMat(self.global_.duplicate(), comm=mat.comm)
         else:
             return _GlobalMat(comm=mat.comm)
+
+
+class AbstractPETScBackend(AbstractComputeBackend):
+    from pyop2.backend import _not_implemented
+    PETScVecType = _not_implemented()

@@ -47,7 +47,8 @@ from pyop2 import petsc_base
 from pyop2.base import par_loop                          # noqa: F401
 from pyop2.base import READ, WRITE, RW, INC, MIN, MAX    # noqa: F401
 from pyop2.base import ALL
-from pyop2.base import Map, MixedMap, Sparsity, Halo  # noqa: F401
+from pyop2.base import MixedMap, Sparsity, Halo  # noqa: F401
+from pyop2.base import Map as BaseMap
 from pyop2.base import Set, ExtrudedSet, MixedSet, Subset  # noqa: F401
 from pyop2.base import DatView                           # noqa: F401
 from pyop2.base import Kernel                            # noqa: F401
@@ -60,38 +61,45 @@ from pyop2.petsc_base import PETSc, MixedDat, Mat          # noqa: F401
 from pyop2.exceptions import *  # noqa: F401
 from pyop2.mpi import collective
 from pyop2.profiling import timed_region, timed_function
-from pyop2.utils import cached_property
+from pyop2.utils import *
 from pyop2.configuration import configuration
 
 import loopy
 import numpy
 import pycuda.driver as cuda
 from pytools import memoize_method
+from pyop2.petsc_base import AbstractPETScBackend
 from pyop2.logger import ExecTimeNoter
 
 
-class Map(Map):
+class Map(BaseMap):
+    """Map for CuDA"""
 
-    @cached_property
-    def device_handle(self):
-        m_gpu = cuda.mem_alloc(int(self.values.nbytes))
-        cuda.memcpy_htod(m_gpu, self.values)
-        return m_gpu
+    def __init__(self, base_map):
+        assert type(base_map) == BaseMap
+        self._iterset = base_map._iterset
+        self._toset = base_map._toset
+        self.comm = base_map.comm
+        self._arity = base_map._arity
+        # maps indexed as `map[icell, idof]`
+        self._values = base_map._values
+        self._values_cuda = cuda.mem_alloc(int(self._values.nbytes))
+        cuda.memcpy_htod(self._values_cuda, self._values)
+        self.shape = base_map.shape
+        self._name = 'cuda_copy_%d_of_%s' % (BaseMap._globalcount, base_map._name)
+        self._offset = base_map._offset
+        # A cache for objects built on top of this map
+        self._cache = {}
+        BaseMap._globalcount += 1
 
     @cached_property
     def _kernel_args_(self):
-        return (self.device_handle, )
-
-
-class Arg(Arg):
-    """
-    Arg for GPU.
-    """
+        return (self._values_cuda, )
 
 
 class ExtrudedSet(ExtrudedSet):
     """
-    ExtrudedSet for GPU.
+    ExtrudedSet for CUDA.
     """
     @cached_property
     def _kernel_args_(self):
@@ -102,7 +110,7 @@ class ExtrudedSet(ExtrudedSet):
 
 class Subset(Subset):
     """
-    Subset for GPU.
+    Subset for CUDA.
     """
     @cached_property
     def _kernel_args_(self):
@@ -126,7 +134,6 @@ class Dat(petsc_Dat):
     """
     Dat for GPU.
     """
-
     @cached_property
     def _vec(self):
         assert self.dtype == PETSc.ScalarType, \
@@ -143,37 +150,6 @@ class Dat(petsc_Dat):
         cuda_vec.setArray(data)
 
         return cuda_vec
-
-    @cached_property
-    def device_handle(self):
-        if self.dtype == PETSc.ScalarType:
-            with self.vec as v:
-                return v.getCUDAHandle()
-        else:
-            # handle for ex. facet numbers
-            m_gpu = cuda.mem_alloc(int(self._data.nbytes))
-            cuda.memcpy_htod(m_gpu, self._data)
-            return m_gpu
-
-    @cached_property
-    def _kernel_args_(self):
-        return (self.device_handle, )
-
-    @collective
-    @property
-    def data(self):
-
-        with self.vec as v:
-            v.restoreCUDAHandle(self.device_handle)
-            return v.array
-
-    ## TODO: fail when trying to acess elems from data_ro
-    @collective
-    @property
-    def data_ro(self):
-        with self.vec_ro as v:
-            v.restoreCUDAHandle(self.device_handle)
-            return v.array
 
 
 class Global(petsc_Global):
@@ -661,3 +637,36 @@ def generate_gpu_kernel(program, args=None, argshapes=None):
         code = code.replace("inline void pyop2_kernel_uniform_extrusion", "__device__ inline void pyop2_kernel_uniform_extrusion")
 
     return code, program, args_to_make_global
+
+
+class CUDABackend(AbstractPETScBackend):
+    Arg = Arg
+    ParLoop = ParLoop
+    Kernel = Kernel
+    Dat = Dat
+    READ = READ
+    WRITE = WRITE
+    RW = RW
+    INC = INC
+    MIN = MIN
+    MAX = MAX
+    Set = Set
+    ExtrudedSet = ExtrudedSet
+    MixedSet = MixedSet
+    Subset = Subset
+    DataSet = DataSet
+    MixedDataSet = MixedDataSet
+    Map = Map
+    MixedMap = MixedMap
+    Sparsity = Sparsity
+    Halo = Halo
+    Dat = Dat
+    MixedDat = MixedDat
+    DatView = DatView
+    Mat = Mat
+    Global = Global
+    GlobalDataSet = GlobalDataSet
+    PETScVecType = 'seqcuda'
+
+
+cuda_backend = CUDABackend()
