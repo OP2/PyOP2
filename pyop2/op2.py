@@ -39,16 +39,18 @@ from pyop2.configuration import configuration
 from pyop2.logger import debug, info, warning, error, critical, set_log_level
 from pyop2.mpi import MPI, COMM_WORLD, collective
 
-from pyop2.gpu.cuda import par_loop, Kernel  # noqa: F401
-from pyop2.gpu.cuda import READ, WRITE, RW, INC, MIN, MAX  # noqa: F401
 from pyop2.base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL  # noqa: F401
-from pyop2.gpu.cuda import Set, ExtrudedSet, MixedSet, Subset, DataSet, MixedDataSet  # noqa: F401
-from pyop2.gpu.cuda import Map, MixedMap, Sparsity, Halo  # noqa: F401
-from pyop2.gpu.cuda import Dat, MixedDat, DatView, Mat  # noqa: F401
-from pyop2.gpu.cuda import Global, GlobalDataSet        # noqa: F401
-from pyop2.gpu.cuda import ParLoop as SeqParLoop  # noqa: F401
-from pyop2.pyparloop import ParLoop as PyParLoop
+import pyop2.sequential
+from pyop2.sequential import par_loop, Kernel  # noqa: F401
+from pyop2.sequential import READ, WRITE, RW, INC, MIN, MAX  # noqa: F401
+from pyop2.sequential import Set, ExtrudedSet, MixedSet, Subset, DataSet, MixedDataSet  # noqa: F401
+from pyop2.sequential import Map, MixedMap, Sparsity, Halo  # noqa: F401
+from pyop2.sequential import Dat, MixedDat, DatView, Mat  # noqa: F401
+from pyop2.sequential import Global, GlobalDataSet        # noqa: F401
+from pyop2.sequential import ParLoop as SeqParLoop  # noqa: F401
+from pyop2.sequential import sequential_cpu_backend
 
+from pyop2.pyparloop import ParLoop as PyParLoop
 import types
 import loopy
 
@@ -66,7 +68,7 @@ def ParLoop(kernel, *args, **kwargs):
     if isinstance(kernel, types.FunctionType):
         return PyParLoop(kernel, *args, **kwargs)
     else:
-        return SeqParLoop(kernel, *args, **kwargs)
+        return compute_backend.ParLoop(kernel, *args, **kwargs)
 
 
 _initialised = False
@@ -122,3 +124,6 @@ def exit():
     configuration.reset()
     global _initialised
     _initialised = False
+
+
+compute_backend = sequential_cpu_backend
