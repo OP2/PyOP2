@@ -251,12 +251,6 @@ class SequentialCPUBackend(AbstractPETScBackend):
     ParLoop = ParLoop
     Kernel = Kernel
     Dat = Dat
-    READ = READ
-    WRITE = WRITE
-    RW = RW
-    INC = INC
-    MIN = MIN
-    MAX = MAX
     Set = Set
     ExtrudedSet = ExtrudedSet
     MixedSet = MixedSet
