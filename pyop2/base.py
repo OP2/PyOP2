@@ -65,8 +65,10 @@ import loopy
 
 
 def _make_object(name, *args, **kwargs):
-    from pyop2.gpu import cuda as backend
-    return getattr(backend, name)(*args, **kwargs)
+    # TODO: All "make_object("xyz", ...)" should be replaced by
+    # "compute_backend.xyz(...)"?
+    from pyop2.op2 import compute_backend
+    return getattr(compute_backend, name)(*args, **kwargs)
 
 
 # Data API
@@ -1355,7 +1357,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
                    ('name', str, NameTypeError))
     @validate_dtype(('dtype', None, DataTypeError))
     def __init__(self, dataset, data=None, dtype=None, name=None, uid=None):
-
         if isinstance(dataset, Dat):
             self.__init__(dataset.dataset, None, dtype=dataset.dtype,
                           name="copy_of_%s" % dataset.name)
@@ -2502,16 +2503,9 @@ class Map(object):
         self._toset = toset
         self.comm = toset.comm
         self._arity = arity
-        if False:
-            # maps indexed as `map[idof, icell]`
-            self._values = verify_reshape(values, IntType,
-                                          (arity, iterset.total_size),
-                                          allow_none=True)
-        else:
-            # maps indexed as `map[icell, idof]`
-            self._values = verify_reshape(values, IntType,
-                                          (iterset.total_size, arity),
-                                          allow_none=True)
+        self._values = verify_reshape(values, IntType,
+                                      (iterset.total_size, arity),
+                                      allow_none=True)
         self.shape = (iterset.total_size, arity)
         self._name = name or "map_%d" % Map._globalcount
         if offset is None or len(offset) == 0:
@@ -2589,11 +2583,7 @@ class Map(object):
 
         This only returns the map values for local points, to see the
         halo points too, use :meth:`values_with_halo`."""
-        if False:
-            # Transposed maps
-            return self._values[:, :self.iterset.size]
-        else:
-            return self._values[:self.iterset.size]
+        return self._values[:self.iterset.size]
 
     @cached_property
     def values_with_halo(self):
