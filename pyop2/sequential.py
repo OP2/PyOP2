@@ -247,10 +247,7 @@ def generate_single_cell_wrapper(iterset, args, forward_args=(), kernel_name=Non
 
 
 class SequentialCPUBackend(AbstractPETScBackend):
-    Arg = Arg
     ParLoop = ParLoop
-    Kernel = Kernel
-    Dat = Dat
     Set = Set
     ExtrudedSet = ExtrudedSet
     MixedSet = MixedSet
@@ -259,8 +256,6 @@ class SequentialCPUBackend(AbstractPETScBackend):
     MixedDataSet = MixedDataSet
     Map = Map
     MixedMap = MixedMap
-    Sparsity = Sparsity
-    Halo = Halo
     Dat = Dat
     MixedDat = MixedDat
     DatView = DatView

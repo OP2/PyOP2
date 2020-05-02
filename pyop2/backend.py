@@ -3,10 +3,7 @@ class _not_implemented:  # noqa
 
 
 class AbstractComputeBackend:
-    Arg = _not_implemented()
     ParLoop = _not_implemented()
-    Kernel = _not_implemented()
-    Dat = _not_implemented()
     Set = _not_implemented()
     ExtrudedSet = _not_implemented()
     MixedSet = _not_implemented()
@@ -15,8 +12,6 @@ class AbstractComputeBackend:
     MixedDataSet = _not_implemented()
     Map = _not_implemented()
     MixedMap = _not_implemented()
-    Sparsity = _not_implemented()
-    Halo = _not_implemented()
     Dat = _not_implemented()
     MixedDat = _not_implemented()
     DatView = _not_implemented()

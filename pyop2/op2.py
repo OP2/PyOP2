@@ -41,12 +41,12 @@ from pyop2.mpi import MPI, COMM_WORLD, collective
 
 from pyop2.base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL  # noqa: F401
 from pyop2.base import READ, WRITE, RW, INC, MIN, MAX  # noqa: F401
+from pyop2.base import Kernel, Sparsity, Halo  # noqa: F401
 # TODO: These imports shouldn't be imported from sequential
 # i.e. all uses of op2.xyz should be replaces with op2.compute_backend.xyz
-import pyop2.sequential
-from pyop2.sequential import par_loop, Kernel  # noqa: F401
+from pyop2.sequential import par_loop  # noqa: F401
 from pyop2.sequential import Set, ExtrudedSet, MixedSet, Subset, DataSet, MixedDataSet  # noqa: F401
-from pyop2.sequential import Map, MixedMap, Sparsity, Halo  # noqa: F401
+from pyop2.sequential import Map, MixedMap  # noqa: F401
 from pyop2.sequential import Dat, MixedDat, DatView, Mat  # noqa: F401
 from pyop2.sequential import Global, GlobalDataSet        # noqa: F401
 from pyop2.sequential import ParLoop as SeqParLoop  # noqa: F401

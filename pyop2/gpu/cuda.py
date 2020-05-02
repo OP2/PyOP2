@@ -640,10 +640,7 @@ def generate_gpu_kernel(program, args=None, argshapes=None):
 
 
 class CUDABackend(AbstractPETScBackend):
-    Arg = Arg
     ParLoop = ParLoop
-    Kernel = Kernel
-    Dat = Dat
     Set = Set
     ExtrudedSet = ExtrudedSet
     MixedSet = MixedSet
@@ -652,8 +649,6 @@ class CUDABackend(AbstractPETScBackend):
     MixedDataSet = MixedDataSet
     Map = Map
     MixedMap = MixedMap
-    Sparsity = Sparsity
-    Halo = Halo
     Dat = Dat
     MixedDat = MixedDat
     DatView = DatView
