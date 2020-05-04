@@ -439,6 +439,9 @@ class Dat(base.Dat, VecAccessMixin):
         if access is not base.READ:
             self.halo_valid = False
 
+            if self._vec.type == 'seqcuda':
+                self._vec.restoreCUDAHandle(self._vec.getCUDAHandle())
+
     @property
     def _kernel_args_(self):
         with self.vec as petsc_vec:
