@@ -382,20 +382,6 @@ class Dat(base.Dat, VecAccessMixin):
         data = self._data[:size[0]]
         return PETSc.Vec().createWithArray(data, size=size, bsize=self.cdim, comm=self.comm)
 
-    @contextmanager
-    def vec_context(self, access):
-        r"""A context manager for a :class:`PETSc.Vec` from a :class:`Dat`.
-
-        :param access: Access descriptor: READ, WRITE, or RW."""
-        # PETSc Vecs have a state counter and cache norm computations
-        # to return immediately if the state counter is unchanged.
-        # Since we've updated the data behind their back, we need to
-        # change that state counter.
-        self._vec.stateIncrease()
-        yield self._vec
-        if access is not base.READ:
-            self.halo_valid = False
-
     def _update_petsc_vec_type(self, vec, to_type):
         from_type = vec.type
         if from_type == to_type:
@@ -406,17 +392,19 @@ class Dat(base.Dat, VecAccessMixin):
 
         if from_type == 'seq':
             if to_type == 'seqcuda':
-                data = vec.array.copy()
+                # FIXME:  Why is the reshape needed?
+                size = self.dataset.layout_vec.getSizes()
+                self._data = vec.array.reshape(self._data.shape).copy()
                 vec.setType('seqcuda')
-                vec.setArray(data)
-                # FIXME: update '._data'
+                vec.setArray(self._data[:size[0]])
             else:
                 raise unknown_conversion_err
         elif from_type == 'seqcuda':
             if to_type == 'seq':
+                # FIXME:  Why is the reshape needed?
                 size = self.dataset.layout_vec.getSizes()
-                #FIXME: This is probably more involved
-                self._data = self.data.copy()
+                vec.restoreCUDAHandle(vec.getCUDAHandle())
+                self._data = vec.array.reshape(self._data.shape).copy()
                 vec.setType('seq')
                 vec.setArray(self._data[:size[0]])
             else:
@@ -425,20 +413,35 @@ class Dat(base.Dat, VecAccessMixin):
             raise unknown_conversion_err
 
     def ensure_availability_on(self, backend):
-        with self.vec as petsc_vec:
-            self._update_petsc_vec_type(petsc_vec,
-                    backend.PETScVecType)
+        self._update_petsc_vec_type(self._vec,
+                backend.PETScVecType)
+
+    @contextmanager
+    def vec_context(self, access):
+        r"""A context manager for a :class:`PETSc.Vec` from a :class:`Dat`.
+
+        :param access: Access descriptor: READ, WRITE, or RW."""
+        # PETSc Vecs have a state counter and cache norm computations
+        # to return immediately if the state counter is unchanged.
+        # Since we've updated the data behind their back, we need to
+        # change that state counter.
+
+        from pyop2.op2 import compute_backend
+        self._vec.stateIncrease()
+        if self._vec.type != compute_backend.PETScVecType:
+            if configuration['only_explicit_host_device_data_transfers']:
+                raise RuntimeError("Memory location mismatch for"
+                        " '{}'.".format(self.name))
+            else:
+                self.ensure_availability_on(compute_backend)
+
+        yield self._vec
+        if access is not base.READ:
+            self.halo_valid = False
 
     @property
     def _kernel_args_(self):
-        from pyop2.op2 import compute_backend
         with self.vec as petsc_vec:
-            if petsc_vec.type != compute_backend.PETScVecType:
-                if configuration['only_explicit_host_device_data_transfers']:
-                    raise RuntimeError("Memory location mismatch for"
-                            " '{}'.".format(self.name))
-                else:
-                    self.ensure_availability_on(compute_backend)
             if petsc_vec.type == 'seq':
                 return (self._data.ctypes.data, )
             elif petsc_vec.type == 'seqcuda':
