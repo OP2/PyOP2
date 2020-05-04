@@ -124,17 +124,52 @@ class DataSet(base.DataSet):
         return tuple(ises)
 
     @utils.cached_property
-    def layout_vec(self):
-        """A PETSc Vec compatible with the dof layout of this DataSet."""
+    def _layout_vec(self):
         vec = PETSc.Vec().create(comm=self.comm)
         size = (self.size * self.cdim, None)
         vec.setSizes(size, bsize=self.cdim)
         vec.setUp()
         return vec
 
+    def _update_petsc_vec_type(self, vec):
+        from pyop2.op2 import compute_backend
+        to_type = compute_backend.PETScVecType
+        from_type = vec.type
+        if from_type == to_type:
+            return
+
+        unknown_conversion_err = NotImplementedError("Cannot convert petsc vec"
+                " type from '{}' to '{}'.".format(from_type, to_type))
+
+        if from_type == 'seq':
+            if to_type == 'seqcuda':
+                data = vec.array.copy()
+                vec.setType('seqcuda')
+                vec.setArray(data)
+            else:
+                raise unknown_conversion_err
+        elif from_type == 'seqcuda':
+            if to_type == 'seq':
+                vec.restoreCUDAHandle(vec.getCUDAHandle())
+                data = vec.array.copy()
+                vec.setType('seq')
+                vec.setArray(data)
+            else:
+                raise unknown_conversion_err
+        else:
+            raise unknown_conversion_err
+
+    @property
+    def layout_vec(self):
+        """A PETSc Vec compatible with the dof layout of this DataSet."""
+        self._update_petsc_vec_type(self._layout_vec)
+        return self._layout_vec
+
     @utils.cached_property
     def dm(self):
         dm = PETSc.DMShell().create(comm=self.comm)
+        # FIXME: Ownership of 'dm' is not properly tied to DataSet in
+        # firedrake, this might lead to compute backend mismatch errors.
         dm.setGlobalVector(self.layout_vec)
         return dm
 

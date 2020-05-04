@@ -107,9 +107,8 @@ class Subset(base.Subset):
 
 class DataSet(petsc_base.DataSet):
     @cached_property
-    def layout_vec(self):
+    def _layout_vec(self):
         """A PETSc Vec compatible with the dof layout of this DataSet."""
-        1/0
         size = (self.size * self.cdim, None)
         vec = PETSc.Vec().create(comm=self.comm)
         vec.setSizes(size, bsize=self.cdim)
