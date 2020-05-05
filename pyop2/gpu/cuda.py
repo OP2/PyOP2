@@ -172,9 +172,23 @@ class Dat(petsc_Dat):
     @property
     def data_ro(self):
         with self.vec_ro as v:
-            v.restoreCUDAHandle(self.device_handle)
+            v.restoreCUDAHandle(self.device_handle, mode='r')
             return v.array
 
+    @contextmanager
+    def vec_context(self, access):
+        r"""A context manager for a :class:`PETSc.Vec` from a :class:`Dat`.
+
+        :param access: Access descriptor: READ, WRITE, or RW."""
+        # PETSc Vecs have a state counter and cache norm computations
+        # to return immediately if the state counter is unchanged.
+        # Since we've updated the data behind their back, we need to
+        # change that state counter.
+        self._vec.stateIncrease()
+        yield self._vec
+        if access is not base.READ:
+            self.halo_valid = False
+            self._vec.restoreCUDAHandle(self._vec.getCUDAHandle())
 
 class Global(petsc_Global):
 
@@ -373,6 +387,7 @@ class JITModule(base.JITModule):
 
         compiler = "nvcc"
         extension = "cu"
+        #print("{0}".format(self._wrapper_name))
         self._fun = compilation.load(self,
                                      extension,
                                      self._wrapper_name,
@@ -639,7 +654,7 @@ def generate_gpu_kernel(program, args=None, argshapes=None):
             "wrap_form_cell_integral_otherwise",
             "wrap_loopy_kernel_prolong",
             "wrap_loopy_kernel_restrict",
-            "wrap_loopy_kernel_inject", "wrap_copy"
+            "wrap_loopy_kernel_inject", "wrap_copy", "wrap_inner"
             ]:
         from pyop2.gpu.snpt import snpt_transform
         kernel, args_to_make_global = snpt_transform(kernel,
