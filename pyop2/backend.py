@@ -3,6 +3,10 @@ class _not_implemented:  # noqa
 
 
 class AbstractComputeBackend:
+    """
+    Abstract class to record all the backend specific implementation of
+    :mod:`pyop2`'s data structures.
+    """
     ParLoop = _not_implemented()
     Set = _not_implemented()
     ExtrudedSet = _not_implemented()
