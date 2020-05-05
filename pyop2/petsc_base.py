@@ -45,6 +45,8 @@ from pyop2 import utils
 from pyop2.base import _make_object, Subset
 from pyop2.mpi import collective
 from pyop2.profiling import timed_region
+from pyop2.configuration import configuration
+from pyop2.backend import AbstractComputeBackend
 
 
 class DataSet(base.DataSet):
@@ -122,17 +124,52 @@ class DataSet(base.DataSet):
         return tuple(ises)
 
     @utils.cached_property
-    def layout_vec(self):
-        """A PETSc Vec compatible with the dof layout of this DataSet."""
+    def _layout_vec(self):
         vec = PETSc.Vec().create(comm=self.comm)
         size = (self.size * self.cdim, None)
         vec.setSizes(size, bsize=self.cdim)
         vec.setUp()
         return vec
 
+    def _update_petsc_vec_type(self, vec):
+        from pyop2.op2 import compute_backend
+        to_type = compute_backend.PETScVecType
+        from_type = vec.type
+        if from_type == to_type:
+            return
+
+        unknown_conversion_err = NotImplementedError("Cannot convert petsc vec"
+                " type from '{}' to '{}'.".format(from_type, to_type))
+
+        if from_type == 'seq':
+            if to_type == 'seqcuda':
+                data = vec.array.copy()
+                vec.setType('seqcuda')
+                vec.setArray(data)
+            else:
+                raise unknown_conversion_err
+        elif from_type == 'seqcuda':
+            if to_type == 'seq':
+                vec.restoreCUDAHandle(vec.getCUDAHandle())
+                data = vec.array.copy()
+                vec.setType('seq')
+                vec.setArray(data)
+            else:
+                raise unknown_conversion_err
+        else:
+            raise unknown_conversion_err
+
+    @property
+    def layout_vec(self):
+        """A PETSc Vec compatible with the dof layout of this DataSet."""
+        self._update_petsc_vec_type(self._layout_vec)
+        return self._layout_vec
+
     @utils.cached_property
     def dm(self):
         dm = PETSc.DMShell().create(comm=self.comm)
+        # FIXME: Ownership of 'dm' is not properly tied to DataSet in
+        # firedrake, this might lead to compute backend mismatch errors.
         dm.setGlobalVector(self.layout_vec)
         return dm
 
@@ -345,6 +382,40 @@ class Dat(base.Dat, VecAccessMixin):
         data = self._data[:size[0]]
         return PETSc.Vec().createWithArray(data, size=size, bsize=self.cdim, comm=self.comm)
 
+    def _update_petsc_vec_type(self, vec, to_type):
+        from_type = vec.type
+        if from_type == to_type:
+            return
+
+        unknown_conversion_err = NotImplementedError("Cannot convert petsc vec"
+                " type from '{}' to '{}'.".format(from_type, to_type))
+
+        if from_type == 'seq':
+            if to_type == 'seqcuda':
+                # FIXME:  Why is the reshape needed?
+                size = self.dataset.layout_vec.getSizes()
+                self._data = vec.array.reshape(self._data.shape).copy()
+                vec.setType('seqcuda')
+                vec.setArray(self._data[:size[0]])
+            else:
+                raise unknown_conversion_err
+        elif from_type == 'seqcuda':
+            if to_type == 'seq':
+                # FIXME:  Why is the reshape needed?
+                size = self.dataset.layout_vec.getSizes()
+                vec.restoreCUDAHandle(vec.getCUDAHandle())
+                self._data = vec.array.reshape(self._data.shape).copy()
+                vec.setType('seq')
+                vec.setArray(self._data[:size[0]])
+            else:
+                raise unknown_conversion_err
+        else:
+            raise unknown_conversion_err
+
+    def ensure_availability_on(self, backend):
+        self._update_petsc_vec_type(self._vec,
+                backend.PETScVecType)
+
     @contextmanager
     def vec_context(self, access):
         r"""A context manager for a :class:`PETSc.Vec` from a :class:`Dat`.
@@ -354,10 +425,44 @@ class Dat(base.Dat, VecAccessMixin):
         # to return immediately if the state counter is unchanged.
         # Since we've updated the data behind their back, we need to
         # change that state counter.
+
+        from pyop2.op2 import compute_backend
         self._vec.stateIncrease()
+        if self._vec.type != compute_backend.PETScVecType:
+            if configuration['only_explicit_host_device_data_transfers']:
+                raise RuntimeError("Memory location mismatch for"
+                        " '{}'.".format(self.name))
+            else:
+                self.ensure_availability_on(compute_backend)
+
         yield self._vec
         if access is not base.READ:
             self.halo_valid = False
+
+            if self._vec.type == 'seqcuda':
+                self._vec.restoreCUDAHandle(self._vec.getCUDAHandle())
+
+    @property
+    def _kernel_args_(self):
+        with self.vec as petsc_vec:
+            if petsc_vec.type == 'seq':
+                return (self._data.ctypes.data, )
+            elif petsc_vec.type == 'seqcuda':
+                return (petsc_vec.getCUDAHandle(), )
+            else:
+                raise NotImplementedError()
+
+    @collective
+    @property
+    def data(self):
+        with self.vec as v:
+            if v.type == 'seq':
+                return v.array
+            elif v.type == 'seqcuda':
+                v.restoreCUDAHandle(v.getCUDAHandle())
+                return v.array
+            else:
+                raise NotImplementedError("Unknown vec type %s." % v.type)
 
 
 class MixedDat(base.MixedDat, VecAccessMixin):
@@ -1066,3 +1171,8 @@ class _GlobalMatPayload(object):
             return _GlobalMat(self.global_.duplicate(), comm=mat.comm)
         else:
             return _GlobalMat(comm=mat.comm)
+
+
+class AbstractPETScBackend(AbstractComputeBackend):
+    from pyop2.backend import _not_implemented
+    PETScVecType = _not_implemented()

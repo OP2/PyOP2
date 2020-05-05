@@ -65,8 +65,10 @@ import loopy
 
 
 def _make_object(name, *args, **kwargs):
-    from pyop2.gpu import cuda as backend
-    return getattr(backend, name)(*args, **kwargs)
+    # TODO: All "make_object("xyz", ...)" should be replaced by
+    # "compute_backend.xyz(...)"?
+    from pyop2.op2 import compute_backend
+    return getattr(compute_backend, name)(*args, **kwargs)
 
 
 # Data API
@@ -212,12 +214,12 @@ class Arg(object):
     def split(self):
         """Split a mixed argument into a tuple of constituent arguments."""
         if self._is_mixed_dat:
-            return tuple(_make_object('Arg', d, m, self._access)
+            return tuple(Arg(d, m, self._access)
                          for d, m in zip(self.data, self._map))
         elif self._is_mixed_mat:
             s = self.data.sparsity.shape
             mr, mc = self.map
-            return tuple(_make_object('Arg', self.data[i, j], (mr.split[i], mc.split[j]),
+            return tuple(Arg(self.data[i, j], (mr.split[i], mc.split[j]),
                                       self._access)
                          for j in range(s[1]) for i in range(s[0]))
         else:
@@ -1355,7 +1357,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
                    ('name', str, NameTypeError))
     @validate_dtype(('dtype', None, DataTypeError))
     def __init__(self, dataset, data=None, dtype=None, name=None, uid=None):
-
         if isinstance(dataset, Dat):
             self.__init__(dataset.dataset, None, dtype=dataset.dtype,
                           name="copy_of_%s" % dataset.name)
@@ -1396,7 +1397,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
     def __call__(self, access, path=None):
         if configuration["type_check"] and path and path.toset != self.dataset.set:
             raise MapValueError("To Set of Map does not match Set of Dat.")
-        return _make_object('Arg', data=self, map=path, access=access)
+        return Arg(data=self, map=path, access=access)
 
     def __getitem__(self, idx):
         """Return self if ``idx`` is 0, raise an error otherwise."""
@@ -1576,7 +1577,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
             data = loopy.GlobalArg("dat", dtype=self.dtype, shape=(self.cdim,))
             knl = loopy.make_function([domain], [insn], [data], name="zero")
 
-            knl = _make_object('Kernel', knl, 'zero')
+            knl = Kernel(knl, 'zero')
             loop = _make_object('ParLoop', knl,
                                 iterset,
                                 self(WRITE))
@@ -1610,7 +1611,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
                     loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,))]
             knl = loopy.make_function([domain], [insn], data, name="copy")
 
-            self._copy_kernel = _make_object('Kernel', knl, 'copy')
+            self._copy_kernel = Kernel(knl, 'copy')
         return _make_object('ParLoop', self._copy_kernel,
                             subset or self.dataset.set,
                             self(READ), other(WRITE))
@@ -1663,7 +1664,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
                 loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,)),
                 loopy.GlobalArg("ret", dtype=self.dtype, shape=(self.cdim,))]
         knl = loopy.make_function([domain], [insn], data, name=name)
-        k = _make_object('Kernel', knl, name)
+        k = Kernel(knl, name)
 
         par_loop(k, self.dataset.set, self(READ), other(READ), ret(WRITE))
 
@@ -1692,7 +1693,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
                 loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,))]
         knl = loopy.make_function([domain], [insn], data, name=name)
-        k = _make_object('Kernel', knl, name)
+        k = Kernel(knl, name)
 
         par_loop(k, self.dataset.set, self(INC), other(READ))
 
@@ -1714,7 +1715,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         insn = loopy.Assignment(_self.index(i), _op(_self.index(i)), within_inames=frozenset(["i"]))
         data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,))]
         knl = loopy.make_function([domain], [insn], data, name=name)
-        k = _make_object('Kernel', knl, name)
+        k = Kernel(knl, name)
 
         par_loop(k, self.dataset.set, self(RW))
         return self
@@ -1745,7 +1746,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
                 loopy.GlobalArg("ret", dtype=ret.dtype, shape=(1,))]
         knl = loopy.make_function([domain], [insn], data, name="inner")
 
-        k = _make_object('Kernel', knl, "inner")
+        k = Kernel(knl, "inner")
         par_loop(k, self.dataset.set, self(READ), other(READ), ret(INC))
         return ret.data_ro[0]
 
@@ -2287,7 +2288,7 @@ class Global(DataCarrier, _EmptyDataMixin):
 
     @validate_in(('access', _modes, ModeValueError))
     def __call__(self, access, path=None):
-        return _make_object('Arg', data=self, access=access)
+        return Arg(data=self, access=access)
 
     def __iter__(self):
         """Yield self when iterated over."""
@@ -2502,16 +2503,9 @@ class Map(object):
         self._toset = toset
         self.comm = toset.comm
         self._arity = arity
-        if False:
-            # maps indexed as `map[idof, icell]`
-            self._values = verify_reshape(values, IntType,
-                                          (arity, iterset.total_size),
-                                          allow_none=True)
-        else:
-            # maps indexed as `map[icell, idof]`
-            self._values = verify_reshape(values, IntType,
-                                          (iterset.total_size, arity),
-                                          allow_none=True)
+        self._values = verify_reshape(values, IntType,
+                                      (iterset.total_size, arity),
+                                      allow_none=True)
         self.shape = (iterset.total_size, arity)
         self._name = name or "map_%d" % Map._globalcount
         if offset is None or len(offset) == 0:
@@ -2589,11 +2583,7 @@ class Map(object):
 
         This only returns the map values for local points, to see the
         halo points too, use :meth:`values_with_halo`."""
-        if False:
-            # Transposed maps
-            return self._values[:, :self.iterset.size]
-        else:
-            return self._values[:self.iterset.size]
+        return self._values[:self.iterset.size]
 
     @cached_property
     def values_with_halo(self):
@@ -3133,7 +3123,7 @@ class Mat(DataCarrier):
         path_maps = as_tuple(path, Map, 2)
         if configuration["type_check"] and tuple(path_maps) not in self.sparsity:
             raise MapValueError("Path maps not in sparsity maps")
-        return _make_object('Arg', data=self, map=path_maps, access=access, lgmaps=lgmaps, unroll_map=unroll_map)
+        return Arg(data=self, map=path_maps, access=access, lgmaps=lgmaps, unroll_map=unroll_map)
 
     @cached_property
     def _wrapper_cache_key_(self):

@@ -44,54 +44,48 @@ from pyop2.datatypes import IntType, as_ctypes
 from pyop2 import base
 from pyop2 import compilation
 from pyop2 import petsc_base
-from pyop2.base import par_loop                          # noqa: F401
-from pyop2.base import READ, WRITE, RW, INC, MIN, MAX    # noqa: F401
-from pyop2.base import ALL
-from pyop2.base import Map, MixedMap, Sparsity, Halo  # noqa: F401
-from pyop2.base import Set, ExtrudedSet, MixedSet, Subset  # noqa: F401
-from pyop2.base import DatView                           # noqa: F401
-from pyop2.base import Kernel                            # noqa: F401
-from pyop2.base import Arg                               # noqa: F401
-from pyop2.petsc_base import DataSet, MixedDataSet       # noqa: F401
-from pyop2.petsc_base import GlobalDataSet       # noqa: F401
-from pyop2.petsc_base import Dat as petsc_Dat
-from pyop2.petsc_base import Global as petsc_Global
-from pyop2.petsc_base import PETSc, MixedDat, Mat          # noqa: F401
 from pyop2.exceptions import *  # noqa: F401
 from pyop2.mpi import collective
 from pyop2.profiling import timed_region, timed_function
-from pyop2.utils import cached_property
+from pyop2.utils import *
 from pyop2.configuration import configuration
 
 import loopy
 import numpy
 import pycuda.driver as cuda
 from pytools import memoize_method
+from pyop2.petsc_base import PETSc, AbstractPETScBackend
 from pyop2.logger import ExecTimeNoter
 
 
-class Map(Map):
+class Map(base.Map):
+    """Map for CuDA"""
 
-    @cached_property
-    def device_handle(self):
-        m_gpu = cuda.mem_alloc(int(self.values.nbytes))
-        cuda.memcpy_htod(m_gpu, self.values)
-        return m_gpu
+    def __init__(self, base_map):
+        assert type(base_map) == base.Map
+        self._iterset = base_map._iterset
+        self._toset = base_map._toset
+        self.comm = base_map.comm
+        self._arity = base_map._arity
+        # maps indexed as `map[icell, idof]`
+        self._values = base_map._values
+        self._values_cuda = cuda.mem_alloc(int(self._values.nbytes))
+        cuda.memcpy_htod(self._values_cuda, self._values)
+        self.shape = base_map.shape
+        self._name = 'cuda_copy_%d_of_%s' % (base.Map._globalcount, base_map._name)
+        self._offset = base_map._offset
+        # A cache for objects built on top of this map
+        self._cache = {}
+        base.Map._globalcount += 1
 
     @cached_property
     def _kernel_args_(self):
-        return (self.device_handle, )
+        return (self._values_cuda, )
 
 
-class Arg(Arg):
+class ExtrudedSet(base.ExtrudedSet):
     """
-    Arg for GPU.
-    """
-
-
-class ExtrudedSet(ExtrudedSet):
-    """
-    ExtrudedSet for GPU.
+    ExtrudedSet for CUDA.
     """
     @cached_property
     def _kernel_args_(self):
@@ -100,9 +94,9 @@ class ExtrudedSet(ExtrudedSet):
         return (m_gpu,)
 
 
-class Subset(Subset):
+class Subset(base.Subset):
     """
-    Subset for GPU.
+    Subset for CUDA.
     """
     @cached_property
     def _kernel_args_(self):
@@ -111,22 +105,21 @@ class Subset(Subset):
         return self._superset._kernel_args_ + (m_gpu, )
 
 
-class DataSet(DataSet):
+class DataSet(petsc_base.DataSet):
     @cached_property
-    def layout_vec(self):
+    def _layout_vec(self):
         """A PETSc Vec compatible with the dof layout of this DataSet."""
         size = (self.size * self.cdim, None)
         vec = PETSc.Vec().create(comm=self.comm)
         vec.setSizes(size, bsize=self.cdim)
-        vec.setType('cuda')
+        vec.setType('seqcuda')
         vec.setUp()
         return vec
 
-class Dat(petsc_Dat):
+class Dat(petsc_base.Dat):
     """
     Dat for GPU.
     """
-
     @cached_property
     def _vec(self):
         assert self.dtype == PETSc.ScalarType, \
@@ -136,61 +129,15 @@ class Dat(petsc_Dat):
         # But use getSizes to save an Allreduce in computing the
         # global size.
         size = self.dataset.layout_vec.getSizes()
-        data = self._data[:size[0]]
         cuda_vec = PETSc.Vec().create(self.comm)
         cuda_vec.setSizes(size=size, bsize=self.cdim)
-        cuda_vec.setType('cuda')
-        cuda_vec.setArray(data)
+        cuda_vec.setType('seqcuda')
+        cuda_vec.setArray(self._data[:size[0]])
 
         return cuda_vec
 
-    @cached_property
-    def device_handle(self):
-        if self.dtype == PETSc.ScalarType:
-            with self.vec as v:
-                return v.getCUDAHandle()
-        else:
-            # handle for ex. facet numbers
-            m_gpu = cuda.mem_alloc(int(self._data.nbytes))
-            cuda.memcpy_htod(m_gpu, self._data)
-            return m_gpu
 
-    @cached_property
-    def _kernel_args_(self):
-        return (self.device_handle, )
-
-    @collective
-    @property
-    def data(self):
-
-        with self.vec as v:
-            v.restoreCUDAHandle(self.device_handle)
-            return v.array
-
-    ## TODO: fail when trying to acess elems from data_ro
-    @collective
-    @property
-    def data_ro(self):
-        with self.vec_ro as v:
-            v.restoreCUDAHandle(self.device_handle, mode='r')
-            return v.array
-
-    @contextmanager
-    def vec_context(self, access):
-        r"""A context manager for a :class:`PETSc.Vec` from a :class:`Dat`.
-
-        :param access: Access descriptor: READ, WRITE, or RW."""
-        # PETSc Vecs have a state counter and cache norm computations
-        # to return immediately if the state counter is unchanged.
-        # Since we've updated the data behind their back, we need to
-        # change that state counter.
-        self._vec.stateIncrease()
-        yield self._vec
-        if access is not base.READ:
-            self.halo_valid = False
-            self._vec.restoreCUDAHandle(self._vec.getCUDAHandle())
-
-class Global(petsc_Global):
+class Global(petsc_base.Global):
 
     @cached_property
     def device_handle(self):
@@ -233,7 +180,7 @@ class JITModule(base.JITModule):
         self._fun = None
         self._iterset = iterset
         self._args = args
-        self._iteration_region = kwargs.get('iterate', ALL)
+        self._iteration_region = kwargs.get('iterate', base.ALL)
         self._pass_layer_arg = kwargs.get('pass_layer_arg', False)
         # Copy the class variables, so we don't overwrite them
         self._cppargs = dcopy(type(self)._cppargs)
@@ -462,7 +409,7 @@ class ParLoop(petsc_base.ParLoop):
         arglist = iterset._kernel_args_
         for arg in args:
             arglist += arg._kernel_args_
-            if arg.access is INC:
+            if arg.access is base.INC:
                 nbytes += arg.data.nbytes * 2
             else:
                 nbytes += arg.data.nbytes
@@ -676,3 +623,25 @@ def generate_gpu_kernel(program, args=None, argshapes=None):
         code = code.replace("inline void pyop2_kernel_uniform_extrusion", "__device__ inline void pyop2_kernel_uniform_extrusion")
 
     return code, program, args_to_make_global
+
+
+class CUDABackend(AbstractPETScBackend):
+    ParLoop = ParLoop
+    Set = base.Set
+    ExtrudedSet = ExtrudedSet
+    MixedSet = base.MixedSet
+    Subset = Subset
+    DataSet = DataSet
+    MixedDataSet = petsc_base.MixedDataSet
+    Map = Map
+    MixedMap = base.MixedMap
+    Dat = Dat
+    MixedDat = petsc_base.MixedDat
+    DatView = base.DatView
+    Mat = petsc_base.Mat
+    Global = Global
+    GlobalDataSet = petsc_base.GlobalDataSet
+    PETScVecType = 'seqcuda'
+
+
+cuda_backend = CUDABackend()

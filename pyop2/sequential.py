@@ -57,6 +57,7 @@ from pyop2.exceptions import *  # noqa: F401
 from pyop2.mpi import collective
 from pyop2.profiling import timed_region
 from pyop2.utils import cached_property, get_petsc_dir
+from pyop2.petsc_base import AbstractPETScBackend
 
 import loopy
 
@@ -243,3 +244,25 @@ def generate_single_cell_wrapper(iterset, args, forward_args=(), kernel_name=Non
     code = loopy.generate_code_v2(wrapper)
 
     return code.device_code()
+
+
+class SequentialCPUBackend(AbstractPETScBackend):
+    ParLoop = ParLoop
+    Set = Set
+    ExtrudedSet = ExtrudedSet
+    MixedSet = MixedSet
+    Subset = Subset
+    DataSet = DataSet
+    MixedDataSet = MixedDataSet
+    Map = Map
+    MixedMap = MixedMap
+    Dat = Dat
+    MixedDat = MixedDat
+    DatView = DatView
+    Mat = Mat
+    Global = Global
+    GlobalDataSet = GlobalDataSet
+    PETScVecType = 'seq'
+
+
+sequential_cpu_backend = SequentialCPUBackend()

@@ -71,6 +71,10 @@ class Configuration(dict):
         cdim > 1 be built as block sparsities, or dof sparsities.  The
         former saves memory but changes which preconditioners are
         available for the resulting matrices.  (Default yes)
+    :param only_explicit_host_device_data_transfers: Flag to set host<->device
+        transfers mode. If set *True*, the user has to invoke all the
+        host<->device transfers. If set *False* (default), Firedrake automatically
+        figures out the data transfers, however this might lead to sub-optimality.
     """
     # name, env variable, type, default, write once
     DEFAULTS = {
@@ -112,6 +116,7 @@ class Configuration(dict):
         "print_summary": ("PYOP2_PRINT_SUMMARY", bool, False),
         "matnest": ("PYOP2_MATNEST", bool, True),
         "block_sparsity": ("PYOP2_BLOCK_SPARSITY", bool, True),
+        "only_explicit_host_device_data_transfers": ("EXPLICIT_TRNSFRS", bool, False)
     }
     """Default values for PyOP2 configuration parameters"""
 
