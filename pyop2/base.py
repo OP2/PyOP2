@@ -2640,6 +2640,8 @@ class ComposedMap(Map, ObjectCached):
         self._toset = maps[0].toset
         self._arity = np.prod([m.arity for m in maps], dtype=int)
         if len(maps) > 1:
+            #temp
+            print("mmm: ComposedMap: check shapes here.")
             self._values = reduce((lambda m1, m2: m1._values[m2._values.reshape(-1,)]), self.maps)
         else:
             self._values = maps[0]._values
@@ -2649,6 +2651,7 @@ class ComposedMap(Map, ObjectCached):
         self.dtype = maps[0].dtype
         self._cache = {}
 
+        #temp
         print("remove this later, _globalcount?")
         self._name = "composedmaptest"
         #Map._globalcount += 1
