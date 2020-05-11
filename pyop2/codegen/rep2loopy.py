@@ -629,6 +629,27 @@ def generate(builder, wrapper_name=None):
         knl = kernel._code
         wrapper = loopy.register_callable_kernel(wrapper, knl)
         wrapper = _match_caller_callee_argument_dimension_(wrapper, knl.name)
+        wrapper = loopy.inline_callable_kernel(wrapper, knl.name)
+    elif isinstance(kernel._code, loopy.Program):
+        kernel = kernel._code  # loopy.Program
+        knl = kernel.root_kernel  # loopy.LoopKernel
+
+        from loopy.transform.callable import _match_caller_callee_argument_dimension_
+
+        # Register all resolved functions of root_kernel in wrapper
+        for name, callable in kernel.callables_table.resolved_functions.items():
+            if isinstance(callable, loopy.CallableKernel):
+                wrapper = loopy.register_callable_kernel(wrapper, callable.subkernel)
+            else:
+                # Mathcallables e.g. do not have subkernels so add by hand
+                combined_callables = wrapper.callables_table.resolved_functions
+                combined_callables[name] = callable
+                combined_callables_table = wrapper.callables_table.copy(
+                    resolved_functions=combined_callables)
+                wrapper = wrapper.copy(callables_table=combined_callables_table)
+
+        wrapper = _match_caller_callee_argument_dimension_(wrapper, knl.name)
+        wrapper = loopy.inline_callable_kernel(wrapper, knl.name)
     else:
         # kernel is a string, add it to preamble
         if isinstance(kernel._code, Node):
