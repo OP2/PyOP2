@@ -786,7 +786,7 @@ def generate(builder, wrapper_name=None):
         knl = kernel._code
         wrapper = loopy.register_callable_kernel(wrapper, knl)
         wrapper = _match_caller_callee_argument_dimension_(wrapper, knl.name)
-        wrapper = loopy.inline_callable_kernel(wrapper, knl.name) 
+        wrapper = loopy.inline_callable_kernel(wrapper, knl.name)
     elif isinstance(kernel._code, loopy.Program):
         kernel = kernel._code  # loopy.Program
         knl = kernel.root_kernel  # loopy.LoopKernel
