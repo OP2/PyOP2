@@ -2652,7 +2652,7 @@ class ComposedMap(Map, ObjectCached):
         self._cache = {}
 
         #temp
-        print("remove this later, _globalcount?")
+        #print("remove this later, _globalcount?")
         self._name = "composedmaptest"
         #Map._globalcount += 1
         self._initialized = True
