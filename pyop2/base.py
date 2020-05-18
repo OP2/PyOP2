@@ -2619,21 +2619,32 @@ class ComposedMap(Map, ObjectCached):
             raise ValueError("Requires at least one map object.")
         if self._initialized:
             return
-        # TODO: Must all maps have the same MPI communicator?
-        # TODO: is this the right communicator?
-        self.comm = maps[0].comm
-        self.maps = maps
         if len(maps) > 1:
             for m1, m2 in zip(maps[:-1], maps[1:]):
                 if m1.iterset != m2.toset:
                     raise ValueError("m1 o m2 is not valid")
+                if m1.comm is not m2.comm:
+                    # TODO: Must all maps have the same MPI communicator?
+                    raise ValueError("m1 and m2 have different communicator.")
+            for m in maps[1:]:
+                if m.arity != 1:
+                    raise NotImplementedError("Currently assumed that each map has arity 1 except maps[0].")
+        self.comm = maps[0].comm
+        self.maps = maps
         self._iterset = maps[-1].iterset
         self._toset = maps[0].toset
         self._arity = np.prod([m.arity for m in maps], dtype=int)
         if len(maps) > 1:
-            #temp
-            print("mmm: ComposedMap: check shapes here.")
-            self._values = reduce((lambda m1, m2: m1._values[m2._values.reshape(-1,)]), self.maps)
+            def _squash(m1, m2):
+                _values = np.empty((m2.values_with_halo.shape[0], m1.values_with_halo.shape[1]), dtype=IntType)
+                slce = m2.values_with_halo.reshape(-1,)
+                # Elements corresponding to negative index are meaningless.
+                # Propagage negative.
+                # This is necessary when mapping a larger set (m2) to a smaller one (m1).
+                _values[slce >= 0] = m1.values_with_halo[slce][slce >= 0]
+                _values[slce < 0] = -1
+                return _values
+            self._values = reduce(_squash, self.maps)
         else:
             self._values = maps[0]._values
         self.shape = (self.iterset.total_size, self.arity)
