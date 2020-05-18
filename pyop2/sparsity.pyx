@@ -231,6 +231,8 @@ def fill_with_zeros(PETSc.Mat mat not None, dims, maps, iteration_regions, set_d
             # rmap and cmap entries and set a block of values.
             CHKERR(PetscCalloc1(rarity*carity*rdim*cdim, &values))
             for set_entry in range(set_size):
+                if rmap[set_entry, 0] < 0 or cmap[set_entry, 0] < 0:
+                    continue
                 CHKERR(MatSetValuesBlockedLocal(mat.mat, rarity, &rmap[set_entry, 0],
                                                 carity, &cmap[set_entry, 0],
                                                 values, PETSC_INSERT_VALUES))
