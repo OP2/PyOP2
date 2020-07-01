@@ -39,6 +39,22 @@ from tempfile import gettempdir
 from pyop2.exceptions import ConfigurationError
 
 
+def default_simd_width():
+    from cpuinfo import get_cpu_info
+    avx_to_width = {'avx': 2, 'avx1': 2, 'avx128': 2, 'avx2': 4,
+                    'avx256': 4, 'avx3': 8, 'avx512': 8}
+    longest_ext = [t for t in get_cpu_info()["flags"] if t.startswith('avx')][-1]
+    if longest_ext not in avx_to_width.keys():
+        if longest_ext[:6] not in avx_to_width.keys():
+            assert longest_ext[:4] in avx_to_width.keys(), \
+                "The vector extension of your architecture is unknown. Disable vectorisation!"
+            return avx_to_width[longest_ext[:4]]
+        else:
+            return avx_to_width[longest_ext[:6]]
+    else:
+        return avx_to_width[longest_ext]
+
+
 class Configuration(dict):
     r"""PyOP2 configuration parameters
 
@@ -75,8 +91,8 @@ class Configuration(dict):
     # name, env variable, type, default, write once
     DEFAULTS = {
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gcc"),
-        "simd_width": ("PYOP2_SIMD_WIDTH", int, 4),
-        "vectorization_strategy":("PYOP2_VECT_STRATEGY", str, "ve"),
+        "simd_width": ("PYOP2_SIMD_WIDTH", int, default_simd_width()),
+        "vectorization_strategy": ("PYOP2_VECT_STRATEGY", str, "ve"),
         "alignment": ("PYOP2_ALIGNMENT", int, 64),
         "time": ("PYOP2_TIME", bool, False),
         "debug": ("PYOP2_DEBUG", bool, False),
