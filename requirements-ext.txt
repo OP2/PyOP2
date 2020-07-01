@@ -4,4 +4,5 @@ pytest>=2.3
 flake8>=2.1.0
 pycparser>=2.10
 mpi4py>=1.3.1
-decorator<=4.4.2
+decorator
+py-cpuinfo
