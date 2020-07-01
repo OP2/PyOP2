@@ -84,8 +84,6 @@ def vectorise(wrapper, iname, batch_size):
 
     # split iname and vectorize the inner loop
     slabs = (1, 1)
-    if configuration["time"]:
-        slabs = (0, 0)
     inner_iname = iname + "_batch"
 
     if configuration["vectorization_strategy"] == "ve":
@@ -274,8 +272,6 @@ class ParLoop(petsc_base.ParLoop):
                         continue
                     arglist += (k,)
                     seen.add(k)
-        if configuration["time"]:
-            self.set_nbytes(args)
         return arglist
 
     @cached_property
@@ -290,10 +286,6 @@ class ParLoop(petsc_base.ParLoop):
 
     @collective
     def _compute(self, part, fun, *arglist):
-        if configuration["time"]:
-            nbytes = self.comm.allreduce(self.nbytes)
-            if self.comm.Get_rank() == 0:
-                print("{0}_BYTES= {1}".format(self._jitmodule._wrapper_name, nbytes))
         with self._compute_event:
             self.log_flops(part.size * self.num_flops)
             fun(part.offset, part.offset + part.size, *arglist)
