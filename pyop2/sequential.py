@@ -38,7 +38,6 @@ from copy import deepcopy as dcopy
 
 import ctypes
 import loopy
-import numpy
 
 from pyop2.datatypes import IntType, as_ctypes
 from pyop2 import base
@@ -60,7 +59,6 @@ from pyop2.mpi import collective
 from pyop2.profiling import timed_region
 from pyop2.utils import cached_property, get_petsc_dir
 from pyop2.configuration import configuration
-from pyop2.codegen.rep2loopy import _PreambleGen
 
 
 def vectorise(wrapper, iname, batch_size):
@@ -75,12 +73,6 @@ def vectorise(wrapper, iname, batch_size):
     # create constant zero vectors
     wrapper = wrapper.copy(target=loopy.CVecTarget(batch_size))
     kernel = wrapper.root_kernel
-    zeros = loopy.TemporaryVariable("_zeros", shape=loopy.auto, dtype=numpy.float64, read_only=True,
-                                    initializer=numpy.array(0.0, dtype=numpy.float64),
-                                    address_space=loopy.AddressSpace.GLOBAL, zero_size=batch_size)
-    tmps = kernel.temporary_variables.copy()
-    tmps["_zeros"] = zeros
-    kernel = kernel.copy(temporary_variables=tmps)
 
     # split iname and vectorize the inner loop
     slabs = (1, 1)
