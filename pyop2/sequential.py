@@ -73,7 +73,7 @@ def vectorise(wrapper, iname, batch_size):
         return wrapper
 
     # create constant zero vectors
-    wrapper = wrapper.copy(target=loopy.CVecTarget())
+    wrapper = wrapper.copy(target=loopy.CVecTarget(batch_size))
     kernel = wrapper.root_kernel
     zeros = loopy.TemporaryVariable("_zeros", shape=loopy.auto, dtype=numpy.float64, read_only=True,
                                     initializer=numpy.array(0.0, dtype=numpy.float64),
@@ -100,12 +100,6 @@ def vectorise(wrapper, iname, batch_size):
 
     wrapper = wrapper.with_root_kernel(kernel)
 
-    # vector data type
-    vec_types = [("double", 8), ("int", 4)]  # scalar type, bytes
-    preamble = ["typedef {0} {0}{1} __attribute__ ((vector_size ({2})));".format(t, batch_size, batch_size * b) for t, b in vec_types]
-    preamble = "\n" + "\n".join(preamble)
-
-    wrapper = loopy.register_preamble_generators(wrapper, [_PreambleGen(preamble, idx="01")])
     return wrapper
 
 
