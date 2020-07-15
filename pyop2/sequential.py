@@ -160,11 +160,16 @@ class JITModule(base.JITModule):
             iname = "layer"
         else:
             iname = "n"
+
         has_matrix = any(arg._is_mat for arg in self._args)
         has_rw = any(arg.access == RW for arg in self._args)
-        if isinstance(self._kernel.code, loopy.LoopKernel) and not (has_matrix or has_rw):
+        is_cplx = any(arg.dtype.name == 'complex128' for arg in self._args)
+        vectorisable = not (has_matrix or has_rw) and (configuration["vectorization_strategy"])
+
+        if (isinstance(self._kernel.code, loopy.LoopKernel) and vectorisable):
             wrapper = loopy.inline_callable_kernel(wrapper, self._kernel.name)
-            wrapper = vectorise(wrapper, iname, configuration["simd_width"])
+            if not is_cplx:
+                wrapper = vectorise(wrapper, iname, configuration["simd_width"])
         code = loopy.generate_code_v2(wrapper)
 
         if self._kernel._cpp:
