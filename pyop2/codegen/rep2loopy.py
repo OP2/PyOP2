@@ -613,7 +613,7 @@ def generate(builder, wrapper_name=None):
                                 lang_version=(2018, 2),
                                 name=wrapper_name,
                                 # TODO, should these really be silenced?
-                                silenced_warnings=["write_race*"])
+                                silenced_warnings=["write_race*", "data_dep*"])
 
     # prioritize loops
     for indices in context.index_ordering:
