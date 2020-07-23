@@ -2650,7 +2650,7 @@ class ComposedMap(Map, ObjectCached):
                 # Elements corresponding to negative index are meaningless.
                 # Propagage negative.
                 # This is necessary when mapping a larger set (m2) to a smaller one (m1).
-                _values[slce >= 0] = m1.values_with_halo[slce][slce >= 0]
+                _values[slce >= 0] = m1.values_with_halo[slce[slce >= 0]]
                 _values[slce < 0] = -1
                 return _values
             self._values = reduce(_squash, self.maps)
