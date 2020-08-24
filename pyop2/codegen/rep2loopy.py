@@ -168,7 +168,103 @@ class LACallable(loopy.ScalarCallable, metaclass=abc.ABCMeta):
         return var(self.name_in_target)(*c_parameters), False
 
 
-class INVCallable(LACallable):
+class INVBatchCallable(LACallable):
+    """
+    The InverseCallable replaces loopy.CallInstructions to "inverse"
+    functions by LAPACK getri.
+    """
+    def generate_preambles(self, target):
+        # assert isinstance(target, loopy.CVecTarget)
+        inverse_preamble = """
+            #include <mkl.h>
+            #define Inverse_HPP
+            #define BUF_SIZE 30
+
+ 
+#define BYTES4 (4*4)
+typedef int int4 __attribute__ ((vector_size (BYTES4)));
+#define BYTES8 (4*8)
+typedef double double4 __attribute__ ((vector_size (BYTES8)));
+static void inverse(double4* Aout, const double4*  A, PetscBLASInt N)
+{
+                MKL_INT nmat = 1;
+                MKL_COMPACT_PACK format = mkl_get_format_compact();
+                MKL_INT mkl_N = N;
+                MKL_INT a_buffer_size = mkl_dget_size_compact(mkl_N, mkl_N, format, nmat);
+                double *Aout_compact = (double *)mkl_malloc(a_buffer_size, 128);
+                double *Awork_compact = (double *)mkl_malloc(sizeof(double) *N*N, 128);
+
+                MKL_LAYOUT layout = MKL_ROW_MAJOR;
+                MKL_INT info;
+
+    double* A_compact = (double *)mkl_malloc(sizeof(double)*N*N*nmat, 128);
+    double* Awork = (double *)mkl_malloc(sizeof(double)*N*N*nmat, 128);
+
+    MKL_INT n, m, k;
+    printf("A (hor is k, vert is col, blocks is row)//n");
+    for (k = 0; k < nmat; k++){
+      for (n = 0; n < N; n++) {
+        for (m = 0; m < N; m++) {
+          printf("%f", A[n+m*N][k]);
+        }
+        printf("//n");
+      }
+      printf("//n");
+    }
+
+    printf("Awork (hor is row, vert is col, blocks is mats)//n");
+    memcpy(A_compact, A, N*N*sizeof(double4));
+    for (k = 0; k < nmat; k++){
+      for (n = 0; n < N; n++) {
+        for (m = 0; m < N; m++) {
+          printf("%f", A_compact[n*nmat*N+m*nmat+k]);
+        }
+        printf("//n");
+      }
+      printf("//n");
+    }
+    
+    mkl_dgetrfnp_compact(layout, mkl_N, mkl_N, A_compact, mkl_N, &info, format, nmat);
+    
+    printf("Awork fact//n");
+   
+    for (k = 0; k < nmat; k++){
+      for (n = 0; n < N; n++) {
+        for (m = 0; m < N; m++) {
+          printf("%f", A_compact[n*nmat*N+m*nmat+k]);
+        }
+        printf("//n");
+      }
+      printf("//n");
+    }
+
+    if(info == 0){
+        mkl_dgetrinp_compact(layout, mkl_N, A_compact, mkl_N, Awork, N*N, &info, format, nmat);
+    }else{
+        fprintf(stderr, "Getrf throws nonzero info.");
+        abort();
+    }
+    
+    printf("Awork inv//n");
+   
+    for (k = 0; k < nmat; k++){
+      for (n = 0; n < N; n++) {
+        for (m = 0; m < N; m++) {
+          printf("%f", A_compact[n*nmat*N+m*nmat+k]);
+        }
+        printf("//n");
+      }
+      printf("//n");
+    }
+
+    memcpy(Aout, A_compact, nmat*N*N*sizeof(double));
+}
+        """
+        yield ("inverse", "#include <petscsys.h>\n\n" + inverse_preamble)
+        return
+
+        
+class INVNonBatchedCallable(LACallable):
     """
     The InverseCallable replaces loopy.CallInstructions to "inverse"
     functions by LAPACK getri.
