@@ -79,7 +79,7 @@ def vectorise(wrapper, iname, batch_size):
     inner_iname = iname + "_batch"
 
     if configuration["vectorization_strategy"] == "ve":
-        kernel = loopy.split_iname(kernel, iname, batch_size, slabs=slabs, inner_tag="c_vec", inner_iname=inner_iname)
+        kernel = loopy.split_iname(kernel, iname, batch_size, slabs=slabs, inner_tag="vec", inner_iname=inner_iname)
 
     alignment = configuration["alignment"]
     tmps = dict((name, tv.copy(alignment=alignment)) for name, tv in kernel.temporary_variables.items())
