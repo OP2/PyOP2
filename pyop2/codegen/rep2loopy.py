@@ -262,6 +262,45 @@ static void inverse(double4* Aout, const double4*  A, PetscBLASInt N)
         yield ("inverse", "#include <petscsys.h>\n\n" + inverse_preamble)
         return
 
+class INVNullBatchedCallable(LACallable):
+    """
+    The InverseCallable replaces loopy.CallInstructions to "inverse"
+    functions by LAPACK getri.
+    """
+    def generate_preambles(self, target):
+        assert isinstance(target, loopy.CTarget)
+        inverse_preamble = """
+            #define Inverse_HPP
+            #define BUF_SIZE 30
+
+            static PetscBLASInt ipiv_buffer[BUF_SIZE];
+            static PetscScalar work_buffer[BUF_SIZE*BUF_SIZE];
+            static void inverse(double4 __restrict__ Aout, const double4 __restrict__ A, PetscBLASInt N)
+            {
+                PetscBLASInt info;
+                PetscBLASInt *ipiv = N <= BUF_SIZE ? ipiv_buffer : malloc(N*sizeof(*ipiv));
+                PetscScalar *Awork = N <= BUF_SIZE ? work_buffer : malloc(N*N*sizeof(*Awork));
+                PetscScalar *Abuf = malloc(N*N*sizeof(PetscScalar))
+                for (i = 0; i < 4; i++) {
+                    copy(Abuf, A[:,:,i])
+                memcpy(Aout, A, N*N*sizeof(PetscScalar));
+                LAPACKgetrf_(&N, &N, Abuf, &N, ipiv, &info);
+                if(info == 0){
+                    LAPACKgetri_(&N, Abuf, &N, ipiv, Awork, &N, &info);
+                }
+                if(info != 0){
+                    fprintf(stderr, \"Getri throws nonzero info.\");
+                    abort();
+                }
+                copy(Aout[:,:,i], Abuf)
+                if ( N > BUF_SIZE ) {
+                    free(Awork);
+                    free(ipiv);
+                }
+            }
+        """
+        yield ("inverse", "#include <petscsys.h>\n#include <petscblaslapack.h>\n" + inverse_preamble)
+        return
         
 class INVNonBatchedCallable(LACallable):
     """
