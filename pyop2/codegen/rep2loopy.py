@@ -303,7 +303,7 @@ class INVNullBatchedCallable(LACallable):
         yield ("inverse", "#include <petscsys.h>\n#include <petscblaslapack.h>\n" + inverse_preamble)
         return
         
-class INVNonBatchedCallable(LACallable):
+class UnvectorisedINVCallable(LACallable):
     """
     The InverseCallable replaces loopy.CallInstructions to "inverse"
     functions by LAPACK getri.
