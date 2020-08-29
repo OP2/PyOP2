@@ -71,7 +71,7 @@ def vectorise(wrapper, iname, batch_size):
         return wrapper
 
     # create constant zero vectors
-    wrapper = wrapper.copy(target=loopy.CVecTarget(batch_size))
+    wrapper = wrapper.copy(target=loopy.CVecTarget(batch_size, batchedblas=True))
     kernel = wrapper.root_kernel
 
     # split iname and vectorize the inner loop
