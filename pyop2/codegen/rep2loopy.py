@@ -210,30 +210,47 @@ class INVBatchCallable(LACallable):
                 """
                 yield ("inverse", "#include <petscsys.h>\n\n" + inverse_preamble)
             else:
+                # for now the codegeneration inside the slate kernel is the same for batched and non batched blas
+                # meaning multiple matrices are passed 
+                # the alternative would be to call to loop over the matrices and pass them one by one
                 inverse_preamble = """
                     #define Inverse_HPP
                     #define BUF_SIZE 30
-
+                    
+                    #define BYTES4 (4*4)
+                    typedef int int4 __attribute__ ((vector_size (BYTES4)));
+                    #define BYTES8 (4*8)
+                    typedef double double4 __attribute__ ((vector_size (BYTES8)));
                     static PetscBLASInt ipiv_buffer[BUF_SIZE];
                     static PetscScalar work_buffer[BUF_SIZE*BUF_SIZE];
-                    static void inverse(double4 __restrict__ Aout, const double4 __restrict__ A, PetscBLASInt N)
+                    static void inverse(double4* __restrict__ Aout, const double4* __restrict__ A, PetscBLASInt N)
                     {
+                        PetscBLASInt nmat = 4;
                         PetscBLASInt info;
-                        PetscBLASInt *ipiv = N <= BUF_SIZE ? ipiv_buffer : malloc(N*sizeof(*ipiv));
-                        PetscScalar *Awork = N <= BUF_SIZE ? work_buffer : malloc(N*N*sizeof(*Awork));
-                        PetscScalar *Abuf = malloc(N*N*sizeof(PetscScalar))
-                        for (i = 0; i < 4; i++) {
-                            copy(Abuf, A[:,:,i])
-                        memcpy(Aout, A, N*N*sizeof(PetscScalar));
-                        LAPACKgetrf_(&N, &N, Abuf, &N, ipiv, &info);
-                        if(info == 0){
-                            LAPACKgetri_(&N, Abuf, &N, ipiv, Awork, &N, &info);
+                        PetscBLASInt *ipiv = N <= BUF_SIZE ? ipiv_buffer : malloc(N*sizeof(PetscBLASInt));
+                        PetscScalar *Awork = N <= BUF_SIZE ? work_buffer : malloc(N*N*sizeof(PetscScalar));
+                        PetscScalar *Abuf = malloc(N*N*sizeof(PetscScalar));
+                        PetscBLASInt k, n, m;
+                        for (k = 0; k < nmat; k++){
+                            for (n = 0; n < N; n++) {
+                                for (m = 0; m < N; m++) {
+                                    Abuf[n*N+m] = A[n+m*N][k];
+                                }
+                            }
+                            LAPACKgetrf_(&N, &N, Abuf, &N, ipiv, &info);
+                            if(info == 0){
+                                LAPACKgetri_(&N, Abuf, &N, ipiv, Awork, &N, &info);
+                            }
+                            if(info != 0){
+                                fprintf(stderr, \"Getri throws nonzero info.\");
+                                abort();
+                            }
+                            for (n = 0; n < N; n++) {
+                                for (m = 0; m < N; m++) {
+                                    Aout[n*N+m][k] = Abuf[n+m*N];
+                                }
+                            }
                         }
-                        if(info != 0){
-                            fprintf(stderr, \"Getri throws nonzero info.\");
-                            abort();
-                        }
-                        copy(Aout[:,:,i], Abuf)
                         if ( N > BUF_SIZE ) {
                             free(Awork);
                             free(ipiv);
