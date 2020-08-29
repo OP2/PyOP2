@@ -195,62 +195,14 @@ class INVBatchCallable(LACallable):
 
                         double* A_compact = (double *)mkl_malloc(sizeof(double)*N*N*nmat, 128);
                         double* Awork = (double *)mkl_malloc(sizeof(double)*N*N*nmat, 128);
-
-                        MKL_INT n, m, k;
-                        printf("A (hor is k, vert is col, blocks is row)\\n");
-                        for (k = 0; k < nmat; k++){
-                        for (n = 0; n < N; n++) {
-                            for (m = 0; m < N; m++) {
-                            printf("%f", A[n+m*N][k]);
-                            }
-                            printf("\\n");
-                        }
-                        printf("\\n");
-                        }
-
-                        printf("Awork (hor is row, vert is col, blocks is mats)\\n");
                         memcpy(A_compact, A, N*N*sizeof(double4));
-                        for (k = 0; k < nmat; k++){
-                        for (n = 0; n < N; n++) {
-                            for (m = 0; m < N; m++) {
-                            printf("%f", A_compact[n*nmat*N+m*nmat+k]);
-                            }
-                            printf("\\n");
-                        }
-                        printf("\\n");
-                        }
                         
                         mkl_dgetrfnp_compact(layout, mkl_N, mkl_N, A_compact, mkl_N, &info, format, nmat);
-                        
-                        printf("Awork fact\\n");
-                    
-                        for (k = 0; k < nmat; k++){
-                        for (n = 0; n < N; n++) {
-                            for (m = 0; m < N; m++) {
-                            printf("%f", A_compact[n*nmat*N+m*nmat+k]);
-                            }
-                            printf("\\n");
-                        }
-                        printf("\\n");
-                        }
-
                         if(info == 0){
                             mkl_dgetrinp_compact(layout, mkl_N, A_compact, mkl_N, Awork, N*N, &info, format, nmat);
                         }else{
                             fprintf(stderr, "Getrf throws nonzero info.");
                             abort();
-                        }
-                        
-                        printf("Awork inv\\n");
-                    
-                        for (k = 0; k < nmat; k++){
-                        for (n = 0; n < N; n++) {
-                            for (m = 0; m < N; m++) {
-                            printf("%f", A_compact[n*nmat*N+m*nmat+k]);
-                            }
-                            printf("\\n");
-                        }
-                        printf("\\n");
                         }
 
                         memcpy(Aout, A_compact, nmat*N*N*sizeof(double));
