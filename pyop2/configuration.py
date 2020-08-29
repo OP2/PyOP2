@@ -96,9 +96,10 @@ class Configuration(dict):
     dir = prefix+"lib/"
     ompdir = prefix+"../lib/"
     DEFAULTS = {
-        "compiler": ("PYOP2_BACKEND_COMPILER", str, "icc"),
+        "compiler": ("PYOP2_BACKEND_COMPILER", str, "gcc"),
         "simd_width": ("PYOP2_SIMD_WIDTH", int, default_simd_width()),
         "vectorization_strategy": ("PYOP2_VECT_STRATEGY", str, "ve"),
+        "batched_blas": ("PYOP2_BATCHED_BLAS", bool, False),
         "alignment": ("PYOP2_ALIGNMENT", int, 64),
         "time": ("PYOP2_TIME", bool, False),
         "debug": ("PYOP2_DEBUG", bool, False),
