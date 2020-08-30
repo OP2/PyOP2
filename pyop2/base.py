@@ -124,7 +124,7 @@ class Arg(object):
         :param map:  A :class:`Map` to access this :class:`Arg` or the default
                      if the identity map is to be used.
         :param access: An access descriptor of type :class:`Access`
-        :param lgmaps: For :class:`Mat` objects, a 2-tuple of local to
+        :param lgmaps: For :class:`Mat` objects, a tuple of 2-tuples of local to
             global maps used during assembly.
 
         Checks that:
@@ -148,6 +148,7 @@ class Arg(object):
         self.lgmaps = None
         if self._is_mat and lgmaps is not None:
             self.lgmaps = as_tuple(lgmaps)
+            assert len(self.lgmaps) == self.data.nblocks
         else:
             if lgmaps is not None:
                 raise ValueError("Local to global maps only for matrices")
@@ -215,11 +216,11 @@ class Arg(object):
             return tuple(_make_object('Arg', d, m, self._access)
                          for d, m in zip(self.data, self._map))
         elif self._is_mixed_mat:
-            s = self.data.sparsity.shape
+            rows, cols = self.data.sparsity.shape
             mr, mc = self.map
             return tuple(_make_object('Arg', self.data[i, j], (mr.split[i], mc.split[j]),
                                       self._access)
-                         for j in range(s[1]) for i in range(s[0]))
+                         for i in range(rows) for j in range(cols))
         else:
             return (self,)
 
@@ -773,11 +774,6 @@ class Subset(ExtrudedSet):
         else:
             return self._superset.layers_array[self.indices, ...]
 
-    @cached_property
-    def _argtype(self):
-        """Ctypes argtype for this :class:`Subset`"""
-        return ctypes.c_voidp
-
 
 class SetPartition(object):
     def __init__(self, set, offset, size):
@@ -1281,7 +1277,7 @@ class _EmptyDataMixin(object):
     """
     def __init__(self, data, dtype, shape):
         if data is None:
-            self._dtype = np.dtype(dtype if dtype is not None else np.float64)
+            self._dtype = np.dtype(dtype if dtype is not None else ScalarType)
         else:
             self._numpy_data = verify_reshape(data, dtype, shape, allow_none=True)
             self._dtype = self._data.dtype
@@ -1410,11 +1406,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
         """The scalar number of values for each member of the object. This is
         the product of the dim tuple."""
         return self.dataset.cdim
-
-    @cached_property
-    def _argtype(self):
-        """Ctypes argtype for this :class:`Dat`"""
-        return ctypes.c_voidp
 
     @property
     @collective
@@ -1778,11 +1769,11 @@ class Dat(DataCarrier, _EmptyDataMixin):
         name = "neg"
         inames = isl.make_zero_and_vars(["i"])
         domain = (inames[0].le_set(inames["i"])) & (inames["i"].lt_set(inames[0] + self.cdim))
-        lvalue = p.Variable("neg")
+        lvalue = p.Variable("other")
         rvalue = p.Variable("self")
         i = p.Variable("i")
         insn = loopy.Assignment(lvalue.index(i), -rvalue.index(i), within_inames=frozenset(["i"]))
-        data = [loopy.GlobalArg("neg", dtype=self.dtype, shape=(self.cdim,)),
+        data = [loopy.GlobalArg("other", dtype=self.dtype, shape=(self.cdim,)),
                 loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,))]
         knl = loopy.make_function([domain], [insn], data, name=name)
         return _make_object('Kernel', knl, name)
@@ -2329,11 +2320,6 @@ class Global(DataCarrier, _EmptyDataMixin):
         return _make_object('GlobalDataSet', self)
 
     @property
-    def _argtype(self):
-        """Ctypes argtype for this :class:`Global`"""
-        return ctypes.c_voidp
-
-    @property
     def shape(self):
         return self._dim
 
@@ -2551,11 +2537,6 @@ class Map(object):
     def __len__(self):
         """This is not a mixed type and therefore of length 1."""
         return 1
-
-    @cached_property
-    def _argtype(self):
-        """Ctypes argtype for this :class:`Map`"""
-        return ctypes.c_voidp
 
     @cached_property
     def split(self):
@@ -3267,14 +3248,13 @@ class Mat(DataCarrier):
             "Abstract Mat base class doesn't know how to set values.")
 
     @cached_property
-    def _argtypes_(self):
-        """Ctypes argtype for this :class:`Mat`"""
-        return (ctypes.c_voidp, )
+    def nblocks(self):
+        return int(np.prod(self.sparsity.shape))
 
     @cached_property
-    def _argtype(self):
+    def _argtypes_(self):
         """Ctypes argtype for this :class:`Mat`"""
-        return ctypes.c_voidp
+        return tuple(ctypes.c_voidp for _ in self)
 
     @cached_property
     def dims(self):
@@ -3416,6 +3396,8 @@ class Kernel(Cached):
         empty)
     :param ldargs: A list of arguments to pass to the linker when
         compiling this Kernel.
+    :param requires_zeroed_output_arguments: Does this kernel require the
+        output arguments to be zeroed on entry when called? (default no)
     :param cpp: Is the kernel actually C++ rather than C?  If yes,
         then compile with the C++ compiler (kernel is wrapped in
         extern C for linkage reasons).
@@ -3438,7 +3420,7 @@ class Kernel(Cached):
     @classmethod
     @validate_type(('name', str, NameTypeError))
     def _cache_key(cls, code, name, opts={}, include_dirs=[], headers=[],
-                   user_code="", ldargs=None, cpp=False):
+                   user_code="", ldargs=None, cpp=False, requires_zeroed_output_arguments=False):
         # Both code and name are relevant since there might be multiple kernels
         # extracting different functions from the same code
         # Also include the PyOP2 version, since the Kernel class might change
@@ -3452,7 +3434,7 @@ class Kernel(Cached):
             code.update_persistent_hash(key_hash, LoopyKeyBuilder())
             code = key_hash.hexdigest()
         hashee = (str(code) + name + str(sorted(opts.items())) + str(include_dirs)
-                  + str(headers) + version + str(ldargs) + str(cpp))
+                  + str(headers) + version + str(ldargs) + str(cpp) + str(requires_zeroed_output_arguments))
         return md5(hashee.encode()).hexdigest()
 
     @cached_property
@@ -3460,7 +3442,7 @@ class Kernel(Cached):
         return (self._key, )
 
     def __init__(self, code, name, opts={}, include_dirs=[], headers=[],
-                 user_code="", ldargs=None, cpp=False):
+                 user_code="", ldargs=None, cpp=False, requires_zeroed_output_arguments=False):
         # Protect against re-initialization when retrieved from cache
         if self._initialized:
             return
@@ -3475,6 +3457,7 @@ class Kernel(Cached):
         assert isinstance(code, (str, Node, loopy.Program, loopy.LoopKernel))
         self._code = code
         self._initialized = True
+        self.requires_zeroed_output_arguments = requires_zeroed_output_arguments
 
     @property
     def name(self):
@@ -3665,9 +3648,23 @@ class ParLoop(object):
         with self._parloop_event:
             orig_lgmaps = []
             for arg in self.args:
-                if arg._is_mat and arg.lgmaps is not None:
-                    orig_lgmaps.append(arg.data.handle.getLGMap())
-                    arg.data.handle.setLGMap(*arg.lgmaps)
+                if arg._is_mat:
+                    new_state = {INC: Mat.ADD_VALUES,
+                                 WRITE: Mat.INSERT_VALUES}[arg.access]
+                    for m in arg.data:
+                        m.change_assembly_state(new_state)
+                    arg.data.change_assembly_state(new_state)
+                    # Boundary conditions applied to the matrix appear
+                    # as modified lgmaps on the Arg. We set them onto
+                    # the matrix so things are correctly dropped in
+                    # insertion, and then restore the original lgmaps
+                    # afterwards.
+                    if arg.lgmaps is not None:
+                        olgmaps = []
+                        for m, lgmaps in zip(arg.data, arg.lgmaps):
+                            olgmaps.append(m.handle.getLGMap())
+                            m.handle.setLGMap(*lgmaps)
+                        orig_lgmaps.append(olgmaps)
             self.global_to_local_begin()
             iterset = self.iterset
             arglist = self.arglist
@@ -3684,7 +3681,8 @@ class ParLoop(object):
             self.update_arg_data_state()
             for arg in reversed(self.args):
                 if arg._is_mat and arg.lgmaps is not None:
-                    arg.data.handle.setLGMap(*orig_lgmaps.pop())
+                    for m, lgmaps in zip(arg.data, orig_lgmaps.pop()):
+                        m.handle.setLGMap(*lgmaps)
             self.reduction_end()
             self.local_to_global_end()
 
