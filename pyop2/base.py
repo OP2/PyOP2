@@ -2655,7 +2655,8 @@ class ComposedMap(Map, ObjectCached):
 
         #temp
         #print("remove this later, _globalcount?")
-        self._name = "composedmaptest"
+        #self._name = "composedmaptest"
+        self._name = "composed_map_" + "o".join([m.name for m in maps])
         #Map._globalcount += 1
         self._initialized = True
 
