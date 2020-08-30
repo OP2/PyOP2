@@ -119,3 +119,32 @@ class TestCallables:
         op2.par_loop(loopykernel, solve_mat.dataset.set, *args)
         expected = np.linalg.solve(solve_mat.data, solve_vec.data)
         assert np.allclose(expected, zero_vec.data)
+
+    def test_inline_multiple(self, zero_vec, solve_mat, solve_vec):
+        loopy.set_caching_enabled(False)
+
+        k = loopy.make_kernel(
+            ["{[i,j] : 0 <= i,j < 2}"],
+            """
+            B[:,:] = inv(A[:,:])
+            C[:,:] = inv(B[:,:])
+            x[:] = solve(C[:,:], b[:])
+            """,
+            [loopy.GlobalArg('x', dtype=np.float64, shape=(2, )),
+             loopy.GlobalArg('A', dtype=np.float64, shape=(2, 2)),
+             loopy.TemporaryVariable('B', dtype=np.float64, shape=(2, 2)),
+             loopy.TemporaryVariable('C', dtype=np.float64, shape=(2, 2)),
+             loopy.GlobalArg('b', dtype=np.float64, shape=(2, ),)],
+            target=loopy.CTarget(),
+            name="callable_kernel",
+            lang_version=(2018, 2))
+
+        k = loopy.register_function_id_to_in_knl_callable_mapper(k, solve_fn_lookup)
+        k = loopy.register_function_id_to_in_knl_callable_mapper(k, inv_fn_lookup)
+
+        loopykernel = op2.Kernel(k, k.name, ldargs=["-llapack"])
+        args = [zero_vec(op2.WRITE), solve_mat(op2.READ), solve_vec(op2.READ)]
+
+        op2.par_loop(loopykernel, solve_mat.dataset.set, *args)
+        expected = np.linalg.solve(solve_mat.data, solve_vec.data)
+        assert np.allclose(expected, zero_vec.data)
