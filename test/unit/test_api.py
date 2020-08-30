@@ -1197,13 +1197,13 @@ class TestSparsityAPI:
 
         # Note: We can't actually reproduce a Sparsity from its repr because
         # the Sparsity constructor checks that the maps are populated
-        r = "Sparsity(%r, %r, %r)" % (sparsity.dsets, sparsity.maps, sparsity.name)
+        r = "Sparsity(%r, %r, %r, maps_ij=%r)" % (sparsity.dsets, sparsity.maps, sparsity.name, sparsity._maps_ij)
         assert repr(sparsity) == r
 
     def test_sparsity_str(self, sparsity):
         "Sparsity should have the expected string representation."
-        s = "OP2 Sparsity: dsets %s, rmaps %s, cmaps %s, name %s" % \
-            (sparsity.dsets, sparsity.rmaps, sparsity.cmaps, sparsity.name)
+        s = "OP2 Sparsity: dsets %s, rmaps %s, cmaps %s, maps_ij %s, name %s" % \
+            (sparsity.dsets, sparsity.rmaps, sparsity.cmaps, sparsity._maps_ij, sparsity.name)
         assert str(sparsity) == s
 
 
@@ -1529,11 +1529,6 @@ class TestMixedMapAPI:
         for i, m in enumerate(maps):
             assert mmap.split[i] == m
         assert mmap.split[:-1] == tuple(mmap)[:-1]
-
-    def test_mixed_map_nonunique_itset(self, m_iterset_toset, m_set_toset):
-        "Map toset should be Set."
-        with pytest.raises(exceptions.MapTypeError):
-            op2.MixedMap((m_iterset_toset, m_set_toset))
 
     def test_mixed_map_iterset(self, mmap):
         "MixedMap iterset should return the common iterset of all Maps."

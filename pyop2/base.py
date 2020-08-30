@@ -2706,8 +2706,6 @@ class MixedMap(Map, ObjectCached):
         if self._initialized:
             return
         self._maps = maps
-        #if not all(m is None or m.iterset == self.iterset for m in self._maps):
-        #    raise MapTypeError("All maps in a MixedMap need to share the same iterset")
         # TODO: Think about different communicators on maps (c.f. MixedSet)
         # TODO: What if all maps are None?
         comms = tuple(m.comm for m in self._maps if m is not None)
@@ -3163,10 +3161,11 @@ class Sparsity(ObjectCached):
             if tuple(other) <= maps:
                 return True
 
-        for maps_i in self._maps_ij:
-            for maps in maps_i:
-                if other in maps:
-                    return True
+        if self._maps_ij:
+            for maps_i in self._maps_ij:
+                for maps in maps_i:
+                    if other in maps:
+                        return True
 
         return False
 
