@@ -90,15 +90,10 @@ def vectorise(wrapper, iname, batch_size):
     from loopy.transform.iname import tag_inames
 
     # try to vectorise with vector extensionn
-    pragma_inst, vector_inst, iname_to_pragma, iname_to_unr = check_cvec_vectorizability(kernel)
-    
-    # if not possible fall back to OpenMP SIMD pragmas or unrolling by retagging
-    for i in iname_to_pragma:
-        kernel = tag_inames(kernel, [(i, "omp_simd")], retag=True)
-    for i in iname_to_unr:
-        kernel = tag_inames(kernel, [(i, "unr")], retag=True)
+    vector_inst, pragma_inst_to_tag, unr_inst_to_tag = check_cvec_vectorizability(kernel)
 
-    kernel = cvec_privatize(kernel, pragma_inst, vector_inst)
+    # if not possible fall back to OpenMP SIMD pragmas or unrolling by retagging, then privatize
+    kernel = cvec_retag_and_privatize(kernel, vector_inst, pragma_inst_to_tag, unr_inst_to_tag)
 
     wrapper = wrapper.with_root_kernel(kernel)
     
