@@ -85,9 +85,11 @@ def vectorise(wrapper, iname, batch_size):
     tmps = dict((name, tv.copy(alignment=alignment)) for name, tv in kernel.temporary_variables.items())
     kernel = kernel.copy(temporary_variables=tmps)
 
-    from loopy.preprocess import check_cvec_vectorizability, cvec_privatize
+    from loopy.preprocess import check_cvec_vectorizability, cvec_retag_and_privatize, realize_ilp
     from loopy.kernel.data import OpenMPSIMDTag, VectorizeTag
     from loopy.transform.iname import tag_inames
+
+    kernel = realize_ilp(kernel)  # FIXME: do we also need to realize the reductions first?
 
     # try to vectorise with vector extensionn
     vector_inst, pragma_inst_to_tag, unr_inst_to_tag = check_cvec_vectorizability(kernel)
