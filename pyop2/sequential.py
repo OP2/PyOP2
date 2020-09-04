@@ -70,7 +70,6 @@ def vectorise(wrapper, iname, batch_size):
     if batch_size == 1:
         return wrapper
 
-    # create constant zero vectors
     wrapper = wrapper.copy(target=loopy.CVecTarget())
     kernel = wrapper.root_kernel
 
