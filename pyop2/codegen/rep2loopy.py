@@ -304,8 +304,93 @@ class SolveCallable(LACallable):
     functions by LAPACK getrs.
     """
     def generate_preambles(self, target):
-        assert isinstance(target, loopy.CTarget)
-        yield ("solve", solve_preamble)
+        if isinstance(target, loopy.CVecTarget):
+            if target.batchedblas:
+                pass
+            else:
+                solve_preamble = """
+                    #define Inverse_HPP
+                    #define BUF_SIZE 30
+                    
+                    #define BYTES4 (4*4)
+                    typedef int int4 __attribute__ ((vector_size (BYTES4)));
+                    #define BYTES8 (4*8)
+                    typedef double double4 __attribute__ ((vector_size (BYTES8)));
+                    static PetscBLASInt ipiv_buffer[BUF_SIZE];
+                    static PetscScalar work_buffer[BUF_SIZE*BUF_SIZE];
+                    static void solve(double4* __restrict__ out, const double4* __restrict__ A, const double4* __restrict__ B, PetscBLASInt N)
+                    {
+                        PetscBLASInt nmat = 4;
+                        PetscBLASInt info;
+                        PetscBLASInt *ipiv = N <= BUF_SIZE ? ipiv_buffer : malloc(N*sizeof(PetscBLASInt));
+                        PetscScalar *Awork = N <= BUF_SIZE ? work_buffer : malloc(N*N*sizeof(PetscScalar));
+                        PetscScalar *Abuf = malloc(N*N*sizeof(PetscScalar));
+                        PetscScalar *Bbuf = malloc(N*sizeof(PetscScalar));
+                        memcpy(out,B,N*sizeof(PetscScalar));
+                        PetscBLASInt NRHS = 1;
+                        const char T = 'T';
+                        PetscBLASInt k, n, m;
+                        for (k = 0; k < nmat; k++){
+                            for (n = 0; n < N; n++) {
+                                for (m = 0; m < N; m++) {
+                                    Abuf[n*N+m] = A[n+m*N][k];
+                                }
+                                Bbuf[n] = B[n][k];
+                            }
+                            LAPACKgetrf_(&N, &N, Abuf, &N, ipiv, &info);
+                            if(info == 0){
+                                LAPACKgetrs_(&T, &N, &NRHS, Abuf, &N, ipiv, Bbuf, &N, &info);
+                            }
+                            if(info != 0){
+                                fprintf(stderr, \"Getri throws nonzero info.\");
+                                abort();
+                            }
+                            for (n = 0; n < N; n++) {
+                                out[n][k] = Bbuf[n];
+                            }
+                        }
+                        if ( N > BUF_SIZE ) {
+                            free(Awork);
+                            free(ipiv);
+                        }
+                    }
+                """
+                yield ("solve", "#include <petscsys.h>\n#include <petscblaslapack.h>\n" + solve_preamble)
+        else:
+            assert isinstance(target, loopy.CTarget)
+
+            solve_preamble  = """
+                #define Solve_HPP
+                #define BUF_SIZE 30
+
+                static PetscBLASInt ipiv_buffer[BUF_SIZE];
+                static PetscScalar work_buffer[BUF_SIZE*BUF_SIZE];
+                static void solve(PetscScalar* __restrict__ out, const PetscScalar* __restrict__ A, const PetscScalar* __restrict__ B, PetscBLASInt N)
+                {
+                    PetscBLASInt info;
+                    PetscBLASInt *ipiv = N <= BUF_SIZE ? ipiv_buffer : malloc(N*sizeof(*ipiv));
+                    memcpy(out,B,N*sizeof(PetscScalar));
+                    PetscScalar *Awork = N <= BUF_SIZE ? work_buffer : malloc(N*N*sizeof(*Awork));
+                    memcpy(Awork,A,N*N*sizeof(PetscScalar));
+                    PetscBLASInt NRHS = 1;
+                    const char T = 'T';
+                    LAPACKgetrf_(&N, &N, Awork, &N, ipiv, &info);
+                    if(info == 0){
+                        LAPACKgetrs_(&T, &N, &NRHS, Awork, &N, ipiv, out, &N, &info);
+                    }
+                    if(info != 0){
+                        fprintf(stderr, \"Gesv throws nonzero info.\");
+                        abort();
+                    }
+
+                    if ( N > BUF_SIZE ) {
+                        free(ipiv);
+                        free(Awork);
+                    }
+                }
+            """
+            yield ("solve", "#include <petscsys.h>\n#include <petscblaslapack.h>\n" + solve_preamble)
+        return
 
 
 def solve_fn_lookup(target, identifier):
