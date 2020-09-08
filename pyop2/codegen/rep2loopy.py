@@ -167,7 +167,7 @@ class LACallable(loopy.ScalarCallable, metaclass=abc.ABCMeta):
         return var(self.name_in_target)(*c_parameters), False
 
 
-class INVBatchCallable(LACallable):
+class INVCallable(LACallable):
     """
     The InverseCallable replaces loopy.CallInstructions to "inverse"
     functions by LAPACK getri.
