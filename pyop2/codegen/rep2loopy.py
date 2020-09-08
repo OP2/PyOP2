@@ -45,12 +45,28 @@ if COMM_WORLD.rank == 0:
         inverse_preamble = myfile.read()
     with open(os.path.dirname(__file__)+"/c/solve.c", "r") as myfile:
         solve_preamble = myfile.read()
+    with open(os.path.dirname(__file__)+"/c/inverse_vect_batch.c", "r") as myfile:
+        inverse_vect_batch_preamble = myfile.read()
+    with open(os.path.dirname(__file__)+"/c/solve_vect_batch.c", "r") as myfile:
+        solve_vect_batch_preamble = myfile.read()
+    with open(os.path.dirname(__file__)+"/c/inverse_vect_nonbatch.c", "r") as myfile:
+        inverse_vect_nonbatch_preamble = myfile.read()
+    with open(os.path.dirname(__file__)+"/c/solve_vect_nonbatch.c", "r") as myfile:
+        solve_vect_nonbatch_preamble = myfile.read()
 else:
     solve_preamble = None
     inverse_preamble = None
+    solve_vect_batch_preamble = None
+    inverse_vect_batch_preamble = None
+    solve_vect_nonbatch_preamble = None
+    inverse_vect_nonbatch_preamble = None
 
 inverse_preamble = COMM_WORLD.bcast(inverse_preamble, root=0)
 solve_preamble = COMM_WORLD.bcast(solve_preamble, root=0)
+inverse_vect_batch_preamble = COMM_WORLD.bcast(inverse_vect_batch_preamble, root=0)
+solve_vect_batch_preamble = COMM_WORLD.bcast(solve_vect_batch_preamble, root=0)
+inverse_vect_nonbatch_preamble = COMM_WORLD.bcast(inverse_vect_nonbatch_preamble, root=0)
+solve_vect_nonbatch_preamble = COMM_WORLD.bcast(solve_vect_nonbatch_preamble, root=0)
 
 
 class Bag(object):
@@ -175,119 +191,15 @@ class INVCallable(LACallable):
     def generate_preambles(self, target):
         if isinstance(target, loopy.CVecTarget):
             if target.batchedblas:
-                inverse_preamble = """
-                    #include <mkl.h>
-                    #define Inverse_HPP
-                    #define BUF_SIZE 30
-
-                    
-                    #define BYTES4 (4*4)
-                    typedef int int4 __attribute__ ((vector_size (BYTES4)));
-                    #define BYTES8 (4*8)
-                    typedef double double4 __attribute__ ((vector_size (BYTES8)));
-                    static void inverse(double4* Aout, const double4*  A, PetscBLASInt N)
-                    {
-                        MKL_INT nmat = 4;
-                        MKL_COMPACT_PACK format = MKL_COMPACT_AVX;
-                        MKL_INT mkl_N = N;
-                        MKL_LAYOUT layout = MKL_ROW_MAJOR;
-                        MKL_INT info;
-
-                        double* A_compact = (double *)mkl_malloc(sizeof(double)*N*N*nmat, 128);
-                        double* Awork = (double *)mkl_malloc(sizeof(double)*N*N*nmat, 128);
-                        memcpy(A_compact, A, N*N*sizeof(double4));
-                        
-                        mkl_dgetrfnp_compact(layout, mkl_N, mkl_N, A_compact, mkl_N, &info, format, nmat);
-                        if(info == 0){
-                            mkl_dgetrinp_compact(layout, mkl_N, A_compact, mkl_N, Awork, N*N, &info, format, nmat);
-                        }else{
-                            fprintf(stderr, "Getrf throws nonzero info.");
-                            abort();
-                        }
-
-                        memcpy(Aout, A_compact, nmat*N*N*sizeof(double));
-                    }
-                """
-                yield ("inverse", "#include <petscsys.h>\n\n" + inverse_preamble)
+                yield ("zinverse", inverse_vect_batch_preamble)
             else:
                 # for now the codegeneration inside the slate kernel is the same for batched and non batched blas
                 # meaning multiple matrices are passed 
                 # the alternative would be to call to loop over the matrices and pass them one by one
-                inverse_preamble = """
-                    #define Inverse_HPP
-                    #define BUF_SIZE 30
-                    
-                    #define BYTES4 (4*4)
-                    typedef int int4 __attribute__ ((vector_size (BYTES4)));
-                    #define BYTES8 (4*8)
-                    typedef double double4 __attribute__ ((vector_size (BYTES8)));
-                    static PetscBLASInt ipiv_buffer[BUF_SIZE];
-                    static PetscScalar work_buffer[BUF_SIZE*BUF_SIZE];
-                    static void inverse(double4* __restrict__ Aout, const double4* __restrict__ A, PetscBLASInt N)
-                    {
-                        PetscBLASInt nmat = 4;
-                        PetscBLASInt info;
-                        PetscBLASInt *ipiv = N <= BUF_SIZE ? ipiv_buffer : malloc(N*sizeof(PetscBLASInt));
-                        PetscScalar *Awork = N <= BUF_SIZE ? work_buffer : malloc(N*N*sizeof(PetscScalar));
-                        PetscScalar *Abuf = malloc(N*N*sizeof(PetscScalar));
-                        PetscBLASInt k, n, m;
-                        for (k = 0; k < nmat; k++){
-                            for (n = 0; n < N; n++) {
-                                for (m = 0; m < N; m++) {
-                                    Abuf[n*N+m] = A[n+m*N][k];
-                                }
-                            }
-                            LAPACKgetrf_(&N, &N, Abuf, &N, ipiv, &info);
-                            if(info == 0){
-                                LAPACKgetri_(&N, Abuf, &N, ipiv, Awork, &N, &info);
-                            }
-                            if(info != 0){
-                                fprintf(stderr, \"Getri throws nonzero info.\");
-                                abort();
-                            }
-                            for (n = 0; n < N; n++) {
-                                for (m = 0; m < N; m++) {
-                                    Aout[n*N+m][k] = Abuf[n+m*N];
-                                }
-                            }
-                        }
-                        if ( N > BUF_SIZE ) {
-                            free(Awork);
-                            free(ipiv);
-                        }
-                    }
-                """
-                yield ("inverse", "#include <petscsys.h>\n#include <petscblaslapack.h>\n" + inverse_preamble)
+                yield ("zinverse", inverse_vect_nonbatch_preamble)
         else:
             assert isinstance(target, loopy.CTarget)
-            inverse_preamble = """
-                #define Inverse_HPP
-                #define BUF_SIZE 30
-
-                static PetscBLASInt ipiv_buffer[BUF_SIZE];
-                static PetscScalar work_buffer[BUF_SIZE*BUF_SIZE];
-                static void inverse(PetscScalar* __restrict__ Aout, const PetscScalar* __restrict__ A, PetscBLASInt N)
-                {
-                    PetscBLASInt info;
-                    PetscBLASInt *ipiv = N <= BUF_SIZE ? ipiv_buffer : malloc(N*sizeof(*ipiv));
-                    PetscScalar *Awork = N <= BUF_SIZE ? work_buffer : malloc(N*N*sizeof(*Awork));
-                    memcpy(Aout, A, N*N*sizeof(PetscScalar));
-                    LAPACKgetrf_(&N, &N, Aout, &N, ipiv, &info);
-                    if(info == 0){
-                        LAPACKgetri_(&N, Aout, &N, ipiv, Awork, &N, &info);
-                    }
-                    if(info != 0){
-                        fprintf(stderr, \"Getri throws nonzero info.\");
-                        abort();
-                    }
-                    if ( N > BUF_SIZE ) {
-                        free(Awork);
-                        free(ipiv);
-                    }
-                }
-            """
-            yield ("inverse", "#include <petscsys.h>\n#include <petscblaslapack.h>\n" + inverse_preamble)
-        return
+            yield ("zinverse", inverse_preamble)
 
 
 class SolveCallable(LACallable):
@@ -300,142 +212,12 @@ class SolveCallable(LACallable):
     def generate_preambles(self, target):
         if isinstance(target, loopy.CVecTarget):
             if target.batchedblas:
-                solve_preamble = """
-                    #include <mkl.h>
-                    #define Inverse_HPP
-                    #define BUF_SIZE 30
-
-                    
-                    #define BYTES4 (4*4)
-                    typedef int int4 __attribute__ ((vector_size (BYTES4)));
-                    #define BYTES8 (4*8)
-                    typedef double double4 __attribute__ ((vector_size (BYTES8)));
-                    static void solve(double4* __restrict__ Aout, const double4* __restrict__ A, const double4* __restrict__ B, PetscBLASInt N)
-                    {
-                        MKL_INT nmat = 4;
-                        MKL_COMPACT_PACK format = MKL_COMPACT_AVX;
-                        MKL_INT mkl_N = N;
-                        MKL_LAYOUT layout = MKL_COL_MAJOR;
-                        MKL_INT info;
-                        MKL_TRANSPOSE T = MKL_TRANS;
-                        MKL_TRANSPOSE TN = MKL_NOTRANS;
-                        double one = 1.0;
-
-                        double* A_compact = (double *)malloc(sizeof(double)*N*N*nmat);
-                        double* Awork = (double *)malloc(sizeof(double)*N*N*nmat);
-                        memcpy(A_compact, A, N*N*sizeof(double)*nmat);
-                        double* B_compact = (double *)malloc(sizeof(double)*N*nmat);
-                        memcpy(B_compact, B, N*sizeof(double)*nmat);
-                        double* C_compact = (double *)malloc(sizeof(double)*N*nmat);
-
-                        int n, k;
-                        for (n = 0; n < N; n++) {
-                            for (k = 0; k < nmat; k++){
-                                C_compact[k+n*nmat] = 0.0;
-                            }
-                        }
-                        
-                        mkl_dgetrfnp_compact(layout, mkl_N, mkl_N, A_compact, mkl_N, &info, format, nmat);
-                        if(info == 0){
-                            mkl_dgetrinp_compact(layout, mkl_N, A_compact, mkl_N, Awork, N*N, &info, format, nmat);
-                        }else{
-                            fprintf(stderr, "Getrf throws nonzero info.");
-                            abort();
-                        }
-                        mkl_dgemm_compact(layout, TN, TN, mkl_N, one, mkl_N, one, A_compact, mkl_N, B_compact , mkl_N, one, C_compact, mkl_N, format, nmat);
-                        
-                        for (n = 0; n < N; n++) {
-                            for (k = 0; k < nmat; k++){
-                                Aout[n][k] = C_compact[n*nmat+k];
-                            }
-                        }
-                    }
-                """
-                yield ("solve", "#include <petscsys.h>\n\n" + solve_preamble)
+                yield ("zsolve", solve_vect_batch_preamble)
             else:
-                solve_preamble = """
-                    #define Inverse_HPP
-                    #define BUF_SIZE 30
-                    
-                    #define BYTES4 (4*4)
-                    typedef int int4 __attribute__ ((vector_size (BYTES4)));
-                    #define BYTES8 (4*8)
-                    typedef double double4 __attribute__ ((vector_size (BYTES8)));
-                    static PetscBLASInt ipiv_buffer[BUF_SIZE];
-                    static PetscScalar work_buffer[BUF_SIZE*BUF_SIZE];
-                    static void solve(double4* __restrict__ out, const double4* __restrict__ A, const double4* __restrict__ B, PetscBLASInt N)
-                    {
-                        PetscBLASInt nmat = 4;
-                        PetscBLASInt info;
-                        PetscBLASInt *ipiv = N <= BUF_SIZE ? ipiv_buffer : malloc(N*sizeof(PetscBLASInt));
-                        PetscScalar *Awork = N <= BUF_SIZE ? work_buffer : malloc(N*N*sizeof(PetscScalar));
-                        PetscScalar *Abuf = malloc(N*N*sizeof(PetscScalar));
-                        PetscScalar *Bbuf = malloc(N*sizeof(PetscScalar));
-                        memcpy(out,B,N*sizeof(PetscScalar));
-                        PetscBLASInt NRHS = 1;
-                        const char T = 'T';
-                        PetscBLASInt k, n, m;
-                        for (k = 0; k < nmat; k++){
-                            for (n = 0; n < N; n++) {
-                                for (m = 0; m < N; m++) {
-                                    Abuf[n*N+m] = A[n+m*N][k];
-                                }
-                                Bbuf[n] = B[n][k];
-                            }
-                            LAPACKgetrf_(&N, &N, Abuf, &N, ipiv, &info);
-                            if(info == 0){
-                                LAPACKgetrs_(&T, &N, &NRHS, Abuf, &N, ipiv, Bbuf, &N, &info);
-                            }
-                            if(info != 0){
-                                fprintf(stderr, \"Getri throws nonzero info.\");
-                                abort();
-                            }
-                            for (n = 0; n < N; n++) {
-                                out[n][k] = Bbuf[n];
-                            }
-                        }
-                        if ( N > BUF_SIZE ) {
-                            free(Awork);
-                            free(ipiv);
-                        }
-                    }
-                """
-                yield ("solve", "#include <petscsys.h>\n#include <petscblaslapack.h>\n" + solve_preamble)
+                yield ("zsolve", solve_vect_nonbatch_preamble)
         else:
             assert isinstance(target, loopy.CTarget)
-
-            solve_preamble  = """
-                #define Solve_HPP
-                #define BUF_SIZE 30
-
-                static PetscBLASInt ipiv_buffer[BUF_SIZE];
-                static PetscScalar work_buffer[BUF_SIZE*BUF_SIZE];
-                static void solve(PetscScalar* __restrict__ out, const PetscScalar* __restrict__ A, const PetscScalar* __restrict__ B, PetscBLASInt N)
-                {
-                    PetscBLASInt info;
-                    PetscBLASInt *ipiv = N <= BUF_SIZE ? ipiv_buffer : malloc(N*sizeof(*ipiv));
-                    memcpy(out,B,N*sizeof(PetscScalar));
-                    PetscScalar *Awork = N <= BUF_SIZE ? work_buffer : malloc(N*N*sizeof(*Awork));
-                    memcpy(Awork,A,N*N*sizeof(PetscScalar));
-                    PetscBLASInt NRHS = 1;
-                    const char T = 'T';
-                    LAPACKgetrf_(&N, &N, Awork, &N, ipiv, &info);
-                    if(info == 0){
-                        LAPACKgetrs_(&T, &N, &NRHS, Awork, &N, ipiv, out, &N, &info);
-                    }
-                    if(info != 0){
-                        fprintf(stderr, \"Gesv throws nonzero info.\");
-                        abort();
-                    }
-
-                    if ( N > BUF_SIZE ) {
-                        free(ipiv);
-                        free(Awork);
-                    }
-                }
-            """
-            yield ("solve", "#include <petscsys.h>\n#include <petscblaslapack.h>\n" + solve_preamble)
-        return
+            yield ("zsolve", solve_preamble)
 
 
 class _PreambleGen(ImmutableRecord):
