@@ -35,11 +35,7 @@ static void solve(double4* __restrict__ Aout, const double4* __restrict__ A, con
     }
     mkl_dgemm_compact(layout, TN, TN, mkl_N, one, mkl_N, one, A_compact, mkl_N, B_compact , mkl_N, one, C_compact, mkl_N, format, nmat);
     
-    for (n = 0; n < N; n++) {
-        for (k = 0; k < nmat; k++){
-            Aout[n][k] = C_compact[n*nmat+k];
-        }
-    }
+    memcpy(Aout, C_compact, N*N*sizeof(double4));
     mkl_free(A_compact);
     mkl_free(B_compact);
     mkl_free(C_compact);
