@@ -142,6 +142,10 @@ class Arg(object):
             self.map_tuple = (map, )
         else:
             self.map_tuple = tuple(map)
+
+        if data is not None and hasattr(data, "dtype"):
+            if data.dtype.kind == "c" and (access == MIN or access == MAX):
+                raise ValueError("MIN and MAX access descriptors are undefined on complex data.")
         self._access = access
 
         self.unroll_map = unroll_map
@@ -1277,7 +1281,7 @@ class _EmptyDataMixin(object):
     """
     def __init__(self, data, dtype, shape):
         if data is None:
-            self._dtype = np.dtype(dtype if dtype is not None else np.float64)
+            self._dtype = np.dtype(dtype if dtype is not None else ScalarType)
         else:
             self._numpy_data = verify_reshape(data, dtype, shape, allow_none=True)
             self._dtype = self._data.dtype
