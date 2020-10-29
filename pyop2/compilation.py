@@ -481,6 +481,8 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
             compiler = LinuxCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
         ##### Hack for Cray !!!
         elif compiler == 'cc':
+            if '-llapack' in ldargs:
+                ldargs.remove('-llapack')
             compiler = LinuxCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
         ##### Hack for Cray ^^^
         else:
