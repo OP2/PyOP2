@@ -1,0 +1,241 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mixed Types &#8212; PyOP2 2020.0 documentation</title>
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/classic.css" type="text/css" />
+    
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="MPI" href="mpi.html" />
+    <link rel="prev" title="Parallel Execution Plan" href="plan.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="mpi.html" title="MPI"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="plan.html" title="Parallel Execution Plan"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">PyOP2 2020.0 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">Mixed Types</a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <div class="section" id="mixed-types">
+<span id="mixed"></span><h1>Mixed Types<a class="headerlink" href="#mixed-types" title="Permalink to this headline">¶</a></h1>
+<p>When solving linear systems of equations as they arise for instance in the
+finite-element method (FEM), one is often interested in <em>coupled</em> solutions of
+more than one quantity. In fluid dynamics, a common example is solving a
+coupled system of velocity and pressure as it occurs in some formulations of
+the Navier-Stokes equations.</p>
+<div class="section" id="mixed-set-dataset-map-and-dat">
+<h2>Mixed Set, DataSet, Map and Dat<a class="headerlink" href="#mixed-set-dataset-map-and-dat" title="Permalink to this headline">¶</a></h2>
+<p>PyOP2 provides the mixed types <a class="reference internal" href="user.html#pyop2.MixedSet" title="pyop2.MixedSet"><code class="xref py py-class docutils literal notranslate"><span class="pre">MixedSet</span></code></a>
+<a class="reference internal" href="user.html#pyop2.MixedDataSet" title="pyop2.MixedDataSet"><code class="xref py py-class docutils literal notranslate"><span class="pre">MixedDataSet</span></code></a>, <a class="reference internal" href="user.html#pyop2.MixedMap" title="pyop2.MixedMap"><code class="xref py py-class docutils literal notranslate"><span class="pre">MixedMap</span></code></a> and
+<a class="reference internal" href="user.html#pyop2.MixedDat" title="pyop2.MixedDat"><code class="xref py py-class docutils literal notranslate"><span class="pre">MixedDat</span></code></a> for a <a class="reference internal" href="user.html#pyop2.Set" title="pyop2.Set"><code class="xref py py-class docutils literal notranslate"><span class="pre">Set</span></code></a>, <a class="reference internal" href="user.html#pyop2.DataSet" title="pyop2.DataSet"><code class="xref py py-class docutils literal notranslate"><span class="pre">DataSet</span></code></a>,
+<a class="reference internal" href="user.html#pyop2.Map" title="pyop2.Map"><code class="xref py py-class docutils literal notranslate"><span class="pre">Map</span></code></a> and <a class="reference internal" href="user.html#pyop2.Dat" title="pyop2.Dat"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code></a> respectively. A mixed type is
+constructed from a list or other iterable of its base type and provides the
+same attributes and methods. Under most circumstances types and mixed types
+behave the same way and can be treated uniformly. Mixed types allow iteration
+over their constituent parts and for convenience the base types are also
+iterable, yielding themselves.</p>
+<p>A <a class="reference internal" href="user.html#pyop2.MixedSet" title="pyop2.MixedSet"><code class="xref py py-class docutils literal notranslate"><span class="pre">MixedSet</span></code></a> is defined from a list of sets:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">s1</span><span class="p">,</span> <span class="n">s2</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Set</span><span class="p">(</span><span class="n">N</span><span class="p">),</span> <span class="n">op2</span><span class="o">.</span><span class="n">Set</span><span class="p">(</span><span class="n">M</span><span class="p">)</span>
+<span class="n">ms</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">MixedSet</span><span class="p">([</span><span class="n">s1</span><span class="p">,</span> <span class="n">s2</span><span class="p">])</span>
+</pre></div>
+</div>
+<p>There are a number of equivalent ways of defining a
+<a class="reference internal" href="user.html#pyop2.MixedDataSet" title="pyop2.MixedDataSet"><code class="xref py py-class docutils literal notranslate"><span class="pre">MixedDataSet</span></code></a>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">mds</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">MixedDataSet</span><span class="p">([</span><span class="n">s1</span><span class="p">,</span> <span class="n">s2</span><span class="p">],</span> <span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
+<span class="n">mds</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">MixedDataSet</span><span class="p">([</span><span class="n">s1</span><span class="o">**</span><span class="mi">1</span><span class="p">,</span> <span class="n">s2</span><span class="o">**</span><span class="mi">2</span><span class="p">])</span>
+<span class="n">mds</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">MixedDataSet</span><span class="p">(</span><span class="n">ms</span><span class="p">,</span> <span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
+<span class="n">mds</span> <span class="o">=</span> <span class="n">ms</span><span class="o">**</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>A <a class="reference internal" href="user.html#pyop2.MixedDat" title="pyop2.MixedDat"><code class="xref py py-class docutils literal notranslate"><span class="pre">MixedDat</span></code></a> with no associated data is defined in one of the
+following ways:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">md</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">MixedDat</span><span class="p">(</span><span class="n">mds</span><span class="p">)</span>
+<span class="n">md</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">MixedDat</span><span class="p">([</span><span class="n">s1</span><span class="o">**</span><span class="mi">1</span><span class="p">,</span> <span class="n">s2</span><span class="o">**</span><span class="mi">2</span><span class="p">])</span>
+<span class="n">md</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">MixedDat</span><span class="p">([</span><span class="n">op2</span><span class="o">.</span><span class="n">Dat</span><span class="p">(</span><span class="n">s1</span><span class="o">**</span><span class="mi">1</span><span class="p">),</span> <span class="n">op2</span><span class="o">.</span><span class="n">Dat</span><span class="p">(</span><span class="n">s2</span><span class="o">**</span><span class="mi">2</span><span class="p">)])</span>
+</pre></div>
+</div>
+<p>Finally, a <a class="reference internal" href="user.html#pyop2.MixedMap" title="pyop2.MixedMap"><code class="xref py py-class docutils literal notranslate"><span class="pre">MixedMap</span></code></a> is defined from a list of maps, all of
+which must share the same source <a class="reference internal" href="user.html#pyop2.Set" title="pyop2.Set"><code class="xref py py-class docutils literal notranslate"><span class="pre">Set</span></code></a>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">it</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Set</span><span class="p">(</span><span class="n">S</span><span class="p">)</span>
+<span class="n">mm</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">MixedMap</span><span class="p">([</span><span class="n">op2</span><span class="o">.</span><span class="n">Map</span><span class="p">(</span><span class="n">it</span><span class="p">,</span> <span class="n">s1</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">op2</span><span class="o">.</span><span class="n">Map</span><span class="p">(</span><span class="n">it</span><span class="p">,</span> <span class="n">s2</span><span class="p">,</span> <span class="mi">3</span><span class="p">)])</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="block-sparsity-and-mat">
+<h2>Block Sparsity and Mat<a class="headerlink" href="#block-sparsity-and-mat" title="Permalink to this headline">¶</a></h2>
+<p>When declaring a <a class="reference internal" href="user.html#pyop2.Sparsity" title="pyop2.Sparsity"><code class="xref py py-class docutils literal notranslate"><span class="pre">Sparsity</span></code></a> on pairs of mixed maps, the
+resulting sparsity pattern has a square block structure with as many block
+rows and columns as there are components in the <a class="reference internal" href="user.html#pyop2.MixedDataSet" title="pyop2.MixedDataSet"><code class="xref py py-class docutils literal notranslate"><span class="pre">MixedDataSet</span></code></a>
+forming its row and column space. In the most general case a
+<a class="reference internal" href="user.html#pyop2.Sparsity" title="pyop2.Sparsity"><code class="xref py py-class docutils literal notranslate"><span class="pre">Sparsity</span></code></a> is constructed as follows:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">it</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Set</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>  <span class="c1"># Iteration set</span>
+<span class="n">sr0</span><span class="p">,</span> <span class="n">sr1</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Set</span><span class="p">(</span><span class="o">...</span><span class="p">),</span> <span class="n">op2</span><span class="o">.</span><span class="n">Set</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>  <span class="c1"># Sets for row spaces</span>
+<span class="n">sc0</span><span class="p">,</span> <span class="n">sc1</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Set</span><span class="p">(</span><span class="o">...</span><span class="p">),</span> <span class="n">op2</span><span class="o">.</span><span class="n">Set</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>  <span class="c1"># Sets for column spaces</span>
+<span class="c1"># MixedMaps for the row and column spaces</span>
+<span class="n">mr</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">MixedMap</span><span class="p">([</span><span class="n">op2</span><span class="o">.</span><span class="n">Map</span><span class="p">(</span><span class="n">it</span><span class="p">,</span> <span class="n">sr0</span><span class="p">,</span> <span class="o">...</span><span class="p">),</span> <span class="n">op2</span><span class="o">.</span><span class="n">Map</span><span class="p">(</span><span class="n">it</span><span class="p">,</span> <span class="n">sr1</span><span class="p">,</span> <span class="o">...</span><span class="p">)])</span>
+<span class="n">mc</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">MixedMap</span><span class="p">([</span><span class="n">op2</span><span class="o">.</span><span class="n">Map</span><span class="p">(</span><span class="n">it</span><span class="p">,</span> <span class="n">sc0</span><span class="p">,</span> <span class="o">...</span><span class="p">),</span> <span class="n">op2</span><span class="o">.</span><span class="n">Map</span><span class="p">(</span><span class="n">it</span><span class="p">,</span> <span class="n">sc1</span><span class="p">,</span> <span class="o">...</span><span class="p">)])</span>
+<span class="c1"># MixedDataSets for the row and column spaces</span>
+<span class="n">dsr</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">MixedDataSet</span><span class="p">([</span><span class="n">sr0</span><span class="o">**</span><span class="mi">1</span><span class="p">,</span> <span class="n">sr1</span><span class="o">**</span><span class="mi">1</span><span class="p">])</span>
+<span class="n">dsc</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">MixedDataSet</span><span class="p">([</span><span class="n">sc0</span><span class="o">**</span><span class="mi">1</span><span class="p">,</span> <span class="n">sc1</span><span class="o">**</span><span class="mi">1</span><span class="p">])</span>
+<span class="c1"># Blocked sparsity</span>
+<span class="n">sparsity</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Sparsity</span><span class="p">((</span><span class="n">dsr</span><span class="p">,</span> <span class="n">dsc</span><span class="p">),</span> <span class="p">[(</span><span class="n">mr</span><span class="p">,</span> <span class="n">mc</span><span class="p">),</span> <span class="o">...</span><span class="p">])</span>
+</pre></div>
+</div>
+<p>The relationships of each component of the mixed maps and datasets to the
+blocks of the <a class="reference internal" href="user.html#pyop2.Sparsity" title="pyop2.Sparsity"><code class="xref py py-class docutils literal notranslate"><span class="pre">Sparsity</span></code></a> is shown in the following diagram:</p>
+<div class="figure align-center" id="id1">
+<img alt="_images/mixed_sparsity.svg" src="_images/mixed_sparsity.svg" /><p class="caption"><span class="caption-text">The contribution of sets, maps and datasets to the blocked sparsity.</span><a class="headerlink" href="#id1" title="Permalink to this image">¶</a></p>
+</div>
+<p>Block sparsity patterns are computed separately for each block as described in
+<a class="reference internal" href="linear_algebra.html#sparsity-pattern"><span class="std std-ref">Building a sparsity pattern</span></a> and the same validity rules apply. A
+<a class="reference internal" href="user.html#pyop2.Mat" title="pyop2.Mat"><code class="xref py py-class docutils literal notranslate"><span class="pre">Mat</span></code></a> defined on a block <a class="reference internal" href="user.html#pyop2.Sparsity" title="pyop2.Sparsity"><code class="xref py py-class docutils literal notranslate"><span class="pre">Sparsity</span></code></a> has the same
+block structure, which is implemented using a <a class="reference external" href="http://www.mcs.anl.gov/petsc/">PETSc</a> <a class="reference external" href="http://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Mat/MATNEST.html">MATNEST</a>.</p>
+</div>
+<div class="section" id="mixed-assembly">
+<h2>Mixed Assembly<a class="headerlink" href="#mixed-assembly" title="Permalink to this headline">¶</a></h2>
+<p>When assembling into a <a class="reference internal" href="user.html#pyop2.MixedDat" title="pyop2.MixedDat"><code class="xref py py-class docutils literal notranslate"><span class="pre">MixedDat</span></code></a> or a block
+<a class="reference internal" href="user.html#pyop2.Mat" title="pyop2.Mat"><code class="xref py py-class docutils literal notranslate"><span class="pre">Mat</span></code></a>, the <a class="reference internal" href="user.html#pyop2.Kernel" title="pyop2.Kernel"><code class="xref py py-class docutils literal notranslate"><span class="pre">Kernel</span></code></a> produces a local tensor of the
+same block structure, which is a combination of <a class="reference internal" href="kernels.html#local-iteration-spaces"><span class="std std-ref">Local iteration spaces</span></a>
+of all its subblocks. This is entirely transparent to the kernel however,
+which sees the combined local iteration space.  PyOP2 ensures that indirectly
+accessed data is gathered and scattered via the correct maps and packed
+together into a contiguous vector to be passed to the kernel. Contributions
+from the local tensor are assembled into the correct blocks of the
+<a class="reference internal" href="user.html#pyop2.MixedDat" title="pyop2.MixedDat"><code class="xref py py-class docutils literal notranslate"><span class="pre">MixedDat</span></code></a> or <a class="reference internal" href="user.html#pyop2.Mat" title="pyop2.Mat"><code class="xref py py-class docutils literal notranslate"><span class="pre">Mat</span></code></a>.</p>
+<p>Consider the following example <a class="reference internal" href="user.html#pyop2.par_loop" title="pyop2.par_loop"><code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code></a> assembling a block
+<a class="reference internal" href="user.html#pyop2.Mat" title="pyop2.Mat"><code class="xref py py-class docutils literal notranslate"><span class="pre">Mat</span></code></a>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">it</span><span class="p">,</span> <span class="n">cells</span><span class="p">,</span> <span class="n">nodes</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Set</span><span class="p">(</span><span class="o">...</span><span class="p">),</span> <span class="n">op2</span><span class="o">.</span><span class="n">Set</span><span class="p">(</span><span class="o">...</span><span class="p">),</span> <span class="n">op2</span><span class="o">.</span><span class="n">Set</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+<span class="n">mds</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">MixedDataSet</span><span class="p">([</span><span class="n">nodes</span><span class="p">,</span> <span class="n">cells</span><span class="p">])</span>
+<span class="n">mmap</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">MixedMap</span><span class="p">([</span><span class="n">op2</span><span class="o">.</span><span class="n">Map</span><span class="p">(</span><span class="n">it</span><span class="p">,</span> <span class="n">nodes</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="o">...</span><span class="p">),</span> <span class="n">op2</span><span class="o">.</span><span class="n">Map</span><span class="p">(</span><span class="n">it</span><span class="p">,</span> <span class="n">cells</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="o">...</span><span class="p">)])</span>
+<span class="n">mat</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Mat</span><span class="p">(</span><span class="n">op2</span><span class="o">.</span><span class="n">Sparsity</span><span class="p">(</span><span class="n">mds</span><span class="p">,</span> <span class="n">mmap</span><span class="p">))</span>
+<span class="n">d</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">MixedDat</span><span class="p">(</span><span class="n">mds</span><span class="p">)</span>
+
+<span class="n">op2</span><span class="o">.</span><span class="n">par_loop</span><span class="p">(</span><span class="n">kernel</span><span class="p">,</span> <span class="n">it</span><span class="p">,</span>
+             <span class="n">mat</span><span class="p">(</span><span class="n">op2</span><span class="o">.</span><span class="n">INC</span><span class="p">,</span> <span class="p">(</span><span class="n">mmap</span><span class="p">[</span><span class="n">op2</span><span class="o">.</span><span class="n">i</span><span class="p">[</span><span class="mi">0</span><span class="p">]],</span> <span class="n">mmap</span><span class="p">[</span><span class="n">op2</span><span class="o">.</span><span class="n">i</span><span class="p">[</span><span class="mi">1</span><span class="p">]])),</span>
+             <span class="n">d</span><span class="p">(</span><span class="n">op2</span><span class="o">.</span><span class="n">read</span><span class="p">,</span> <span class="n">mmap</span><span class="p">))</span>
+</pre></div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">kernel</span></code> for this <a class="reference internal" href="user.html#pyop2.par_loop" title="pyop2.par_loop"><code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code></a> assembles a 3x3 local tensor
+and is passed an input vector of length 3 for each iteration set element:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">void</span> <span class="nf">kernel</span><span class="p">(</span><span class="kt">double</span> <span class="n">v</span><span class="p">[</span><span class="mi">3</span><span class="p">][</span><span class="mi">3</span><span class="p">]</span> <span class="p">,</span> <span class="kt">double</span> <span class="o">**</span><span class="n">d</span> <span class="p">)</span> <span class="p">{</span>
+  <span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span><span class="o">&lt;</span><span class="mi">3</span><span class="p">;</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span>
+    <span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="n">j</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">j</span><span class="o">&lt;</span><span class="mi">3</span><span class="p">;</span> <span class="n">j</span><span class="o">++</span><span class="p">)</span>
+      <span class="n">v</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]</span> <span class="o">+=</span> <span class="n">d</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="n">d</span><span class="p">[</span><span class="n">j</span><span class="p">][</span><span class="mi">0</span><span class="p">];</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>The top-left 2x2 block of the local tensor is assembled into the (0,0) block
+of the matrix, the top-right 2x1 block into (0,1), the bottom-left 1x2 block
+into (1,0) and finally the bottom-right 1x1 block into (1,1). Note that for
+the (0,0) block only the first component of the <a class="reference internal" href="user.html#pyop2.MixedDat" title="pyop2.MixedDat"><code class="xref py py-class docutils literal notranslate"><span class="pre">MixedDat</span></code></a> is
+read and for the (1,1) block only the second component. For the (0,1) and
+(1,0) blocks, both components of the <a class="reference internal" href="user.html#pyop2.MixedDat" title="pyop2.MixedDat"><code class="xref py py-class docutils literal notranslate"><span class="pre">MixedDat</span></code></a> are accessed.</p>
+<p>This diagram illustrates the assembly of the block <a class="reference internal" href="user.html#pyop2.Mat" title="pyop2.Mat"><code class="xref py py-class docutils literal notranslate"><span class="pre">Mat</span></code></a>:</p>
+<div class="figure align-center" id="id2">
+<img alt="_images/mixed_assembly.svg" src="_images/mixed_assembly.svg" /><p class="caption"><span class="caption-text">Assembling into the blocks of a global matrix <span class="math">A</span>: block
+<span class="math">A^{0,0}</span> uses maps <span class="math">\iota^{1,0}</span> and <span class="math">\iota^{2,0}</span>,
+<span class="math">A^{0,1}</span> uses <span class="math">\iota^{1,0}</span> and <span class="math">\iota^{2,1}</span>,
+<span class="math">A^{1,0}</span> uses <span class="math">\iota^{1,1}</span> and <span class="math">\iota^{2,0}</span> and finally
+<span class="math">A^{1,1}</span> uses <span class="math">\iota^{1,1}</span> and <span class="math">\iota^{2,1}</span> for the row
+and column spaces respectively.</span><a class="headerlink" href="#id2" title="Permalink to this image">¶</a></p>
+</div>
+</div>
+</div>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+  <h3><a href="index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Mixed Types</a><ul>
+<li><a class="reference internal" href="#mixed-set-dataset-map-and-dat">Mixed Set, DataSet, Map and Dat</a></li>
+<li><a class="reference internal" href="#block-sparsity-and-mat">Block Sparsity and Mat</a></li>
+<li><a class="reference internal" href="#mixed-assembly">Mixed Assembly</a></li>
+</ul>
+</li>
+</ul>
+
+  <h4>Previous topic</h4>
+  <p class="topless"><a href="plan.html"
+                        title="previous chapter">Parallel Execution Plan</a></p>
+  <h4>Next topic</h4>
+  <p class="topless"><a href="mpi.html"
+                        title="next chapter">MPI</a></p>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/mixed.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="mpi.html" title="MPI"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="plan.html" title="Parallel Execution Plan"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">PyOP2 2020.0 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">Mixed Types</a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2012-2013, Imperial College et al.
+      Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 3.4.3.
+    </div>
+  </body>
+</html>

@@ -1,0 +1,1873 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>pyop2.codegen package &#8212; PyOP2 2020.0 documentation</title>
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/classic.css" type="text/css" />
+    
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="pyop2 package" href="pyop2.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="pyop2.html" title="pyop2 package"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">PyOP2 2020.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="pyop2.html" accesskey="U">pyop2 package</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">pyop2.codegen package</a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <div class="section" id="pyop2-codegen-package">
+<h1>pyop2.codegen package<a class="headerlink" href="#pyop2-codegen-package" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="submodules">
+<h2>Submodules<a class="headerlink" href="#submodules" title="Permalink to this headline">¶</a></h2>
+</div>
+<div class="section" id="module-pyop2.codegen.builder">
+<span id="pyop2-codegen-builder-module"></span><h2>pyop2.codegen.builder module<a class="headerlink" href="#module-pyop2.codegen.builder" title="Permalink to this headline">¶</a></h2>
+<dl class="py class">
+<dt id="pyop2.codegen.builder.PetscMat">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.builder.</code><code class="sig-name descname">PetscMat</code><a class="headerlink" href="#pyop2.codegen.builder.PetscMat" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">loopy.types.OpaqueType</span></code></p>
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.builder.Map">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.builder.</code><code class="sig-name descname">Map</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">map_</span></em>, <em class="sig-param"><span class="n">interior_horizontal</span></em>, <em class="sig-param"><span class="n">layer_bounds</span></em>, <em class="sig-param"><span class="n">values</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">offset</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">unroll</span><span class="o">=</span><span class="default_value">False</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.Map" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.builder.Map.variable">
+<code class="sig-name descname">variable</code><a class="headerlink" href="#pyop2.codegen.builder.Map.variable" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.builder.Map.unroll">
+<code class="sig-name descname">unroll</code><a class="headerlink" href="#pyop2.codegen.builder.Map.unroll" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.builder.Map.layer_bounds">
+<code class="sig-name descname">layer_bounds</code><a class="headerlink" href="#pyop2.codegen.builder.Map.layer_bounds" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.builder.Map.interior_horizontal">
+<code class="sig-name descname">interior_horizontal</code><a class="headerlink" href="#pyop2.codegen.builder.Map.interior_horizontal" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.builder.Map.prefetch">
+<code class="sig-name descname">prefetch</code><a class="headerlink" href="#pyop2.codegen.builder.Map.prefetch" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.builder.Map.values">
+<code class="sig-name descname">values</code><a class="headerlink" href="#pyop2.codegen.builder.Map.values" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.builder.Map.offset">
+<code class="sig-name descname">offset</code><a class="headerlink" href="#pyop2.codegen.builder.Map.offset" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.Map.shape">
+<em class="property">property </em><code class="sig-name descname">shape</code><a class="headerlink" href="#pyop2.codegen.builder.Map.shape" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.Map.dtype">
+<em class="property">property </em><code class="sig-name descname">dtype</code><a class="headerlink" href="#pyop2.codegen.builder.Map.dtype" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.Map.indexed">
+<code class="sig-name descname">indexed</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">multiindex</span></em>, <em class="sig-param"><span class="n">layer</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.Map.indexed" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.Map.indexed_vector">
+<code class="sig-name descname">indexed_vector</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">n</span></em>, <em class="sig-param"><span class="n">shape</span></em>, <em class="sig-param"><span class="n">layer</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.Map.indexed_vector" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.builder.Pack">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.builder.</code><code class="sig-name descname">Pack</code><a class="headerlink" href="#pyop2.codegen.builder.Pack" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<dl class="py method">
+<dt id="pyop2.codegen.builder.Pack.pick_loop_indices">
+<code class="sig-name descname">pick_loop_indices</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">loop_index</span></em>, <em class="sig-param"><span class="n">layer_index</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">entity_index</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.Pack.pick_loop_indices" title="Permalink to this definition">¶</a></dt>
+<dd><p>Override this to select the loop indices used by a pack for indexing.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.Pack.kernel_arg">
+<em class="property">abstract </em><code class="sig-name descname">kernel_arg</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.Pack.kernel_arg" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.Pack.emit_pack_instruction">
+<em class="property">abstract </em><code class="sig-name descname">emit_pack_instruction</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span></em>, <em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.Pack.emit_pack_instruction" title="Permalink to this definition">¶</a></dt>
+<dd><p>Either yield an instruction, or else return an empty tuple (to indicate no instruction)</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.Pack.pack">
+<em class="property">abstract </em><code class="sig-name descname">pack</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.Pack.pack" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.Pack.emit_unpack_instruction">
+<em class="property">abstract </em><code class="sig-name descname">emit_unpack_instruction</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span></em>, <em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.Pack.emit_unpack_instruction" title="Permalink to this definition">¶</a></dt>
+<dd><p>Either yield an instruction, or else return an empty tuple (to indicate no instruction)</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.builder.GlobalPack">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.builder.</code><code class="sig-name descname">GlobalPack</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">outer</span></em>, <em class="sig-param"><span class="n">access</span></em>, <em class="sig-param"><span class="n">init_with_zero</span><span class="o">=</span><span class="default_value">False</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.GlobalPack" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.builder.Pack" title="pyop2.codegen.builder.Pack"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.builder.Pack</span></code></a></p>
+<dl class="py method">
+<dt id="pyop2.codegen.builder.GlobalPack.kernel_arg">
+<code class="sig-name descname">kernel_arg</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.GlobalPack.kernel_arg" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.GlobalPack.emit_pack_instruction">
+<code class="sig-name descname">emit_pack_instruction</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span></em>, <em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.GlobalPack.emit_pack_instruction" title="Permalink to this definition">¶</a></dt>
+<dd><p>Either yield an instruction, or else return an empty tuple (to indicate no instruction)</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.GlobalPack.pack">
+<code class="sig-name descname">pack</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.GlobalPack.pack" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.GlobalPack.emit_unpack_instruction">
+<code class="sig-name descname">emit_unpack_instruction</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span></em>, <em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.GlobalPack.emit_unpack_instruction" title="Permalink to this definition">¶</a></dt>
+<dd><p>Either yield an instruction, or else return an empty tuple (to indicate no instruction)</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.builder.DatPack">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.builder.</code><code class="sig-name descname">DatPack</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">outer</span></em>, <em class="sig-param"><span class="n">access</span></em>, <em class="sig-param"><span class="n">map_</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">interior_horizontal</span><span class="o">=</span><span class="default_value">False</span></em>, <em class="sig-param"><span class="n">view_index</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">layer_bounds</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">init_with_zero</span><span class="o">=</span><span class="default_value">False</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.DatPack" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.builder.Pack" title="pyop2.codegen.builder.Pack"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.builder.Pack</span></code></a></p>
+<dl class="py method">
+<dt id="pyop2.codegen.builder.DatPack.pack">
+<code class="sig-name descname">pack</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.DatPack.pack" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.DatPack.kernel_arg">
+<code class="sig-name descname">kernel_arg</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.DatPack.kernel_arg" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.DatPack.emit_pack_instruction">
+<code class="sig-name descname">emit_pack_instruction</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span></em>, <em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.DatPack.emit_pack_instruction" title="Permalink to this definition">¶</a></dt>
+<dd><p>Either yield an instruction, or else return an empty tuple (to indicate no instruction)</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.DatPack.emit_unpack_instruction">
+<code class="sig-name descname">emit_unpack_instruction</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span></em>, <em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.DatPack.emit_unpack_instruction" title="Permalink to this definition">¶</a></dt>
+<dd><p>Either yield an instruction, or else return an empty tuple (to indicate no instruction)</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.builder.MixedDatPack">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.builder.</code><code class="sig-name descname">MixedDatPack</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">packs</span></em>, <em class="sig-param"><span class="n">access</span></em>, <em class="sig-param"><span class="n">dtype</span></em>, <em class="sig-param"><span class="n">interior_horizontal</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.MixedDatPack" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.builder.Pack" title="pyop2.codegen.builder.Pack"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.builder.Pack</span></code></a></p>
+<dl class="py method">
+<dt id="pyop2.codegen.builder.MixedDatPack.pack">
+<code class="sig-name descname">pack</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.MixedDatPack.pack" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.MixedDatPack.kernel_arg">
+<code class="sig-name descname">kernel_arg</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.MixedDatPack.kernel_arg" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.MixedDatPack.emit_pack_instruction">
+<code class="sig-name descname">emit_pack_instruction</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span></em>, <em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.MixedDatPack.emit_pack_instruction" title="Permalink to this definition">¶</a></dt>
+<dd><p>Either yield an instruction, or else return an empty tuple (to indicate no instruction)</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.MixedDatPack.emit_unpack_instruction">
+<code class="sig-name descname">emit_unpack_instruction</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span></em>, <em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.MixedDatPack.emit_unpack_instruction" title="Permalink to this definition">¶</a></dt>
+<dd><p>Either yield an instruction, or else return an empty tuple (to indicate no instruction)</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.builder.MatPack">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.builder.</code><code class="sig-name descname">MatPack</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">outer</span></em>, <em class="sig-param"><span class="n">access</span></em>, <em class="sig-param"><span class="n">maps</span></em>, <em class="sig-param"><span class="n">dims</span></em>, <em class="sig-param"><span class="n">dtype</span></em>, <em class="sig-param"><span class="n">interior_horizontal</span><span class="o">=</span><span class="default_value">False</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.MatPack" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.builder.Pack" title="pyop2.codegen.builder.Pack"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.builder.Pack</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.builder.MatPack.count">
+<code class="sig-name descname">count</code><em class="property"> = count(0)</em><a class="headerlink" href="#pyop2.codegen.builder.MatPack.count" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.builder.MatPack.insertion_names">
+<code class="sig-name descname">insertion_names</code><em class="property"> = {False: 'MatSetValuesBlockedLocal', True: 'MatSetValuesLocal'}</em><a class="headerlink" href="#pyop2.codegen.builder.MatPack.insertion_names" title="Permalink to this definition">¶</a></dt>
+<dd><p>Function call name for inserting into the PETSc Mat. The keys
+are whether or not maps are “unrolled” (addressing dofs) or
+blocked (addressing nodes).</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.builder.MatPack.shapes">
+<code class="sig-name descname">shapes</code><a class="headerlink" href="#pyop2.codegen.builder.MatPack.shapes" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.MatPack.pack">
+<code class="sig-name descname">pack</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">only_declare</span><span class="o">=</span><span class="default_value">False</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.MatPack.pack" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.MatPack.kernel_arg">
+<code class="sig-name descname">kernel_arg</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.MatPack.kernel_arg" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.MatPack.emit_pack_instruction">
+<code class="sig-name descname">emit_pack_instruction</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span></em>, <em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.MatPack.emit_pack_instruction" title="Permalink to this definition">¶</a></dt>
+<dd><p>Either yield an instruction, or else return an empty tuple (to indicate no instruction)</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.MatPack.emit_unpack_instruction">
+<code class="sig-name descname">emit_unpack_instruction</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span></em>, <em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.MatPack.emit_unpack_instruction" title="Permalink to this definition">¶</a></dt>
+<dd><p>Either yield an instruction, or else return an empty tuple (to indicate no instruction)</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.builder.MixedMatPack">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.builder.</code><code class="sig-name descname">MixedMatPack</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">packs</span></em>, <em class="sig-param"><span class="n">access</span></em>, <em class="sig-param"><span class="n">dtype</span></em>, <em class="sig-param"><span class="n">block_shape</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.MixedMatPack" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.builder.Pack" title="pyop2.codegen.builder.Pack"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.builder.Pack</span></code></a></p>
+<dl class="py method">
+<dt id="pyop2.codegen.builder.MixedMatPack.pack">
+<code class="sig-name descname">pack</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.MixedMatPack.pack" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.MixedMatPack.kernel_arg">
+<code class="sig-name descname">kernel_arg</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.MixedMatPack.kernel_arg" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.MixedMatPack.emit_pack_instruction">
+<code class="sig-name descname">emit_pack_instruction</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span></em>, <em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.MixedMatPack.emit_pack_instruction" title="Permalink to this definition">¶</a></dt>
+<dd><p>Either yield an instruction, or else return an empty tuple (to indicate no instruction)</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.MixedMatPack.emit_unpack_instruction">
+<code class="sig-name descname">emit_unpack_instruction</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span></em>, <em class="sig-param"><span class="n">loop_indices</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.MixedMatPack.emit_unpack_instruction" title="Permalink to this definition">¶</a></dt>
+<dd><p>Either yield an instruction, or else return an empty tuple (to indicate no instruction)</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.builder.WrapperBuilder">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.builder.</code><code class="sig-name descname">WrapperBuilder</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span></em>, <em class="sig-param"><span class="n">kernel</span></em>, <em class="sig-param"><span class="n">iterset</span></em>, <em class="sig-param"><span class="n">iteration_region</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">single_cell</span><span class="o">=</span><span class="default_value">False</span></em>, <em class="sig-param"><span class="n">pass_layer_to_kernel</span><span class="o">=</span><span class="default_value">False</span></em>, <em class="sig-param"><span class="n">forward_arg_types</span><span class="o">=</span><span class="default_value">()</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.WrapperBuilder" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<dl class="py method">
+<dt id="pyop2.codegen.builder.WrapperBuilder.requires_zeroed_output_arguments">
+<em class="property">property </em><code class="sig-name descname">requires_zeroed_output_arguments</code><a class="headerlink" href="#pyop2.codegen.builder.WrapperBuilder.requires_zeroed_output_arguments" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.WrapperBuilder.subset">
+<em class="property">property </em><code class="sig-name descname">subset</code><a class="headerlink" href="#pyop2.codegen.builder.WrapperBuilder.subset" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.WrapperBuilder.extruded">
+<em class="property">property </em><code class="sig-name descname">extruded</code><a class="headerlink" href="#pyop2.codegen.builder.WrapperBuilder.extruded" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.WrapperBuilder.constant_layers">
+<em class="property">property </em><code class="sig-name descname">constant_layers</code><a class="headerlink" href="#pyop2.codegen.builder.WrapperBuilder.constant_layers" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.builder.WrapperBuilder.loop_extents">
+<code class="sig-name descname">loop_extents</code><a class="headerlink" href="#pyop2.codegen.builder.WrapperBuilder.loop_extents" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.builder.WrapperBuilder.loop_index">
+<code class="sig-name descname">loop_index</code><a class="headerlink" href="#pyop2.codegen.builder.WrapperBuilder.loop_index" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.builder.WrapperBuilder.bottom_layer">
+<code class="sig-name descname">bottom_layer</code><a class="headerlink" href="#pyop2.codegen.builder.WrapperBuilder.bottom_layer" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.builder.WrapperBuilder.top_layer">
+<code class="sig-name descname">top_layer</code><a class="headerlink" href="#pyop2.codegen.builder.WrapperBuilder.top_layer" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.builder.WrapperBuilder.layer_extents">
+<code class="sig-name descname">layer_extents</code><a class="headerlink" href="#pyop2.codegen.builder.WrapperBuilder.layer_extents" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.builder.WrapperBuilder.layer_index">
+<code class="sig-name descname">layer_index</code><a class="headerlink" href="#pyop2.codegen.builder.WrapperBuilder.layer_index" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.WrapperBuilder.loop_indices">
+<em class="property">property </em><code class="sig-name descname">loop_indices</code><a class="headerlink" href="#pyop2.codegen.builder.WrapperBuilder.loop_indices" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.WrapperBuilder.add_argument">
+<code class="sig-name descname">add_argument</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">arg</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.WrapperBuilder.add_argument" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.WrapperBuilder.map_">
+<code class="sig-name descname">map_</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">map_</span></em>, <em class="sig-param"><span class="n">unroll</span><span class="o">=</span><span class="default_value">False</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.WrapperBuilder.map_" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.WrapperBuilder.kernel_args">
+<em class="property">property </em><code class="sig-name descname">kernel_args</code><a class="headerlink" href="#pyop2.codegen.builder.WrapperBuilder.kernel_args" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.WrapperBuilder.wrapper_args">
+<em class="property">property </em><code class="sig-name descname">wrapper_args</code><a class="headerlink" href="#pyop2.codegen.builder.WrapperBuilder.wrapper_args" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.WrapperBuilder.kernel_call">
+<code class="sig-name descname">kernel_call</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.WrapperBuilder.kernel_call" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.builder.WrapperBuilder.emit_instructions">
+<code class="sig-name descname">emit_instructions</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.builder.WrapperBuilder.emit_instructions" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+</div>
+<div class="section" id="module-pyop2.codegen.node">
+<span id="pyop2-codegen-node-module"></span><h2>pyop2.codegen.node module<a class="headerlink" href="#module-pyop2.codegen.node" title="Permalink to this headline">¶</a></h2>
+<p>Generic abstract node class and utility functions for creating
+expression DAG languages.</p>
+<dl class="py class">
+<dt id="pyop2.codegen.node.Node">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.node.</code><code class="sig-name descname">Node</code><a class="headerlink" href="#pyop2.codegen.node.Node" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Abstract node class.</p>
+<p>Nodes are not meant to be modified.</p>
+<p>A node can reference other nodes; they are called children. A node
+might contain data, or reference other objects which are not
+themselves nodes; they are not called children.</p>
+<p>Both the children (if any) and non-child data (if any) are
+required to create a node, or determine the equality of two
+nodes. For reconstruction, however, only the new children are
+necessary.</p>
+<dl class="py method">
+<dt id="pyop2.codegen.node.Node.reconstruct">
+<code class="sig-name descname">reconstruct</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span><span class="n">args</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.node.Node.reconstruct" title="Permalink to this definition">¶</a></dt>
+<dd><p>Reconstructs the node with new children from
+‘args’. Non-child data are copied from ‘self’.</p>
+<p>Returns a new object.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.node.Node.is_equal">
+<code class="sig-name descname">is_equal</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">other</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.node.Node.is_equal" title="Permalink to this definition">¶</a></dt>
+<dd><p>Equality predicate.</p>
+<p>This is the method to potentially override in derived classes,
+not <code class="xref py py-meth docutils literal notranslate"><span class="pre">__eq__()</span></code> or <code class="xref py py-meth docutils literal notranslate"><span class="pre">__ne__()</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.node.Node.get_hash">
+<code class="sig-name descname">get_hash</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.node.Node.get_hash" title="Permalink to this definition">¶</a></dt>
+<dd><p>Hash function.</p>
+<p>This is the method to potentially override in derived classes,
+not <code class="xref py py-meth docutils literal notranslate"><span class="pre">__hash__()</span></code>.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.node.Node.hash_value">
+<code class="sig-name descname">hash_value</code><a class="headerlink" href="#pyop2.codegen.node.Node.hash_value" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.node.pre_traversal">
+<code class="sig-prename descclassname">pyop2.codegen.node.</code><code class="sig-name descname">pre_traversal</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expression_dags</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.node.pre_traversal" title="Permalink to this definition">¶</a></dt>
+<dd><p>Pre-order traversal of the nodes of expression DAGs.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.node.post_traversal">
+<code class="sig-prename descclassname">pyop2.codegen.node.</code><code class="sig-name descname">post_traversal</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expression_dags</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.node.post_traversal" title="Permalink to this definition">¶</a></dt>
+<dd><p>Post-order traversal of the nodes of expression DAGs.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.node.traversal">
+<code class="sig-prename descclassname">pyop2.codegen.node.</code><code class="sig-name descname">traversal</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expression_dags</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.node.traversal" title="Permalink to this definition">¶</a></dt>
+<dd><p>Pre-order traversal of the nodes of expression DAGs.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.node.collect_refcount">
+<code class="sig-prename descclassname">pyop2.codegen.node.</code><code class="sig-name descname">collect_refcount</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expression_dags</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.node.collect_refcount" title="Permalink to this definition">¶</a></dt>
+<dd><p>Collects reference counts for a multi-root expression DAG.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.node.noop_recursive">
+<code class="sig-prename descclassname">pyop2.codegen.node.</code><code class="sig-name descname">noop_recursive</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">function</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.node.noop_recursive" title="Permalink to this definition">¶</a></dt>
+<dd><p>No-op wrapper for functions with overridable recursive calls.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>function</strong> – a function with parameters (value, rec), where
+<code class="docutils literal notranslate"><span class="pre">rec</span></code> is expected to be a function used for
+recursive calls.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>a function with working recursion and nothing fancy</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.node.noop_recursive_arg">
+<code class="sig-prename descclassname">pyop2.codegen.node.</code><code class="sig-name descname">noop_recursive_arg</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">function</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.node.noop_recursive_arg" title="Permalink to this definition">¶</a></dt>
+<dd><p>No-op wrapper for functions with overridable recursive calls
+and an argument.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>function</strong> – a function with parameters (value, rec, arg), where
+<code class="docutils literal notranslate"><span class="pre">rec</span></code> is expected to be a function used for
+recursive calls.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>a function with working recursion and nothing fancy</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.node.Memoizer">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.node.</code><code class="sig-name descname">Memoizer</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">function</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.node.Memoizer" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Caching wrapper for functions with overridable recursive calls.
+The lifetime of the cache is the lifetime of the object instance.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>function</strong> – a function with parameters (value, rec), where
+<code class="docutils literal notranslate"><span class="pre">rec</span></code> is expected to be a function used for
+recursive calls.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>a function with working recursion and caching</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.node.MemoizerArg">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.node.</code><code class="sig-name descname">MemoizerArg</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">function</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.node.MemoizerArg" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Caching wrapper for functions with overridable recursive calls
+and an argument.  The lifetime of the cache is the lifetime of the
+object instance.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>function</strong> – a function with parameters (value, rec, arg), where
+<code class="docutils literal notranslate"><span class="pre">rec</span></code> is expected to be a function used for
+recursive calls.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>a function with working recursion and caching</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.node.reuse_if_untouched">
+<code class="sig-prename descclassname">pyop2.codegen.node.</code><code class="sig-name descname">reuse_if_untouched</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">node</span></em>, <em class="sig-param"><span class="n">self</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.node.reuse_if_untouched" title="Permalink to this definition">¶</a></dt>
+<dd><p>Reuse if untouched recipe</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.node.reuse_if_untouched_arg">
+<code class="sig-prename descclassname">pyop2.codegen.node.</code><code class="sig-name descname">reuse_if_untouched_arg</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">node</span></em>, <em class="sig-param"><span class="n">self</span></em>, <em class="sig-param"><span class="n">arg</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.node.reuse_if_untouched_arg" title="Permalink to this definition">¶</a></dt>
+<dd><p>Reuse if touched recipe propagating an extra argument</p>
+</dd></dl>
+
+</div>
+<div class="section" id="module-pyop2.codegen.optimise">
+<span id="pyop2-codegen-optimise-module"></span><h2>pyop2.codegen.optimise module<a class="headerlink" href="#module-pyop2.codegen.optimise" title="Permalink to this headline">¶</a></h2>
+<dl class="py function">
+<dt id="pyop2.codegen.optimise.collect_indices">
+<code class="sig-prename descclassname">pyop2.codegen.optimise.</code><code class="sig-name descname">collect_indices</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expressions</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.optimise.collect_indices" title="Permalink to this definition">¶</a></dt>
+<dd><p>Collect indices in expressions.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>expressions</strong> – an iterable of expressions to collect indices
+from.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>iterable of nodes of type <code class="xref py py-class docutils literal notranslate"><span class="pre">Index</span></code> or
+<code class="xref py py-class docutils literal notranslate"><span class="pre">RuntimeIndex</span></code>.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.optimise.replace_indices">
+<code class="sig-prename descclassname">pyop2.codegen.optimise.</code><code class="sig-name descname">replace_indices</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">node</span></em>, <em class="sig-param"><span class="n">self</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.optimise.replace_indices" title="Permalink to this definition">¶</a></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.optimise.</code><code class="sig-name descname">replace_indices</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">node</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Node" title="pyop2.codegen.representation.Node">pyop2.codegen.representation.Node</a></span></em>, <em class="sig-param"><span class="n">self</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.optimise.</code><code class="sig-name descname">replace_indices</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">node</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Index" title="pyop2.codegen.representation.Index">pyop2.codegen.representation.Index</a></span></em>, <em class="sig-param"><span class="n">self</span></em><span class="sig-paren">)</span></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.optimise.replace_indices_index">
+<code class="sig-prename descclassname">pyop2.codegen.optimise.</code><code class="sig-name descname">replace_indices_index</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">node</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Index" title="pyop2.codegen.representation.Index">pyop2.codegen.representation.Index</a></span></em>, <em class="sig-param"><span class="n">self</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.optimise.replace_indices_index" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.optimise.index_merger">
+<code class="sig-prename descclassname">pyop2.codegen.optimise.</code><code class="sig-name descname">index_merger</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">instructions</span></em>, <em class="sig-param"><span class="n">cache</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.optimise.index_merger" title="Permalink to this definition">¶</a></dt>
+<dd><p>Merge indices across an instruction stream.</p>
+<p>Indices are candidates for merging if they have the same extent as
+an already seen index in the instruction stream, and appear at the
+same level of the loop nest.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>instructions</strong> – Iterable of nodes to merge indices across.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>a memoized callable suitable for index merging.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.optimise.rename_nodes">
+<code class="sig-prename descclassname">pyop2.codegen.optimise.</code><code class="sig-name descname">rename_nodes</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">instructions</span></em>, <em class="sig-param"><span class="n">replace</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.optimise.rename_nodes" title="Permalink to this definition">¶</a></dt>
+<dd><p>Rename the nodes in the instructions.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instructions</strong> – Iterable of nodes.</p></li>
+<li><p><strong>replace</strong> – Dictionary matching old names to new names.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>List of instructions with nodes renamed.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+<div class="section" id="module-pyop2.codegen.rep2loopy">
+<span id="pyop2-codegen-rep2loopy-module"></span><h2>pyop2.codegen.rep2loopy module<a class="headerlink" href="#module-pyop2.codegen.rep2loopy" title="Permalink to this headline">¶</a></h2>
+<dl class="py class">
+<dt id="pyop2.codegen.rep2loopy.Bag">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">Bag</code><a class="headerlink" href="#pyop2.codegen.rep2loopy.Bag" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.symbol_mangler">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">symbol_mangler</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">kernel</span></em>, <em class="sig-param"><span class="n">name</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.symbol_mangler" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.rep2loopy.PetscCallable">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">PetscCallable</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">name</span></em>, <em class="sig-param"><span class="n">arg_id_to_dtype</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">arg_id_to_descr</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">name_in_target</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.PetscCallable" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">loopy.kernel.function_interface.ScalarCallable</span></code></p>
+<dl class="py method">
+<dt id="pyop2.codegen.rep2loopy.PetscCallable.with_types">
+<code class="sig-name descname">with_types</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">arg_id_to_dtype</span></em>, <em class="sig-param"><span class="n">kernel</span></em>, <em class="sig-param"><span class="n">callables_table</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.PetscCallable.with_types" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>arg_id_to_type</strong> – <p>a mapping from argument identifiers
+(integers for positional arguments, names for keyword
+arguments) to <code class="xref py py-class docutils literal notranslate"><span class="pre">loopy.types.LoopyType</span></code> instances.
+Unspecified/unknown types are not represented in <em>arg_id_to_type</em>.</p>
+<p>Return values are denoted by negative integers, with the
+first returned value identified as <em>-1</em>.</p>
+</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>a tuple <code class="docutils literal notranslate"><span class="pre">(new_self,</span> <span class="pre">arg_id_to_type)</span></code>, where <em>new_self</em> is a
+new <code class="xref py py-class docutils literal notranslate"><span class="pre">InKernelCallable</span></code> specialized for the given types,
+and <em>arg_id_to_type</em> is a mapping of the same form as the
+argument above, however it may have more information present.
+Any argument information exists both by its positional and
+its keyword identifier.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.rep2loopy.PetscCallable.with_descrs">
+<code class="sig-name descname">with_descrs</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">arg_id_to_descr</span></em>, <em class="sig-param"><span class="n">callables_table</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.PetscCallable.with_descrs" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>arg_id_to_descr</strong> – <p>a mapping from argument identifiers
+(integers for positional arguments, names for keyword
+arguments) to <code class="xref py py-class docutils literal notranslate"><span class="pre">loopy.ArrayArgDescriptor</span></code> instances.
+Unspecified/unknown types are not represented in <em>arg_id_to_descr</em>.</p>
+<p>Return values are denoted by negative integers, with the
+first returned value identified as <em>-1</em>.</p>
+</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>a copy of <em>self</em> which is a new instance of
+<code class="xref py py-class docutils literal notranslate"><span class="pre">InKernelCallable</span></code> specialized for the given types, and
+<em>arg_id_to_descr</em> is a mapping of the same form as the argument above,
+however it may have more information present.  Any argument information
+exists both by its positional and its keyword identifier.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.rep2loopy.PetscCallable.generate_preambles">
+<code class="sig-name descname">generate_preambles</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">target</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.PetscCallable.generate_preambles" title="Permalink to this definition">¶</a></dt>
+<dd><p>Yields the target specific preamble.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.register_petsc_function">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">register_petsc_function</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">name</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.register_petsc_function" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.petsc_function_lookup">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">petsc_function_lookup</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">target</span></em>, <em class="sig-param"><span class="n">identifier</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.petsc_function_lookup" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.rep2loopy.LACallable">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">LACallable</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">name</span></em>, <em class="sig-param"><span class="n">arg_id_to_dtype</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">arg_id_to_descr</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">name_in_target</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.LACallable" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">loopy.kernel.function_interface.ScalarCallable</span></code></p>
+<p>The LACallable (Linear algebra callable)
+replaces loopy.CallInstructions to linear algebra functions
+like solve or inverse by LAPACK calls.</p>
+<dl class="py method">
+<dt id="pyop2.codegen.rep2loopy.LACallable.generate_preambles">
+<em class="property">abstract </em><code class="sig-name descname">generate_preambles</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">target</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.LACallable.generate_preambles" title="Permalink to this definition">¶</a></dt>
+<dd><p>Yields the target specific preamble.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.rep2loopy.LACallable.with_types">
+<code class="sig-name descname">with_types</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">arg_id_to_dtype</span></em>, <em class="sig-param"><span class="n">kernel</span></em>, <em class="sig-param"><span class="n">callables_table</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.LACallable.with_types" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>arg_id_to_type</strong> – <p>a mapping from argument identifiers
+(integers for positional arguments, names for keyword
+arguments) to <code class="xref py py-class docutils literal notranslate"><span class="pre">loopy.types.LoopyType</span></code> instances.
+Unspecified/unknown types are not represented in <em>arg_id_to_type</em>.</p>
+<p>Return values are denoted by negative integers, with the
+first returned value identified as <em>-1</em>.</p>
+</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>a tuple <code class="docutils literal notranslate"><span class="pre">(new_self,</span> <span class="pre">arg_id_to_type)</span></code>, where <em>new_self</em> is a
+new <code class="xref py py-class docutils literal notranslate"><span class="pre">InKernelCallable</span></code> specialized for the given types,
+and <em>arg_id_to_type</em> is a mapping of the same form as the
+argument above, however it may have more information present.
+Any argument information exists both by its positional and
+its keyword identifier.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.rep2loopy.LACallable.emit_call_insn">
+<code class="sig-name descname">emit_call_insn</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">insn</span></em>, <em class="sig-param"><span class="n">target</span></em>, <em class="sig-param"><span class="n">expression_to_code_mapper</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.LACallable.emit_call_insn" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns a pymbolic call for C-based targets, when the instructions
+involve multiple return values along with the required type casting.
+The first assignee is returned, but the rest of them are appended to
+the parameters and passed by reference.</p>
+<p><em>Example:</em> <code class="docutils literal notranslate"><span class="pre">c,</span> <span class="pre">d</span> <span class="pre">=</span> <span class="pre">f(a,</span> <span class="pre">b)</span></code> is returned as <code class="docutils literal notranslate"><span class="pre">c</span> <span class="pre">=</span> <span class="pre">f(a,</span> <span class="pre">b,</span> <span class="pre">&amp;d)</span></code></p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>insn</strong> – An instance of <code class="xref py py-class docutils literal notranslate"><span class="pre">loopy.kernel.instructions.CallInstruction</span></code>.</p></li>
+<li><p><strong>target</strong> – An instance of <code class="xref py py-class docutils literal notranslate"><span class="pre">loopy.target.TargetBase</span></code>.</p></li>
+<li><p><strong>expression_to_code_mapper</strong> – An instance of <code class="xref py py-class docutils literal notranslate"><span class="pre">IdentityMapper</span></code>
+responsible for code mapping from <code class="xref py py-mod docutils literal notranslate"><span class="pre">loopy</span></code> syntax to the
+<strong>target syntax</strong>.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.rep2loopy.INVCallable">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">INVCallable</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">name</span></em>, <em class="sig-param"><span class="n">arg_id_to_dtype</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">arg_id_to_descr</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">name_in_target</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.INVCallable" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.rep2loopy.LACallable" title="pyop2.codegen.rep2loopy.LACallable"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.rep2loopy.LACallable</span></code></a></p>
+<p>The InverseCallable replaces loopy.CallInstructions to “inverse”
+functions by LAPACK getri.</p>
+<dl class="py method">
+<dt id="pyop2.codegen.rep2loopy.INVCallable.generate_preambles">
+<code class="sig-name descname">generate_preambles</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">target</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.INVCallable.generate_preambles" title="Permalink to this definition">¶</a></dt>
+<dd><p>Yields the target specific preamble.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.inv_fn_lookup">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">inv_fn_lookup</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">target</span></em>, <em class="sig-param"><span class="n">identifier</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.inv_fn_lookup" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.rep2loopy.SolveCallable">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">SolveCallable</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">name</span></em>, <em class="sig-param"><span class="n">arg_id_to_dtype</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">arg_id_to_descr</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">name_in_target</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.SolveCallable" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.rep2loopy.LACallable" title="pyop2.codegen.rep2loopy.LACallable"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.rep2loopy.LACallable</span></code></a></p>
+<p>The SolveCallable replaces loopy.CallInstructions to “solve”
+functions by LAPACK getrs.</p>
+<dl class="py method">
+<dt id="pyop2.codegen.rep2loopy.SolveCallable.generate_preambles">
+<code class="sig-name descname">generate_preambles</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">target</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.SolveCallable.generate_preambles" title="Permalink to this definition">¶</a></dt>
+<dd><p>Yields the target specific preamble.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.solve_fn_lookup">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">solve_fn_lookup</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">target</span></em>, <em class="sig-param"><span class="n">identifier</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.solve_fn_lookup" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.rep2loopy.PyOP2KernelCallable">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">PyOP2KernelCallable</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">name</span></em>, <em class="sig-param"><span class="n">access</span></em>, <em class="sig-param"><span class="n">arg_id_to_dtype</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">arg_id_to_descr</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">name_in_target</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.PyOP2KernelCallable" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">loopy.kernel.function_interface.ScalarCallable</span></code></p>
+<p>Handles PyOP2 Kernel passed in as a string</p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.rep2loopy.PyOP2KernelCallable.fields">
+<code class="sig-name descname">fields</code><em class="property"> = {'access', 'arg_id_to_descr', 'arg_id_to_dtype', 'name', 'name_in_target'}</em><a class="headerlink" href="#pyop2.codegen.rep2loopy.PyOP2KernelCallable.fields" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.rep2loopy.PyOP2KernelCallable.init_arg_names">
+<code class="sig-name descname">init_arg_names</code><em class="property"> = ('name', 'access', 'arg_id_to_dtype', 'arg_id_to_descr', 'name_in_target')</em><a class="headerlink" href="#pyop2.codegen.rep2loopy.PyOP2KernelCallable.init_arg_names" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.rep2loopy.PyOP2KernelCallable.with_types">
+<code class="sig-name descname">with_types</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">arg_id_to_dtype</span></em>, <em class="sig-param"><span class="n">kernel</span></em>, <em class="sig-param"><span class="n">callables_table</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.PyOP2KernelCallable.with_types" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>arg_id_to_type</strong> – <p>a mapping from argument identifiers
+(integers for positional arguments, names for keyword
+arguments) to <code class="xref py py-class docutils literal notranslate"><span class="pre">loopy.types.LoopyType</span></code> instances.
+Unspecified/unknown types are not represented in <em>arg_id_to_type</em>.</p>
+<p>Return values are denoted by negative integers, with the
+first returned value identified as <em>-1</em>.</p>
+</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>a tuple <code class="docutils literal notranslate"><span class="pre">(new_self,</span> <span class="pre">arg_id_to_type)</span></code>, where <em>new_self</em> is a
+new <code class="xref py py-class docutils literal notranslate"><span class="pre">InKernelCallable</span></code> specialized for the given types,
+and <em>arg_id_to_type</em> is a mapping of the same form as the
+argument above, however it may have more information present.
+Any argument information exists both by its positional and
+its keyword identifier.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.rep2loopy.PyOP2KernelCallable.with_descrs">
+<code class="sig-name descname">with_descrs</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">arg_id_to_descr</span></em>, <em class="sig-param"><span class="n">callables_table</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.PyOP2KernelCallable.with_descrs" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>arg_id_to_descr</strong> – <p>a mapping from argument identifiers
+(integers for positional arguments, names for keyword
+arguments) to <code class="xref py py-class docutils literal notranslate"><span class="pre">loopy.ArrayArgDescriptor</span></code> instances.
+Unspecified/unknown types are not represented in <em>arg_id_to_descr</em>.</p>
+<p>Return values are denoted by negative integers, with the
+first returned value identified as <em>-1</em>.</p>
+</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>a copy of <em>self</em> which is a new instance of
+<code class="xref py py-class docutils literal notranslate"><span class="pre">InKernelCallable</span></code> specialized for the given types, and
+<em>arg_id_to_descr</em> is a mapping of the same form as the argument above,
+however it may have more information present.  Any argument information
+exists both by its positional and its keyword identifier.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.rep2loopy.PyOP2KernelCallable.emit_call_insn">
+<code class="sig-name descname">emit_call_insn</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">insn</span></em>, <em class="sig-param"><span class="n">target</span></em>, <em class="sig-param"><span class="n">expression_to_code_mapper</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.PyOP2KernelCallable.emit_call_insn" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns a pymbolic call for C-based targets, when the instructions
+involve multiple return values along with the required type casting.
+The first assignee is returned, but the rest of them are appended to
+the parameters and passed by reference.</p>
+<p><em>Example:</em> <code class="docutils literal notranslate"><span class="pre">c,</span> <span class="pre">d</span> <span class="pre">=</span> <span class="pre">f(a,</span> <span class="pre">b)</span></code> is returned as <code class="docutils literal notranslate"><span class="pre">c</span> <span class="pre">=</span> <span class="pre">f(a,</span> <span class="pre">b,</span> <span class="pre">&amp;d)</span></code></p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>insn</strong> – An instance of <code class="xref py py-class docutils literal notranslate"><span class="pre">loopy.kernel.instructions.CallInstruction</span></code>.</p></li>
+<li><p><strong>target</strong> – An instance of <code class="xref py py-class docutils literal notranslate"><span class="pre">loopy.target.TargetBase</span></code>.</p></li>
+<li><p><strong>expression_to_code_mapper</strong> – An instance of <code class="xref py py-class docutils literal notranslate"><span class="pre">IdentityMapper</span></code>
+responsible for code mapping from <code class="xref py py-mod docutils literal notranslate"><span class="pre">loopy</span></code> syntax to the
+<strong>target syntax</strong>.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.rep2loopy.PyOP2KernelLookup">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">PyOP2KernelLookup</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">name</span></em>, <em class="sig-param"><span class="n">code</span></em>, <em class="sig-param"><span class="n">access</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.PyOP2KernelLookup" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.replace_materialise">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">replace_materialise</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">node</span></em>, <em class="sig-param"><span class="n">self</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.replace_materialise" title="Permalink to this definition">¶</a></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">replace_materialise</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">node</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Node" title="pyop2.codegen.representation.Node">pyop2.codegen.representation.Node</a></span></em>, <em class="sig-param"><span class="n">self</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">replace_materialise</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">node</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Materialise" title="pyop2.codegen.representation.Materialise">pyop2.codegen.representation.Materialise</a></span></em>, <em class="sig-param"><span class="n">self</span></em><span class="sig-paren">)</span></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.replace_materialise_materialise">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">replace_materialise_materialise</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">node</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Materialise" title="pyop2.codegen.representation.Materialise">pyop2.codegen.representation.Materialise</a></span></em>, <em class="sig-param"><span class="n">self</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.replace_materialise_materialise" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.runtime_indices">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">runtime_indices</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expressions</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.runtime_indices" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.imperatives">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">imperatives</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">exprs</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.imperatives" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.loop_nesting">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">loop_nesting</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">instructions</span></em>, <em class="sig-param"><span class="n">deps</span></em>, <em class="sig-param"><span class="n">outer_inames</span></em>, <em class="sig-param"><span class="n">kernel_name</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.loop_nesting" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.instruction_dependencies">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">instruction_dependencies</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">instructions</span></em>, <em class="sig-param"><span class="n">initialisers</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.instruction_dependencies" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.generate">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">generate</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">builder</span></em>, <em class="sig-param"><span class="n">wrapper_name</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.generate" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.argtypes">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">argtypes</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">kernel</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.argtypes" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.statement">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">statement</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span></em>, <em class="sig-param"><span class="n">context</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.statement" title="Permalink to this definition">¶</a></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">statement</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.DummyInstruction" title="pyop2.codegen.representation.DummyInstruction">pyop2.codegen.representation.DummyInstruction</a></span></em>, <em class="sig-param"><span class="n">context</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">statement</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.When" title="pyop2.codegen.representation.When">pyop2.codegen.representation.When</a></span></em>, <em class="sig-param"><span class="n">context</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">statement</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Accumulate" title="pyop2.codegen.representation.Accumulate">pyop2.codegen.representation.Accumulate</a></span></em>, <em class="sig-param"><span class="n">context</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">statement</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.FunctionCall" title="pyop2.codegen.representation.FunctionCall">pyop2.codegen.representation.FunctionCall</a></span></em>, <em class="sig-param"><span class="n">context</span></em><span class="sig-paren">)</span></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.statement_dummy">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">statement_dummy</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.DummyInstruction" title="pyop2.codegen.representation.DummyInstruction">pyop2.codegen.representation.DummyInstruction</a></span></em>, <em class="sig-param"><span class="n">context</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.statement_dummy" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.statement_when">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">statement_when</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.When" title="pyop2.codegen.representation.When">pyop2.codegen.representation.When</a></span></em>, <em class="sig-param"><span class="n">context</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.statement_when" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.statement_assign">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">statement_assign</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Accumulate" title="pyop2.codegen.representation.Accumulate">pyop2.codegen.representation.Accumulate</a></span></em>, <em class="sig-param"><span class="n">context</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.statement_assign" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.statement_functioncall">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">statement_functioncall</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.FunctionCall" title="pyop2.codegen.representation.FunctionCall">pyop2.codegen.representation.FunctionCall</a></span></em>, <em class="sig-param"><span class="n">context</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.statement_functioncall" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.expression">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.expression" title="Permalink to this definition">¶</a></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Index" title="pyop2.codegen.representation.Index">pyop2.codegen.representation.Index</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.FixedIndex" title="pyop2.codegen.representation.FixedIndex">pyop2.codegen.representation.FixedIndex</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.RuntimeIndex" title="pyop2.codegen.representation.RuntimeIndex">pyop2.codegen.representation.RuntimeIndex</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.MultiIndex" title="pyop2.codegen.representation.MultiIndex">pyop2.codegen.representation.MultiIndex</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Extent" title="pyop2.codegen.representation.Extent">pyop2.codegen.representation.Extent</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Symbol" title="pyop2.codegen.representation.Symbol">pyop2.codegen.representation.Symbol</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Argument" title="pyop2.codegen.representation.Argument">pyop2.codegen.representation.Argument</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Variable" title="pyop2.codegen.representation.Variable">pyop2.codegen.representation.Variable</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Zero" title="pyop2.codegen.representation.Zero">pyop2.codegen.representation.Zero</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Literal" title="pyop2.codegen.representation.Literal">pyop2.codegen.representation.Literal</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.NamedLiteral" title="pyop2.codegen.representation.NamedLiteral">pyop2.codegen.representation.NamedLiteral</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Conditional" title="pyop2.codegen.representation.Conditional">pyop2.codegen.representation.Conditional</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Comparison" title="pyop2.codegen.representation.Comparison">pyop2.codegen.representation.Comparison</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.BitwiseNot" title="pyop2.codegen.representation.BitwiseNot">pyop2.codegen.representation.BitwiseNot</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.BitwiseNot" title="pyop2.codegen.representation.BitwiseNot">pyop2.codegen.representation.BitwiseNot</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.BitwiseOr" title="pyop2.codegen.representation.BitwiseOr">pyop2.codegen.representation.BitwiseOr</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.BitwiseOr" title="pyop2.codegen.representation.BitwiseOr">pyop2.codegen.representation.BitwiseOr</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.BitwiseOr" title="pyop2.codegen.representation.BitwiseOr">pyop2.codegen.representation.BitwiseOr</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.BitwiseOr" title="pyop2.codegen.representation.BitwiseOr">pyop2.codegen.representation.BitwiseOr</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.BitwiseOr" title="pyop2.codegen.representation.BitwiseOr">pyop2.codegen.representation.BitwiseOr</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.BitwiseOr" title="pyop2.codegen.representation.BitwiseOr">pyop2.codegen.representation.BitwiseOr</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Max" title="pyop2.codegen.representation.Max">pyop2.codegen.representation.Max</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Max" title="pyop2.codegen.representation.Max">pyop2.codegen.representation.Max</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.BitShift" title="pyop2.codegen.representation.BitShift">pyop2.codegen.representation.BitShift</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dt>
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Indexed" title="pyop2.codegen.representation.Indexed">pyop2.codegen.representation.Indexed</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.expression_index">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression_index</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Index" title="pyop2.codegen.representation.Index">pyop2.codegen.representation.Index</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.expression_index" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.expression_fixedindex">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression_fixedindex</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.FixedIndex" title="pyop2.codegen.representation.FixedIndex">pyop2.codegen.representation.FixedIndex</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.expression_fixedindex" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.expression_runtimeindex">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression_runtimeindex</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.RuntimeIndex" title="pyop2.codegen.representation.RuntimeIndex">pyop2.codegen.representation.RuntimeIndex</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.expression_runtimeindex" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.expression_multiindex">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression_multiindex</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.MultiIndex" title="pyop2.codegen.representation.MultiIndex">pyop2.codegen.representation.MultiIndex</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.expression_multiindex" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.expression_extent">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression_extent</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Extent" title="pyop2.codegen.representation.Extent">pyop2.codegen.representation.Extent</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.expression_extent" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.expression_symbol">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression_symbol</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Symbol" title="pyop2.codegen.representation.Symbol">pyop2.codegen.representation.Symbol</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.expression_symbol" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.expression_argument">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression_argument</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Argument" title="pyop2.codegen.representation.Argument">pyop2.codegen.representation.Argument</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.expression_argument" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.expression_variable">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression_variable</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Variable" title="pyop2.codegen.representation.Variable">pyop2.codegen.representation.Variable</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.expression_variable" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.expression_zero">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression_zero</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Zero" title="pyop2.codegen.representation.Zero">pyop2.codegen.representation.Zero</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.expression_zero" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.expression_literal">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression_literal</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Literal" title="pyop2.codegen.representation.Literal">pyop2.codegen.representation.Literal</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.expression_literal" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.expression_namedliteral">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression_namedliteral</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.NamedLiteral" title="pyop2.codegen.representation.NamedLiteral">pyop2.codegen.representation.NamedLiteral</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.expression_namedliteral" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.expression_conditional">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression_conditional</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Conditional" title="pyop2.codegen.representation.Conditional">pyop2.codegen.representation.Conditional</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.expression_conditional" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.expression_comparison">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression_comparison</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Comparison" title="pyop2.codegen.representation.Comparison">pyop2.codegen.representation.Comparison</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.expression_comparison" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.expression_uop">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression_uop</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.BitwiseNot" title="pyop2.codegen.representation.BitwiseNot">pyop2.codegen.representation.BitwiseNot</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.expression_uop" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.expression_binop">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression_binop</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.BitwiseOr" title="pyop2.codegen.representation.BitwiseOr">pyop2.codegen.representation.BitwiseOr</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.expression_binop" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.expression_minmax">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression_minmax</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Max" title="pyop2.codegen.representation.Max">pyop2.codegen.representation.Max</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.expression_minmax" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.expression_bitshift">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression_bitshift</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.BitShift" title="pyop2.codegen.representation.BitShift">pyop2.codegen.representation.BitShift</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.expression_bitshift" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="pyop2.codegen.rep2loopy.expression_indexed">
+<code class="sig-prename descclassname">pyop2.codegen.rep2loopy.</code><code class="sig-name descname">expression_indexed</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expr</span><span class="p">:</span> <span class="n"><a class="reference internal" href="#pyop2.codegen.representation.Indexed" title="pyop2.codegen.representation.Indexed">pyop2.codegen.representation.Indexed</a></span></em>, <em class="sig-param"><span class="n">parameters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.rep2loopy.expression_indexed" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="module-pyop2.codegen.representation">
+<span id="pyop2-codegen-representation-module"></span><h2>pyop2.codegen.representation module<a class="headerlink" href="#module-pyop2.codegen.representation" title="Permalink to this headline">¶</a></h2>
+<dl class="py class">
+<dt id="pyop2.codegen.representation.InstructionLabel">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">InstructionLabel</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">within_inames</span><span class="o">=</span><span class="default_value">()</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.InstructionLabel" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.PackInst">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">PackInst</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">within_inames</span><span class="o">=</span><span class="default_value">()</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.PackInst" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.InstructionLabel" title="pyop2.codegen.representation.InstructionLabel"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.InstructionLabel</span></code></a></p>
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.UnpackInst">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">UnpackInst</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">within_inames</span><span class="o">=</span><span class="default_value">()</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.UnpackInst" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.InstructionLabel" title="pyop2.codegen.representation.InstructionLabel"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.InstructionLabel</span></code></a></p>
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.PreUnpackInst">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">PreUnpackInst</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">within_inames</span><span class="o">=</span><span class="default_value">()</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.PreUnpackInst" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.InstructionLabel" title="pyop2.codegen.representation.InstructionLabel"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.InstructionLabel</span></code></a></p>
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.KernelInst">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">KernelInst</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">within_inames</span><span class="o">=</span><span class="default_value">()</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.KernelInst" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.InstructionLabel" title="pyop2.codegen.representation.InstructionLabel"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.InstructionLabel</span></code></a></p>
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Node">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Node</code><a class="headerlink" href="#pyop2.codegen.representation.Node" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.node.Node" title="pyop2.codegen.node.Node"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.node.Node</span></code></a></p>
+<dl class="py method">
+<dt id="pyop2.codegen.representation.Node.is_equal">
+<code class="sig-name descname">is_equal</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">other</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Node.is_equal" title="Permalink to this definition">¶</a></dt>
+<dd><p>Common subexpression eliminating equality predicate.</p>
+<p>When two (sub)expressions are equal, the children of one
+object are reassigned to the children of the other, so some
+duplicated subexpressions are eliminated.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Node.hash_value">
+<code class="sig-name descname">hash_value</code><a class="headerlink" href="#pyop2.codegen.representation.Node.hash_value" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Terminal">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Terminal</code><a class="headerlink" href="#pyop2.codegen.representation.Terminal" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Node" title="pyop2.codegen.representation.Node"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Node</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Terminal.children">
+<code class="sig-name descname">children</code><em class="property"> = ()</em><a class="headerlink" href="#pyop2.codegen.representation.Terminal.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.representation.Terminal.is_equal">
+<code class="sig-name descname">is_equal</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">other</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Terminal.is_equal" title="Permalink to this definition">¶</a></dt>
+<dd><p>Equality predicate.</p>
+<p>This is the method to potentially override in derived classes,
+not <code class="xref py py-meth docutils literal notranslate"><span class="pre">__eq__()</span></code> or <code class="xref py py-meth docutils literal notranslate"><span class="pre">__ne__()</span></code>.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Scalar">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Scalar</code><a class="headerlink" href="#pyop2.codegen.representation.Scalar" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Node" title="pyop2.codegen.representation.Node"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Node</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Scalar.shape">
+<code class="sig-name descname">shape</code><em class="property"> = ()</em><a class="headerlink" href="#pyop2.codegen.representation.Scalar.shape" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Constant">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Constant</code><a class="headerlink" href="#pyop2.codegen.representation.Constant" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Terminal" title="pyop2.codegen.representation.Terminal"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Terminal</span></code></a></p>
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.DTypeMixin">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">DTypeMixin</code><a class="headerlink" href="#pyop2.codegen.representation.DTypeMixin" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.DTypeMixin.dtype">
+<code class="sig-name descname">dtype</code><a class="headerlink" href="#pyop2.codegen.representation.DTypeMixin.dtype" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Zero">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Zero</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">shape</span></em>, <em class="sig-param"><span class="n">dtype</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Zero" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Constant" title="pyop2.codegen.representation.Constant"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Constant</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Zero.shape">
+<code class="sig-name descname">shape</code><a class="headerlink" href="#pyop2.codegen.representation.Zero.shape" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Zero.dtype">
+<code class="sig-name descname">dtype</code><a class="headerlink" href="#pyop2.codegen.representation.Zero.dtype" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.IndexBase">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">IndexBase</code><a class="headerlink" href="#pyop2.codegen.representation.IndexBase" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Index">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Index</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">extent</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">merge</span><span class="o">=</span><span class="default_value">True</span></em>, <em class="sig-param"><span class="n">name</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Index" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Terminal" title="pyop2.codegen.representation.Terminal"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Terminal</span></code></a>, <a class="reference internal" href="#pyop2.codegen.representation.Scalar" title="pyop2.codegen.representation.Scalar"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Scalar</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Index.name">
+<code class="sig-name descname">name</code><a class="headerlink" href="#pyop2.codegen.representation.Index.name" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Index.extent">
+<code class="sig-name descname">extent</code><a class="headerlink" href="#pyop2.codegen.representation.Index.extent" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Index.merge">
+<code class="sig-name descname">merge</code><a class="headerlink" href="#pyop2.codegen.representation.Index.merge" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.representation.Index.set_extent">
+<code class="sig-name descname">set_extent</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">value</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Index.set_extent" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Index.dtype">
+<code class="sig-name descname">dtype</code><a class="headerlink" href="#pyop2.codegen.representation.Index.dtype" title="Permalink to this definition">¶</a></dt>
+<dd><p>alias of <code class="xref py py-class docutils literal notranslate"><span class="pre">numpy.int32</span></code></p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.FixedIndex">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">FixedIndex</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">value</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.FixedIndex" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Terminal" title="pyop2.codegen.representation.Terminal"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Terminal</span></code></a>, <a class="reference internal" href="#pyop2.codegen.representation.Scalar" title="pyop2.codegen.representation.Scalar"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Scalar</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.FixedIndex.extent">
+<code class="sig-name descname">extent</code><em class="property"> = 1</em><a class="headerlink" href="#pyop2.codegen.representation.FixedIndex.extent" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.FixedIndex.value">
+<code class="sig-name descname">value</code><a class="headerlink" href="#pyop2.codegen.representation.FixedIndex.value" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.FixedIndex.dtype">
+<code class="sig-name descname">dtype</code><a class="headerlink" href="#pyop2.codegen.representation.FixedIndex.dtype" title="Permalink to this definition">¶</a></dt>
+<dd><p>alias of <code class="xref py py-class docutils literal notranslate"><span class="pre">numpy.int32</span></code></p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.RuntimeIndex">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">RuntimeIndex</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">lo</span></em>, <em class="sig-param"><span class="n">hi</span></em>, <em class="sig-param"><span class="n">constraint</span></em>, <em class="sig-param"><span class="n">name</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.RuntimeIndex" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Scalar" title="pyop2.codegen.representation.Scalar"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Scalar</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.RuntimeIndex.name">
+<code class="sig-name descname">name</code><a class="headerlink" href="#pyop2.codegen.representation.RuntimeIndex.name" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.RuntimeIndex.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.RuntimeIndex.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.RuntimeIndex.extents">
+<code class="sig-name descname">extents</code><a class="headerlink" href="#pyop2.codegen.representation.RuntimeIndex.extents" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.RuntimeIndex.dtype">
+<code class="sig-name descname">dtype</code><a class="headerlink" href="#pyop2.codegen.representation.RuntimeIndex.dtype" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.MultiIndex">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">MultiIndex</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span><span class="n">indices</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.MultiIndex" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Node" title="pyop2.codegen.representation.Node"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Node</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.MultiIndex.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.MultiIndex.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Extent">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Extent</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">multiindex</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Extent" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Scalar" title="pyop2.codegen.representation.Scalar"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Scalar</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Extent.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.Extent.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Symbol">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Symbol</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">name</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Symbol" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Terminal" title="pyop2.codegen.representation.Terminal"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Terminal</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Symbol.name">
+<code class="sig-name descname">name</code><a class="headerlink" href="#pyop2.codegen.representation.Symbol.name" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Argument">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Argument</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">shape</span></em>, <em class="sig-param"><span class="n">dtype</span></em>, <em class="sig-param"><span class="n">name</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">pfx</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Argument" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Terminal" title="pyop2.codegen.representation.Terminal"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Terminal</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Argument.dtype">
+<code class="sig-name descname">dtype</code><a class="headerlink" href="#pyop2.codegen.representation.Argument.dtype" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Argument.shape">
+<code class="sig-name descname">shape</code><a class="headerlink" href="#pyop2.codegen.representation.Argument.shape" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Argument.name">
+<code class="sig-name descname">name</code><a class="headerlink" href="#pyop2.codegen.representation.Argument.name" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Literal">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Literal</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">value</span></em>, <em class="sig-param"><span class="n">casting</span><span class="o">=</span><span class="default_value">True</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Literal" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Terminal" title="pyop2.codegen.representation.Terminal"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Terminal</span></code></a>, <a class="reference internal" href="#pyop2.codegen.representation.Scalar" title="pyop2.codegen.representation.Scalar"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Scalar</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Literal.shape">
+<code class="sig-name descname">shape</code><em class="property"> = ()</em><a class="headerlink" href="#pyop2.codegen.representation.Literal.shape" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Literal.value">
+<code class="sig-name descname">value</code><a class="headerlink" href="#pyop2.codegen.representation.Literal.value" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.representation.Literal.is_equal">
+<code class="sig-name descname">is_equal</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">other</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Literal.is_equal" title="Permalink to this definition">¶</a></dt>
+<dd><p>Equality predicate.</p>
+<p>This is the method to potentially override in derived classes,
+not <code class="xref py py-meth docutils literal notranslate"><span class="pre">__eq__()</span></code> or <code class="xref py py-meth docutils literal notranslate"><span class="pre">__ne__()</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.representation.Literal.get_hash">
+<code class="sig-name descname">get_hash</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Literal.get_hash" title="Permalink to this definition">¶</a></dt>
+<dd><p>Hash function.</p>
+<p>This is the method to potentially override in derived classes,
+not <code class="xref py py-meth docutils literal notranslate"><span class="pre">__hash__()</span></code>.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Literal.dtype">
+<code class="sig-name descname">dtype</code><a class="headerlink" href="#pyop2.codegen.representation.Literal.dtype" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.NamedLiteral">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">NamedLiteral</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">value</span></em>, <em class="sig-param"><span class="n">name</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.NamedLiteral" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Terminal" title="pyop2.codegen.representation.Terminal"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Terminal</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.NamedLiteral.value">
+<code class="sig-name descname">value</code><a class="headerlink" href="#pyop2.codegen.representation.NamedLiteral.value" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.NamedLiteral.name">
+<code class="sig-name descname">name</code><a class="headerlink" href="#pyop2.codegen.representation.NamedLiteral.name" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.representation.NamedLiteral.is_equal">
+<code class="sig-name descname">is_equal</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">other</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.NamedLiteral.is_equal" title="Permalink to this definition">¶</a></dt>
+<dd><p>Equality predicate.</p>
+<p>This is the method to potentially override in derived classes,
+not <code class="xref py py-meth docutils literal notranslate"><span class="pre">__eq__()</span></code> or <code class="xref py py-meth docutils literal notranslate"><span class="pre">__ne__()</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.representation.NamedLiteral.get_hash">
+<code class="sig-name descname">get_hash</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.NamedLiteral.get_hash" title="Permalink to this definition">¶</a></dt>
+<dd><p>Hash function.</p>
+<p>This is the method to potentially override in derived classes,
+not <code class="xref py py-meth docutils literal notranslate"><span class="pre">__hash__()</span></code>.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.NamedLiteral.shape">
+<code class="sig-name descname">shape</code><a class="headerlink" href="#pyop2.codegen.representation.NamedLiteral.shape" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.NamedLiteral.dtype">
+<code class="sig-name descname">dtype</code><a class="headerlink" href="#pyop2.codegen.representation.NamedLiteral.dtype" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Min">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Min</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">a</span></em>, <em class="sig-param"><span class="n">b</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Min" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Scalar" title="pyop2.codegen.representation.Scalar"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Scalar</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Min.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.Min.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Min.dtype">
+<code class="sig-name descname">dtype</code><a class="headerlink" href="#pyop2.codegen.representation.Min.dtype" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Max">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Max</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">a</span></em>, <em class="sig-param"><span class="n">b</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Max" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Scalar" title="pyop2.codegen.representation.Scalar"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Scalar</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Max.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.Max.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Max.dtype">
+<code class="sig-name descname">dtype</code><a class="headerlink" href="#pyop2.codegen.representation.Max.dtype" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Sum">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Sum</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">a</span></em>, <em class="sig-param"><span class="n">b</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Sum" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Scalar" title="pyop2.codegen.representation.Scalar"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Scalar</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Sum.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.Sum.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Sum.dtype">
+<code class="sig-name descname">dtype</code><a class="headerlink" href="#pyop2.codegen.representation.Sum.dtype" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Product">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Product</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">a</span></em>, <em class="sig-param"><span class="n">b</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Product" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Scalar" title="pyop2.codegen.representation.Scalar"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Scalar</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Product.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.Product.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Product.dtype">
+<code class="sig-name descname">dtype</code><a class="headerlink" href="#pyop2.codegen.representation.Product.dtype" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Indexed">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Indexed</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">aggregate</span></em>, <em class="sig-param"><span class="n">multiindex</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Indexed" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Scalar" title="pyop2.codegen.representation.Scalar"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Scalar</span></code></a></p>
+<dl class="py method">
+<dt id="pyop2.codegen.representation.Indexed.index_ordering">
+<code class="sig-name descname">index_ordering</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Indexed.index_ordering" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Indexed.dtype">
+<code class="sig-name descname">dtype</code><a class="headerlink" href="#pyop2.codegen.representation.Indexed.dtype" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Indexed.aggregate">
+<code class="sig-name descname">aggregate</code><a class="headerlink" href="#pyop2.codegen.representation.Indexed.aggregate" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Indexed.multiindex">
+<code class="sig-name descname">multiindex</code><a class="headerlink" href="#pyop2.codegen.representation.Indexed.multiindex" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Indexed.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.Indexed.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.When">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">When</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">condition</span></em>, <em class="sig-param"><span class="n">expr</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.When" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Node" title="pyop2.codegen.representation.Node"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Node</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.When.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.When.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.When.dtype">
+<code class="sig-name descname">dtype</code><a class="headerlink" href="#pyop2.codegen.representation.When.dtype" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Materialise">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Materialise</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">label</span></em>, <em class="sig-param"><span class="n">init</span></em>, <em class="sig-param"><span class="n">indices</span></em>, <em class="sig-param"><span class="o">*</span><span class="n">expressions_and_indices</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Materialise" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Node" title="pyop2.codegen.representation.Node"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Node</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Materialise.label">
+<code class="sig-name descname">label</code><a class="headerlink" href="#pyop2.codegen.representation.Materialise.label" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Materialise.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.Materialise.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Materialise.name">
+<code class="sig-name descname">name</code><a class="headerlink" href="#pyop2.codegen.representation.Materialise.name" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="pyop2.codegen.representation.Materialise.reconstruct">
+<code class="sig-name descname">reconstruct</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span><span class="n">args</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Materialise.reconstruct" title="Permalink to this definition">¶</a></dt>
+<dd><p>Reconstructs the node with new children from
+‘args’. Non-child data are copied from ‘self’.</p>
+<p>Returns a new object.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Materialise.shape">
+<code class="sig-name descname">shape</code><a class="headerlink" href="#pyop2.codegen.representation.Materialise.shape" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Materialise.dtype">
+<code class="sig-name descname">dtype</code><a class="headerlink" href="#pyop2.codegen.representation.Materialise.dtype" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Variable">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Variable</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">name</span></em>, <em class="sig-param"><span class="n">shape</span></em>, <em class="sig-param"><span class="n">dtype</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Variable" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Terminal" title="pyop2.codegen.representation.Terminal"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Terminal</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Variable.name">
+<code class="sig-name descname">name</code><a class="headerlink" href="#pyop2.codegen.representation.Variable.name" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Variable.shape">
+<code class="sig-name descname">shape</code><a class="headerlink" href="#pyop2.codegen.representation.Variable.shape" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Variable.dtype">
+<code class="sig-name descname">dtype</code><a class="headerlink" href="#pyop2.codegen.representation.Variable.dtype" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.DummyInstruction">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">DummyInstruction</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">label</span></em>, <em class="sig-param"><span class="o">*</span><span class="n">children</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.DummyInstruction" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Node" title="pyop2.codegen.representation.Node"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Node</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.DummyInstruction.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.DummyInstruction.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.DummyInstruction.label">
+<code class="sig-name descname">label</code><a class="headerlink" href="#pyop2.codegen.representation.DummyInstruction.label" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Accumulate">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Accumulate</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">label</span></em>, <em class="sig-param"><span class="n">lvalue</span></em>, <em class="sig-param"><span class="n">rvalue</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Accumulate" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Node" title="pyop2.codegen.representation.Node"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Node</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Accumulate.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.Accumulate.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Accumulate.label">
+<code class="sig-name descname">label</code><a class="headerlink" href="#pyop2.codegen.representation.Accumulate.label" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.FunctionCall">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">FunctionCall</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">name</span></em>, <em class="sig-param"><span class="n">label</span></em>, <em class="sig-param"><span class="n">access</span></em>, <em class="sig-param"><span class="n">free_indices</span></em>, <em class="sig-param"><span class="o">*</span><span class="n">arguments</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.FunctionCall" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Node" title="pyop2.codegen.representation.Node"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Node</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.FunctionCall.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.FunctionCall.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.FunctionCall.access">
+<code class="sig-name descname">access</code><a class="headerlink" href="#pyop2.codegen.representation.FunctionCall.access" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.FunctionCall.free_indices">
+<code class="sig-name descname">free_indices</code><a class="headerlink" href="#pyop2.codegen.representation.FunctionCall.free_indices" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.FunctionCall.name">
+<code class="sig-name descname">name</code><a class="headerlink" href="#pyop2.codegen.representation.FunctionCall.name" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.FunctionCall.label">
+<code class="sig-name descname">label</code><a class="headerlink" href="#pyop2.codegen.representation.FunctionCall.label" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Conditional">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Conditional</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">condition</span></em>, <em class="sig-param"><span class="n">then</span></em>, <em class="sig-param"><span class="n">else_</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Conditional" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Scalar" title="pyop2.codegen.representation.Scalar"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Scalar</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Conditional.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.Conditional.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Conditional.dtype">
+<code class="sig-name descname">dtype</code><a class="headerlink" href="#pyop2.codegen.representation.Conditional.dtype" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.Comparison">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">Comparison</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">op</span></em>, <em class="sig-param"><span class="n">a</span></em>, <em class="sig-param"><span class="n">b</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.Comparison" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Scalar" title="pyop2.codegen.representation.Scalar"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Scalar</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Comparison.operator">
+<code class="sig-name descname">operator</code><a class="headerlink" href="#pyop2.codegen.representation.Comparison.operator" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.Comparison.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.Comparison.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.LogicalNot">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">LogicalNot</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expression</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.LogicalNot" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Scalar" title="pyop2.codegen.representation.Scalar"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Scalar</span></code></a>, <a class="reference internal" href="#pyop2.codegen.representation.DTypeMixin" title="pyop2.codegen.representation.DTypeMixin"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.DTypeMixin</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.LogicalNot.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.LogicalNot.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.LogicalAnd">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">LogicalAnd</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">a</span></em>, <em class="sig-param"><span class="n">b</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.LogicalAnd" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Scalar" title="pyop2.codegen.representation.Scalar"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Scalar</span></code></a>, <a class="reference internal" href="#pyop2.codegen.representation.DTypeMixin" title="pyop2.codegen.representation.DTypeMixin"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.DTypeMixin</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.LogicalAnd.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.LogicalAnd.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.LogicalOr">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">LogicalOr</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">a</span></em>, <em class="sig-param"><span class="n">b</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.LogicalOr" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Scalar" title="pyop2.codegen.representation.Scalar"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Scalar</span></code></a>, <a class="reference internal" href="#pyop2.codegen.representation.DTypeMixin" title="pyop2.codegen.representation.DTypeMixin"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.DTypeMixin</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.LogicalOr.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.LogicalOr.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.BitwiseNot">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">BitwiseNot</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">expression</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.BitwiseNot" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Scalar" title="pyop2.codegen.representation.Scalar"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Scalar</span></code></a>, <a class="reference internal" href="#pyop2.codegen.representation.DTypeMixin" title="pyop2.codegen.representation.DTypeMixin"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.DTypeMixin</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.BitwiseNot.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.BitwiseNot.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.BitwiseAnd">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">BitwiseAnd</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">a</span></em>, <em class="sig-param"><span class="n">b</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.BitwiseAnd" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Scalar" title="pyop2.codegen.representation.Scalar"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Scalar</span></code></a>, <a class="reference internal" href="#pyop2.codegen.representation.DTypeMixin" title="pyop2.codegen.representation.DTypeMixin"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.DTypeMixin</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.BitwiseAnd.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.BitwiseAnd.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.BitwiseOr">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">BitwiseOr</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">a</span></em>, <em class="sig-param"><span class="n">b</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.BitwiseOr" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Scalar" title="pyop2.codegen.representation.Scalar"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Scalar</span></code></a>, <a class="reference internal" href="#pyop2.codegen.representation.DTypeMixin" title="pyop2.codegen.representation.DTypeMixin"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.DTypeMixin</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.BitwiseOr.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.BitwiseOr.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="pyop2.codegen.representation.BitShift">
+<em class="property">class </em><code class="sig-prename descclassname">pyop2.codegen.representation.</code><code class="sig-name descname">BitShift</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">direction</span></em>, <em class="sig-param"><span class="n">expr</span></em>, <em class="sig-param"><span class="n">shift</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pyop2.codegen.representation.BitShift" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#pyop2.codegen.representation.Scalar" title="pyop2.codegen.representation.Scalar"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.Scalar</span></code></a>, <a class="reference internal" href="#pyop2.codegen.representation.DTypeMixin" title="pyop2.codegen.representation.DTypeMixin"><code class="xref py py-class docutils literal notranslate"><span class="pre">pyop2.codegen.representation.DTypeMixin</span></code></a></p>
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.BitShift.direction">
+<code class="sig-name descname">direction</code><a class="headerlink" href="#pyop2.codegen.representation.BitShift.direction" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="pyop2.codegen.representation.BitShift.children">
+<code class="sig-name descname">children</code><a class="headerlink" href="#pyop2.codegen.representation.BitShift.children" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+</div>
+<div class="section" id="module-pyop2.codegen">
+<span id="module-contents"></span><h2>Module contents<a class="headerlink" href="#module-pyop2.codegen" title="Permalink to this headline">¶</a></h2>
+</div>
+</div>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+  <h3><a href="index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">pyop2.codegen package</a><ul>
+<li><a class="reference internal" href="#submodules">Submodules</a></li>
+<li><a class="reference internal" href="#module-pyop2.codegen.builder">pyop2.codegen.builder module</a></li>
+<li><a class="reference internal" href="#module-pyop2.codegen.node">pyop2.codegen.node module</a></li>
+<li><a class="reference internal" href="#module-pyop2.codegen.optimise">pyop2.codegen.optimise module</a></li>
+<li><a class="reference internal" href="#module-pyop2.codegen.rep2loopy">pyop2.codegen.rep2loopy module</a></li>
+<li><a class="reference internal" href="#module-pyop2.codegen.representation">pyop2.codegen.representation module</a></li>
+<li><a class="reference internal" href="#module-pyop2.codegen">Module contents</a></li>
+</ul>
+</li>
+</ul>
+
+  <h4>Previous topic</h4>
+  <p class="topless"><a href="pyop2.html"
+                        title="previous chapter">pyop2 package</a></p>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/pyop2.codegen.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="pyop2.html" title="pyop2 package"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">PyOP2 2020.0 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="pyop2.html" >pyop2 package</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">pyop2.codegen package</a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2012-2013, Imperial College et al.
+      Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 3.4.3.
+    </div>
+  </body>
+</html>
