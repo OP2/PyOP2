@@ -479,6 +479,12 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
             compiler = LinuxIntelCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
         elif compiler == 'gcc':
             compiler = LinuxCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
+        ##### Hack for Cray !!!
+        elif compiler == 'cc':
+            if '-llapack' in ldargs:
+                ldargs.remove('-llapack')
+            compiler = LinuxCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
+        ##### Hack for Cray ^^^
         else:
             raise CompilationError("Unrecognized compiler name '%s'" % compiler)
     elif platform.find('darwin') == 0:
