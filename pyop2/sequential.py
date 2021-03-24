@@ -162,7 +162,6 @@ class JITModule(base.JITModule):
         vectorisable = not (has_matrix or has_rw) and (configuration["vectorization_strategy"])
 
         if (isinstance(self._kernel.code, loopy.LoopKernel) or isinstance(self._kernel.code, loopy.program.Program)) and vectorisable:
-            wrapper = loopy.inline_callable_kernel(wrapper, self._kernel.name)
             if not is_cplx:
                 wrapper = vectorise(wrapper, iname, configuration["simd_width"])
         code = loopy.generate_code_v2(wrapper)

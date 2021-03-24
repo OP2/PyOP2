@@ -421,7 +421,7 @@ class LinuxIntelCompiler(Compiler):
         rank 0 compiles code) (defaults to COMM_WORLD).
     """
     def __init__(self, cppargs=[], ldargs=[], cpp=False, comm=None):
-        opt_flags = ['-march=native', '-Ofast', '-xHost', '-qopenmp-simd']
+        opt_flags = ['-march=native', '-Ofast', '-xHost', '-Wopenmp-simd']
         if configuration['debug']:
             opt_flags = ['-O0', '-g']
         cc = "mpicc"
@@ -429,7 +429,7 @@ class LinuxIntelCompiler(Compiler):
         if cpp:
             cc = "mpicxx"
             stdargs = []
-        cppargs = stdargs + ['-fPIC', '-no-multibyte-chars'] + opt_flags + cppargs
+        cppargs = stdargs + ['-fPIC', '-Wno-multibyte-chars'] + opt_flags + cppargs
         ldargs = ['-shared'] + ldargs
         super(LinuxIntelCompiler, self).__init__(cc, cppargs=cppargs, ldargs=ldargs,
                                                  cpp=cpp, comm=comm)
