@@ -178,12 +178,6 @@ class INVCallable(LACallable):
         yield ("inverse", inverse_preamble)
 
 
-def inv_fn_lookup(target, identifier):
-    if identifier == 'inv':
-        return INVCallable(name='inverse')
-    else:
-        return None
-
 
 class SolveCallable(LACallable):
     """
@@ -194,12 +188,6 @@ class SolveCallable(LACallable):
         assert isinstance(target, loopy.CTarget)
         yield ("solve", solve_preamble)
 
-
-def solve_fn_lookup(target, identifier):
-    if identifier == 'solve':
-        return SolveCallable(name='solve')
-    else:
-        return None
 
 
 class _PreambleGen(ImmutableRecord):
