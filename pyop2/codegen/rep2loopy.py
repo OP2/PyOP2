@@ -64,7 +64,7 @@ def symbol_mangler(kernel, name):
 
 class PetscCallable(loopy.ScalarCallable):
 
-    def with_types(self, arg_id_to_dtype, kernel, callables_table):
+    def with_types(self, arg_id_to_dtype, callables_table):
         new_arg_id_to_dtype = arg_id_to_dtype.copy()
         return (self.copy(
             name_in_target=self.name,
@@ -119,7 +119,7 @@ class LACallable(loopy.ScalarCallable, metaclass=abc.ABCMeta):
     def generate_preambles(self, target):
         pass
 
-    def with_types(self, arg_id_to_dtype, kernel, callables_table):
+    def with_types(self, arg_id_to_dtype, callables_table):
         dtypes = OrderedDict()
         for i in range(len(arg_id_to_dtype)):
             if arg_id_to_dtype.get(i) is None:
@@ -209,7 +209,7 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
         super(PyOP2KernelCallable, self).__init__(name, arg_id_to_dtype, arg_id_to_descr, name_in_target)
         self.access = access
 
-    def with_types(self, arg_id_to_dtype, kernel, callables_table):
+    def with_types(self, arg_id_to_dtype, callables_table):
         new_arg_id_to_dtype = arg_id_to_dtype.copy()
         return self.copy(
             name_in_target=self.name,
