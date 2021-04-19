@@ -98,12 +98,6 @@ def register_petsc_function(name):
     petsc_functions.add(name)
 
 
-def petsc_function_lookup(target, identifier):
-    if identifier in petsc_functions:
-        return PetscCallable(name=identifier)
-    return None
-
-
 class LACallable(loopy.ScalarCallable, metaclass=abc.ABCMeta):
     """
     The LACallable (Linear algebra callable)
@@ -267,27 +261,6 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
 
         assignee_is_returned = False
         return var(self.name_in_target)(*c_parameters), assignee_is_returned
-
-
-class PyOP2KernelLookup(object):
-
-    def __init__(self, name, code, access):
-        self.name = name
-        self.code = code
-        self.access = access
-
-    def __hash__(self):
-        return hash(self.name + self.code)
-
-    def __eq__(self, other):
-        if isinstance(other, PyOP2KernelLookup):
-            return self.name == other.name and self.code == other.code
-        return False
-
-    def __call__(self, target, identifier):
-        if identifier == self.name:
-            return PyOP2KernelCallable(name=identifier, access=self.access)
-        return None
 
 
 @singledispatch
@@ -572,26 +545,28 @@ def generate(builder, wrapper_name=None):
 
     from coffee.base import Node
 
-    if isinstance(kernel._code, loopy.LoopKernel):
+    if isinstance(kernel._code, loopy.program.Program):
         from loopy.transform.callable import _match_caller_callee_argument_dimension_
         knl = kernel._code
-        wrapper = loopy.merge(wrapper, knl)
-        wrapper = _match_caller_callee_argument_dimension_(wrapper, knl.name)
+        wrapper = loopy.merge([wrapper, knl])
+        wrapper = _match_caller_callee_argument_dimension_(wrapper, kernel.name)
     else:
         # kernel is a string, add it to preamble
         if isinstance(kernel._code, Node):
             code = kernel._code.gencode()
         else:
             code = kernel._code
-        wrapper = loopy.register_function_id_to_in_knl_callable_mapper(
+        wrapper = loopy.register_callable(
             wrapper,
-            PyOP2KernelLookup(kernel.name, code, tuple(builder.argument_accesses)))
+            kernel.name,
+            PyOP2KernelCallable(name=kernel.name, access=tuple(builder.argument_accesses)))
         preamble = preamble + "\n" + code
 
     wrapper = loopy.register_preamble_generators(wrapper, [_PreambleGen(preamble)])
 
     # register petsc functions
-    wrapper = loopy.register_function_id_to_in_knl_callable_mapper(wrapper, petsc_function_lookup)
+    for name in petsc_functions:
+        wrapper = loopy.register_callable(wrapper, name, PetscCallable(name=name))
 
     return wrapper
 
