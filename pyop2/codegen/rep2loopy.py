@@ -565,8 +565,8 @@ def generate(builder, wrapper_name=None):
     wrapper = loopy.register_preamble_generators(wrapper, [_PreambleGen(preamble)])
 
     # register petsc functions
-    for name in petsc_functions:
-        wrapper = loopy.register_callable(wrapper, name, PetscCallable(name=name))
+    for identifier in petsc_functions:
+        wrapper = loopy.register_callable(wrapper, identifier, PetscCallable(name=identifier))
 
     return wrapper
 
