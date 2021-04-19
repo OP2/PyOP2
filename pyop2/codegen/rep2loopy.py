@@ -583,7 +583,7 @@ def generate(builder, wrapper_name=None):
     if isinstance(kernel._code, loopy.LoopKernel):
         from loopy.transform.callable import _match_caller_callee_argument_dimension_
         knl = kernel._code
-        wrapper = loopy.register_callable_kernel(wrapper, knl)
+        wrapper = loopy.merge(wrapper, knl)
         wrapper = _match_caller_callee_argument_dimension_(wrapper, knl.name)
     else:
         # kernel is a string, add it to preamble
