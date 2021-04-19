@@ -85,7 +85,7 @@ class TestCallables:
             name="callable_kernel",
             lang_version=(2018, 2))
 
-        k = loopy.register_callable(k, "inv", INVCallable(name="inv"))
+        k = loopy.register_callable(k, INVCallable.name, INVCallable())
         code = loopy.generate_code_v2(k).device_code()
         code.replace('void callable_kernel', 'static void callable_kernel')
 
@@ -110,7 +110,7 @@ class TestCallables:
             name="callable_kernel2",
             lang_version=(2018, 2))
 
-        k = loopy.register_callable(k, "solve", SolveCallable(name="solve"))
+        k = loopy.register_callable(k, SolveCallable.name, SolveCallable())
         code = loopy.generate_code_v2(k).device_code()
         code.replace('void callable_kernel2', 'static void callable_kernel2')
         loopykernel = op2.Kernel(code, k.name, ldargs=["-llapack"])

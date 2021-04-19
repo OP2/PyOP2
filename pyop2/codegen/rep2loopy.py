@@ -110,14 +110,16 @@ class LACallable(loopy.ScalarCallable, metaclass=abc.ABCMeta):
     replaces loopy.CallInstructions to linear algebra functions
     like solve or inverse by LAPACK calls.
     """
-    def __init__(self, name, arg_id_to_dtype=None,
+    def __init__(self, arg_id_to_dtype=None,
                  arg_id_to_descr=None, name_in_target=None):
-
-        super(LACallable, self).__init__(name,
+        super(LACallable, self).__init__(self.name,
                                          arg_id_to_dtype=arg_id_to_dtype,
                                          arg_id_to_descr=arg_id_to_descr)
-        self.name = name
-        self.name_in_target = name_in_target if name_in_target else name
+        self.name_in_target = name_in_target if name_in_target else self.name
+
+    @abc.abstractproperty
+    def name(self):
+        pass
 
     @abc.abstractmethod
     def generate_preambles(self, target):
@@ -173,6 +175,7 @@ class INVCallable(LACallable):
     The InverseCallable replaces loopy.CallInstructions to "inverse"
     functions by LAPACK getri.
     """
+    name = "inv"
     def generate_preambles(self, target):
         assert isinstance(target, loopy.CTarget)
         yield ("inverse", inverse_preamble)
@@ -184,6 +187,7 @@ class SolveCallable(LACallable):
     The SolveCallable replaces loopy.CallInstructions to "solve"
     functions by LAPACK getrs.
     """
+    name = "solve"
     def generate_preambles(self, target):
         assert isinstance(target, loopy.CTarget)
         yield ("solve", solve_preamble)
