@@ -551,7 +551,8 @@ def generate(builder, wrapper_name=None):
         from loopy.transform.callable import _match_caller_callee_argument_dimension_
         knl = kernel._code
         wrapper = loopy.merge([wrapper, knl])
-        wrapper = _match_caller_callee_argument_dimension_(wrapper, kernel.name)
+        name, = knl.callables_table
+        wrapper = _match_caller_callee_argument_dimension_(wrapper, name)
     else:
         # kernel is a string, add it to preamble
         if isinstance(kernel._code, Node):
