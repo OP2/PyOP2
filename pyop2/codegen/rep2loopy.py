@@ -645,6 +645,7 @@ def statement_functioncall(expr, context):
         if access is READ or (isinstance(child, Argument) and isinstance(child.dtype, OpaqueType)):
             reads.append(arg)
         else:
+            reads.append(arg)
             writes.append(arg)
 
     within_inames = context.within_inames[expr]
