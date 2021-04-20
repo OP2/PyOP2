@@ -865,7 +865,3 @@ def expression_bitshift(expr, parameters):
 def expression_indexed(expr, parameters):
     aggregate, multiindex = (expression(c, parameters) for c in expr.children)
     return pym.Subscript(aggregate, multiindex)
-    extents = [int(numpy.prod(expr.aggregate.shape[i+1:])) for i in range(len(multiindex))]
-    make_sum = lambda x, y: pym.Sum((x, y))
-    index = reduce(make_sum, [pym.Product((e, m)) for e, m in zip(extents, multiindex)])
-    return pym.Subscript(aggregate, (index,))
