@@ -20,7 +20,7 @@ import operator
 
 from pyop2.codegen.node import traversal, Node, Memoizer, reuse_if_untouched
 
-from pyop2.base import READ
+from pyop2.base import READ, WRITE
 from pyop2.datatypes import as_ctypes
 
 from pyop2.codegen.optimise import index_merger, rename_nodes
@@ -645,6 +645,8 @@ def statement_functioncall(expr, context):
             arg = var
         if access is READ or (isinstance(child, Argument) and isinstance(child.dtype, OpaqueType)):
             reads.append(arg)
+        elif access is WRITE:
+            writes.append(arg)
         else:
             reads.append(arg)
             writes.append(arg)

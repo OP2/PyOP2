@@ -806,6 +806,19 @@ class WrapperBuilder(object):
             self.maps[key] = map_
             return map_
 
+    @cached_property
+    def loopy_argument_accesses(self):
+        """Loopy wants the CallInstruction to have argument access
+        descriptors aligned with how the callee treats the function.
+        In the cases of TSFC kernels with WRITE access, this is not
+        how we treats the function, so we have to keep track of the
+        difference here."""
+        if self.requires_zeroed_output_arguments:
+            mapping = {WRITE: INC}
+        else:
+            mapping = {}
+        return list(mapping.get(a, a) for a in self.argument_accesses)
+
     @property
     def kernel_args(self):
         return tuple(p.kernel_arg(self.loop_indices) for p in self.packed_args)
@@ -828,7 +841,7 @@ class WrapperBuilder(object):
 
     def kernel_call(self):
         args = self.kernel_args
-        access = tuple(self.argument_accesses)
+        access = tuple(self.loopy_argument_accesses)
         # assuming every index is free index
         free_indices = set(itertools.chain.from_iterable(arg.multiindex for arg in args))
         # remove runtime index
