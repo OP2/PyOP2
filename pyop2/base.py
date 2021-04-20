@@ -1561,7 +1561,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
                 i = p.Variable("i")
                 insn = loopy.Assignment(x.index(i), 0, within_inames=frozenset(["i"]))
                 data = loopy.GlobalArg("dat", dtype=self.dtype, shape=(self.cdim,))
-                knl = loopy.make_function([domain], [insn], [data], name="zero", target=loopy.CTarget())
+                knl = loopy.make_function([domain], [insn], [data], name="zero", target=loopy.CTarget(), lang_version=(2018, 2))
 
                 knl = _make_object('Kernel', knl, 'zero')
                 self._zero_kernels[(self.dtype, self.cdim)] = knl
@@ -1595,7 +1595,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
             insn = loopy.Assignment(_other.index(i), _self.index(i), within_inames=frozenset(["i"]))
             data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
                     loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,))]
-            knl = loopy.make_function([domain], [insn], data, name="copy", target=loopy.CTarget())
+            knl = loopy.make_function([domain], [insn], data, name="copy", target=loopy.CTarget(), lang_version=(2018, 2))
 
             self._copy_kernel = _make_object('Kernel', knl, 'copy')
         return _make_object('ParLoop', self._copy_kernel,
@@ -1651,7 +1651,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
                 loopy.GlobalArg("other", dtype=dtype, shape=rshape),
                 loopy.GlobalArg("ret", dtype=self.dtype, shape=(self.cdim,))]
-        knl = loopy.make_function([domain], [insn], data, name=name, target=loopy.CTarget())
+        knl = loopy.make_function([domain], [insn], data, name=name, target=loopy.CTarget(), lang_version=(2018, 2))
         return self._op_kernel_cache.setdefault(key, _make_object('Kernel', knl, name))
 
     def _op(self, other, op):
@@ -1695,7 +1695,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,))]
         if not other_is_self:
             data.append(loopy.GlobalArg("other", dtype=dtype, shape=rshape))
-        knl = loopy.make_function([domain], [insn], data, name=name, target=loopy.CTarget())
+        knl = loopy.make_function([domain], [insn], data, name=name, target=loopy.CTarget(), lang_version=(2018, 2))
         return self._iop_kernel_cache.setdefault(key, _make_object('Kernel', knl, name))
 
     def _iop(self, other, op):
@@ -1732,7 +1732,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
                 loopy.GlobalArg("other", dtype=dtype, shape=(self.cdim,)),
                 loopy.GlobalArg("ret", dtype=self.dtype, shape=(1,))]
-        knl = loopy.make_function([domain], [insn], data, name="inner", target=loopy.CTarget())
+        knl = loopy.make_function([domain], [insn], data, name="inner", target=loopy.CTarget(), lang_version=(2018, 2))
         k = _make_object('Kernel', knl, "inner")
         return self._inner_kernel_cache.setdefault(dtype, k)
 
@@ -1787,7 +1787,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         insn = loopy.Assignment(lvalue.index(i), -rvalue.index(i), within_inames=frozenset(["i"]))
         data = [loopy.GlobalArg("other", dtype=self.dtype, shape=(self.cdim,)),
                 loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,))]
-        knl = loopy.make_function([domain], [insn], data, name=name, target=loopy.CTarget())
+        knl = loopy.make_function([domain], [insn], data, name=name, target=loopy.CTarget(), lang_version=(2018, 2))
         return _make_object('Kernel', knl, name)
 
     def __neg__(self):
