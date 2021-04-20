@@ -28,8 +28,6 @@ replace_indices.register(Node)(reuse_if_untouched)
 
 @replace_indices.register(Index)
 def replace_indices_index(node, self):
-    if node.extent == 1:
-        return FixedIndex(0)
     return self.subst.get(node, node)
 
 

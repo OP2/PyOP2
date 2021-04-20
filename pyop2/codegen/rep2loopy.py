@@ -633,10 +633,8 @@ def statement_functioncall(expr, context):
         var = expression(child, parameters)
         if isinstance(var, pym.Subscript):
             # tensor argument
-            indices = []
             sweeping_indices = []
             for index in var.index_tuple:
-                indices.append(index)
                 if isinstance(index, pym.Variable) and index.name in free_indices:
                     sweeping_indices.append(index)
             arg = SubArrayRef(tuple(sweeping_indices), var)

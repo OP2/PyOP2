@@ -730,7 +730,10 @@ class WrapperBuilder(object):
             if arg._is_mixed:
                 packs = []
                 for a in arg:
-                    shape = (None, *a.data.shape[1:])
+                    shape = a.data.shape[1:]
+                    if shape == ():
+                        shape = (1,)
+                    shape = (None, *shape)
                     argument = Argument(shape, a.data.dtype, pfx="mdat")
                     packs.append(a.data.pack(argument, arg.access, self.map_(a.map, unroll=a.unroll_map),
                                              interior_horizontal=interior_horizontal,
@@ -746,7 +749,10 @@ class WrapperBuilder(object):
                 else:
                     view_index = None
                     data = arg.data
-                shape = (None, *data.shape[1:])
+                shape = data.shape[1:]
+                if shape == ():
+                    shape = (1,)
+                shape = (None, *shape)
                 argument = Argument(shape,
                                     arg.data.dtype,
                                     pfx="dat")
