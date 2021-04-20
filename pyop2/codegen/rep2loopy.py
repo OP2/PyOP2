@@ -172,10 +172,10 @@ class INVCallable(LACallable):
     functions by LAPACK getri.
     """
     name = "inverse"
+
     def generate_preambles(self, target):
         assert isinstance(target, loopy.CTarget)
         yield ("inverse", inverse_preamble)
-
 
 
 class SolveCallable(LACallable):
@@ -184,10 +184,10 @@ class SolveCallable(LACallable):
     functions by LAPACK getrs.
     """
     name = "solve"
+
     def generate_preambles(self, target):
         assert isinstance(target, loopy.CTarget)
         yield ("solve", solve_preamble)
-
 
 
 class _PreambleGen(ImmutableRecord):
