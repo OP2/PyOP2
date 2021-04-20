@@ -1651,7 +1651,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
                 loopy.GlobalArg("other", dtype=dtype, shape=rshape),
                 loopy.GlobalArg("ret", dtype=self.dtype, shape=(self.cdim,))]
-        knl = loopy.make_function([domain], [insn], data, name=name)
+        knl = loopy.make_function([domain], [insn], data, name=name, target=loopy.CTarget())
         return self._op_kernel_cache.setdefault(key, _make_object('Kernel', knl, name))
 
     def _op(self, other, op):
