@@ -534,6 +534,7 @@ def generate(builder, wrapper_name=None):
     preamble = "\n".join(sorted(headers))
 
     from coffee.base import Node
+    from loopy.kernel.function_interface import CallableKernel
 
     if isinstance(kernel._code, loopy.program.Program):
         from loopy.transform.callable import _match_caller_callee_argument_dimension_
@@ -541,7 +542,7 @@ def generate(builder, wrapper_name=None):
         wrapper = loopy.merge([wrapper, knl])
         names = knl.callables_table
         for name in names:
-            if not isinstance(knl.callables_table[name], LACallable):
+            if isinstance(wrapper.callables_table[name], CallableKernel):
                 wrapper = _match_caller_callee_argument_dimension_(wrapper, name)
     else:
         # kernel is a string, add it to preamble
