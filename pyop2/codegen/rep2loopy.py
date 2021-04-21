@@ -204,11 +204,12 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
     """Handles PyOP2 Kernel passed in as a string
     """
 
-    fields = set(["name", "access", "arg_id_to_dtype", "arg_id_to_descr", "name_in_target"])
-    init_arg_names = ("name", "access", "arg_id_to_dtype", "arg_id_to_descr", "name_in_target")
+    fields = set(["name", "arguments", "access", "arg_id_to_dtype", "arg_id_to_descr", "name_in_target"])
+    init_arg_names = ("name", "arguments", "access", "arg_id_to_dtype", "arg_id_to_descr", "name_in_target")
 
-    def __init__(self, name, access, arg_id_to_dtype=None, arg_id_to_descr=None, name_in_target=None):
+    def __init__(self, name, arguments, access, arg_id_to_dtype=None, arg_id_to_descr=None, name_in_target=None):
         super(PyOP2KernelCallable, self).__init__(name, arg_id_to_dtype, arg_id_to_descr, name_in_target)
+        self.arguments = arguments
         self.access = access
 
     def with_types(self, arg_id_to_dtype, callables_table):
@@ -236,19 +237,7 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
 
     def emit_call_insn(self, insn, target, expression_to_code_mapper):
         # reorder arguments, e.g. a,c = f(b,d) to f(a,b,c,d)
-        parameters = []
-        reads = iter(insn.expression.parameters)
-        writes = iter(insn.assignees)
-        for ac in self.access:
-            if ac is READ:
-                parameters.append(next(reads))
-            else:
-                parameters.append(next(writes))
-
-        # pass layer argument if needed
-        for layer in reads:
-            parameters.append(layer)
-
+        parameters = self.arguments[insn.id]
         par_dtypes = tuple(expression_to_code_mapper.infer_type(p) for p in parameters)
 
         from loopy.expression import dtype_to_type_context
@@ -562,7 +551,9 @@ def generate(builder, wrapper_name=None):
         wrapper = loopy.register_callable(
             wrapper,
             kernel.name,
-            PyOP2KernelCallable(name=kernel.name, access=tuple(builder.argument_accesses)))
+            PyOP2KernelCallable(name=kernel.name,
+                                arguments=context.function_args,
+                                access=tuple(builder.argument_accesses)))
         preamble = preamble + "\n" + code
 
     wrapper = loopy.register_preamble_generators(wrapper, [_PreambleGen(preamble)])
@@ -627,6 +618,7 @@ def statement_functioncall(expr, context):
     parameters = context.parameters
 
     free_indices = set(i.name for i in expr.free_indices)
+    function_args = []
     writes = []
     reads = []
     for access, child in zip(expr.access, expr.children):
@@ -641,6 +633,8 @@ def statement_functioncall(expr, context):
         else:
             # scalar argument or constant
             arg = var
+        function_args.append(arg)
+
         if access is READ or (isinstance(child, Argument) and isinstance(child.dtype, OpaqueType)):
             reads.append(arg)
         elif access is WRITE:
@@ -655,11 +649,20 @@ def statement_functioncall(expr, context):
 
     call = pym.Call(pym.Variable(expr.name), tuple(reads))
 
-    return loopy.CallInstruction(tuple(writes), call,
+    insn = loopy.CallInstruction(tuple(writes), call,
                                  within_inames=within_inames,
                                  predicates=predicates,
                                  id=id,
                                  depends_on=depends_on, depends_on_is_final=True)
+
+    # We cannot reconstruct the correct calling convention for C-string kernels
+    # without providing some additional context about the argument ordering.
+    # This is processed inside the ``emit_call_insn`` method of
+    # :class:`.PyOP2KernelCallable`.
+    if not hasattr(context, "function_args"):
+        context.function_args = {}
+    context.function_args[id] = function_args
+    return insn
 
 
 @singledispatch
