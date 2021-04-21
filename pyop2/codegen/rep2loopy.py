@@ -461,7 +461,7 @@ def generate(builder, wrapper_name=None):
     context.conditions = []
     context.index_ordering = []
     context.instruction_dependencies = deps
-    context.function_args = {}
+    context.kernel_parameters = {}
 
     statements = list(statement(insn, context) for insn in instructions)
     # remove the dummy instructions (they were only used to ensure
@@ -551,7 +551,7 @@ def generate(builder, wrapper_name=None):
             wrapper,
             kernel.name,
             PyOP2KernelCallable(name=kernel.name,
-                                parameters=context.function_args[kernel.name]))
+                                parameters=context.kernel_parameters[kernel.name]))
         preamble = preamble + "\n" + code
 
     wrapper = loopy.register_preamble_generators(wrapper, [_PreambleGen(preamble)])
@@ -619,7 +619,7 @@ def statement_functioncall(expr, context):
     # without providing some additional context about the argument ordering.
     # This is processed inside the ``emit_call_insn`` method of
     # :class:`.PyOP2KernelCallable`.
-    context.function_args[expr.name] = []
+    context.kernel_parameters[expr.name] = []
 
     free_indices = set(i.name for i in expr.free_indices)
     writes = []
@@ -636,7 +636,7 @@ def statement_functioncall(expr, context):
         else:
             # scalar argument or constant
             arg = var
-        context.function_args[expr.name].append(arg)
+        context.kernel_parameters[expr.name].append(arg)
 
         if access is READ or (isinstance(child, Argument) and isinstance(child.dtype, OpaqueType)):
             reads.append(arg)
