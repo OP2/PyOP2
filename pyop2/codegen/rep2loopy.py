@@ -609,6 +609,7 @@ def statement_assign(expr, context):
     id, depends_on = context.instruction_dependencies[expr]
     predicates = frozenset(context.conditions)
     return loopy.Assignment(lvalue, rvalue, within_inames=within_inames,
+                            within_inames_is_final=True,
                             predicates=predicates,
                             id=id,
                             depends_on=depends_on, depends_on_is_final=True)
@@ -657,6 +658,7 @@ def statement_functioncall(expr, context):
 
     return loopy.CallInstruction(tuple(writes), call,
                                  within_inames=within_inames,
+                                 within_inames_is_final=True,
                                  predicates=predicates,
                                  id=id,
                                  depends_on=depends_on, depends_on_is_final=True)
