@@ -496,7 +496,8 @@ def generate(builder, wrapper_name=None):
     # sometimes masks are not used, but we still need to create the function arguments
     for i, arg in enumerate(parameters.wrapper_arguments):
         if parameters.kernel_data[i] is None:
-            arg = loopy.GlobalArg(arg.name, dtype=arg.dtype, shape=arg.shape)
+            arg = loopy.GlobalArg(arg.name, dtype=arg.dtype, shape=arg.shape,
+                                  strides=loopy.auto)
             parameters.kernel_data[i] = arg
 
     if wrapper_name is None:
@@ -767,7 +768,8 @@ def expression_argument(expr, parameters):
     else:
         arg = loopy.GlobalArg(name,
                               dtype=dtype,
-                              shape=shape)
+                              shape=shape,
+                              strides=loopy.auto)
     idx = parameters.wrapper_arguments.index(expr)
     parameters.kernel_data[idx] = arg
     return pym.Variable(name)
