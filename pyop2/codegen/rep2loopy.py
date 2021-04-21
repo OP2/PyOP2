@@ -204,12 +204,12 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
     """Handles PyOP2 Kernel passed in as a string
     """
 
-    fields = set(["name", "access", "arg_id_to_dtype", "arg_id_to_descr", "name_in_target"])
-    init_arg_names = ("name", "access", "arg_id_to_dtype", "arg_id_to_descr", "name_in_target")
+    fields = set(["name", "parameters", "arg_id_to_dtype", "arg_id_to_descr", "name_in_target"])
+    init_arg_names = ("name", "parameters", "arg_id_to_dtype", "arg_id_to_descr", "name_in_target")
 
-    def __init__(self, name, access, arg_id_to_dtype=None, arg_id_to_descr=None, name_in_target=None):
+    def __init__(self, name, parameters, arg_id_to_dtype=None, arg_id_to_descr=None, name_in_target=None):
         super(PyOP2KernelCallable, self).__init__(name, arg_id_to_dtype, arg_id_to_descr, name_in_target)
-        self.access = access
+        self.parameters = parameters
 
     def with_types(self, arg_id_to_dtype, callables_table):
         new_arg_id_to_dtype = arg_id_to_dtype.copy()
@@ -236,20 +236,7 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
 
     def emit_call_insn(self, insn, target, expression_to_code_mapper):
         # reorder arguments, e.g. a,c = f(b,d) to f(a,b,c,d)
-        parameters = []
-        reads = iter(insn.expression.parameters)
-        writes = iter(insn.assignees)
-        for ac in self.access:
-            if ac is READ:
-                parameters.append(next(reads))
-            else:
-                parameters.append(next(writes))
-
-        # pass layer argument if needed
-        for layer in reads:
-            parameters.append(layer)
-
-        par_dtypes = tuple(expression_to_code_mapper.infer_type(p) for p in parameters)
+        par_dtypes = tuple(expression_to_code_mapper.infer_type(p) for p in self.parameters)
 
         from loopy.expression import dtype_to_type_context
         from pymbolic.mapper.stringifier import PREC_NONE
@@ -259,7 +246,7 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
             expression_to_code_mapper(
                 par, PREC_NONE, dtype_to_type_context(target, par_dtype),
                 par_dtype).expr
-            for par, par_dtype in zip(parameters, par_dtypes)]
+            for par, par_dtype in zip(self.parameters, par_dtypes)]
 
         assignee_is_returned = False
         return var(self.name_in_target)(*c_parameters), assignee_is_returned
@@ -474,6 +461,7 @@ def generate(builder, wrapper_name=None):
     context.conditions = []
     context.index_ordering = []
     context.instruction_dependencies = deps
+    context.kernel_parameters = {}
 
     statements = list(statement(insn, context) for insn in instructions)
     # remove the dummy instructions (they were only used to ensure
@@ -562,7 +550,8 @@ def generate(builder, wrapper_name=None):
         wrapper = loopy.register_callable(
             wrapper,
             kernel.name,
-            PyOP2KernelCallable(name=kernel.name, access=tuple(builder.argument_accesses)))
+            PyOP2KernelCallable(name=kernel.name,
+                                parameters=context.kernel_parameters[kernel.name]))
         preamble = preamble + "\n" + code
 
     wrapper = loopy.register_preamble_generators(wrapper, [_PreambleGen(preamble)])
@@ -626,6 +615,12 @@ def statement_assign(expr, context):
 def statement_functioncall(expr, context):
     parameters = context.parameters
 
+    # We cannot reconstruct the correct calling convention for C-string kernels
+    # without providing some additional context about the argument ordering.
+    # This is processed inside the ``emit_call_insn`` method of
+    # :class:`.PyOP2KernelCallable`.
+    context.kernel_parameters[expr.name] = []
+
     free_indices = set(i.name for i in expr.free_indices)
     writes = []
     reads = []
@@ -641,6 +636,8 @@ def statement_functioncall(expr, context):
         else:
             # scalar argument or constant
             arg = var
+        context.kernel_parameters[expr.name].append(arg)
+
         if access is READ or (isinstance(child, Argument) and isinstance(child.dtype, OpaqueType)):
             reads.append(arg)
         elif access is WRITE:
