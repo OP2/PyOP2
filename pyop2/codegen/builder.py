@@ -84,13 +84,14 @@ class Map(object):
             # Now prefetch the extruded part of the map (inside the layer loop).
             # This is necessary so loopy DTRT for MatSetValues
             # Different f values need to be treated separately.
-            key = f.extent
-            if key is None:
-                key = 1
+            key = 1 if f is None else (f.extent or 1)
             if key not in self.prefetch:
                 bottom_layer, _ = self.layer_bounds
-                k = Index(f.extent if f.extent is not None else 1)
-                offset = Sum(Sum(layer, Product(Literal(numpy.int32(-1)), bottom_layer)), k)
+                k = FixedIndex(0) if f is None else Index(f.extent or 1)
+                offset = Sum(layer, Product(Literal(numpy.int32(-1)), bottom_layer))
+                if f is not None:
+                    k = Index(f.extent or 1)
+                    offset = Sum(offset, k)
                 j = Index()
                 # Inline map offsets where all entries are identical.
                 if self.offset.shape == ():
@@ -98,24 +99,29 @@ class Map(object):
                 else:
                     offset = Product(offset, Indexed(self.offset, (j,)))
                 base = Indexed(base, (j, ))
-                self.prefetch[key] = Materialise(PackInst(), Sum(base, offset), MultiIndex(k, j))
-
-            return Indexed(self.prefetch[key], (f, i)), (f, i)
+                mi = (k, j) if f is not None else (j,)
+                self.prefetch[key] = Materialise(PackInst(), Sum(base, offset), MultiIndex(*mi))
+            mi = (f, i) if f is not None else (i,)
+            return Indexed(self.prefetch[key], mi), mi
         else:
-            assert f.extent == 1 or f.extent is None
+            assert f is None
             base = Indexed(self.values, (n, i))
-            return base, (f, i)
+            return base, (i,)
 
     def indexed_vector(self, n, shape, layer=None):
+        shape = (numpy.prod(shape, dtype=numpy.int32), )
         shape = self.shape[1:] + shape
         if self.interior_horizontal:
             shape = (2, ) + shape
+            f, i, j = (Index(e) for e in shape)
         else:
-            shape = (1, ) + shape
-        f, i, j = (Index(e) for e in shape)
-        base, (f, i) = self.indexed((n, i, f), layer=layer)
+            shape = () + shape
+            i, j = (Index(e) for e in shape)
+            f = None
+        base, idx = self.indexed((n, i, f), layer=layer)
         init = Sum(Product(base, Literal(numpy.int32(j.extent))), j)
-        pack = Materialise(PackInst(), init, MultiIndex(f, i, j))
+        mi = idx + (j, )
+        pack = Materialise(PackInst(), init, MultiIndex(*mi))
         multiindex = tuple(Index(e) for e in pack.shape)
         return Indexed(pack, multiindex), multiindex
 
@@ -229,11 +235,15 @@ class DatPack(Pack):
         otherwise the pack/unpack will be wrapped in When(mask, expr).
         This is used for the case where maps might have negative entries.
         """
-        f, i, *j = multiindex
+        if self.interior_horizontal:
+            f, i, *j = multiindex
+        else:
+            i, *j = multiindex
+            f = None
         n, layer = self.pick_loop_indices(*loop_indices)
         if self.view_index is not None:
             j = tuple(j) + tuple(FixedIndex(i) for i in self.view_index)
-        map_, (f, i) = self.map_.indexed((n, i, f), layer=layer)
+        map_, _ = self.map_.indexed((n, i, f), layer=layer)
         return Indexed(self.outer, MultiIndex(map_, *j)), self._mask(map_)
 
     def pack(self, loop_indices=None):
@@ -246,7 +256,7 @@ class DatPack(Pack):
         if self.interior_horizontal:
             shape = (2, )
         else:
-            shape = (1, )
+            shape = ()
 
         shape = shape + self.map_.shape[1:]
         if self.view_index is None:
@@ -333,7 +343,7 @@ class MixedDatPack(Pack):
             _shape = (2,)
             flat_shape *= 2
         else:
-            _shape = (1,)
+            _shape = ()
 
         if self.access in {INC, WRITE}:
             val = Zero((), self.dtype)
@@ -379,7 +389,7 @@ class MixedDatPack(Pack):
             if self.interior_horizontal:
                 _shape = (2,)
             else:
-                _shape = (1,)
+                _shape = ()
             offset = 0
             for p in self.packs:
                 shape = _shape + p.map_.shape[1:] + p.outer.shape[1:]
@@ -424,14 +434,14 @@ class MatPack(Pack):
 
     @cached_property
     def shapes(self):
-        ((rdim, cdim), ), = self.dims
+        rdim, cdim = self.dims
         rmap, cmap = self.maps
         if self.interior_horizontal:
             shape = (2, )
         else:
-            shape = (1, )
-        rshape = shape + rmap.shape[1:] + (rdim, )
-        cshape = shape + cmap.shape[1:] + (cdim, )
+            shape = ()
+        rshape = shape + rmap.shape[1:] + rdim
+        cshape = shape + cmap.shape[1:] + cdim
         return (rshape, cshape)
 
     def pack(self, loop_indices=None, only_declare=False):
@@ -459,12 +469,12 @@ class MatPack(Pack):
 
     def emit_unpack_instruction(self, *, loop_indices=None):
         from pyop2.codegen.rep2loopy import register_petsc_function
-        ((rdim, cdim), ), = self.dims
         rmap, cmap = self.maps
         n, layer = self.pick_loop_indices(*loop_indices)
         unroll = any(m.unroll for m in self.maps)
         if unroll:
-            maps = [map_.indexed_vector(n, (dim, ), layer=layer)
+            rdim, cdim, = self.dims
+            maps = [map_.indexed_vector(n, dim, layer=layer)
                     for map_, dim in zip(self.maps, (rdim, cdim))]
         else:
             maps = []
@@ -473,21 +483,16 @@ class MatPack(Pack):
                 if self.interior_horizontal:
                     f = Index(2)
                 else:
-                    f = Index(1)
+                    f = None
                 maps.append(map_.indexed((n, i, f), layer=layer))
         (rmap, cmap), (rindices, cindices) = zip(*maps)
 
         pack = self.pack(loop_indices=loop_indices)
         name = self.insertion_names[unroll]
-        if unroll:
-            # The shape of MatPack is
-            # (row, cols) if it has vector BC
-            # (block_rows, row_cmpt, block_cols, col_cmpt) otherwise
-            free_indices = rindices + cindices
-            pack = Indexed(pack, free_indices)
-        else:
-            free_indices = rindices + (Index(), ) + cindices + (Index(), )
-            pack = Indexed(pack, free_indices)
+
+        pack_indices = tuple(Index(s) for s in pack.shape)
+        pack = Indexed(pack, pack_indices)
+        free_indices = rindices + cindices + pack_indices
 
         access = Symbol({WRITE: "INSERT_VALUES",
                          INC: "ADD_VALUES"}[self.access])
@@ -731,7 +736,7 @@ class WrapperBuilder(object):
                 packs = []
                 for a in arg:
                     shape = a.data.shape[1:]
-                    if shape == ():
+                    if shape == () and a.map is None:
                         shape = (1,)
                     shape = (None, *shape)
                     argument = Argument(shape, a.data.dtype, pfx="mdat")
@@ -750,7 +755,7 @@ class WrapperBuilder(object):
                     view_index = None
                     data = arg.data
                 shape = data.shape[1:]
-                if shape == ():
+                if shape == () and arg.map is None:
                     shape = (1,)
                 shape = (None, *shape)
                 argument = Argument(shape,
@@ -778,8 +783,10 @@ class WrapperBuilder(object):
                 for a in arg:
                     argument = Argument((), PetscMat(), pfx="mat")
                     map_ = tuple(self.map_(m, unroll=arg.unroll_map) for m in a.map)
+                    rset, cset = a.data.sparsity.dsets
+                    dims = (rset.dim, cset.dim)
                     packs.append(arg.data.pack(argument, a.access, map_,
-                                               a.data.dims, a.data.dtype,
+                                               dims, a.data.dtype,
                                                interior_horizontal=interior_horizontal))
                     self.arguments.append(argument)
                 pack = MixedMatPack(packs, arg.access, arg.dtype,
@@ -789,8 +796,10 @@ class WrapperBuilder(object):
             else:
                 argument = Argument((), PetscMat(), pfx="mat")
                 map_ = tuple(self.map_(m, unroll=arg.unroll_map) for m in arg.map)
+                rset, cset = arg.data.sparsity.dsets
+                dims = (rset.dim, cset.dim)
                 pack = arg.data.pack(argument, arg.access, map_,
-                                     arg.data.dims, arg.data.dtype,
+                                     dims, arg.data.dtype,
                                      interior_horizontal=interior_horizontal)
                 self.arguments.append(argument)
                 self.packed_args.append(pack)
