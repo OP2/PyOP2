@@ -3330,7 +3330,7 @@ class Kernel(Cached):
 
         if isinstance(code, Node):
             code = code.gencode()
-        if isinstance(code, loopy.LoopKernel):
+        if isinstance(code, loopy.Program):
             from loopy.tools import LoopyKeyBuilder
             from hashlib import sha256
             key_hash = sha256()
