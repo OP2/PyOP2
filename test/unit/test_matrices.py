@@ -69,7 +69,7 @@ def elements():
 
 @pytest.fixture(scope='module')
 def dnodes(nodes):
-    return op2.DataSet(nodes, 1, "dnodes")
+    return op2.DataSet(nodes, (), "dnodes")
 
 
 @pytest.fixture(scope='module')
@@ -79,7 +79,7 @@ def dvnodes(nodes):
 
 @pytest.fixture(scope='module')
 def delements(elements):
-    return op2.DataSet(elements, 1, "delements")
+    return op2.DataSet(elements, (), "delements")
 
 
 @pytest.fixture(scope='module')

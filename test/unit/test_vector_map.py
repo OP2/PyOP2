@@ -58,7 +58,7 @@ def ele():
 
 @pytest.fixture(scope='module')
 def dnode(node):
-    return op2.DataSet(node, 1, 'dnode')
+    return op2.DataSet(node, (), 'dnode')
 
 
 @pytest.fixture(scope='module')
@@ -68,7 +68,7 @@ def dnode2(node):
 
 @pytest.fixture(scope='module')
 def dele(ele):
-    return op2.DataSet(ele, 1, 'dele')
+    return op2.DataSet(ele, (), 'dele')
 
 
 @pytest.fixture(scope='module')

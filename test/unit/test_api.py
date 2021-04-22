@@ -536,8 +536,8 @@ class TestDataSetAPI:
             op2.DataSet(iterset, 1, 2)
 
     def test_dset_default_dim(self, iterset):
-        "DataSet constructor should default dim to (1,)."
-        assert op2.DataSet(iterset).dim == (1,)
+        "DataSet constructor should default dim to ()."
+        assert op2.DataSet(iterset).dim == ()
 
     def test_dset_dim(self, iterset):
         "DataSet constructor should create a dim tuple."
@@ -624,22 +624,22 @@ class TestMixedDataSetAPI:
     def test_mixed_dset_upcast_sets(self, msets, mset):
         """Constructing a MixedDataSet from an iterable/iterator of Sets or
         MixedSet should upcast."""
-        assert op2.MixedDataSet(msets) == mset ** 1
+        assert op2.MixedDataSet(msets) == mset ** (((),)*len(mset))
 
     def test_mixed_dset_sets_and_dsets(self, set, dset):
         """Constructing a MixedDataSet from an iterable with a mixture of
         Sets and DataSets should upcast the Sets."""
-        assert op2.MixedDataSet((set, dset)).split == (set ** 1, dset)
+        assert op2.MixedDataSet((set, dset)).split == (set ** (), dset)
 
     def test_mixed_dset_sets_and_dsets_gen(self, set, dset):
         """Constructing a MixedDataSet from an iterable with a mixture of
         Sets and DataSets should upcast the Sets."""
-        assert op2.MixedDataSet(iter((set, dset))).split == (set ** 1, dset)
+        assert op2.MixedDataSet(iter((set, dset))).split == (set ** (), dset)
 
     def test_mixed_dset_dims_default_to_one(self, msets, mset):
         """Constructing a MixedDataSet from an interable/iterator of Sets or
-        MixedSet without dims should default them to 1."""
-        assert op2.MixedDataSet(msets).dim == ((1,),) * len(mset)
+        MixedSet without dims should default them to ()."""
+        assert op2.MixedDataSet(msets).dim == ((),) * len(mset)
 
     def test_mixed_dset_dims_int(self, msets, mset):
         """Construct a MixedDataSet from an iterator/iterable of Sets and a
@@ -834,7 +834,7 @@ class TestDatAPI:
     def test_dat_reshape(self, dset):
         "Data should be reshaped according to the set's dim."
         d = op2.Dat(dset, [1.0] * dset.size * dset.cdim)
-        shape = (dset.size,) + (() if dset.cdim == 1 else dset.dim)
+        shape = (dset.size,) + dset.dim
         assert d.data.shape == shape
 
     def test_dat_properties(self, dset):

@@ -60,7 +60,7 @@ class TestSubSet:
         indices = np.array([i for i in range(nelems) if not i % 2], dtype=np.int)
         ss = op2.Subset(iterset, indices)
 
-        d = op2.Dat(iterset ** 1, data=None, dtype=np.uint32)
+        d = op2.Dat(iterset ** (), data=None, dtype=np.uint32)
         k = op2.Kernel("static void inc(unsigned int* v) { *v += 1; }", "inc")
         op2.par_loop(k, ss, d(op2.RW))
         inds, = np.where(d.data)
@@ -69,7 +69,7 @@ class TestSubSet:
     def test_direct_loop_empty(self, iterset):
         """Test a direct loop with an empty subset"""
         ss = op2.Subset(iterset, [])
-        d = op2.Dat(iterset ** 1, data=None, dtype=np.uint32)
+        d = op2.Dat(iterset ** (), data=None, dtype=np.uint32)
         k = op2.Kernel("static void inc(unsigned int* v) { *v += 1; }", "inc")
         op2.par_loop(k, ss, d(op2.RW))
         inds, = np.where(d.data)
@@ -83,7 +83,7 @@ class TestSubSet:
         sseven = op2.Subset(iterset, even)
         ssodd = op2.Subset(iterset, odd)
 
-        d = op2.Dat(iterset ** 1, data=None, dtype=np.uint32)
+        d = op2.Dat(iterset ** (), data=None, dtype=np.uint32)
         k = op2.Kernel("static void inc(unsigned int* v) { *v += 1; }", "inc")
         op2.par_loop(k, sseven, d(op2.RW))
         op2.par_loop(k, ssodd, d(op2.RW))
@@ -97,7 +97,7 @@ class TestSubSet:
         sseven = iterset(even)
         ssodd = iterset(odd)
 
-        d = op2.Dat(iterset ** 1, data=None, dtype=np.uint32)
+        d = op2.Dat(iterset ** (), data=None, dtype=np.uint32)
         k = op2.Kernel("static void inc(unsigned int* v) { *v += 1; }", "inc")
         op2.par_loop(k, sseven, d(op2.RW))
         op2.par_loop(k, ssodd, d(op2.RW))
@@ -109,13 +109,13 @@ class TestSubSet:
         indices = np.arange(0, nelems//2, 2, dtype=np.int)
         sss = op2.Subset(ss, indices)
 
-        d = op2.Dat(iterset ** 1, data=None, dtype=np.uint32)
+        d = op2.Dat(iterset ** (), data=None, dtype=np.uint32)
         k = op2.Kernel("static void inc(unsigned int* v) { *v += 1; }", "inc")
         op2.par_loop(k, sss, d(op2.RW))
 
         indices = np.arange(0, nelems, 4, dtype=np.int)
         ss2 = op2.Subset(iterset, indices)
-        d2 = op2.Dat(iterset ** 1, data=None, dtype=np.uint32)
+        d2 = op2.Dat(iterset ** (), data=None, dtype=np.uint32)
         op2.par_loop(k, ss2, d2(op2.RW))
 
         assert (d.data == d2.data).all()
@@ -126,13 +126,13 @@ class TestSubSet:
         indices = np.arange(0, nelems//2, 2, dtype=np.int)
         sss = ss(indices)
 
-        d = op2.Dat(iterset ** 1, data=None, dtype=np.uint32)
+        d = op2.Dat(iterset ** (), data=None, dtype=np.uint32)
         k = op2.Kernel("static void inc(unsigned int* v) { *v += 1; }", "inc")
         op2.par_loop(k, sss, d(op2.RW))
 
         indices = np.arange(0, nelems, 4, dtype=np.int)
         ss2 = iterset(indices)
-        d2 = op2.Dat(iterset ** 1, data=None, dtype=np.uint32)
+        d2 = op2.Dat(iterset ** (), data=None, dtype=np.uint32)
         op2.par_loop(k, ss2, d2(op2.RW))
 
         assert (d.data == d2.data).all()
@@ -144,7 +144,7 @@ class TestSubSet:
 
         indset = op2.Set(2, "indset")
         map = op2.Map(iterset, indset, 1, [(1 if i % 2 else 0) for i in range(nelems)])
-        d = op2.Dat(indset ** 1, data=None, dtype=np.uint32)
+        d = op2.Dat(indset ** (), data=None, dtype=np.uint32)
 
         k = op2.Kernel("static void inc(unsigned int* v) { *v += 1;}", "inc")
         op2.par_loop(k, ss, d(op2.INC, map))
@@ -157,7 +157,7 @@ class TestSubSet:
 
         indset = op2.Set(2, "indset")
         map = op2.Map(iterset, indset, 1, [(1 if i % 2 else 0) for i in range(nelems)])
-        d = op2.Dat(indset ** 1, data=None, dtype=np.uint32)
+        d = op2.Dat(indset ** (), data=None, dtype=np.uint32)
 
         k = op2.Kernel("static void inc(unsigned int* v) { *v += 1;}", "inc")
         d.data[:] = 0
@@ -175,8 +175,8 @@ class TestSubSet:
 
         values = [2976579765] * nelems
         values[::2] = [i//2 for i in range(nelems)][::2]
-        dat1 = op2.Dat(iterset ** 1, data=values, dtype=np.uint32)
-        dat2 = op2.Dat(indset ** 1, data=None, dtype=np.uint32)
+        dat1 = op2.Dat(iterset ** (), data=values, dtype=np.uint32)
+        dat2 = op2.Dat(indset ** (), data=None, dtype=np.uint32)
 
         k = op2.Kernel("static void inc(unsigned* d, unsigned int* s) { *d += *s;}", "inc")
         op2.par_loop(k, ss, dat2(op2.INC, map), dat1(op2.READ))
@@ -193,8 +193,8 @@ class TestSubSet:
 
         indset = op2.Set(nelems, "indset")
         map = op2.Map(iterset, indset, 1, [i for i in range(nelems)])
-        dat1 = op2.Dat(iterset ** 1, data=None, dtype=np.uint32)
-        dat2 = op2.Dat(indset ** 1, data=None, dtype=np.uint32)
+        dat1 = op2.Dat(iterset ** (), data=None, dtype=np.uint32)
+        dat2 = op2.Dat(indset ** (), data=None, dtype=np.uint32)
 
         k = op2.Kernel("""
 static void inc(unsigned int* v1, unsigned int* v2) {
@@ -216,7 +216,7 @@ static void inc(unsigned int* v1, unsigned int* v2) {
         ss10 = op2.Subset(iterset, [1, 0])
         indset = op2.Set(4)
 
-        dat = op2.Dat(idset ** 1, data=[0, 1], dtype=np.float)
+        dat = op2.Dat(idset ** (), data=[0, 1], dtype=np.float)
         map = op2.Map(iterset, indset, 4, [0, 1, 2, 3, 0, 1, 2, 3])
         idmap = op2.Map(iterset, idset, 1, [0, 1])
         sparsity = op2.Sparsity((indset, indset), (map, map))

@@ -907,7 +907,7 @@ class DataSet(ObjectCached):
     @validate_type(('iter_set', Set, SetTypeError),
                    ('dim', (numbers.Integral, tuple, list), DimTypeError),
                    ('name', str, NameTypeError))
-    def __init__(self, iter_set, dim=1, name=None):
+    def __init__(self, iter_set, dim=(), name=None):
         if isinstance(iter_set, ExtrudedSet):
             raise NotImplementedError("Not allowed!")
         if self._initialized:
@@ -916,7 +916,7 @@ class DataSet(ObjectCached):
             raise NotImplementedError("Deriving a DataSet from a Subset is unsupported")
         self._set = iter_set
         self._dim = as_tuple(dim, numbers.Integral)
-        self._cdim = np.prod(self._dim).item()
+        self._cdim = np.prod(self._dim, dtype=int).item()
         self._name = name or "dset_#x%x" % id(self)
         self._initialized = True
 
@@ -1122,7 +1122,7 @@ class MixedDataSet(DataSet, ObjectCached):
         # Otherwise expect the first argument to be an iterable of Sets and/or
         # DataSets and upcast Sets to DataSets as necessary
         else:
-            arg = [s if isinstance(s, DataSet) else s ** 1 for s in arg]
+            arg = [s if isinstance(s, DataSet) else s ** () for s in arg]
             dsets = as_tuple(arg, type=DataSet)
 
         return (dsets[0].set, ) + (dsets, ), {}
@@ -1360,9 +1360,9 @@ class Dat(DataCarrier, _EmptyDataMixin):
             return
         if type(dataset) is Set or type(dataset) is ExtrudedSet:
             # If a Set, rather than a dataset is passed in, default to
-            # a dataset dimension of 1.
-            dataset = dataset ** 1
-        self._shape = (dataset.total_size,) + (() if dataset.cdim == 1 else dataset.dim)
+            # a dataset dimension of ().
+            dataset = dataset ** ()
+        self._shape = (dataset.total_size,) + dataset.dim
         _EmptyDataMixin.__init__(self, data, dtype, self._shape)
 
         self._dataset = dataset
