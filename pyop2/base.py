@@ -3378,7 +3378,7 @@ class Kernel(Cached):
         if isinstance(self.code, Node):
             v = EstimateFlops()
             return v.visit(self.code)
-        elif isinstance(self.code, loopy.LoopKernel):
+        elif isinstance(self.code, loopy.Program):
             op_map = loopy.get_op_map(
                 self.code.copy(options=loopy.Options(ignore_boostable_into=True),
                                silenced_warnings=['insn_count_subgroups_upper_bound',
