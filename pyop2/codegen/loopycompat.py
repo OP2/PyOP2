@@ -11,7 +11,7 @@ from loopy.kernel.instruction import CallInstruction, MultiAssignmentBase, \
 from loopy.symbolic import CombineMapper, IdentityMapper
 from loopy.isl_helpers import simplify_via_aff
 from loopy.kernel.function_interface import CallableKernel
-from loopy.translation_unit import Program
+from loopy.translation_unit import TranslationUnit
 
 
 # Tools to match caller to callee args by (guessed) automatic reshaping
@@ -164,7 +164,7 @@ def _match_caller_callee_argument_dimension_(program, callee_function_name):
         implemented yet.
     """
 
-    assert isinstance(program, Program)
+    assert isinstance(program, TranslationUnit)
     assert isinstance(callee_function_name, str)
     assert callee_function_name not in program.entrypoints
     assert callee_function_name in program.callables_table
