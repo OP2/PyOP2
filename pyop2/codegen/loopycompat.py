@@ -2,6 +2,10 @@
 # but was removed in https://github.com/inducer/loopy/pull/327. It has
 # been kept here for compatibility but should be phased out.
 
+# Note that since this code is copypasted, the linter has been turned off.
+
+# flake8: noqa
+
 from loopy.kernel.instruction import CallInstruction, MultiAssignmentBase, \
     CInstruction, _DataObliviousInstruction
 from loopy.symbolic import CombineMapper, IdentityMapper
