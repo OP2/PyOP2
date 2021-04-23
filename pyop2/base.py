@@ -3330,7 +3330,7 @@ class Kernel(Cached):
 
         if isinstance(code, Node):
             code = code.gencode()
-        if isinstance(code, loopy.Program):
+        if isinstance(code, loopy.TranslationUnit):
             from loopy.tools import LoopyKeyBuilder
             from hashlib import sha256
             key_hash = sha256()
@@ -3357,7 +3357,7 @@ class Kernel(Cached):
         self._ldargs = ldargs if ldargs is not None else []
         self._headers = headers
         self._user_code = user_code
-        assert isinstance(code, (str, Node, loopy.Program, loopy.LoopKernel))
+        assert isinstance(code, (str, Node, loopy.Program, loopy.LoopKernel, loopy.TranslationUnit))
         self._code = code
         self._initialized = True
         self.requires_zeroed_output_arguments = requires_zeroed_output_arguments
@@ -3378,7 +3378,7 @@ class Kernel(Cached):
         if isinstance(self.code, Node):
             v = EstimateFlops()
             return v.visit(self.code)
-        elif isinstance(self.code, loopy.Program):
+        elif isinstance(self.code, loopy.TranslationUnit):
             op_map = loopy.get_op_map(
                 self.code.copy(options=loopy.Options(ignore_boostable_into=True),
                                silenced_warnings=['insn_count_subgroups_upper_bound',
