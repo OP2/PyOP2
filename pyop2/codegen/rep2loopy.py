@@ -538,7 +538,7 @@ def generate(builder, wrapper_name=None):
     from loopy.kernel.function_interface import CallableKernel
 
     if isinstance(kernel._code, loopy.TranslationUnit):
-        from loopy.transform.callable import _match_caller_callee_argument_dimension_
+        from pyop2.codegen.loopycompat import _match_caller_callee_argument_dimension_
         knl = kernel._code
         wrapper = loopy.merge([wrapper, knl])
         names = knl.callables_table
