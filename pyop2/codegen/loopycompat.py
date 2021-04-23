@@ -7,7 +7,7 @@ from loopy.kernel.instruction import CallInstruction, MultiAssignmentBase, \
 from loopy.symbolic import CombineMapper, IdentityMapper
 from loopy.isl_helpers import simplify_via_aff
 from loopy.kernel.function_interface import CallableKernel
-from loopy.program import Program
+from loopy.translation_unit import Program
 
 
 # Tools to match caller to callee args by (guessed) automatic reshaping
