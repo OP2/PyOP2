@@ -537,7 +537,7 @@ def generate(builder, wrapper_name=None):
     from coffee.base import Node
     from loopy.kernel.function_interface import CallableKernel
 
-    if isinstance(kernel._code, loopy.program.Program):
+    if isinstance(kernel._code, loopy.Program):
         from loopy.transform.callable import _match_caller_callee_argument_dimension_
         knl = kernel._code
         wrapper = loopy.merge([wrapper, knl])
