@@ -1,6 +1,6 @@
 from pyop2.codegen.node import traversal, reuse_if_untouched, Memoizer
 from functools import singledispatch
-from pyop2.codegen.representation import (Index, RuntimeIndex, FixedIndex, Node,
+from pyop2.codegen.representation import (Index, RuntimeIndex, Node,
                                           FunctionCall, Variable, Argument,
                                           NamedLiteral)
 
