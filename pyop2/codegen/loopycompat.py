@@ -73,12 +73,12 @@ def _match_caller_callee_argument_dimension_for_single_kernel(
             # CallInstruction.
             continue
 
-        def _shape_1_if_empty(shape):
-            assert isinstance(shape, tuple)
-            if shape == ():
-                return (1, )
+        def _shape_1_if_empty(shape_caller, shape_callee):
+            assert isinstance(shape_caller, tuple)
+            if shape_caller == () and shape_caller!=shape_callee:
+                return (1,)
             else:
-                return shape
+                return shape_caller
 
         from loopy.kernel.function_interface import (
                 ArrayArgDescriptor, get_arg_descriptor_for_expression,
@@ -90,7 +90,7 @@ def _match_caller_callee_argument_dimension_for_single_kernel(
 
             arg_descr = get_arg_descriptor_for_expression(caller_knl, arg)
             if isinstance(arg_descr, ArrayArgDescriptor):
-                arg_id_to_shape[arg_id] = _shape_1_if_empty(arg_descr.shape)
+                arg_id_to_shape[arg_id] = arg_descr.shape
             else:
                 arg_id_to_shape[arg_id] = (1, )
 
