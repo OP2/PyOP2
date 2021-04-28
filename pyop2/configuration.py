@@ -77,11 +77,8 @@ class Configuration(dict):
     """
     # name, env variable, type, default, write once
     DEFAULTS = {
-        "compiler": ("PYOP2_BACKEND_COMPILER", str, "gcc"),
         "simd_width": ("PYOP2_SIMD_WIDTH", int, 4),
         "debug": ("PYOP2_DEBUG", bool, False),
-        "cflags": ("PYOP2_CFLAGS", str, ""),
-        "ldflags": ("PYOP2_LDFLAGS", str, ""),
         "compute_kernel_flops": ("PYOP2_COMPUTE_KERNEL_FLOPS", bool, False),
         "use_safe_cflags": ("PYOP2_USE_SAFE_CFLAGS", bool, True),
         "type_check": ("PYOP2_TYPE_CHECK", bool, True),
