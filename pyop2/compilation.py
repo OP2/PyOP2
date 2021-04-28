@@ -32,6 +32,7 @@
 # OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
+from abc import ABC, abstractmethod
 import os
 import subprocess
 import sys
@@ -153,7 +154,7 @@ def compilation_comm(comm):
     return retcomm
 
 
-class Compiler(object):
+class Compiler(ABC):
 
     compiler_versions = {}
 
@@ -173,18 +174,90 @@ class Compiler(object):
     :kwarg comm: Optional communicator to compile the code on
         (defaults to COMM_WORLD).
     """
-    def __init__(self, cc, ld=None, cppargs=[], ldargs=[],
-                 cpp=False, comm=None):
-        ccenv = 'CXX' if cpp else 'CC'
+    def __init__(self, extra_cppflags=None, extra_ldflags=None, cpp=False, comm=None):
+        self._extra_cppflags = extra_cppflags or []
+        self._extra_ldflags = extra_ldflags or []
+
+        self._cpp = cpp
+        self._debug = configuration["debug"]
+
         # Ensure that this is an internal communicator.
         comm = dup_comm(comm or COMM_WORLD)
         self.comm = compilation_comm(comm)
-        self._cc = os.environ.get(ccenv, cc)
-        self._ld = os.environ.get('LDSHARED', ld)
-        self._cppargs = cppargs + configuration['cflags'].split()
-        if configuration["use_safe_cflags"]:
-            self._cppargs += self.workaround_cflags
-        self._ldargs = ldargs + configuration['ldflags'].split()
+
+    @property
+    def cc(self):
+        return os.environ.get("PYOP2_CC", self._cxx if self._cpp else self._cc)
+
+    @property
+    def ld(self):
+        return os.environ.get("PYOP2_LD", None)
+
+    @property
+    def cppflags(self):
+        try:
+            return os.environ["PYOP2_CPPFLAGS"]
+        except KeyError:
+            cppflags = self._cppflags + self._extra_cppflags
+
+            if self._debug:
+                cppflags += self._debugflags
+            else:
+                cppflags += self._optflags
+
+            if self._cpp:
+                cppflags += self._cxxflags
+            else:
+                cppflags += self._cflags
+
+            return cppflags
+
+    @property
+    def ldflags(self):
+        try:
+            return os.environ["PYOP2_LDFLAGS"]
+        except KeyError:
+            return self._ldflags + self._extra_ldflags
+
+    @property
+    def bugfix_cflags(self):
+        return []
+
+    @property
+    @abstractmethod
+    def _cc(self):
+        ...
+
+    @property
+    @abstractmethod
+    def _cxx(self):
+        ...
+
+    @property
+    @abstractmethod
+    def _optflags(self):
+        ...
+
+    @property
+    def _debugflags(self):
+        return ["-O0", "-g"]
+
+    @property
+    @abstractmethod
+    def _cppflags(self):
+        ...
+
+    @property
+    def _cflags(self):
+        return ["-std=c99"]
+
+    @property
+    def _cxxflags(self):
+        return []
+
+    @property
+    def _ldflags(self):
+        return []
 
     @property
     def compiler_version(self):
@@ -354,86 +427,76 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
             return ctypes.CDLL(soname)
 
 
-class MacCompiler(Compiler):
-    """A compiler for building a shared library on mac systems.
+class MacClangCompiler(Compiler):
+    """A compiler for building a shared library on mac systems."""
 
-    :arg cppargs: A list of arguments to pass to the C compiler
-         (optional).
-    :arg ldargs: A list of arguments to pass to the linker (optional).
+    @property
+    def _cc(self):
+        return "clang"
 
-    :arg cpp: Are we actually using the C++ compiler?
+    @property
+    def _cxx(self):
+        return "clang++"
 
-    :kwarg comm: Optional communicator to compile the code on (only
-        rank 0 compiles code) (defaults to COMM_WORLD).
-    """
+    @property
+    def _cppflags(self):
+        return ["-fPIC", "-Wall", "-framework", "Accelerate"]
 
-    def __init__(self, cppargs=[], ldargs=[], cpp=False, comm=None):
-        opt_flags = ['-march=native', '-O3', '-ffast-math']
-        if configuration['debug']:
-            opt_flags = ['-O0', '-g']
-        cc = "mpicc"
-        stdargs = ["-std=c99"]
-        if cpp:
-            cc = "mpicxx"
-            stdargs = []
-        cppargs = stdargs + ['-fPIC', '-Wall', '-framework', 'Accelerate'] + \
-            opt_flags + cppargs
-        ldargs = ['-dynamiclib'] + ldargs
-        super(MacCompiler, self).__init__(cc,
-                                          cppargs=cppargs,
-                                          ldargs=ldargs,
-                                          cpp=cpp,
-                                          comm=comm)
+    @property
+    def _optflags(self):
+        return ["-march=native", "-O3", "-ffast-math"]
+
+    @property
+    def _ldflags(self):
+        return ["-dynamiclib"]
 
 
-class LinuxCompiler(Compiler):
-    """A compiler for building a shared library on linux systems.
+class LinuxGnuCompiler(Compiler):
+    """A compiler for building a shared library on Linux systems."""
 
-    :arg cppargs: A list of arguments to pass to the C compiler
-         (optional).
-    :arg ldargs: A list of arguments to pass to the linker (optional).
-    :arg cpp: Are we actually using the C++ compiler?
-    :kwarg comm: Optional communicator to compile the code on (only
-    rank 0 compiles code) (defaults to COMM_WORLD)."""
-    def __init__(self, cppargs=[], ldargs=[], cpp=False, comm=None):
-        opt_flags = ['-march=native', '-O3', '-ffast-math']
-        if configuration['debug']:
-            opt_flags = ['-O0', '-g']
-        cc = "mpicc"
-        stdargs = ["-std=c99"]
-        if cpp:
-            cc = "mpicxx"
-            stdargs = []
-        cppargs = stdargs + ['-fPIC', '-Wall'] + opt_flags + cppargs
-        ldargs = ['-shared'] + ldargs
+    @property
+    def _cc(self):
+        return "gcc"
 
-        super(LinuxCompiler, self).__init__(cc, cppargs=cppargs, ldargs=ldargs,
-                                            cpp=cpp, comm=comm)
+    @property
+    def _cxx(self):
+        return "g++"
+
+    @property
+    def _cppflags(self):
+        return ["-fPIC", "-Wall"]
+
+    @property
+    def _ldargs(self):
+        return ["-shared"]
+
+    @property
+    def _optflags(self):
+        return ["-march=native", "-O3", "-ffast-math"]
 
 
 class LinuxIntelCompiler(Compiler):
-    """The intel compiler for building a shared library on linux systems.
+    """The Intel compiler for building a shared library on Linux systems."""
 
-    :arg cppargs: A list of arguments to pass to the C compiler
-         (optional).
-    :arg ldargs: A list of arguments to pass to the linker (optional).
-    :arg cpp: Are we actually using the C++ compiler?
-    :kwarg comm: Optional communicator to compile the code on (only
-        rank 0 compiles code) (defaults to COMM_WORLD).
-    """
-    def __init__(self, cppargs=[], ldargs=[], cpp=False, comm=None):
-        opt_flags = ['-Ofast', '-xHost']
-        if configuration['debug']:
-            opt_flags = ['-O0', '-g']
-        cc = "mpicc"
-        stdargs = ["-std=c99"]
-        if cpp:
-            cc = "mpicxx"
-            stdargs = []
-        cppargs = stdargs + ['-fPIC', '-no-multibyte-chars'] + opt_flags + cppargs
-        ldargs = ['-shared'] + ldargs
-        super(LinuxIntelCompiler, self).__init__(cc, cppargs=cppargs, ldargs=ldargs,
-                                                 cpp=cpp, comm=comm)
+    @property
+    def _cc(self):
+        return "icc"
+
+    @property
+    def _cxx(self):
+        return "icpc"
+
+    @property
+    def _cppflags(self):
+        return ["-fPIC", "-no-multibyte-chars"]
+
+    @property
+    def _optflags(self):
+        return ["-Ofast", "-xHost"]
+
+    @property
+    def _ldflags(self):
+        return ["-shared"]
 
 
 @collective
