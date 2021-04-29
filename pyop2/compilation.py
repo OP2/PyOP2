@@ -166,8 +166,9 @@ class ForkingCompiler(Compiler, ABC):
 
     compiler_versions = {}
 
-    _cc = None
-    _cxx = None
+    _cc = "mpicc"
+    _cxx = "mpicxx"
+
     _cppflags = None
     _ldflags = None
 
@@ -413,8 +414,6 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
 class MacClangCompiler(ForkingCompiler):
     """A compiler for building a shared library on mac systems."""
 
-    _cc = "clang"
-    _cxx = "clang++"
     _cppflags = ["-fPIC", "-Wall", "-framework", "Accelerate"]
     _ldflags = ["-dynamiclib"]
 
@@ -437,8 +436,6 @@ class MacClangCompiler(ForkingCompiler):
 class LinuxGnuCompiler(ForkingCompiler):
     """A compiler for building a shared library on Linux systems."""
 
-    _cc = "gcc"
-    _cxx = "g++"
     _cppflags = ["-fPIC", "-Wall"]
     _ldflags = ["-shared"]
 
@@ -452,8 +449,6 @@ class LinuxGnuCompiler(ForkingCompiler):
 class LinuxIntelCompiler(ForkingCompiler):
     """The Intel compiler for building a shared library on Linux systems."""
 
-    _cc = "icc"
-    _cxx = "icpc"
     _cppflags = ["-fPIC", "-no-multibyte-chars"]
     _ldflags = ["-shared"]
 
@@ -465,9 +460,22 @@ class LinuxIntelCompiler(ForkingCompiler):
 
 
 class NonForkingCompiler(Compiler):
+    ...
+
+
+class DragonFFICompiler(NonForkingCompiler):
+    def compile(self, jitmodule, _):
+        try:
+            import pydffi
+        except ImportError:
+            raise ImportError("DragonFFI must be installed first")
+        ffi = pydffi.FFI()
+        ffi.compile(jitmodule.codetocompile)
+
+
+class TinyCCompiler(NonForkingCompiler):
     def compile(self, jitmodule, _):
         ...
-
 
 
 @collective
@@ -514,11 +522,11 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
         if compiler == 'icc':
             compiler = LinuxIntelCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
         elif compiler == 'gcc':
-            compiler = LinuxCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
+            compiler = LinuxGnuCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
         else:
             raise CompilationError("Unrecognized compiler name '%s'" % compiler)
     elif platform.find('darwin') == 0:
-        compiler = MacCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
+        compiler = MacClangCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
     else:
         raise CompilationError("Don't know what compiler to use for platform '%s'" %
                                platform)
