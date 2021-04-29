@@ -157,7 +157,25 @@ def compilation_comm(comm):
 
 class Compiler(ABC):
 
+    @abstractmethod
+    def compile(self, jitmodule, extension):
+        ...
+
+
+class ForkingCompiler(Compiler, ABC):
+
     compiler_versions = {}
+
+    _cc = None
+    _cxx = None
+    _cppflags = None
+    _ldflags = None
+
+    _cflags = None
+    _cxxflags = None
+
+    _optflags = None
+    _debugflags = None
 
     """A compiler for shared libraries.
 
@@ -201,7 +219,7 @@ class Compiler(ABC):
         except KeyError:
             cppflags = self._cppflags + self._extra_cppflags
 
-            if self._debug:
+            if not self._debug:
                 cppflags += self._debugflags
             else:
                 cppflags += self._optflags
@@ -222,42 +240,6 @@ class Compiler(ABC):
 
     @property
     def bugfix_cflags(self):
-        return []
-
-    @property
-    @abstractmethod
-    def _cc(self):
-        ...
-
-    @property
-    @abstractmethod
-    def _cxx(self):
-        ...
-
-    @property
-    @abstractmethod
-    def _optflags(self):
-        ...
-
-    @property
-    def _debugflags(self):
-        return ["-O0", "-g"]
-
-    @property
-    @abstractmethod
-    def _cppflags(self):
-        ...
-
-    @property
-    def _cflags(self):
-        return ["-std=c99"]
-
-    @property
-    def _cxxflags(self):
-        return []
-
-    @property
-    def _ldflags(self):
         return []
 
     @property
@@ -428,20 +410,16 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
             return ctypes.CDLL(soname)
 
 
-class MacClangCompiler(Compiler):
+class MacClangCompiler(ForkingCompiler):
     """A compiler for building a shared library on mac systems."""
 
-    @property
-    def _cc(self):
-        return "clang"
+    _cc = "clang"
+    _cxx = "clang++"
+    _cppflags = ["-fPIC", "-Wall", "-framework", "Accelerate"]
+    _ldflags = ["-dynamiclib"]
 
-    @property
-    def _cxx(self):
-        return "clang++"
-
-    @property
-    def _cppflags(self):
-        return ["-fPIC", "-Wall", "-framework", "Accelerate"]
+    _cflags = ["-std=c99"]
+    _cxxflags = []
 
     @property
     def _optflags(self):
@@ -453,57 +431,43 @@ class MacClangCompiler(Compiler):
             opt_flags.append("-march=native")
         return opt_flags
 
-    @property
-    def _ldflags(self):
-        return ["-dynamiclib"]
+    _debugflags = ["-O0", "-g"]
 
 
-class LinuxGnuCompiler(Compiler):
+class LinuxGnuCompiler(ForkingCompiler):
     """A compiler for building a shared library on Linux systems."""
 
-    @property
-    def _cc(self):
-        return "gcc"
+    _cc = "gcc"
+    _cxx = "g++"
+    _cppflags = ["-fPIC", "-Wall"]
+    _ldflags = ["-shared"]
 
-    @property
-    def _cxx(self):
-        return "g++"
+    _cflags = ["-std=c99"]
+    _cxxflags = []
 
-    @property
-    def _cppflags(self):
-        return ["-fPIC", "-Wall"]
-
-    @property
-    def _ldargs(self):
-        return ["-shared"]
-
-    @property
-    def _optflags(self):
-        return ["-march=native", "-O3", "-ffast-math"]
+    _optflags = ["-march=native", "-O3", "-ffast-math"]
+    _debugflags = ["-O0", "-g"]
 
 
-class LinuxIntelCompiler(Compiler):
+class LinuxIntelCompiler(ForkingCompiler):
     """The Intel compiler for building a shared library on Linux systems."""
 
-    @property
-    def _cc(self):
-        return "icc"
+    _cc = "icc"
+    _cxx = "icpc"
+    _cppflags = ["-fPIC", "-no-multibyte-chars"]
+    _ldflags = ["-shared"]
 
-    @property
-    def _cxx(self):
-        return "icpc"
+    _cflags = ["-std=c99"]
+    _cxxflags = []
 
-    @property
-    def _cppflags(self):
-        return ["-fPIC", "-no-multibyte-chars"]
+    _optflags = ["-Ofast", "-xHost"]
+    _debugflags = ["-O0", "-g"]
 
-    @property
-    def _optflags(self):
-        return ["-Ofast", "-xHost"]
 
-    @property
-    def _ldflags(self):
-        return ["-shared"]
+class NonForkingCompiler(Compiler):
+    def compile(self, jitmodule, _):
+        ...
+
 
 
 @collective
