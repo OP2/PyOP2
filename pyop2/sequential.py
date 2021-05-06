@@ -33,10 +33,11 @@
 
 """OP2 sequential backend."""
 
-import os
 from copy import deepcopy as dcopy
-
 import ctypes
+import os
+
+import numpy as np
 
 from pyop2.datatypes import IntType, as_ctypes
 from pyop2 import base
@@ -210,10 +211,11 @@ class ParLoop(petsc_base.ParLoop):
                 if map_ is None:
                     continue
                 for k in get_args(map_):
-                    if k in seen:
+                    key = k.ctypes.data if isinstance(k, np.ndarray) else k
+                    if key in seen:
                         continue
                     arglist += (k,)
-                    seen.add(k)
+                    seen.add(key)
         return arglist
 
     @cached_property
