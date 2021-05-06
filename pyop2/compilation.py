@@ -520,8 +520,8 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
 def _load_cppyy(code, fn_name, cppargs, ldargs):
     import cppyy
 
-    print(code.code_to_compile)
-    exit()
+    # print(code.code_to_compile)
+    # exit()
 
     for flag in chain(cppargs, ldargs):
         if flag.startswith("-I"):
@@ -532,7 +532,7 @@ def _load_cppyy(code, fn_name, cppargs, ldargs):
             cppyy.load_library(flag.strip("-l"))
 
     cppyy.cppdef(code.code_to_compile)
-    return getattr(cppyy.gbl, fn_name, )
+    return getattr(cppyy.gbl, fn_name)
 
 
 def clear_cache(prompt=False):

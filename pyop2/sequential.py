@@ -104,6 +104,7 @@ class JITModule(base.JITModule):
 
     @collective
     def __call__(self, *args):
+        # import pdb; pdb.set_trace()
         return self._fun(*args)
 
     @cached_property
@@ -187,6 +188,7 @@ class JITModule(base.JITModule):
 class ParLoop(petsc_base.ParLoop):
 
     def prepare_arglist(self, iterset, *args, ffi_backend=FFIBackend.CTYPES):
+        ffi_backend = FFIBackend.CPPYY  # testing
         def get_args(obj):
             """Return the appropriate arguments to pass into the wrapper."""
             if ffi_backend == FFIBackend.CTYPES:
@@ -228,6 +230,7 @@ class ParLoop(petsc_base.ParLoop):
     def _compute(self, part, fun, *arglist):
         with self._compute_event:
             self.log_flops(part.size * self.num_flops)
+            # import pdb; pdb.set_trace()
             fun(part.offset, part.offset + part.size, *arglist)
 
 
