@@ -33,14 +33,15 @@
 
 
 from abc import ABC, abstractmethod
+import collections
+import ctypes
+from distutils import version
+from enum import IntEnum, auto
+from hashlib import md5
+from itertools import chain
 import os
 import subprocess
 import sys
-import ctypes
-import collections
-from hashlib import md5
-from distutils import version
-
 
 from pyop2.mpi import MPI, collective, COMM_WORLD
 from pyop2.mpi import dup_comm, get_compilation_comm, set_compilation_comm
@@ -48,6 +49,12 @@ from pyop2.configuration import configuration
 from pyop2.logger import debug, progress, INFO
 from pyop2.exceptions import CompilationError
 from pyop2.base import JITModule
+
+
+class FFIBackend(IntEnum):
+    CTYPES = auto()
+    CFFI = auto()
+    CPPYY = auto()
 
 
 def _check_hashes(x, y, datatype):
@@ -156,26 +163,19 @@ def compilation_comm(comm):
 
 class Compiler(ABC):
 
-    @abstractmethod
-    def compile(self, jitmodule, extension):
-        ...
+    compiler_versions = {}  # TODO: what to do with this?
 
+    default_cc = "mpicc"
+    default_cxx = "mpicxx"
 
-class ForkingCompiler(Compiler, ABC):
+    default_cppflags = None
+    default_ldflags = None
 
-    compiler_versions = {}
+    default_cflags = None
+    default_cxxflags = None
 
-    _cc = "mpicc"
-    _cxx = "mpicxx"
-
-    _cppflags = None
-    _ldflags = None
-
-    _cflags = None
-    _cxxflags = None
-
-    _optflags = None
-    _debugflags = None
+    default_optflags = None
+    default_debugflags = None
 
     """A compiler for shared libraries.
 
@@ -282,7 +282,8 @@ class ForkingCompiler(Compiler, ABC):
         return []
 
     @collective
-    def get_so(self, jitmodule, extension):
+    @classmethod
+    def compile(cls, jitmodule, extension):
         """Build a shared library and load it
 
         :arg jitmodule: The JIT Module which can generate the code to compile.
@@ -294,8 +295,8 @@ class ForkingCompiler(Compiler, ABC):
         # Determine cache key
         hsh = md5(str(jitmodule.cache_key[1:]).encode())
         hsh.update(self._cc.encode())
-        if self._ld:
-            hsh.update(self._ld.encode())
+        if self.ld:
+            hsh.update(self.ld.encode())
         hsh.update("".join(self._cppargs).encode())
         hsh.update("".join(self._ldargs).encode())
 
@@ -340,7 +341,7 @@ class ForkingCompiler(Compiler, ABC):
                     with open(cname, "w") as f:
                         f.write(jitmodule.code_to_compile)
                     # Compiler also links
-                    if self._ld is None:
+                    if self.ld is None:
                         cc = [self._cc] + self._cppargs + \
                              ['-o', tmpname, cname] + self._ldargs
                         debug('Compilation command: %s', ' '.join(cc))
@@ -368,7 +369,7 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
                     else:
                         cc = [self._cc] + self._cppargs + \
                              ['-c', '-o', oname, cname]
-                        ld = self._ld.split() + ['-o', tmpname, oname] + self._ldargs
+                        ld = self.ld.split() + ['-o', tmpname, oname] + self.ldargs
                         debug('Compilation command: %s', ' '.join(cc))
                         debug('Link command: %s', ' '.join(ld))
                         with open(logfile, "w") as log:
@@ -410,7 +411,7 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
             return ctypes.CDLL(soname)
 
 
-class MacClangCompiler(ForkingCompiler):
+class MacClangCompiler(Compiler):
     """A compiler for building a shared library on mac systems."""
     
     _cppflags = ["-fPIC", "-Wall", "-framework", "Accelerate"]
@@ -423,7 +424,7 @@ class MacClangCompiler(ForkingCompiler):
     _debugflags = ["-O0", "-g"]
 
 
-class LinuxGnuCompiler(ForkingCompiler):
+class LinuxGnuCompiler(Compiler):
     """A compiler for building a shared library on Linux systems."""
 
     _cppflags = ["-fPIC", "-Wall"]
@@ -436,7 +437,7 @@ class LinuxGnuCompiler(ForkingCompiler):
     _debugflags = ["-O0", "-g"]
 
 
-class LinuxIntelCompiler(ForkingCompiler):
+class LinuxIntelCompiler(Compiler):
     """The Intel compiler for building a shared library on Linux systems."""
 
     _cppflags = ["-fPIC", "-no-multibyte-chars"]
@@ -449,28 +450,9 @@ class LinuxIntelCompiler(ForkingCompiler):
     _debugflags = ["-O0", "-g"]
 
 
-class NonForkingCompiler(Compiler):
-    ...
-
-
-class DragonFFICompiler(NonForkingCompiler):
-    def compile(self, jitmodule, _):
-        try:
-            import pydffi
-        except ImportError:
-            raise ImportError("DragonFFI must be installed first")
-        ffi = pydffi.FFI()
-        ffi.compile(jitmodule.codetocompile)
-
-
-class TinyCCompiler(NonForkingCompiler):
-    def compile(self, jitmodule, _):
-        ...
-
-
 @collective
 def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
-         argtypes=None, restype=None, compiler=None, comm=None):
+         argtypes=None, restype=None, compiler=None, comm=None, ffi_backend=FFIBackend.CTYPES):
     """Build a shared library and return a function pointer from it.
 
     :arg jitmodule: The JIT Module which can generate the code to compile, or
@@ -502,28 +484,55 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
     else:
         raise ValueError("Don't know how to compile code of type %r" % type(jitmodule))
 
-    platform = sys.platform
-    cpp = extension == "cpp"
-    if not compiler:
-        compiler = configuration["compiler"]
-    if platform.find('linux') == 0:
-        if compiler == 'icc':
-            compiler = LinuxIntelCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
-        elif compiler == 'gcc':
-            compiler = LinuxGnuCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
+    # testing
+    ffi_backend = FFIBackend.CPPYY
+    if ffi_backend == FFIBackend.CTYPES:
+        platform = sys.platform
+        cpp = extension == "cpp"
+        if not compiler:
+            compiler = configuration["compiler"]
+        if platform.find('linux') == 0:
+            if compiler == 'icc':
+                compiler = LinuxIntelCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
+            elif compiler == 'gcc':
+                compiler = LinuxGnuCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
+            else:
+                raise CompilationError("Unrecognized compiler name '%s'" % compiler)
+        elif platform.find('darwin') == 0:
+            compiler = MacClangCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
         else:
-            raise CompilationError("Unrecognized compiler name '%s'" % compiler)
-    elif platform.find('darwin') == 0:
-        compiler = MacClangCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
-    else:
-        raise CompilationError("Don't know what compiler to use for platform '%s'" %
-                               platform)
-    dll = compiler.get_so(code, extension)
+            raise CompilationError("Don't know what compiler to use for platform '%s'" %
+                                platform)
+        dll = compiler.compile(code, extension)
 
-    fn = getattr(dll, fn_name)
-    fn.argtypes = code.argtypes
-    fn.restype = restype
-    return fn
+        fn = getattr(dll, fn_name)
+        fn.argtypes = code.argtypes
+        fn.restype = restype
+        return fn
+    elif ffi_backend == FFIBackend.CFFI:
+        raise NotImplementedError
+    elif ffi_backend == FFIBackend.CPPYY:
+        return _load_cppyy(code, fn_name, cppargs, ldargs)
+    else:
+        raise AssertionError
+
+
+def _load_cppyy(code, fn_name, cppargs, ldargs):
+    import cppyy
+
+    print(code.code_to_compile)
+    exit()
+
+    for flag in chain(cppargs, ldargs):
+        if flag.startswith("-I"):
+            cppyy.add_include_path(flag.strip("-I"))
+        elif flag.startswith("-L"):
+            cppyy.add_library_path(flag.strip("-L"))
+        elif flag.startswith("-l"):
+            cppyy.load_library(flag.strip("-l"))
+
+    cppyy.cppdef(code.code_to_compile)
+    return getattr(cppyy.gbl, fn_name, )
 
 
 def clear_cache(prompt=False):
