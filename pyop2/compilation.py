@@ -531,7 +531,12 @@ def _load_cppyy(code, fn_name, cppargs, ldargs):
         elif flag.startswith("-l"):
             cppyy.load_library(flag.strip("-l"))
 
-    cppyy.cppdef(code.code_to_compile)
+    # debug
+    try:
+        cppyy.cppdef(code.code_to_compile)
+    except:
+        print(code.code_to_compile)
+        raise Exception
     return getattr(cppyy.gbl, fn_name)
 
 
