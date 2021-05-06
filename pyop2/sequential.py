@@ -33,10 +33,11 @@
 
 """OP2 sequential backend."""
 
-import os
 from copy import deepcopy as dcopy
-
 import ctypes
+import os
+
+import numpy as np
 
 from pyop2.datatypes import IntType, as_ctypes
 from pyop2 import base
@@ -50,6 +51,7 @@ from pyop2.base import Set, ExtrudedSet, MixedSet, Subset  # noqa: F401
 from pyop2.base import DatView                           # noqa: F401
 from pyop2.base import Kernel                            # noqa: F401
 from pyop2.base import Arg                               # noqa: F401
+from pyop2.compilation import FFIBackend
 from pyop2.petsc_base import DataSet, MixedDataSet       # noqa: F401
 from pyop2.petsc_base import Global, GlobalDataSet       # noqa: F401
 from pyop2.petsc_base import Dat, MixedDat, Mat          # noqa: F401
@@ -103,6 +105,7 @@ class JITModule(base.JITModule):
 
     @collective
     def __call__(self, *args):
+        # import pdb; pdb.set_trace()
         return self._fun(*args)
 
     @cached_property
@@ -139,7 +142,8 @@ class JITModule(base.JITModule):
 
         from pyop2.configuration import configuration
 
-        compiler = configuration["compiler"]
+        # compiler = configuration["compiler"]
+        compiler = "gcc"
         extension = "cpp" if self._kernel._cpp else "c"
         cppargs = self._cppargs
         cppargs += ["-I%s/include" % d for d in get_petsc_dir()] + \
@@ -174,7 +178,7 @@ class JITModule(base.JITModule):
         for arg in self._args:
             maps = arg.map_tuple
             for map_ in maps:
-                for k, t in zip(map_._kernel_args_, map_._argtypes_):
+                for k, t in zip(map_.ctypes_args, map_._argtypes_):
                     if k in seen:
                         continue
                     argtypes += (t,)
@@ -184,21 +188,34 @@ class JITModule(base.JITModule):
 
 class ParLoop(petsc_base.ParLoop):
 
-    def prepare_arglist(self, iterset, *args):
-        arglist = iterset._kernel_args_
+    def prepare_arglist(self, iterset, *args, ffi_backend=FFIBackend.CTYPES):
+        ffi_backend = FFIBackend.CPPYY  # testing
+        def get_args(obj):
+            """Return the appropriate arguments to pass into the wrapper."""
+            if ffi_backend == FFIBackend.CTYPES:
+                return obj.ctypes_args
+            elif ffi_backend == FFIBackend.CFFI:
+                return obj.cffi_args
+            elif ffi_backend == FFIBackend.CPPYY:
+                return obj.cppyy_args
+            else:
+                raise AssertionError
+
+        arglist = get_args(iterset)
         for arg in args:
-            arglist += arg._kernel_args_
+            arglist += get_args(arg)
         seen = set()
         for arg in args:
             maps = arg.map_tuple
             for map_ in maps:
                 if map_ is None:
                     continue
-                for k in map_._kernel_args_:
-                    if k in seen:
+                for k in get_args(map_):
+                    key = k.ctypes.data if isinstance(k, np.ndarray) else k
+                    if key in seen:
                         continue
                     arglist += (k,)
-                    seen.add(k)
+                    seen.add(key)
         return arglist
 
     @cached_property
@@ -215,6 +232,7 @@ class ParLoop(petsc_base.ParLoop):
     def _compute(self, part, fun, *arglist):
         with self._compute_event:
             self.log_flops(part.size * self.num_flops)
+            # import pdb; pdb.set_trace()
             fun(part.offset, part.offset + part.size, *arglist)
 
 

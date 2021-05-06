@@ -170,8 +170,16 @@ class Arg(object):
                     "To set of %s doesn't match the set of %s." % (map, data))
 
     @cached_property
-    def _kernel_args_(self):
-        return self.data._kernel_args_
+    def ctypes_args(self):
+        return self.data.ctypes_args
+
+    @property
+    def cffi_args(self):
+        return self.data.cffi_args
+
+    @property
+    def cppyy_args(self):
+        return self.data.cppyy_args
 
     @cached_property
     def _argtypes_(self):
@@ -403,7 +411,9 @@ class Set(object):
 
     _extruded = False
 
-    _kernel_args_ = ()
+    ctypes_args = ()
+    cffi_args = ()
+    cppyy_args = ()
     _argtypes_ = ()
 
     @cached_property
@@ -531,7 +541,9 @@ class GlobalSet(Set):
     """A proxy set allowing a :class:`Global` to be used in place of a
     :class:`Dat` where appropriate."""
 
-    _kernel_args_ = ()
+    ctypes_args = ()
+    cffi_args = ()
+    cppyy_args = ()
     _argtypes_ = ()
 
     def __init__(self, comm=None):
@@ -642,8 +654,16 @@ class ExtrudedSet(Set):
         self._extruded = True
 
     @cached_property
-    def _kernel_args_(self):
-        return (self.layers_array.ctypes.data, )
+    def ctypes_args(self):
+        return (self.layers_array.ctypes.data,)
+
+    @property
+    def cffi_args(self):
+        return NotImplemented
+
+    @property
+    def cppyy_args(self):
+        return (self._layers,)
 
     @cached_property
     def _argtypes_(self):
@@ -723,8 +743,16 @@ class Subset(ExtrudedSet):
         self._extruded = superset._extruded
 
     @cached_property
-    def _kernel_args_(self):
-        return self._superset._kernel_args_ + (self._indices.ctypes.data, )
+    def ctypes_args(self):
+        return self._superset.ctypes_args + (self._indices.ctypes.data,)
+
+    @property
+    def cffi_args(self):
+        return NotImplemented
+
+    @property
+    def cppyy_args(self):
+        return self._superset.cppyy_args + (self._indices,)
 
     @cached_property
     def _argtypes_(self):
@@ -782,8 +810,8 @@ class Subset(ExtrudedSet):
 class SetPartition(object):
     def __init__(self, set, offset, size):
         self.set = set
-        self.offset = offset
-        self.size = size
+        self.offset = int(offset)
+        self.size = int(size)
 
 
 class MixedSet(Set, ObjectCached):
@@ -800,8 +828,16 @@ class MixedSet(Set, ObjectCached):
         self.comm = reduce(lambda a, b: a or b, map(lambda s: s if s is None else s.comm, sets))
         self._initialized = True
 
-    @cached_property
-    def _kernel_args_(self):
+    @property
+    def ctypes_args(self):
+        raise NotImplementedError
+
+    @property
+    def cffi_args(self):
+        raise NotImplementedError
+
+    @property
+    def cppyy_args(self):
         raise NotImplementedError
 
     @cached_property
@@ -1370,9 +1406,17 @@ class Dat(DataCarrier, _EmptyDataMixin):
         self.halo_valid = True
         self._name = name or "dat_#x%x" % id(self)
 
-    @cached_property
-    def _kernel_args_(self):
-        return (self._data.ctypes.data, )
+    @property
+    def ctypes_args(self):
+        return (self._data.ctypes.data,)
+
+    @property
+    def cffi_args(self):
+        raise NotImplementedError
+
+    @property
+    def cppyy_args(self):
+        return (self._data,)
 
     @cached_property
     def _argtypes_(self):
@@ -1587,6 +1631,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         if not hasattr(self, '_copy_kernel'):
             import islpy as isl
             import pymbolic.primitives as p
+            name = f"copy_{id(self)}"
             inames = isl.make_zero_and_vars(["i"])
             domain = (inames[0].le_set(inames["i"])) & (inames["i"].lt_set(inames[0] + self.cdim))
             _other = p.Variable("other")
@@ -1595,9 +1640,9 @@ class Dat(DataCarrier, _EmptyDataMixin):
             insn = loopy.Assignment(_other.index(i), _self.index(i), within_inames=frozenset(["i"]))
             data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
                     loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,))]
-            knl = loopy.make_function([domain], [insn], data, name="copy")
+            knl = loopy.make_function([domain], [insn], data, name=name)
 
-            self._copy_kernel = _make_object('Kernel', knl, 'copy')
+            self._copy_kernel = _make_object('Kernel', knl, name)
         return _make_object('ParLoop', self._copy_kernel,
                             subset or self.dataset.set,
                             self(READ), other(WRITE))
@@ -1923,9 +1968,17 @@ class DatView(Dat):
                                       name="view[%s](%s)" % (index, dat.name))
         self._parent = dat
 
-    @cached_property
-    def _kernel_args_(self):
-        return self._parent._kernel_args_
+    @property
+    def ctypes_args(self):
+        return self._parent.ctypes_args
+
+    @property
+    def cffi_args(self):
+        raise NotImplementedError
+
+    @property
+    def cppyy_args(self):
+        return self._parent.cppyy_args
 
     @cached_property
     def _argtypes_(self):
@@ -2005,8 +2058,16 @@ class MixedDat(Dat):
         self.comm = self._dats[0].comm
 
     @cached_property
-    def _kernel_args_(self):
-        return tuple(itertools.chain(*(d._kernel_args_ for d in self)))
+    def ctypes_args(self):
+        return tuple(itertools.chain(*(d.ctypes_args for d in self)))
+
+    @cached_property
+    def cffi_args(self):
+        raise NotImplementedError
+
+    @cached_property
+    def cppyy_args(self):
+        return tuple(itertools.chain(*(d.cppyy_args for d in self)))
 
     @cached_property
     def _argtypes_(self):
@@ -2290,8 +2351,16 @@ class Global(DataCarrier, _EmptyDataMixin):
         self.comm = comm
 
     @cached_property
-    def _kernel_args_(self):
-        return (self._data.ctypes.data, )
+    def ctypes_args(self):
+        return (self._data.ctypes.data,)
+
+    @cached_property
+    def cffi_args(self):
+        raise NotImplementedError
+
+    @cached_property
+    def cppyy_args(self):
+        return (self._data,)
 
     @cached_property
     def _argtypes_(self):
@@ -2528,8 +2597,16 @@ class Map(object):
         self._cache = {}
 
     @cached_property
-    def _kernel_args_(self):
-        return (self._values.ctypes.data, )
+    def ctypes_args(self):
+        return (self._values.ctypes.data,)
+
+    @cached_property
+    def cffi_args(self):
+        raise NotImplementedError
+
+    @cached_property
+    def cppyy_args(self):
+        return (self._values,)
 
     @cached_property
     def _argtypes_(self):
@@ -2654,8 +2731,16 @@ class MixedMap(Map, ObjectCached):
         return maps
 
     @cached_property
-    def _kernel_args_(self):
-        return tuple(itertools.chain(*(m._kernel_args_ for m in self if m is not None)))
+    def ctypes_args(self):
+        return tuple(itertools.chain(*(m.ctypes_args for m in self if m is not None)))
+
+    @cached_property
+    def cffi_args(self):
+        raise NotImplementedError
+
+    @cached_property
+    def cppyy_args(self):
+        return tuple(itertools.chain(*(m.cppyy_args for m in self if m is not None)))
 
     @cached_property
     def _argtypes_(self):

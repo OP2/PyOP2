@@ -508,8 +508,21 @@ class MatBlock(base.Mat):
         self.local_to_global_maps = self.handle.getLGMap()
 
     @utils.cached_property
-    def _kernel_args_(self):
-        return (self.handle.handle, )
+    def ctypes_args(self):
+        return (self.handle.handle,)
+
+    @utils.cached_property
+    def cffi_args(self):
+        raise NotImplementedError
+
+    @utils.cached_property
+    def cppyy_args(self):
+        import cppyy
+        import cppyy.ll
+        for dir_ in utils.get_petsc_dir():
+            cppyy.add_include_path(f"{dir_}/include")
+        cppyy.include("petsc.h")
+        return cppyy.ll.cast["Mat"](self.handle.handle)
 
     @utils.cached_property
     def _wrapper_cache_key_(self):
@@ -607,8 +620,21 @@ class Mat(base.Mat):
     local_to_global_maps = (None, None)
 
     @utils.cached_property
-    def _kernel_args_(self):
+    def ctypes_args(self):
         return tuple(a.handle.handle for a in self)
+
+    @utils.cached_property
+    def cffi_args(self):
+        raise NotImplementedError
+
+    @utils.cached_property
+    def cppyy_args(self):
+        import cppyy
+        import cppyy.ll
+        for dir_ in utils.get_petsc_dir():
+            cppyy.add_include_path(f"{dir_}/include")
+        cppyy.include("petsc.h")
+        return tuple(cppyy.ll.cast["Mat"](a.handle.handle) for a in self)
 
     @collective
     def _init(self):

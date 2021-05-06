@@ -32,14 +32,16 @@
 # OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
+from abc import ABC, abstractmethod
+import collections
+import ctypes
+from distutils import version
+from enum import IntEnum, auto
+from hashlib import md5
+from itertools import chain
 import os
 import subprocess
 import sys
-import ctypes
-import collections
-from hashlib import md5
-from distutils import version
-
 
 from pyop2.mpi import MPI, collective, COMM_WORLD
 from pyop2.mpi import dup_comm, get_compilation_comm, set_compilation_comm
@@ -47,6 +49,12 @@ from pyop2.configuration import configuration
 from pyop2.logger import debug, progress, INFO
 from pyop2.exceptions import CompilationError
 from pyop2.base import JITModule
+
+
+class FFIBackend(IntEnum):
+    CTYPES = auto()
+    CFFI = auto()
+    CPPYY = auto()
 
 
 def _check_hashes(x, y, datatype):
@@ -153,9 +161,21 @@ def compilation_comm(comm):
     return retcomm
 
 
-class Compiler(object):
+class Compiler(ABC):
 
-    compiler_versions = {}
+    compiler_versions = {}  # TODO: what to do with this?
+
+    default_cc = "mpicc"
+    default_cxx = "mpicxx"
+
+    default_cppflags = None
+    default_ldflags = None
+
+    default_cflags = None
+    default_cxxflags = None
+
+    default_optflags = None
+    default_debugflags = None
 
     """A compiler for shared libraries.
 
@@ -173,18 +193,54 @@ class Compiler(object):
     :kwarg comm: Optional communicator to compile the code on
         (defaults to COMM_WORLD).
     """
-    def __init__(self, cc, ld=None, cppargs=[], ldargs=[],
-                 cpp=False, comm=None):
-        ccenv = 'CXX' if cpp else 'CC'
+    def __init__(self, extra_cppflags=None, extra_ldflags=None, cpp=False, comm=None):
+        self._extra_cppflags = extra_cppflags or []
+        self._extra_ldflags = extra_ldflags or []
+
+        self._cpp = cpp
+        self._debug = configuration["debug"]
+
         # Ensure that this is an internal communicator.
         comm = dup_comm(comm or COMM_WORLD)
         self.comm = compilation_comm(comm)
-        self._cc = os.environ.get(ccenv, cc)
-        self._ld = os.environ.get('LDSHARED', ld)
-        self._cppargs = cppargs + configuration['cflags'].split()
-        if configuration["use_safe_cflags"]:
-            self._cppargs += self.workaround_cflags
-        self._ldargs = ldargs + configuration['ldflags'].split()
+
+    @property
+    def cc(self):
+        return os.environ.get("PYOP2_CC", self._cxx if self._cpp else self._cc)
+
+    @property
+    def ld(self):
+        return os.environ.get("PYOP2_LD", None)
+
+    @property
+    def cppflags(self):
+        try:
+            return os.environ["PYOP2_CPPFLAGS"]
+        except KeyError:
+            cppflags = self._cppflags + self._extra_cppflags
+
+            if not self._debug:
+                cppflags += self._debugflags
+            else:
+                cppflags += self._optflags
+
+            if self._cpp:
+                cppflags += self._cxxflags
+            else:
+                cppflags += self._cflags
+
+            return cppflags
+
+    @property
+    def ldflags(self):
+        try:
+            return os.environ["PYOP2_LDFLAGS"]
+        except KeyError:
+            return self._ldflags + self._extra_ldflags
+
+    @property
+    def bugfix_cflags(self):
+        return []
 
     @property
     def compiler_version(self):
@@ -226,7 +282,8 @@ class Compiler(object):
         return []
 
     @collective
-    def get_so(self, jitmodule, extension):
+    @classmethod
+    def compile(cls, jitmodule, extension):
         """Build a shared library and load it
 
         :arg jitmodule: The JIT Module which can generate the code to compile.
@@ -238,8 +295,8 @@ class Compiler(object):
         # Determine cache key
         hsh = md5(str(jitmodule.cache_key[1:]).encode())
         hsh.update(self._cc.encode())
-        if self._ld:
-            hsh.update(self._ld.encode())
+        if self.ld:
+            hsh.update(self.ld.encode())
         hsh.update("".join(self._cppargs).encode())
         hsh.update("".join(self._ldargs).encode())
 
@@ -284,7 +341,7 @@ class Compiler(object):
                     with open(cname, "w") as f:
                         f.write(jitmodule.code_to_compile)
                     # Compiler also links
-                    if self._ld is None:
+                    if self.ld is None:
                         cc = [self._cc] + self._cppargs + \
                              ['-o', tmpname, cname] + self._ldargs
                         debug('Compilation command: %s', ' '.join(cc))
@@ -312,7 +369,7 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
                     else:
                         cc = [self._cc] + self._cppargs + \
                              ['-c', '-o', oname, cname]
-                        ld = self._ld.split() + ['-o', tmpname, oname] + self._ldargs
+                        ld = self.ld.split() + ['-o', tmpname, oname] + self.ldargs
                         debug('Compilation command: %s', ' '.join(cc))
                         debug('Link command: %s', ' '.join(ld))
                         with open(logfile, "w") as log:
@@ -354,91 +411,48 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
             return ctypes.CDLL(soname)
 
 
-class MacCompiler(Compiler):
-    """A compiler for building a shared library on mac systems.
+class MacClangCompiler(Compiler):
+    """A compiler for building a shared library on mac systems."""
+    
+    _cppflags = ["-fPIC", "-Wall", "-framework", "Accelerate"]
+    _ldflags = ["-dynamiclib"]
 
-    :arg cppargs: A list of arguments to pass to the C compiler
-         (optional).
-    :arg ldargs: A list of arguments to pass to the linker (optional).
+    _cflags = ["-std=c99"]
+    _cxxflags = []
 
-    :arg cpp: Are we actually using the C++ compiler?
-
-    :kwarg comm: Optional communicator to compile the code on (only
-        rank 0 compiles code) (defaults to COMM_WORLD).
-    """
-
-    def __init__(self, cppargs=[], ldargs=[], cpp=False, comm=None):
-        opt_flags = ['-march=native', '-O3', '-ffast-math']
-        if configuration['debug']:
-            opt_flags = ['-O0', '-g']
-        cc = "mpicc"
-        stdargs = ["-std=c99"]
-        if cpp:
-            cc = "mpicxx"
-            stdargs = []
-        cppargs = stdargs + ['-fPIC', '-Wall', '-framework', 'Accelerate'] + \
-            opt_flags + cppargs
-        ldargs = ['-dynamiclib'] + ldargs
-        super(MacCompiler, self).__init__(cc,
-                                          cppargs=cppargs,
-                                          ldargs=ldargs,
-                                          cpp=cpp,
-                                          comm=comm)
+    _optflags = ["-march=native", "-O3", "-ffast-math"]
+    _debugflags = ["-O0", "-g"]
 
 
-class LinuxCompiler(Compiler):
-    """A compiler for building a shared library on linux systems.
+class LinuxGnuCompiler(Compiler):
+    """A compiler for building a shared library on Linux systems."""
 
-    :arg cppargs: A list of arguments to pass to the C compiler
-         (optional).
-    :arg ldargs: A list of arguments to pass to the linker (optional).
-    :arg cpp: Are we actually using the C++ compiler?
-    :kwarg comm: Optional communicator to compile the code on (only
-    rank 0 compiles code) (defaults to COMM_WORLD)."""
-    def __init__(self, cppargs=[], ldargs=[], cpp=False, comm=None):
-        opt_flags = ['-march=native', '-O3', '-ffast-math']
-        if configuration['debug']:
-            opt_flags = ['-O0', '-g']
-        cc = "mpicc"
-        stdargs = ["-std=c99"]
-        if cpp:
-            cc = "mpicxx"
-            stdargs = []
-        cppargs = stdargs + ['-fPIC', '-Wall'] + opt_flags + cppargs
-        ldargs = ['-shared'] + ldargs
+    _cppflags = ["-fPIC", "-Wall"]
+    _ldflags = ["-shared"]
 
-        super(LinuxCompiler, self).__init__(cc, cppargs=cppargs, ldargs=ldargs,
-                                            cpp=cpp, comm=comm)
+    _cflags = ["-std=c99"]
+    _cxxflags = []
+
+    _optflags = ["-march=native", "-O3", "-ffast-math"]
+    _debugflags = ["-O0", "-g"]
 
 
 class LinuxIntelCompiler(Compiler):
-    """The intel compiler for building a shared library on linux systems.
+    """The Intel compiler for building a shared library on Linux systems."""
 
-    :arg cppargs: A list of arguments to pass to the C compiler
-         (optional).
-    :arg ldargs: A list of arguments to pass to the linker (optional).
-    :arg cpp: Are we actually using the C++ compiler?
-    :kwarg comm: Optional communicator to compile the code on (only
-        rank 0 compiles code) (defaults to COMM_WORLD).
-    """
-    def __init__(self, cppargs=[], ldargs=[], cpp=False, comm=None):
-        opt_flags = ['-Ofast', '-xHost']
-        if configuration['debug']:
-            opt_flags = ['-O0', '-g']
-        cc = "mpicc"
-        stdargs = ["-std=c99"]
-        if cpp:
-            cc = "mpicxx"
-            stdargs = []
-        cppargs = stdargs + ['-fPIC', '-no-multibyte-chars'] + opt_flags + cppargs
-        ldargs = ['-shared'] + ldargs
-        super(LinuxIntelCompiler, self).__init__(cc, cppargs=cppargs, ldargs=ldargs,
-                                                 cpp=cpp, comm=comm)
+    _cppflags = ["-fPIC", "-no-multibyte-chars"]
+    _ldflags = ["-shared"]
+
+    _cflags = ["-std=c99"]
+    _cxxflags = []
+
+    _optflags = ["-Ofast", "-xHost"]
+    _debugflags = ["-O0", "-g"]
 
 
 @collective
 def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
-         argtypes=None, restype=None, compiler=None, comm=None):
+         argtypes=None, restype=None, compiler=None, comm=None, ffi_backend=FFIBackend.CTYPES):
     """Build a shared library and return a function pointer from it.
 
     :arg jitmodule: The JIT Module which can generate the code to compile, or
@@ -470,28 +484,60 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
     else:
         raise ValueError("Don't know how to compile code of type %r" % type(jitmodule))
 
-    platform = sys.platform
-    cpp = extension == "cpp"
-    if not compiler:
-        compiler = configuration["compiler"]
-    if platform.find('linux') == 0:
-        if compiler == 'icc':
-            compiler = LinuxIntelCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
-        elif compiler == 'gcc':
-            compiler = LinuxCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
+    # testing
+    ffi_backend = FFIBackend.CPPYY
+    if ffi_backend == FFIBackend.CTYPES:
+        platform = sys.platform
+        cpp = extension == "cpp"
+        if not compiler:
+            compiler = configuration["compiler"]
+        if platform.find('linux') == 0:
+            if compiler == 'icc':
+                compiler = LinuxIntelCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
+            elif compiler == 'gcc':
+                compiler = LinuxGnuCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
+            else:
+                raise CompilationError("Unrecognized compiler name '%s'" % compiler)
+        elif platform.find('darwin') == 0:
+            compiler = MacClangCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
         else:
-            raise CompilationError("Unrecognized compiler name '%s'" % compiler)
-    elif platform.find('darwin') == 0:
-        compiler = MacCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
-    else:
-        raise CompilationError("Don't know what compiler to use for platform '%s'" %
-                               platform)
-    dll = compiler.get_so(code, extension)
+            raise CompilationError("Don't know what compiler to use for platform '%s'" %
+                                platform)
+        dll = compiler.compile(code, extension)
 
-    fn = getattr(dll, fn_name)
-    fn.argtypes = code.argtypes
-    fn.restype = restype
-    return fn
+        fn = getattr(dll, fn_name)
+        fn.argtypes = code.argtypes
+        fn.restype = restype
+        return fn
+    elif ffi_backend == FFIBackend.CFFI:
+        raise NotImplementedError
+    elif ffi_backend == FFIBackend.CPPYY:
+        return _load_cppyy(code, fn_name, cppargs, ldargs)
+    else:
+        raise AssertionError
+
+
+def _load_cppyy(code, fn_name, cppargs, ldargs):
+    import cppyy
+
+    # print(code.code_to_compile)
+    # exit()
+
+    for flag in chain(cppargs, ldargs):
+        if flag.startswith("-I"):
+            cppyy.add_include_path(flag.strip("-I"))
+        elif flag.startswith("-L"):
+            cppyy.add_library_path(flag.strip("-L"))
+        elif flag.startswith("-l"):
+            cppyy.load_library(flag.strip("-l"))
+
+    # debug
+    try:
+        cppyy.cppdef(code.code_to_compile)
+    except:
+        print(code.code_to_compile)
+        raise Exception
+    return getattr(cppyy.gbl, fn_name)
 
 
 def clear_cache(prompt=False):
