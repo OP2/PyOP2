@@ -96,17 +96,19 @@ class Configuration(dict):
     dir = prefix+"lib/"
     ompdir = prefix+"../lib/"
     DEFAULTS = {
-        "compiler": ("PYOP2_BACKEND_COMPILER", str, "icc"),
-        "simd_width": ("PYOP2_SIMD_WIDTH", int, default_simd_width()),
-        "vectorization_strategy": ("PYOP2_VECT_STRATEGY", str, "ve"),
+        "compiler": ("PYOP2_BACKEND_COMPILER", str, "gcc"),
+        "simd_width": ("PYOP2_SIMD_WIDTH", int, None),
+        "vectorization_strategy": ("PYOP2_VECT_STRATEGY", str, ""),
         "batched_blas": ("PYOP2_BATCHED_BLAS", str, ""),
         "alignment": ("PYOP2_ALIGNMENT", int, 64),
         "time": ("PYOP2_TIME", bool, False),
         "debug": ("PYOP2_DEBUG", bool, False),
-        "cflags": ("PYOP2_CFLAGS", str, "-I/opt/intel/compilers_and_libraries/mac/mkl/include/"),
-        "ldflags": ("PYOP2_LDFLAGS", str, "-Wl,-rpath," + dir+" "+
-                                          "-L"+dir+" -lmkl_core -lmkl_intel_lp64 -lmkl_intel_thread"+
-                                          " -L"+ompdir+" -liomp5 -lpthread -lm -ldl"),
+        "cflags": ("PYOP2_CFLAGS", str, ""),
+        "ldflags": ("PYOP2_LDFLAGS", str, ""),
+        # "cflags": ("PYOP2_CFLAGS", str, "-I/opt/intel/compilers_and_libraries/mac/mkl/include/"),
+        # "ldflags": ("PYOP2_LDFLAGS", str, "-Wl,-rpath," + dir+" "+
+        #                                   "-L"+dir+" -lmkl_core -lmkl_intel_lp64 -lmkl_intel_thread"+
+        #                                   " -L"+ompdir+" -liomp5 -lpthread -lm -ldl"),
         "compute_kernel_flops": ("PYOP2_COMPUTE_KERNEL_FLOPS", bool, False),
         "use_safe_cflags": ("PYOP2_USE_SAFE_CFLAGS", bool, True),
         "type_check": ("PYOP2_TYPE_CHECK", bool, True),
