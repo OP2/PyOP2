@@ -66,8 +66,7 @@ jobs:
           # xargs is used to force installation of requirements in the order we specified.
           xargs -l1 python -m pip install < requirements-ext.txt
           xargs -l1 python -m pip install < requirements-git.txt
-          python -m pip install pulp
-          python -m pip install -U flake8
+          python -m pip install --upgrade flake8 pulp sphinx
           python -m pip install .
 
       - name: Run linting
@@ -79,3 +78,19 @@ jobs:
         shell: bash
         working-directory: PyOP2
         run: pytest test -v --tb=native
+
+      - name: Build documentation
+        if: ${{ github.event_name == 'push' }}
+        shell: bash
+        working-directory: PyOP2
+        run: make -C doc/sphinx html
+
+      - name: Upload to GitHub Pages
+        if: ${{ github.event_name == 'push' }}
+        uses: crazy-max/ghaction-github-pages@v2.2.0
+        with:
+          build_dir: PyOP2/doc/sphinx/build/html
+          jekyll: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
