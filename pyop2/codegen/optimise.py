@@ -75,13 +75,13 @@ def index_merger(instructions, cache=None):
 
         for i, ni in zip(indices, new_indices):
             if i in appeared:
-                if isinstance(i, (Index)) and i.extent!=1 or isinstance(i, (RuntimeIndex)):
+                if isinstance(i, (Index)) and i.extent != 1 or isinstance(i, (RuntimeIndex)):
                     subst.append((i, appeared[i]))
             if i != ni:
                 if i in appeared:
                     assert appeared[i] == ni
                 appeared[i] = ni
-                if isinstance(i, (Index)) and i.extent!=1 or isinstance(i, (RuntimeIndex)):
+                if isinstance(i, (Index)) and i.extent != 1 or isinstance(i, (RuntimeIndex)):
                     subst.append((i, ni))
 
     index_replacer.subst = dict(subst)
