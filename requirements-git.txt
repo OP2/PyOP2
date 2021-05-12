@@ -1,2 +1,2 @@
 git+https://github.com/coneoproject/COFFEE.git#egg=coffee
-git+https://github.com/firedrakeproject/loopy.git@kernel_callables_v3-edit2-updated#egg=loopy
+git+https://github.com/firedrakeproject/loopy.git@kernel_callables_v3-edit2#egg=loopy
