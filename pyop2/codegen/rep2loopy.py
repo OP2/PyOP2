@@ -35,6 +35,7 @@ from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
                                           Symbol, Zero, Sum, Min, Max, Product)
 from pyop2.codegen.representation import (PackInst, UnpackInst, KernelInst, PreUnpackInst)
 from pytools import ImmutableRecord
+from pyop2.codegen.loopycompat import _match_caller_callee_argument_dimension_
 
 # Read c files  for linear algebra callables in on import
 import os
@@ -538,7 +539,6 @@ def generate(builder, wrapper_name=None):
     from loopy.kernel.function_interface import CallableKernel
 
     if isinstance(kernel._code, loopy.TranslationUnit):
-        from pyop2.codegen.loopycompat import _match_caller_callee_argument_dimension_
         knl = kernel._code
         wrapper = loopy.merge([wrapper, knl])
         names = knl.callables_table
