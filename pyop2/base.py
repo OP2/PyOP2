@@ -3323,7 +3323,8 @@ class Kernel(Cached):
     @classmethod
     @validate_type(('name', str, NameTypeError))
     def _cache_key(cls, code, name, opts={}, include_dirs=[], headers=[],
-                   user_code="", ldargs=None, cpp=False, requires_zeroed_output_arguments=False):
+                   user_code="", ldargs=None, cpp=False, requires_zeroed_output_arguments=False,
+                   flop_count=None):
         # Both code and name are relevant since there might be multiple kernels
         # extracting different functions from the same code
         # Also include the PyOP2 version, since the Kernel class might change
@@ -3345,7 +3346,8 @@ class Kernel(Cached):
         return (self._key, )
 
     def __init__(self, code, name, opts={}, include_dirs=[], headers=[],
-                 user_code="", ldargs=None, cpp=False, requires_zeroed_output_arguments=False):
+                 user_code="", ldargs=None, cpp=False, requires_zeroed_output_arguments=False,
+                 flop_count=None):
         # Protect against re-initialization when retrieved from cache
         if self._initialized:
             return
@@ -3361,6 +3363,7 @@ class Kernel(Cached):
         self._code = code
         self._initialized = True
         self.requires_zeroed_output_arguments = requires_zeroed_output_arguments
+        self.flop_count = flop_count
 
     @property
     def name(self):
@@ -3373,6 +3376,8 @@ class Kernel(Cached):
 
     @cached_property
     def num_flops(self):
+        if self.flop_count is not None:
+            return self.flop_count
         if not configuration["compute_kernel_flops"]:
             return 0
         if isinstance(self.code, Node):
