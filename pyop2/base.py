@@ -1583,28 +1583,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
             other.data[:] = self.data_ro
         else:
             other.data[subset.indices] = self.data_ro[subset.indices]
-        self._copy_parloop(other, subset=subset).compute()
-
-    @collective
-    def _copy_parloop(self, other, subset=None):
-        """Create the :class:`ParLoop` implementing copy."""
-        if not hasattr(self, '_copy_kernel'):
-            import islpy as isl
-            import pymbolic.primitives as p
-            inames = isl.make_zero_and_vars(["i"])
-            domain = (inames[0].le_set(inames["i"])) & (inames["i"].lt_set(inames[0] + self.cdim))
-            _other = p.Variable("other")
-            _self = p.Variable("self")
-            i = p.Variable("i")
-            insn = loopy.Assignment(_other.index(i), _self.index(i), within_inames=frozenset(["i"]))
-            data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,)),
-                    loopy.GlobalArg("other", dtype=other.dtype, shape=(other.cdim,))]
-            knl = loopy.make_function([domain], [insn], data, name="copy", target=loopy.CTarget(), lang_version=(2018, 2))
-
-            self._copy_kernel = _make_object('Kernel', knl, 'copy')
-        return _make_object('ParLoop', self._copy_kernel,
-                            subset or self.dataset.set,
-                            self(READ), other(WRITE))
 
     def __iter__(self):
         """Yield self when iterated over."""
