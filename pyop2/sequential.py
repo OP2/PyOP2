@@ -217,6 +217,7 @@ class ParLoop(petsc_base.ParLoop):
     def _compute(self, part, fun, *arglist):
         with self._compute_event:
             self.log_flops(part.size * self.num_flops)
+            self.log_bytes(part.size * self.num_bytes)
             fun(part.offset, part.offset + part.size, *arglist)
 
 

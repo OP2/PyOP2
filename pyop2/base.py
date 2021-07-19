@@ -3538,6 +3538,14 @@ class ParLoop(object):
     def log_flops(self, flops):
         pass
 
+    def log_bytes(self, bytes):
+        pass
+
+    @cached_property
+    def num_bytes(self):
+        # Fake number serving as placeholder 
+        return 100000
+
     @property
     @collective
     def _jitmodule(self):

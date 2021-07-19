@@ -907,6 +907,9 @@ class ParLoop(base.ParLoop):
     def log_flops(self, flops):
         PETSc.Log.logFlops(flops)
 
+    def log_bytes(self, bytes):
+        PETSc.Log.logBytes(bytes)
+
 
 def _DatMat(sparsity, dat=None):
     """A :class:`PETSc.Mat` with global size nx1 or nx1 implemented as a
