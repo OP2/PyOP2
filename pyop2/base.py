@@ -3537,8 +3537,8 @@ class ParLoop(object):
 
     @cached_property
     def num_bytes(self):
-        # Fake number serving as placeholder 
-        return 100000
+        # Fake number serving as place holder 
+        return 1e7
     
     def log_flops(self, flops):
         pass
