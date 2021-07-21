@@ -3537,8 +3537,21 @@ class ParLoop(object):
 
     @cached_property
     def num_bytes(self):
-        # Fake number serving as place holder 
-        return 1e7
+        # Measuring Streaming data footprint
+        n_bytes = 0
+        for arg in self.args:
+            n_bytes += arg.data.nbytes
+            if arg.access is not READ:
+                # Writing access counts as 2 accesses
+                n_bytes += arg.data.nbytes
+            for map_ in arg.map_tuple:
+                if map_ is not None:
+                    for m in map_:
+                        n_bytes += m._values.nbytes
+        if self.iterset.size == 0:
+            return 0
+        else:
+            return n_bytes/self.iterset.size 
     
     def log_flops(self, flops):
         pass
