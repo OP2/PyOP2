@@ -66,7 +66,11 @@ import loopy
 
 def _make_object(name, *args, **kwargs):
     from pyop2 import sequential
-    return getattr(sequential, name)(*args, **kwargs)
+    # return getattr(sequential, name)(*args, **kwargs)
+    # breakpoint()
+    cls = getattr(sequential, name)
+    obj = cls(*args, **kwargs)
+    return obj
 
 
 # Data API
@@ -942,6 +946,11 @@ class MixedSet(Set):
 
     def __pow__(self, e):
         """Derive a :class:`MixedDataSet` with dimensions ``e``"""
+        # Due to multiple inheritance we 'consume' e now if it is a generator
+        # expression. Otherwise it arrives to the correct constructor empty.
+        # TODO: Remove this once inheritance is tidied up.
+        if isinstance(e, types.GeneratorType):
+            e = tuple(e)
         return _make_object('MixedDataSet', self._sets, e)
 
     def __str__(self):
@@ -964,6 +973,7 @@ class DataSet(ObjectCached):
                    ('dim', (numbers.Integral, tuple, list), DimTypeError),
                    ('name', str, NameTypeError))
     def __init__(self, iter_set, dim=1, name=None):
+        print("DataSet __init__")
         if isinstance(iter_set, ExtrudedSet):
             raise NotImplementedError("Not allowed!")
         if self._initialized:
@@ -1112,7 +1122,7 @@ class GlobalDataSet(DataSet):
         return "GlobalDataSet(%r)" % (self._global)
 
 
-class MixedDataSet(DataSet, ObjectCached):
+class MixedDataSet(DataSet):
     r"""A container for a bag of :class:`DataSet`\s.
 
     Initialized either from a :class:`MixedSet` and an iterable or iterator of
@@ -1156,11 +1166,30 @@ class MixedDataSet(DataSet, ObjectCached):
             When using generator expressions for ``arg`` or ``dims``, these
             **must** terminate or else will cause an infinite loop.
         """
-        if self._initialized:
-            return
-        self._dsets = arg
-        self._initialized = True
+        print("MixedDataSet __init__")
+        # If the second argument is not None it is expect to be a scalar dim
+        # or an iterable of dims and the first is expected to be a MixedSet or
+        # an iterable of Sets
+        breakpoint()
+        if dims is not None:
+            # breakpoint()
+            # If arg is a MixedSet, get its Sets tuple
+            sets = arg.split if isinstance(arg, MixedSet) else tuple(arg)
+            # If dims is a scalar, turn it into a tuple of right length
+            dims = (dims,) * len(sets) if isinstance(dims, int) else tuple(dims)
+            if len(sets) != len(dims):
+                raise ValueError("Got MixedSet of %d Sets but %s dims" %
+                                 (len(sets), len(dims)))
+            dsets = tuple(s ** d for s, d in zip(sets, dims))
+        # Otherwise expect the first argument to be an iterable of Sets and/or
+        # DataSets and upcast Sets to DataSets as necessary
+        else:
+            arg = [s if isinstance(s, DataSet) else s ** 1 for s in arg]
+            dsets = as_tuple(arg, type=DataSet)
 
+        self._dsets = dsets
+
+    # TODO delete
     @classmethod
     def _process_args(cls, arg, dims=None):
         # If the second argument is not None it is expect to be a scalar dim
@@ -1182,10 +1211,6 @@ class MixedDataSet(DataSet, ObjectCached):
             dsets = as_tuple(arg, type=DataSet)
 
         return (dsets[0].set, ) + (dsets, ), {}
-
-    @classmethod
-    def _cache_key(cls, arg, dims=None):
-        return arg
 
     @cached_property
     def _wrapper_cache_key_(self):
