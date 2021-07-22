@@ -1538,38 +1538,11 @@ class Dat(DataCarrier, _EmptyDataMixin):
         """Zero the data associated with this :class:`Dat`
 
         :arg subset: A :class:`Subset` of entries to zero (optional)."""
-        if hasattr(self, "_zero_parloops"):
-            loops = self._zero_parloops
+        if subset is None:
+            self.data[:] = 0
         else:
-            loops = {}
-            self._zero_parloops = loops
-
-        iterset = subset or self.dataset.set
-
-        loop = loops.get(iterset, None)
-
-        if loop is None:
-            try:
-                knl = self._zero_kernels[(self.dtype, self.cdim)]
-            except KeyError:
-                import islpy as isl
-                import pymbolic.primitives as p
-
-                inames = isl.make_zero_and_vars(["i"])
-                domain = (inames[0].le_set(inames["i"])) & (inames["i"].lt_set(inames[0] + self.cdim))
-                x = p.Variable("dat")
-                i = p.Variable("i")
-                insn = loopy.Assignment(x.index(i), 0, within_inames=frozenset(["i"]))
-                data = loopy.GlobalArg("dat", dtype=self.dtype, shape=(self.cdim,))
-                knl = loopy.make_function([domain], [insn], [data], name="zero", target=loopy.CTarget(), lang_version=(2018, 2))
-
-                knl = _make_object('Kernel', knl, 'zero')
-                self._zero_kernels[(self.dtype, self.cdim)] = knl
-            loop = _make_object('ParLoop', knl,
-                                iterset,
-                                self(WRITE))
-            loops[iterset] = loop
-        loop.compute()
+            self.data[subset.indices] = 0
+        return self
 
     @collective
     def copy(self, other, subset=None):
@@ -1679,19 +1652,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
             data.append(loopy.GlobalArg("other", dtype=dtype, shape=rshape))
         knl = loopy.make_function([domain], [insn], data, name=name, target=loopy.CTarget(), lang_version=(2018, 2))
         return self._iop_kernel_cache.setdefault(key, _make_object('Kernel', knl, name))
-
-    def _iop(self, other, op):
-        globalp = False
-        if np.isscalar(other):
-            other = _make_object('Global', 1, data=other)
-            globalp = True
-        elif other is not self:
-            self._check_shape(other)
-        args = [self(INC)]
-        if other is not self:
-            args.append(other(READ))
-        par_loop(self._iop_kernel(op, globalp, other is self, other.dtype), self.dataset.set, *args)
-        return self
 
     def _inner_kernel(self, dtype):
         try:
@@ -1807,19 +1767,33 @@ class Dat(DataCarrier, _EmptyDataMixin):
 
     def __iadd__(self, other):
         """Pointwise addition of fields."""
-        return self._iop(other, operator.iadd)
+        if other is not None:
+            self.data[:] += other.data_ro
+        return self
 
     def __isub__(self, other):
         """Pointwise subtraction of fields."""
-        return self._iop(other, operator.isub)
+        if other is not None:
+            self.data[:] -= other.data_ro
+        return self
 
     def __imul__(self, other):
         """Pointwise multiplication or scaling of fields."""
-        return self._iop(other, operator.imul)
+        from numbers import Number
+        if isinstance(other, Number):
+            self.data[:] *= other
+        else:
+            self.data[:] *= other.data_ro
+        return self
 
     def __itruediv__(self, other):
         """Pointwise division or scaling of fields."""
-        return self._iop(other, operator.itruediv)
+        from numbers import Number
+        if isinstance(other, Number):
+            self.data[:] /= other
+        else:
+            self.data[:] /= other.data_ro
+        return self
 
     __idiv__ = __itruediv__  # Python 2 compatibility
 
