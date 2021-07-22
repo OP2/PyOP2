@@ -853,19 +853,22 @@ class SetPartition(object):
         self.size = size
 
 
-class MixedSet(Set, ObjectCached):
+class MixedSet(Set):
     r"""A container for a bag of :class:`Set`\s."""
 
     def __init__(self, sets):
         r""":param iterable sets: Iterable of :class:`Set`\s or :class:`ExtrudedSet`\s"""
-        if self._initialized:
-            return
+        sets = [s for s in sets]
+        try:
+            sets = as_tuple(sets, ExtrudedSet)
+        except TypeError:
+            sets = as_tuple(sets, (Set, type(None)))
+
         self._sets = sets
         assert all(s is None or isinstance(s, GlobalSet) or ((s.layers == self._sets[0].layers).all() if s.layers is not None else True) for s in sets), \
             "All components of a MixedSet must have the same number of layers."
         # TODO: do all sets need the same communicator?
         self.comm = reduce(lambda a, b: a or b, map(lambda s: s if s is None else s.comm, sets))
-        self._initialized = True
 
     @cached_property
     def _kernel_args_(self):
@@ -878,20 +881,6 @@ class MixedSet(Set, ObjectCached):
     @cached_property
     def _wrapper_cache_key_(self):
         raise NotImplementedError
-
-    @classmethod
-    def _process_args(cls, sets, **kwargs):
-        sets = [s for s in sets]
-        try:
-            sets = as_tuple(sets, ExtrudedSet)
-        except TypeError:
-            sets = as_tuple(sets, (Set, type(None)))
-        cache = sets[0]
-        return (cache, ) + (sets, ), kwargs
-
-    @classmethod
-    def _cache_key(cls, sets, **kwargs):
-        return sets
 
     def __getitem__(self, idx):
         """Return :class:`Set` with index ``idx`` or a given slice of sets."""

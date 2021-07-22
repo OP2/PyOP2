@@ -166,27 +166,6 @@ class TestObjectCaching:
         assert d1 != d3
         assert not d1 == d3
 
-    def test_mixedset_cache_hit(self, base_set):
-        ms = op2.MixedSet([base_set, base_set])
-        ms2 = op2.MixedSet([base_set, base_set])
-
-        assert ms is ms2
-        assert not ms != ms2
-        assert ms == ms2
-
-    def test_mixedset_cache_miss(self, base_set, base_set2):
-        ms = op2.MixedSet([base_set, base_set2])
-        ms2 = op2.MixedSet([base_set2, base_set])
-
-        assert ms is not ms2
-        assert ms != ms2
-        assert not ms == ms2
-
-        ms3 = op2.MixedSet([base_set, base_set2])
-        assert ms is ms3
-        assert not ms != ms3
-        assert ms == ms3
-
     def test_mixedmap_cache_hit(self, base_map, base_map2):
         mm = op2.MixedMap([base_map, base_map2])
         mm2 = op2.MixedMap([base_map, base_map2])
