@@ -1770,7 +1770,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         from numbers import Number
         if other is not None:
             if isinstance(other, Number):
-                self.data[:] -= other
+                self.data[:] += other
             else:
                 self.data[:] += other.data_ro
         return self
