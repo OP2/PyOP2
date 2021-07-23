@@ -1767,14 +1767,22 @@ class Dat(DataCarrier, _EmptyDataMixin):
 
     def __iadd__(self, other):
         """Pointwise addition of fields."""
+        from numbers import Number
         if other is not None:
-            self.data[:] += other.data_ro
+            if isinstance(other, Number):
+                self.data[:] -= other
+            else:
+                self.data[:] += other.data_ro
         return self
 
     def __isub__(self, other):
         """Pointwise subtraction of fields."""
+        from numbers import Number
         if other is not None:
-            self.data[:] -= other.data_ro
+            if isinstance(other, Number):
+                self.data[:] -= other
+            else:
+                self.data[:] -= other.data_ro
         return self
 
     def __imul__(self, other):
