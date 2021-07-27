@@ -1823,7 +1823,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
                 self.data[:] += other
             else:
                 self._check_shape(other)
-                self.data[:] += other.data_ro
+                np.add(self.data[:], other.data_ro, out=self.data[:], casting="unsafe")
         return self
 
     def __isub__(self, other):
@@ -1834,7 +1834,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
                 self.data[:] -= other
             else:
                 self._check_shape(other)
-                self.data[:] -= other.data_ro
+                np.subtract(self.data[:], other.data_ro, out=self.data[:], casting="unsafe")
         return self
 
     def __imul__(self, other):
@@ -1844,7 +1844,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
             self.data[:] *= other
         else:
             self._check_shape(other)
-            self.data[:] *= other.data_ro
+            np.multiply(self.data[:], other.data_ro, out=self.data[:], casting="unsafe")
         return self
 
     def __itruediv__(self, other):
@@ -1854,7 +1854,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
             self.data[:] /= other
         else:
             self._check_shape(other)
-            self.data[:] /= other.data_ro
+            np.true_divide(self.data[:], other.data_ro, out=self.data[:], casting="unsafe")
         return self
 
     __idiv__ = __itruediv__  # Python 2 compatibility
