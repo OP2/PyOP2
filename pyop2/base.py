@@ -1624,7 +1624,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
             self.data[:] = 0
         else:
             self.data[subset.indices] = 0
-        return self
 
     @collective
     def copy(self, other, subset=None):
@@ -1856,8 +1855,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
             self._check_shape(other)
             np.true_divide(self.data[:], other.data_ro, out=self.data[:], casting="unsafe")
         return self
-
-    __idiv__ = __itruediv__  # Python 2 compatibility
 
     @collective
     def global_to_local_begin(self, access_mode):
