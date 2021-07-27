@@ -1621,38 +1621,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
                  self.dataset.set, self(READ), other(READ), ret(WRITE))
         return ret
 
-    def _iop_kernel(self, op, globalp, other_is_self, dtype):
-        key = (op, globalp, other_is_self, dtype)
-        try:
-            if not hasattr(self, "_iop_kernel_cache"):
-                self._iop_kernel_cache = {}
-            return self._iop_kernel_cache[key]
-        except KeyError:
-            pass
-        import islpy as isl
-        import pymbolic.primitives as p
-        name = "iop_%s" % op.__name__
-        inames = isl.make_zero_and_vars(["i"])
-        domain = (inames[0].le_set(inames["i"])) & (inames["i"].lt_set(inames[0] + self.cdim))
-        _other = p.Variable("other")
-        _self = p.Variable("self")
-        i = p.Variable("i")
-        lhs = _self.index(i)
-        rshape = (self.cdim, )
-        if globalp:
-            rhs = _other.index(0)
-            rshape = (1, )
-        elif other_is_self:
-            rhs = _self.index(i)
-        else:
-            rhs = _other.index(i)
-        insn = loopy.Assignment(lhs, op(lhs, rhs), within_inames=frozenset(["i"]))
-        data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,))]
-        if not other_is_self:
-            data.append(loopy.GlobalArg("other", dtype=dtype, shape=rshape))
-        knl = loopy.make_function([domain], [insn], data, name=name, target=loopy.CTarget(), lang_version=(2018, 2))
-        return self._iop_kernel_cache.setdefault(key, _make_object('Kernel', knl, name))
-
     def _inner_kernel(self, dtype):
         try:
             if not hasattr(self, "_inner_kernel_cache"):
