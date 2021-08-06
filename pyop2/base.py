@@ -1629,6 +1629,8 @@ class Dat(DataCarrier, _EmptyDataMixin):
         :arg subset: A :class:`Subset` of entries to zero (optional)."""
         if subset is None:
             self.data[:] = 0
+        elif subset.superset != self.dataset.set:
+            raise MapValueError("The subset and dataset are incompatible")
         else:
             self.data[subset.owned_indices] = 0
 
@@ -1638,11 +1640,12 @@ class Dat(DataCarrier, _EmptyDataMixin):
 
         :arg other: The destination :class:`Dat`
         :arg subset: A :class:`Subset` of elements to copy (optional)"""
-        # breakpoint()
         if other is self:
             return
         if subset is None:
             other.data[:] = self.data_ro
+        elif subset.superset != self.dataset.set:
+            raise MapValueError("The subset and dataset are incompatible")
         else:
             other.data[subset.owned_indices] = self.data_ro[subset.owned_indices]
 
@@ -1709,6 +1712,51 @@ class Dat(DataCarrier, _EmptyDataMixin):
         par_loop(self._op_kernel(op, globalp, other.dtype),
                  self.dataset.set, self(READ), other(READ), ret(WRITE))
         return ret
+
+    def _iop_kernel(self, op, globalp, other_is_self, dtype):
+        key = (op, globalp, other_is_self, dtype)
+        try:
+            if not hasattr(self, "_iop_kernel_cache"):
+                self._iop_kernel_cache = {}
+            return self._iop_kernel_cache[key]
+        except KeyError:
+            pass
+        import islpy as isl
+        import pymbolic.primitives as p
+        name = "iop_%s" % op.__name__
+        inames = isl.make_zero_and_vars(["i"])
+        domain = (inames[0].le_set(inames["i"])) & (inames["i"].lt_set(inames[0] + self.cdim))
+        _other = p.Variable("other")
+        _self = p.Variable("self")
+        i = p.Variable("i")
+        lhs = _self.index(i)
+        rshape = (self.cdim, )
+        if globalp:
+            rhs = _other.index(0)
+            rshape = (1, )
+        elif other_is_self:
+            rhs = _self.index(i)
+        else:
+            rhs = _other.index(i)
+        insn = loopy.Assignment(lhs, op(lhs, rhs), within_inames=frozenset(["i"]))
+        data = [loopy.GlobalArg("self", dtype=self.dtype, shape=(self.cdim,))]
+        if not other_is_self:
+            data.append(loopy.GlobalArg("other", dtype=dtype, shape=rshape))
+        knl = loopy.make_function([domain], [insn], data, name=name, target=loopy.CTarget(), lang_version=(2018, 2))
+        return self._iop_kernel_cache.setdefault(key, _make_object('Kernel', knl, name))
+
+    def _iop(self, other, op):
+        globalp = False
+        if np.isscalar(other):
+            other = _make_object('Global', 1, data=other)
+            globalp = True
+        elif other is not self:
+            self._check_shape(other)
+        args = [self(INC)]
+        if other is not self:
+            args.append(other(READ))
+        par_loop(self._iop_kernel(op, globalp, other is self, other.dtype), self.dataset.set, *args)
+        return self
 
     def _inner_kernel(self, dtype):
         try:
@@ -1824,45 +1872,19 @@ class Dat(DataCarrier, _EmptyDataMixin):
 
     def __iadd__(self, other):
         """Pointwise addition of fields."""
-        from numbers import Number
-        if other is not None:
-            if isinstance(other, Number):
-                self.data[:] += other
-            else:
-                self._check_shape(other)
-                np.add(self.data[:], other.data_ro, out=self.data[:], casting="unsafe")
-        return self
+        return self._iop(other, operator.iadd)
 
     def __isub__(self, other):
         """Pointwise subtraction of fields."""
-        from numbers import Number
-        if other is not None:
-            if isinstance(other, Number):
-                self.data[:] -= other
-            else:
-                self._check_shape(other)
-                np.subtract(self.data[:], other.data_ro, out=self.data[:], casting="unsafe")
-        return self
+        return self._iop(other, operator.isub)
 
     def __imul__(self, other):
         """Pointwise multiplication or scaling of fields."""
-        from numbers import Number
-        if isinstance(other, Number):
-            self.data[:] *= other
-        else:
-            self._check_shape(other)
-            np.multiply(self.data[:], other.data_ro, out=self.data[:], casting="unsafe")
-        return self
+        return self._iop(other, operator.imul)
 
     def __itruediv__(self, other):
         """Pointwise division or scaling of fields."""
-        from numbers import Number
-        if isinstance(other, Number):
-            self.data[:] /= other
-        else:
-            self._check_shape(other)
-            np.true_divide(self.data[:], other.data_ro, out=self.data[:], casting="unsafe")
-        return self
+        return self._iop(other, operator.itruediv)
 
     @collective
     def global_to_local_begin(self, access_mode):
