@@ -816,6 +816,13 @@ class Subset(ExtrudedSet):
         return self._indices
 
     @cached_property
+    def owned_indices(self):
+        """Return the indices that correspond to the owned entities of the
+        superset.
+        """
+        return self.indices[self.indices < self.superset.size]
+
+    @cached_property
     def layers_array(self):
         if self._superset.constant_layers:
             return self._superset.layers_array
@@ -1623,7 +1630,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
         if subset is None:
             self.data[:] = 0
         else:
-            self.data[subset.indices] = 0
+            self.data[subset.owned_indices] = 0
 
     @collective
     def copy(self, other, subset=None):
@@ -1631,12 +1638,13 @@ class Dat(DataCarrier, _EmptyDataMixin):
 
         :arg other: The destination :class:`Dat`
         :arg subset: A :class:`Subset` of elements to copy (optional)"""
+        # breakpoint()
         if other is self:
             return
         if subset is None:
             other.data[:] = self.data_ro
         else:
-            other.data[subset.indices] = self.data_ro[subset.indices]
+            other.data[subset.owned_indices] = self.data_ro[subset.owned_indices]
 
     def __iter__(self):
         """Yield self when iterated over."""
