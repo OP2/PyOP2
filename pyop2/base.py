@@ -1627,8 +1627,10 @@ class Dat(DataCarrier, _EmptyDataMixin):
         """Zero the data associated with this :class:`Dat`
 
         :arg subset: A :class:`Subset` of entries to zero (optional)."""
+        # If there is no subset we can safely zero the halo values.
         if subset is None:
-            self.data[:] = 0
+            self._data[:] = 0
+            self.halo_valid = True
         elif subset.superset != self.dataset.set:
             raise MapValueError("The subset and dataset are incompatible")
         else:
@@ -1643,7 +1645,12 @@ class Dat(DataCarrier, _EmptyDataMixin):
         if other is self:
             return
         if subset is None:
-            other.data[:] = self.data_ro
+            # If the current halo is valid we can also copy these values across.
+            if self.halo_valid:
+                other._data[:] = self._data
+                other.halo_valid = True
+            else:
+                other.data[:] = self.data_ro
         elif subset.superset != self.dataset.set:
             raise MapValueError("The subset and dataset are incompatible")
         else:
