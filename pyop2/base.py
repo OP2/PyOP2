@@ -3658,7 +3658,10 @@ class ParLoop(object):
             # in case it's reused.
             for g in self._reduced_globals.keys():
                 g._data[...] = 0
+            import pylikwid
+            pylikwid.markerstartregion("run1")
             self._compute(iterset.core_part, fun, *arglist)
+            pylikwid.markerstopregion("run1")
             self.global_to_local_end()
             self._compute(iterset.owned_part, fun, *arglist)
             self.reduction_begin()
