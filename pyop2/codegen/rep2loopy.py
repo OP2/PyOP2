@@ -63,6 +63,19 @@ def symbol_mangler(kernel, name):
     return None
 
 
+class HCephesCallable(loopy.ScalarCallable):
+    def with_types(self, arg_id_to_dtype, callables_table):
+        new_arg_id_to_dtype = arg_id_to_dtype.copy()
+        new_arg_id_to_dtype[-1] = NumpyType(float)
+        return (self.copy(
+            name_in_target=self.name,
+            arg_id_to_dtype=new_arg_id_to_dtype), callables_table)
+
+    def generate_preambles(self, target):
+        assert isinstance(target, loopy.CTarget)
+        yield ("01_hcephes", "#include <hcephes.h>")
+
+
 class PetscCallable(loopy.ScalarCallable):
 
     def with_types(self, arg_id_to_dtype, callables_table):
@@ -559,6 +572,9 @@ def generate(builder, wrapper_name=None):
         preamble = preamble + "\n" + code
 
     wrapper = loopy.register_preamble_generators(wrapper, [_PreambleGen(preamble)])
+
+    wrapper = loopy.register_callable(wrapper, "hcephes_hyp2f1",
+                                      HCephesCallable("hcephes_hyp2f1"))
 
     # register petsc functions
     for identifier in petsc_functions:
