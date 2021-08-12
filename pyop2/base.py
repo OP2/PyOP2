@@ -1627,12 +1627,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
         """Zero the data associated with this :class:`Dat`
 
         :arg subset: A :class:`Subset` of entries to zero (optional)."""
-<<<<<<< HEAD
-        if subset is None:
-            self.data[:] = 0
-        else:
-            self.data[subset.indices] = 0
-=======
         # If there is no subset we can safely zero the halo values.
         if subset is None:
             self._data[:] = 0
@@ -1641,7 +1635,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
             raise MapValueError("The subset and dataset are incompatible")
         else:
             self.data[subset.owned_indices] = 0
->>>>>>> origin/master
 
     @collective
     def copy(self, other, subset=None):
@@ -1652,11 +1645,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
         if other is self:
             return
         if subset is None:
-<<<<<<< HEAD
-            other.data[:] = self.data_ro
-        else:
-            other.data[subset.indices] = self.data_ro[subset.indices]
-=======
             # If the current halo is valid we can also copy these values across.
             if self.halo_valid:
                 other._data[:] = self._data
@@ -1667,7 +1655,6 @@ class Dat(DataCarrier, _EmptyDataMixin):
             raise MapValueError("The subset and dataset are incompatible")
         else:
             other.data[subset.owned_indices] = self.data_ro[subset.owned_indices]
->>>>>>> origin/master
 
     def __iter__(self):
         """Yield self when iterated over."""
@@ -1879,17 +1866,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
 
     def __itruediv__(self, other):
         """Pointwise division or scaling of fields."""
-<<<<<<< HEAD
-        from numbers import Number
-        if isinstance(other, Number):
-            self.data[:] /= other
-        else:
-            self._check_shape(other)
-            np.true_divide(self.data[:], other.data_ro, out=self.data[:], casting="unsafe")
-        return self
-=======
         return self._iop(other, operator.itruediv)
->>>>>>> origin/master
 
     @collective
     def global_to_local_begin(self, access_mode):
