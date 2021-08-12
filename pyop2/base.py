@@ -816,6 +816,13 @@ class Subset(ExtrudedSet):
         return self._indices
 
     @cached_property
+    def owned_indices(self):
+        """Return the indices that correspond to the owned entities of the
+        superset.
+        """
+        return self.indices[self.indices < self.superset.size]
+
+    @cached_property
     def layers_array(self):
         if self._superset.constant_layers:
             return self._superset.layers_array
@@ -1620,10 +1627,21 @@ class Dat(DataCarrier, _EmptyDataMixin):
         """Zero the data associated with this :class:`Dat`
 
         :arg subset: A :class:`Subset` of entries to zero (optional)."""
+<<<<<<< HEAD
         if subset is None:
             self.data[:] = 0
         else:
             self.data[subset.indices] = 0
+=======
+        # If there is no subset we can safely zero the halo values.
+        if subset is None:
+            self._data[:] = 0
+            self.halo_valid = True
+        elif subset.superset != self.dataset.set:
+            raise MapValueError("The subset and dataset are incompatible")
+        else:
+            self.data[subset.owned_indices] = 0
+>>>>>>> origin/master
 
     @collective
     def copy(self, other, subset=None):
@@ -1634,9 +1652,22 @@ class Dat(DataCarrier, _EmptyDataMixin):
         if other is self:
             return
         if subset is None:
+<<<<<<< HEAD
             other.data[:] = self.data_ro
         else:
             other.data[subset.indices] = self.data_ro[subset.indices]
+=======
+            # If the current halo is valid we can also copy these values across.
+            if self.halo_valid:
+                other._data[:] = self._data
+                other.halo_valid = True
+            else:
+                other.data[:] = self.data_ro
+        elif subset.superset != self.dataset.set:
+            raise MapValueError("The subset and dataset are incompatible")
+        else:
+            other.data[subset.owned_indices] = self.data_ro[subset.owned_indices]
+>>>>>>> origin/master
 
     def __iter__(self):
         """Yield self when iterated over."""
@@ -1848,6 +1879,7 @@ class Dat(DataCarrier, _EmptyDataMixin):
 
     def __itruediv__(self, other):
         """Pointwise division or scaling of fields."""
+<<<<<<< HEAD
         from numbers import Number
         if isinstance(other, Number):
             self.data[:] /= other
@@ -1855,6 +1887,9 @@ class Dat(DataCarrier, _EmptyDataMixin):
             self._check_shape(other)
             np.true_divide(self.data[:], other.data_ro, out=self.data[:], casting="unsafe")
         return self
+=======
+        return self._iop(other, operator.itruediv)
+>>>>>>> origin/master
 
     @collective
     def global_to_local_begin(self, access_mode):
@@ -2636,6 +2671,41 @@ class Map(object):
     def __le__(self, o):
         """self<=o if o equals self or self._parent <= o."""
         return self == o
+
+
+class PermutedMap(Map):
+    """Composition of a standard :class:`Map` with a constant permutation.
+
+    :arg map_: The map to permute.
+    :arg permutation: The permutation of the map indices.
+
+    Where normally staging to element data is performed as
+
+    .. code-block::
+
+       local[i] = global[map[i]]
+
+    With a :class:`PermutedMap` we instead get
+
+    .. code-block::
+
+       local[i] = global[map[permutation[i]]]
+
+    This might be useful if your local kernel wants data in a
+    different order to the one that the map provides, and you don't
+    want two global-sized data structures.
+    """
+    def __init__(self, map_, permutation):
+        self.map_ = map_
+        self.permutation = np.asarray(permutation, dtype=Map.dtype)
+        assert (np.unique(permutation) == np.arange(map_.arity, dtype=Map.dtype)).all()
+
+    @cached_property
+    def _wrapper_cache_key_(self):
+        return super()._wrapper_cache_key_ + (tuple(self.permutation),)
+
+    def __getattr__(self, name):
+        return getattr(self.map_, name)
 
 
 class MixedMap(Map, ObjectCached):
