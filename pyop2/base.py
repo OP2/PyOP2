@@ -667,7 +667,7 @@ class ExtrudedSet(Set):
         try:
             layers = verify_reshape(layers, IntType, (parent.total_size, 2))
             self.constant_layers = False
-            if layers.min() < 0:
+            if layers.min(initial=0) < 0:
                 raise SizeTypeError("Bottom of layers must be >= 0")
             if any(layers[:, 1] - layers[:, 0] < 1):
                 raise SizeTypeError("Number of layers must be >= 0")
