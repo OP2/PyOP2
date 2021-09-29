@@ -45,6 +45,10 @@ from pyop2 import sequential
 from pyop2 import base
 
 
+# testing
+print(op2.TEST_VARIABLE)
+
+
 @pytest.fixture
 def set():
     return op2.Set(5, 'foo')

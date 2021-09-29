@@ -61,6 +61,8 @@ __all__ = ['configuration', 'READ', 'WRITE', 'RW', 'INC', 'MIN', 'MAX',
            'Sparsity', 'par_loop', 'ParLoop',
            'DatView', 'PermutedMap']
 
+TEST_VARIABLE = "this is a test"
+
 
 def ParLoop(kernel, *args, **kwargs):
     if isinstance(kernel, types.FunctionType):
