@@ -79,7 +79,7 @@ class Configuration(dict):
     # name, env variable, type, default, write once
     DEFAULTS = {
         "compiler": ("PYOP2_BACKEND_COMPILER", str, "gcc"),
-        "simd_width": ("PYOP2_SIMD_WIDTH", int, 4),
+        "simd_width": ("PYOP2_SIMD_WIDTH", int, 0),
         "debug": ("PYOP2_DEBUG", bool, False),
         "cflags": ("PYOP2_CFLAGS", str, ""),
         "ldflags": ("PYOP2_LDFLAGS", str, ""),
