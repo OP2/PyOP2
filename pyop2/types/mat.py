@@ -1,5 +1,6 @@
 import abc
 import ctypes
+from functools import cached_property
 import itertools
 
 import numpy as np
@@ -227,13 +228,13 @@ class Sparsity(caching.ObjectCached):
         except TypeError:
             return self._blocks[idx]
 
-    @utils.cached_property
+    @cached_property
     def dsets(self):
         r"""A pair of :class:`DataSet`\s for the left and right function
         spaces this :class:`Sparsity` maps between."""
         return self._dsets
 
-    @utils.cached_property
+    @cached_property
     def maps(self):
         """A list of pairs (rmap, cmap) where each pair of
         :class:`Map` objects will later be used to assemble into this
@@ -245,17 +246,17 @@ class Sparsity(caching.ObjectCached):
         the ``Sparsity``."""
         return list(zip(self._rmaps, self._cmaps))
 
-    @utils.cached_property
+    @cached_property
     def cmaps(self):
         """The list of column maps this sparsity is assembled from."""
         return self._cmaps
 
-    @utils.cached_property
+    @cached_property
     def rmaps(self):
         """The list of row maps this sparsity is assembled from."""
         return self._rmaps
 
-    @utils.cached_property
+    @cached_property
     def dims(self):
         """A tuple of tuples where the ``i,j``th entry
         is a pair giving the number of rows per entry of the row
@@ -265,23 +266,23 @@ class Sparsity(caching.ObjectCached):
         """
         return self._dims
 
-    @utils.cached_property
+    @cached_property
     def shape(self):
         """Number of block rows and columns."""
         return (len(self._dsets[0] or [1]),
                 len(self._dsets[1] or [1]))
 
-    @utils.cached_property
+    @cached_property
     def nrows(self):
         """The number of rows in the ``Sparsity``."""
         return self._nrows
 
-    @utils.cached_property
+    @cached_property
     def ncols(self):
         """The number of columns in the ``Sparsity``."""
         return self._ncols
 
-    @utils.cached_property
+    @cached_property
     def nested(self):
         r"""Whether a sparsity is monolithic (even if it has a block structure).
 
@@ -295,7 +296,7 @@ class Sparsity(caching.ObjectCached):
         """
         return self._nested
 
-    @utils.cached_property
+    @cached_property
     def name(self):
         """A user-defined label."""
         return self._name
@@ -313,7 +314,7 @@ class Sparsity(caching.ObjectCached):
     def __repr__(self):
         return "Sparsity(%r, %r, %r)" % (self.dsets, self.maps, self.name)
 
-    @utils.cached_property
+    @cached_property
     def nnz(self):
         """Array containing the number of non-zeroes in the various rows of the
         diagonal portion of the local submatrix.
@@ -322,7 +323,7 @@ class Sparsity(caching.ObjectCached):
         PETSc's MatMPIAIJSetPreallocation_."""
         return self._d_nnz
 
-    @utils.cached_property
+    @cached_property
     def onnz(self):
         """Array containing the number of non-zeroes in the various rows of the
         off-diagonal portion of the local submatrix.
@@ -331,11 +332,11 @@ class Sparsity(caching.ObjectCached):
         PETSc's MatMPIAIJSetPreallocation_."""
         return self._o_nnz
 
-    @utils.cached_property
+    @cached_property
     def nz(self):
         return self._d_nnz.sum()
 
-    @utils.cached_property
+    @cached_property
     def onz(self):
         return self._o_nnz.sum()
 
@@ -423,7 +424,7 @@ class AbstractMat(DataCarrier, abc.ABC):
        before using it (for example to view its values), you must call
        :meth:`assemble` to finalise the writes.
     """
-    @utils.cached_property
+    @cached_property
     def pack(self):
         from pyop2.codegen.builder import MatPack
         return MatPack
@@ -454,7 +455,7 @@ class AbstractMat(DataCarrier, abc.ABC):
             raise ex.MapValueError("Path maps not in sparsity maps")
         return Arg(data=self, map=path_maps, access=access, lgmaps=lgmaps, unroll_map=unroll_map)
 
-    @utils.cached_property
+    @cached_property
     def _wrapper_cache_key_(self):
         return (type(self), self.dtype, self.dims)
 
@@ -476,16 +477,16 @@ class AbstractMat(DataCarrier, abc.ABC):
         raise NotImplementedError(
             "Abstract Mat base class doesn't know how to set values.")
 
-    @utils.cached_property
+    @cached_property
     def nblocks(self):
         return int(np.prod(self.sparsity.shape))
 
-    @utils.cached_property
+    @cached_property
     def _argtypes_(self):
         """Ctypes argtype for this :class:`Mat`"""
         return tuple(ctypes.c_voidp for _ in self)
 
-    @utils.cached_property
+    @cached_property
     def dims(self):
         """A pair of integers giving the number of matrix rows and columns for
         each member of the row :class:`Set` and column :class:`Set`
@@ -493,12 +494,12 @@ class AbstractMat(DataCarrier, abc.ABC):
         :class:`DataSet`."""
         return self._sparsity._dims
 
-    @utils.cached_property
+    @cached_property
     def nrows(self):
         "The number of rows in the matrix (local to this process)"
         return sum(d.size * d.cdim for d in self.sparsity.dsets[0])
 
-    @utils.cached_property
+    @cached_property
     def nblock_rows(self):
         """The number "block" rows in the matrix (local to this process).
 
@@ -508,7 +509,7 @@ class AbstractMat(DataCarrier, abc.ABC):
         assert len(self.sparsity.dsets[0]) == 1, "Block rows don't make sense for mixed Mats"
         return self.sparsity.dsets[0].size
 
-    @utils.cached_property
+    @cached_property
     def nblock_cols(self):
         """The number of "block" columns in the matrix (local to this process).
 
@@ -518,23 +519,23 @@ class AbstractMat(DataCarrier, abc.ABC):
         assert len(self.sparsity.dsets[1]) == 1, "Block cols don't make sense for mixed Mats"
         return self.sparsity.dsets[1].size
 
-    @utils.cached_property
+    @cached_property
     def ncols(self):
         "The number of columns in the matrix (local to this process)"
         return sum(d.size * d.cdim for d in self.sparsity.dsets[1])
 
-    @utils.cached_property
+    @cached_property
     def sparsity(self):
         """:class:`Sparsity` on which the ``Mat`` is defined."""
         return self._sparsity
 
-    @utils.cached_property
+    @cached_property
     def _is_scalar_field(self):
         # Sparsity from Dat to MixedDat has a shape like (1, (1, 1))
         # (which you can't take the product of)
         return all(np.prod(d) == 1 for d in self.dims)
 
-    @utils.cached_property
+    @cached_property
     def _is_vector_field(self):
         return not self._is_scalar_field
 
@@ -564,12 +565,12 @@ class AbstractMat(DataCarrier, abc.ABC):
         """
         raise NotImplementedError("Abstract base Mat does not implement values()")
 
-    @utils.cached_property
+    @cached_property
     def dtype(self):
         """The Python type of the data."""
         return self._datatype
 
-    @utils.cached_property
+    @cached_property
     def nbytes(self):
         """Return an estimate of the size of the data associated with this
         :class:`Mat` in bytes. This will be the correct size of the
@@ -617,7 +618,7 @@ class Mat(AbstractMat):
     # Firedrake relies on this to distinguish between MatBlock and not for boundary conditions
     local_to_global_maps = (None, None)
 
-    @utils.cached_property
+    @cached_property
     def _kernel_args_(self):
         return tuple(a.handle.handle for a in self)
 
@@ -894,7 +895,7 @@ class Mat(AbstractMat):
             self.handle.setValuesBlockedLocal(rows, cols, values,
                                               addv=PETSc.InsertMode.INSERT_VALUES)
 
-    @utils.cached_property
+    @cached_property
     def blocks(self):
         """2-dimensional array of matrix blocks."""
         return self._blocks
@@ -931,11 +932,11 @@ class MatBlock(AbstractMat):
         self.comm = parent.comm
         self.local_to_global_maps = self.handle.getLGMap()
 
-    @utils.cached_property
+    @cached_property
     def _kernel_args_(self):
         return (self.handle.handle, )
 
-    @utils.cached_property
+    @cached_property
     def _wrapper_cache_key_(self):
         return (type(self._parent), self._parent.dtype, self.dims)
 

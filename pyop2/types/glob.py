@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import ctypes
+from functools import cached_property
 import operator
 
 import numpy as np
@@ -52,15 +53,15 @@ class Global(DataCarrier, EmptyDataMixin, VecAccessMixin):
         self._name = name or "global_#x%x" % id(self)
         self.comm = comm
 
-    @utils.cached_property
+    @cached_property
     def _kernel_args_(self):
         return (self._data.ctypes.data, )
 
-    @utils.cached_property
+    @cached_property
     def _argtypes_(self):
         return (ctypes.c_voidp, )
 
-    @utils.cached_property
+    @cached_property
     def _wrapper_cache_key_(self):
         return (type(self), self.dtype, self.shape)
 
@@ -91,7 +92,7 @@ class Global(DataCarrier, EmptyDataMixin, VecAccessMixin):
         return "Global(%r, %r, %r, %r)" % (self._dim, self._data,
                                            self._data.dtype, self._name)
 
-    @utils.cached_property
+    @cached_property
     def dataset(self):
         return GlobalDataSet(self)
 
@@ -255,7 +256,7 @@ class Global(DataCarrier, EmptyDataMixin, VecAccessMixin):
         assert isinstance(other, Global)
         return np.dot(self.data_ro, np.conj(other.data_ro))
 
-    @utils.cached_property
+    @cached_property
     def _vec(self):
         assert self.dtype == PETSc.ScalarType, \
             "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)

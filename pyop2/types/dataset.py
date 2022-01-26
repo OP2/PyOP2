@@ -1,3 +1,4 @@
+from functools import cached_property
 import numbers
 
 import numpy as np
@@ -43,7 +44,7 @@ class DataSet(caching.ObjectCached):
     def _cache_key(cls, iter_set, dim=1, name=None):
         return (iter_set, utils.as_tuple(dim, numbers.Integral))
 
-    @utils.cached_property
+    @cached_property
     def _wrapper_cache_key_(self):
         return (type(self), self.dim, self._set._wrapper_cache_key_)
 
@@ -67,23 +68,23 @@ class DataSet(caching.ObjectCached):
         assert idx == 0
         return self
 
-    @utils.cached_property
+    @cached_property
     def dim(self):
         """The shape tuple of the values for each element of the set."""
         return self._dim
 
-    @utils.cached_property
+    @cached_property
     def cdim(self):
         """The scalar number of values for each member of the set. This is
         the product of the dim tuple."""
         return self._cdim
 
-    @utils.cached_property
+    @cached_property
     def name(self):
         """Returns the name of the data set."""
         return self._name
 
-    @utils.cached_property
+    @cached_property
     def set(self):
         """Returns the parent set of the data set."""
         return self._set
@@ -107,7 +108,7 @@ class DataSet(caching.ObjectCached):
         """Indicate whether a given Dat is compatible with this DataSet."""
         return dat.dataset == self
 
-    @utils.cached_property
+    @cached_property
     def lgmap(self):
         """A PETSc LGMap mapping process-local indices to global
         indices for this :class:`DataSet`.
@@ -121,14 +122,14 @@ class DataSet(caching.ObjectCached):
                          bsize=self.cdim, comm=self.comm)
         return lgmap
 
-    @utils.cached_property
+    @cached_property
     def scalar_lgmap(self):
         if self.cdim == 1:
             return self.lgmap
         indices = self.lgmap.block_indices
         return PETSc.LGMap().create(indices=indices, bsize=1, comm=self.comm)
 
-    @utils.cached_property
+    @cached_property
     def unblocked_lgmap(self):
         """A PETSc LGMap mapping process-local indices to global
         indices for this :class:`DataSet` with a block size of 1.
@@ -141,7 +142,7 @@ class DataSet(caching.ObjectCached):
                                          bsize=1, comm=self.lgmap.comm)
             return lgmap
 
-    @utils.cached_property
+    @cached_property
     def field_ises(self):
         """A list of PETSc ISes defining the global indices for each set in
         the DataSet.
@@ -162,7 +163,7 @@ class DataSet(caching.ObjectCached):
             offset += nrows
         return tuple(ises)
 
-    @utils.cached_property
+    @cached_property
     def local_ises(self):
         """A list of PETSc ISes defining the local indices for each set in the DataSet.
 
@@ -179,7 +180,7 @@ class DataSet(caching.ObjectCached):
             ises.append(iset)
         return tuple(ises)
 
-    @utils.cached_property
+    @cached_property
     def layout_vec(self):
         """A PETSc Vec compatible with the dof layout of this DataSet."""
         vec = PETSc.Vec().create(comm=self.comm)
@@ -188,7 +189,7 @@ class DataSet(caching.ObjectCached):
         vec.setUp()
         return vec
 
-    @utils.cached_property
+    @cached_property
     def dm(self):
         dm = PETSc.DMShell().create(comm=self.comm)
         dm.setGlobalVector(self.layout_vec)
@@ -211,33 +212,33 @@ class GlobalDataSet(DataSet):
     def _cache_key(cls, *args):
         return None
 
-    @utils.cached_property
+    @cached_property
     def dim(self):
         """The shape tuple of the values for each element of the set."""
         return self._global._dim
 
-    @utils.cached_property
+    @cached_property
     def cdim(self):
         """The scalar number of values for each member of the set. This is
         the product of the dim tuple."""
         return self._global._cdim
 
-    @utils.cached_property
+    @cached_property
     def name(self):
         """Returns the name of the data set."""
         return self._global._name
 
-    @utils.cached_property
+    @cached_property
     def comm(self):
         """Return the communicator on which the set is defined."""
         return self._global.comm
 
-    @utils.cached_property
+    @cached_property
     def set(self):
         """Returns the parent set of the data set."""
         return self._globalset
 
-    @utils.cached_property
+    @cached_property
     def size(self):
         """The number of local entries in the Dataset (1 on rank 0)"""
         return 1 if mpi.MPI.comm.rank == 0 else 0
@@ -257,7 +258,7 @@ class GlobalDataSet(DataSet):
     def __repr__(self):
         return "GlobalDataSet(%r)" % (self._global)
 
-    @utils.cached_property
+    @cached_property
     def lgmap(self):
         """A PETSc LGMap mapping process-local indices to global
         indices for this :class:`DataSet`.
@@ -267,7 +268,7 @@ class GlobalDataSet(DataSet):
                      bsize=self.cdim, comm=self.comm)
         return lgmap
 
-    @utils.cached_property
+    @cached_property
     def unblocked_lgmap(self):
         """A PETSc LGMap mapping process-local indices to global
         indices for this :class:`DataSet` with a block size of 1.
@@ -280,7 +281,7 @@ class GlobalDataSet(DataSet):
                                          bsize=1, comm=self.lgmap.comm)
             return lgmap
 
-    @utils.cached_property
+    @cached_property
     def field_ises(self):
         """A list of PETSc ISes defining the global indices for each set in
         the DataSet.
@@ -301,14 +302,14 @@ class GlobalDataSet(DataSet):
             offset += nrows
         return tuple(ises)
 
-    @utils.cached_property
+    @cached_property
     def local_ises(self):
         """A list of PETSc ISes defining the local indices for each set in the DataSet.
 
         Used when extracting blocks from matrices for assembly."""
         raise NotImplementedError
 
-    @utils.cached_property
+    @cached_property
     def layout_vec(self):
         """A PETSc Vec compatible with the dof layout of this DataSet."""
         vec = PETSc.Vec().create(comm=self.comm)
@@ -317,7 +318,7 @@ class GlobalDataSet(DataSet):
         vec.setUp()
         return vec
 
-    @utils.cached_property
+    @cached_property
     def dm(self):
         dm = PETSc.DMShell().create(comm=self.comm)
         dm.setGlobalVector(self.layout_vec)
@@ -399,7 +400,7 @@ class MixedDataSet(DataSet):
     def _cache_key(cls, arg, dims=None):
         return arg
 
-    @utils.cached_property
+    @cached_property
     def _wrapper_cache_key_(self):
         raise NotImplementedError
 
@@ -407,28 +408,28 @@ class MixedDataSet(DataSet):
         """Return :class:`DataSet` with index ``idx`` or a given slice of datasets."""
         return self._dsets[idx]
 
-    @utils.cached_property
+    @cached_property
     def split(self):
         r"""The underlying tuple of :class:`DataSet`\s."""
         return self._dsets
 
-    @utils.cached_property
+    @cached_property
     def dim(self):
         """The shape tuple of the values for each element of the sets."""
         return tuple(s.dim for s in self._dsets)
 
-    @utils.cached_property
+    @cached_property
     def cdim(self):
         """The sum of the scalar number of values for each member of the sets.
         This is the sum of products of the dim tuples."""
         return sum(s.cdim for s in self._dsets)
 
-    @utils.cached_property
+    @cached_property
     def name(self):
         """Returns the name of the data sets."""
         return tuple(s.name for s in self._dsets)
 
-    @utils.cached_property
+    @cached_property
     def set(self):
         """Returns the :class:`MixedSet` this :class:`MixedDataSet` is
         defined on."""
@@ -449,7 +450,7 @@ class MixedDataSet(DataSet):
     def __repr__(self):
         return "MixedDataSet(%r)" % (self._dsets,)
 
-    @utils.cached_property
+    @cached_property
     def layout_vec(self):
         """A PETSc Vec compatible with the dof layout of this MixedDataSet."""
         vec = PETSc.Vec().create(comm=self.comm)
@@ -459,7 +460,7 @@ class MixedDataSet(DataSet):
         vec.setUp()
         return vec
 
-    @utils.cached_property
+    @cached_property
     def lgmap(self):
         """A PETSc LGMap mapping process-local indices to global
         indices for this :class:`MixedDataSet`.
@@ -523,7 +524,7 @@ class MixedDataSet(DataSet):
         lgmap.create(indices=indices, bsize=1, comm=self.comm)
         return lgmap
 
-    @utils.cached_property
+    @cached_property
     def unblocked_lgmap(self):
         """A PETSc LGMap mapping process-local indices to global
         indices for this :class:`DataSet` with a block size of 1.

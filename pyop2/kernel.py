@@ -1,3 +1,4 @@
+from functools import cached_property
 import hashlib
 
 import coffee
@@ -67,7 +68,7 @@ class Kernel(caching.Cached):
                   + str(headers) + version.__version__ + str(ldargs) + str(cpp) + str(requires_zeroed_output_arguments))
         return hashlib.md5(hashee.encode()).hexdigest()
 
-    @utils.cached_property
+    @cached_property
     def _wrapper_cache_key_(self):
         return (self._key, )
 
@@ -100,7 +101,7 @@ class Kernel(caching.Cached):
     def code(self):
         return self._code
 
-    @utils.cached_property
+    @cached_property
     def num_flops(self):
         if self.flop_count is not None:
             return self.flop_count

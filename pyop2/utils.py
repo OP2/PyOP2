@@ -51,6 +51,10 @@ class cached_property(object):
     memory leakage.'''
 
     def __init__(self, fget, doc=None):
+        import warnings
+        warnings.warn("pyop2.utils.cached_property is now deprecated. Please use "
+                      "functools.cached_property instead.", DeprecationWarning)
+
         self.fget = fget
         self.__doc__ = doc or fget.__doc__
         self.__name__ = fget.__name__

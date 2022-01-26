@@ -1,6 +1,7 @@
 import ctypes
 import itertools
 import functools
+from functools import cached_property
 import numbers
 
 import numpy as np
@@ -49,15 +50,15 @@ class Map:
         # A cache for objects built on top of this map
         self._cache = {}
 
-    @utils.cached_property
+    @cached_property
     def _kernel_args_(self):
         return (self._values.ctypes.data, )
 
-    @utils.cached_property
+    @cached_property
     def _argtypes_(self):
         return (ctypes.c_voidp, )
 
-    @utils.cached_property
+    @cached_property
     def _wrapper_cache_key_(self):
         return (type(self), self.arity, utils.tuplify(self.offset))
 
@@ -72,27 +73,27 @@ class Map:
         """This is not a mixed type and therefore of length 1."""
         return 1
 
-    @utils.cached_property
+    @cached_property
     def split(self):
         return (self,)
 
-    @utils.cached_property
+    @cached_property
     def iterset(self):
         """:class:`Set` mapped from."""
         return self._iterset
 
-    @utils.cached_property
+    @cached_property
     def toset(self):
         """:class:`Set` mapped to."""
         return self._toset
 
-    @utils.cached_property
+    @cached_property
     def arity(self):
         """Arity of the mapping: number of toset elements mapped to per
         iterset element."""
         return self._arity
 
-    @utils.cached_property
+    @cached_property
     def arities(self):
         """Arity of the mapping: number of toset elements mapped to per
         iterset element.
@@ -100,12 +101,12 @@ class Map:
         :rtype: tuple"""
         return (self._arity,)
 
-    @utils.cached_property
+    @cached_property
     def arange(self):
         """Tuple of arity offsets for each constituent :class:`Map`."""
         return (0, self._arity)
 
-    @utils.cached_property
+    @cached_property
     def values(self):
         """Mapping array.
 
@@ -113,7 +114,7 @@ class Map:
         halo points too, use :meth:`values_with_halo`."""
         return self._values[:self.iterset.size]
 
-    @utils.cached_property
+    @cached_property
     def values_with_halo(self):
         """Mapping array.
 
@@ -122,12 +123,12 @@ class Map:
         points."""
         return self._values
 
-    @utils.cached_property
+    @cached_property
     def name(self):
         """User-defined label"""
         return self._name
 
-    @utils.cached_property
+    @cached_property
     def offset(self):
         """The vertical offset."""
         return self._offset
@@ -172,7 +173,7 @@ class PermutedMap(Map):
         self.permutation = np.asarray(permutation, dtype=Map.dtype)
         assert (np.unique(permutation) == np.arange(map_.arity, dtype=Map.dtype)).all()
 
-    @utils.cached_property
+    @cached_property
     def _wrapper_cache_key_(self):
         return super()._wrapper_cache_key_ + (tuple(self.permutation),)
 
@@ -210,41 +211,41 @@ class MixedMap(Map, caching.ObjectCached):
     def _cache_key(cls, maps):
         return maps
 
-    @utils.cached_property
+    @cached_property
     def _kernel_args_(self):
         return tuple(itertools.chain(*(m._kernel_args_ for m in self if m is not None)))
 
-    @utils.cached_property
+    @cached_property
     def _argtypes_(self):
         return tuple(itertools.chain(*(m._argtypes_ for m in self if m is not None)))
 
-    @utils.cached_property
+    @cached_property
     def _wrapper_cache_key_(self):
         return tuple(m._wrapper_cache_key_ for m in self if m is not None)
 
-    @utils.cached_property
+    @cached_property
     def split(self):
         r"""The underlying tuple of :class:`Map`\s."""
         return self._maps
 
-    @utils.cached_property
+    @cached_property
     def iterset(self):
         """:class:`MixedSet` mapped from."""
         return functools.reduce(lambda a, b: a or b, map(lambda s: s if s is None else s.iterset, self._maps))
 
-    @utils.cached_property
+    @cached_property
     def toset(self):
         """:class:`MixedSet` mapped to."""
         return MixedSet(tuple(GlobalSet(comm=self.comm) if m is None else
                               m.toset for m in self._maps))
 
-    @utils.cached_property
+    @cached_property
     def arity(self):
         """Arity of the mapping: total number of toset elements mapped to per
         iterset element."""
         return sum(m.arity for m in self._maps)
 
-    @utils.cached_property
+    @cached_property
     def arities(self):
         """Arity of the mapping: number of toset elements mapped to per
         iterset element.
@@ -252,12 +253,12 @@ class MixedMap(Map, caching.ObjectCached):
         :rtype: tuple"""
         return tuple(m.arity for m in self._maps)
 
-    @utils.cached_property
+    @cached_property
     def arange(self):
         """Tuple of arity offsets for each constituent :class:`Map`."""
         return (0,) + tuple(np.cumsum(self.arities))
 
-    @utils.cached_property
+    @cached_property
     def values(self):
         """Mapping arrays excluding data for halos.
 
@@ -265,7 +266,7 @@ class MixedMap(Map, caching.ObjectCached):
         halo points too, use :meth:`values_with_halo`."""
         return tuple(m.values for m in self._maps)
 
-    @utils.cached_property
+    @cached_property
     def values_with_halo(self):
         """Mapping arrays including data for halos.
 
@@ -275,12 +276,12 @@ class MixedMap(Map, caching.ObjectCached):
         return tuple(None if m is None else
                      m.values_with_halo for m in self._maps)
 
-    @utils.cached_property
+    @cached_property
     def name(self):
         """User-defined labels"""
         return tuple(m.name for m in self._maps)
 
-    @utils.cached_property
+    @cached_property
     def offset(self):
         """Vertical offsets."""
         return tuple(0 if m is None else m.offset for m in self._maps)

@@ -3,6 +3,7 @@ import collections
 import copy
 import ctypes
 import enum
+from functools import cached_property
 import itertools
 import operator
 import os
@@ -105,15 +106,15 @@ class Arg:
                           lgmaps=lgmaps or self.lgmaps,
                           unroll_map=False if unroll_map is None else unroll_map)
 
-    @utils.cached_property
+    @cached_property
     def _kernel_args_(self):
         return self.data._kernel_args_
 
-    @utils.cached_property
+    @cached_property
     def _argtypes_(self):
         return self.data._argtypes_
 
-    @utils.cached_property
+    @cached_property
     def _wrapper_cache_key_(self):
         if self.map is not None:
             map_ = tuple(None if m is None else m._wrapper_cache_key_ for m in self.map)
@@ -149,7 +150,7 @@ class Arg:
         for arg in self.split:
             yield arg
 
-    @utils.cached_property
+    @cached_property
     def split(self):
         """Split a mixed argument into a tuple of constituent arguments."""
         if self._is_mixed_dat:
@@ -163,68 +164,68 @@ class Arg:
         else:
             return (self,)
 
-    @utils.cached_property
+    @cached_property
     def name(self):
         """The generated argument name."""
         return "arg%d" % self.position
 
-    @utils.cached_property
+    @cached_property
     def ctype(self):
         """String representing the C type of the data in this ``Arg``."""
         return self.data.ctype
 
-    @utils.cached_property
+    @cached_property
     def dtype(self):
         """Numpy datatype of this Arg"""
         return self.data.dtype
 
-    @utils.cached_property
+    @cached_property
     def map(self):
         """The :class:`Map` via which the data is to be accessed."""
         return self._map
 
-    @utils.cached_property
+    @cached_property
     def access(self):
         """Access descriptor. One of the constants of type :class:`Access`"""
         return self._access
 
-    @utils.cached_property
+    @cached_property
     def _is_dat_view(self):
         return isinstance(self.data, DatView)
 
-    @utils.cached_property
+    @cached_property
     def _is_mat(self):
         return isinstance(self.data, AbstractMat)
 
-    @utils.cached_property
+    @cached_property
     def _is_mixed_mat(self):
         return self._is_mat and self.data.sparsity.shape > (1, 1)
 
-    @utils.cached_property
+    @cached_property
     def _is_global(self):
         return isinstance(self.data, Global)
 
-    @utils.cached_property
+    @cached_property
     def _is_global_reduction(self):
         return self._is_global and self._access in {Access.INC, Access.MIN, Access.MAX}
 
-    @utils.cached_property
+    @cached_property
     def _is_dat(self):
         return isinstance(self.data, AbstractDat)
 
-    @utils.cached_property
+    @cached_property
     def _is_mixed_dat(self):
         return isinstance(self.data, MixedDat)
 
-    @utils.cached_property
+    @cached_property
     def _is_mixed(self):
         return self._is_mixed_dat or self._is_mixed_mat
 
-    @utils.cached_property
+    @cached_property
     def _is_direct(self):
         return isinstance(self.data, Dat) and self.map is None
 
-    @utils.cached_property
+    @cached_property
     def _is_indirect(self):
         return isinstance(self.data, Dat) and self.map is not None
 
@@ -367,11 +368,11 @@ class JITModule(caching.Cached):
     def __call__(self, *args):
         return self._fun(*args)
 
-    @utils.cached_property
+    @cached_property
     def _wrapper_name(self):
         return 'wrap_%s' % self._kernel.name
 
-    @utils.cached_property
+    @cached_property
     def code_to_compile(self):
         from pyop2.codegen.builder import WrapperBuilder
         from pyop2.codegen.rep2loopy import generate
@@ -424,7 +425,7 @@ class JITModule(caching.Cached):
         del self._kernel
         del self._iterset
 
-    @utils.cached_property
+    @cached_property
     def argtypes(self):
         index_type = dtypes.as_ctypes(dtypes.IntType)
         argtypes = (index_type, index_type)
@@ -528,7 +529,7 @@ class AbstractParLoop(abc.ABC):
         """
         return ()
 
-    @utils.cached_property
+    @cached_property
     def num_flops(self):
         iterset = self.iterset
         size = 1
@@ -551,7 +552,7 @@ class AbstractParLoop(abc.ABC):
         Return None if the child class should deal with this in another way."""
         return None
 
-    @utils.cached_property
+    @cached_property
     def _parloop_event(self):
         return profiling.timed_region("ParLoopExecute")
 
@@ -633,15 +634,15 @@ class AbstractParLoop(abc.ABC):
         for arg in self.unique_dat_args:
             arg.local_to_global_end()
 
-    @utils.cached_property
+    @cached_property
     def _reduction_event_begin(self):
         return profiling.timed_region("ParLoopRednBegin")
 
-    @utils.cached_property
+    @cached_property
     def _reduction_event_end(self):
         return profiling.timed_region("ParLoopRednEnd")
 
-    @utils.cached_property
+    @cached_property
     def _has_reduction(self):
         return len(self.global_reduction_args) > 0
 
@@ -681,11 +682,11 @@ class AbstractParLoop(abc.ABC):
                          Access.INC: Mat.ADD_VALUES}[access]
                 arg.data.assembly_state = state
 
-    @utils.cached_property
+    @cached_property
     def dat_args(self):
         return tuple(arg for arg in self.args if arg._is_dat)
 
-    @utils.cached_property
+    @cached_property
     def unique_dat_args(self):
         seen = {}
         unique = []
@@ -698,26 +699,26 @@ class AbstractParLoop(abc.ABC):
                                  "access descriptors")
         return tuple(unique)
 
-    @utils.cached_property
+    @cached_property
     def global_reduction_args(self):
         return tuple(arg for arg in self.args if arg._is_global_reduction)
 
-    @utils.cached_property
+    @cached_property
     def kernel(self):
         """Kernel executed by this parallel loop."""
         return self._kernel
 
-    @utils.cached_property
+    @cached_property
     def args(self):
         """Arguments to this parallel loop."""
         return self._actual_args
 
-    @utils.cached_property
+    @cached_property
     def is_layered(self):
         """Flag which triggers extrusion"""
         return self._is_layered
 
-    @utils.cached_property
+    @cached_property
     def iteration_region(self):
         """Specifies the part of the mesh the parallel loop will
         be iterating over. The effect is the loop only iterates over
@@ -748,13 +749,13 @@ class ParLoop(AbstractParLoop):
                     seen.add(k)
         return arglist
 
-    @utils.cached_property
+    @cached_property
     def _jitmodule(self):
         return JITModule(self.kernel, self.iterset, *self.args,
                          iterate=self.iteration_region,
                          pass_layer_arg=self._pass_layer_arg)
 
-    @utils.cached_property
+    @cached_property
     def _compute_event(self):
         return profiling.timed_region("ParLoop_{0}_{1}".format(self.iterset.name, self._jitmodule._wrapper_name))
 

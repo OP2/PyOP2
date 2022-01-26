@@ -1,6 +1,7 @@
 import abc
 import contextlib
 import ctypes
+from functools import cached_property
 import itertools
 import operator
 
@@ -63,7 +64,7 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
 
     _modes = [Access.READ, Access.WRITE, Access.RW, Access.INC, Access.MIN, Access.MAX]
 
-    @utils.cached_property
+    @cached_property
     def pack(self):
         from pyop2.codegen.builder import DatPack
         return DatPack
@@ -90,15 +91,15 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
         self.halo_valid = True
         self._name = name or "dat_#x%x" % id(self)
 
-    @utils.cached_property
+    @cached_property
     def _kernel_args_(self):
         return (self._data.ctypes.data, )
 
-    @utils.cached_property
+    @cached_property
     def _argtypes_(self):
         return (ctypes.c_voidp, )
 
-    @utils.cached_property
+    @cached_property
     def _wrapper_cache_key_(self):
         return (type(self), self.dtype, self._dataset._wrapper_cache_key_)
 
@@ -115,22 +116,22 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
             raise ex.IndexValueError("Can only extract component 0 from %r" % self)
         return self
 
-    @utils.cached_property
+    @cached_property
     def split(self):
         """Tuple containing only this :class:`Dat`."""
         return (self,)
 
-    @utils.cached_property
+    @cached_property
     def dataset(self):
         """:class:`DataSet` on which the Dat is defined."""
         return self._dataset
 
-    @utils.cached_property
+    @cached_property
     def dim(self):
         """The shape of the values for each element of the object."""
         return self.dataset.dim
 
-    @utils.cached_property
+    @cached_property
     def cdim(self):
         """The scalar number of values for each member of the object. This is
         the product of the dim tuple."""
@@ -233,15 +234,15 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
         else:
             self.data[:] = np.load(filename)
 
-    @utils.cached_property
+    @cached_property
     def shape(self):
         return self._shape
 
-    @utils.cached_property
+    @cached_property
     def dtype(self):
         return self._dtype
 
-    @utils.cached_property
+    @cached_property
     def nbytes(self):
         """Return an estimate of the size of the data associated with this
         :class:`Dat` in bytes. This will be the correct size of the data
@@ -468,7 +469,7 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
         self.__radd__(other) <==> other + self."""
         return self + other
 
-    @utils.cached_property
+    @cached_property
     def _neg_kernel(self):
         # Copy and negate in one go.
         import islpy as isl
@@ -618,27 +619,27 @@ class DatView(AbstractDat):
                                       name="view[%s](%s)" % (index, dat.name))
         self._parent = dat
 
-    @utils.cached_property
+    @cached_property
     def _kernel_args_(self):
         return self._parent._kernel_args_
 
-    @utils.cached_property
+    @cached_property
     def _argtypes_(self):
         return self._parent._argtypes_
 
-    @utils.cached_property
+    @cached_property
     def _wrapper_cache_key_(self):
         return (type(self), self.index, self._parent._wrapper_cache_key_)
 
-    @utils.cached_property
+    @cached_property
     def cdim(self):
         return 1
 
-    @utils.cached_property
+    @cached_property
     def dim(self):
         return (1, )
 
-    @utils.cached_property
+    @cached_property
     def shape(self):
         return (self.dataset.total_size, )
 
@@ -668,7 +669,7 @@ class DatView(AbstractDat):
 
 
 class Dat(AbstractDat, VecAccessMixin):
-    @utils.cached_property
+    @cached_property
     def _vec(self):
         assert self.dtype == PETSc.ScalarType, \
             "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
@@ -730,15 +731,15 @@ class MixedDat(AbstractDat, VecAccessMixin):
         # TODO: Think about different communicators on dats (c.f. MixedSet)
         self.comm = self._dats[0].comm
 
-    @utils.cached_property
+    @cached_property
     def _kernel_args_(self):
         return tuple(itertools.chain(*(d._kernel_args_ for d in self)))
 
-    @utils.cached_property
+    @cached_property
     def _argtypes_(self):
         return tuple(itertools.chain(*(d._argtypes_ for d in self)))
 
-    @utils.cached_property
+    @cached_property
     def _wrapper_cache_key_(self):
         return (type(self),) + tuple(d._wrapper_cache_key_ for d in self)
 
@@ -746,22 +747,22 @@ class MixedDat(AbstractDat, VecAccessMixin):
         """Return :class:`Dat` with index ``idx`` or a given slice of Dats."""
         return self._dats[idx]
 
-    @utils.cached_property
+    @cached_property
     def dtype(self):
         """The NumPy dtype of the data."""
         return self._dats[0].dtype
 
-    @utils.cached_property
+    @cached_property
     def split(self):
         r"""The underlying tuple of :class:`Dat`\s."""
         return self._dats
 
-    @utils.cached_property
+    @cached_property
     def dataset(self):
         r""":class:`MixedDataSet`\s this :class:`MixedDat` is defined on."""
         return MixedDataSet(tuple(s.dataset for s in self._dats))
 
-    @utils.cached_property
+    @cached_property
     def _data(self):
         """Return the user-provided data buffer, or a zeroed buffer of
         the correct size if none was provided."""
@@ -832,7 +833,7 @@ class MixedDat(AbstractDat, VecAccessMixin):
         for d in self._dats:
             d.zero()
 
-    @utils.cached_property
+    @cached_property
     def nbytes(self):
         """Return an estimate of the size of the data associated with this
         :class:`MixedDat` in bytes. This will be the correct size of the data
@@ -977,7 +978,7 @@ class MixedDat(AbstractDat, VecAccessMixin):
         """Pointwise division or scaling of fields."""
         return self._iop(other, operator.idiv)
 
-    @utils.cached_property
+    @cached_property
     def _vec(self):
         assert self.dtype == PETSc.ScalarType, \
             "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
