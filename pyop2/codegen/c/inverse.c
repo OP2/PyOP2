@@ -15,27 +15,47 @@ static PetscLogEvent USER_EVENT_inv_getrf;
 static PetscLogEvent USER_EVENT_inv_getri;
 #endif
 
+#ifndef BEGIN_LOG
+#define BEGIN_LOG
+static void beginLog(PetscLogEvent eventId){
+    #ifdef PYOP2_PROFILING_ENABLED
+    PetscLogEventBegin(eventId,0,0,0,0);
+    #endif
+}
+#endif
+
+#ifndef END_LOG
+#define END_LOG
+static void endLog(PetscLogEvent eventId){
+    #ifdef PYOP2_PROFILING_ENABLED
+    PetscLogEventEnd(eventId,0,0,0,0);
+    #endif
+}
+#endif
+
 static void inverse(PetscScalar* __restrict__ Aout, const PetscScalar* __restrict__ A, PetscBLASInt N)
 {
+    #ifdef PYOP2_PROFILING_ENABLED
     PetscLogEventRegister("PyOP2InverseCallable_memcpy",PETSC_OBJECT_CLASSID,&USER_EVENT_inv_memcpy);
     PetscLogEventRegister("PyOP2InverseCallable_getrf",PETSC_OBJECT_CLASSID,&USER_EVENT_inv_getrf);
     PetscLogEventRegister("PyOP2InverseCallable_getri",PETSC_OBJECT_CLASSID,&USER_EVENT_inv_getri);
+    #endif
 
-    PetscLogEventBegin(USER_EVENT_inv_memcpy,0,0,0,0);
+    beginLog(USER_EVENT_inv_memcpy);
     PetscBLASInt info;
     PetscBLASInt *ipiv = N <= BUF_SIZE ? ipiv_buffer : malloc(N*sizeof(*ipiv));
     PetscScalar *Awork = N <= BUF_SIZE ? work_buffer : malloc(N*N*sizeof(*Awork));
     memcpy(Aout, A, N*N*sizeof(PetscScalar));
-    PetscLogEventEnd(USER_EVENT_inv_memcpy,0,0,0,0);
+    endLog(USER_EVENT_inv_memcpy);
 
-    PetscLogEventBegin(USER_EVENT_inv_getrf,0,0,0,0);
+    beginLog(USER_EVENT_inv_getrf);
     LAPACKgetrf_(&N, &N, Aout, &N, ipiv, &info);
-    PetscLogEventEnd(USER_EVENT_inv_getrf,0,0,0,0);
+    endLog(USER_EVENT_inv_getrf);
 
     if(info == 0){
-        PetscLogEventBegin(USER_EVENT_inv_getri,0,0,0,0);
+        beginLog(USER_EVENT_inv_getri);
         LAPACKgetri_(&N, Aout, &N, ipiv, Awork, &N, &info);
-        PetscLogEventEnd(USER_EVENT_inv_getri,0,0,0,0);
+        endLog(USER_EVENT_inv_getri);
     }
 
     if(info != 0){

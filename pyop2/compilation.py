@@ -48,6 +48,7 @@ from pyop2.mpi import dup_comm, get_compilation_comm, set_compilation_comm
 from pyop2.configuration import configuration
 from pyop2.logger import debug, progress, INFO
 from pyop2.exceptions import CompilationError
+from petsc4py import PETSc
 
 
 def _check_hashes(x, y, datatype):
@@ -185,6 +186,8 @@ class Compiler(object):
         self._cppargs = cppargs + configuration['cflags'].split()
         if configuration["use_safe_cflags"]:
             self._cppargs += self.workaround_cflags
+        if PETSc.Log.getActive():
+            self._cppargs += ["-DPYOP2_PROFILING_ENABLED"]
         self._ldargs = ldargs + configuration['ldflags'].split()
 
     @property
