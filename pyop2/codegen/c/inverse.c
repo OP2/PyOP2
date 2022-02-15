@@ -10,9 +10,9 @@ static PetscScalar work_buffer[BUF_SIZE*BUF_SIZE];
 
 #ifndef PYOP2_INV_LOG_EVENTS
 #define PYOP2_INV_LOG_EVENTS
-static PetscLogEvent USER_EVENT_inv_memcpy;
-static PetscLogEvent USER_EVENT_inv_getrf;
-static PetscLogEvent USER_EVENT_inv_getri;
+PetscLogEvent USER_EVENT_inv_memcpy = -1;
+PetscLogEvent USER_EVENT_inv_getrf = -1;
+PetscLogEvent USER_EVENT_inv_getri = -1;
 #endif
 
 #ifndef BEGIN_LOG
@@ -33,14 +33,8 @@ static void endLog(PetscLogEvent eventId){
 }
 #endif
 
-static void inverse(PetscScalar* __restrict__ Aout, const PetscScalar* __restrict__ A, PetscBLASInt N)
+void inverse(PetscScalar* __restrict__ Aout, const PetscScalar* __restrict__ A, PetscBLASInt N)
 {
-    #ifdef PYOP2_PROFILING_ENABLED
-    PetscLogEventRegister("PyOP2InverseCallable_memcpy",PETSC_OBJECT_CLASSID,&USER_EVENT_inv_memcpy);
-    PetscLogEventRegister("PyOP2InverseCallable_getrf",PETSC_OBJECT_CLASSID,&USER_EVENT_inv_getrf);
-    PetscLogEventRegister("PyOP2InverseCallable_getri",PETSC_OBJECT_CLASSID,&USER_EVENT_inv_getri);
-    #endif
-
     beginLog(USER_EVENT_inv_memcpy);
     PetscBLASInt info;
     PetscBLASInt *ipiv = N <= BUF_SIZE ? ipiv_buffer : malloc(N*sizeof(*ipiv));

@@ -501,11 +501,29 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
         raise CompilationError("Don't know what compiler to use for platform '%s'" %
                                platform)
     dll = compiler.get_so(code, extension)
+    dll = _add_profiling_events(dll)
 
     fn = getattr(dll, fn_name)
     fn.argtypes = code.argtypes
     fn.restype = restype
     return fn
+
+def _add_profiling_events(dll):
+    """
+        If PyOP2 is in profiling mode, add events to profile the local linear algebra calls.
+        The event is generated here in python and then set in the shared library,
+        so that memory is not allocated over and over again in the C kernel.
+    """
+    if PETSc.Log.getActive():
+        if hasattr(dll, "solve"):
+            ctypes.c_int.in_dll(dll, 'USER_EVENT_solve_memcpy').value = PETSc.Log.Event("PyOP2SolveCallable_solve_memcpy").id
+            ctypes.c_int.in_dll(dll, 'USER_EVENT_solve_getrf').value = PETSc.Log.Event("PyOP2SolveCallable_solve_getrf").id
+            ctypes.c_int.in_dll(dll, 'USER_EVENT_solve_getrs').value = PETSc.Log.Event("PyOP2SolveCallable_solve_getrs").id
+        if hasattr(dll, "inverse"):
+            ctypes.c_int.in_dll(dll, 'USER_EVENT_inv_memcpy').value = PETSc.Log.Event("PyOP2InvCallable_inv_memcpy").id
+            ctypes.c_int.in_dll(dll, 'USER_EVENT_inv_getrf').value = PETSc.Log.Event("PyOP2InvCallable_inv_getrf").id
+            ctypes.c_int.in_dll(dll, 'USER_EVENT_inv_getri').value = PETSc.Log.Event("PyOP2InvCallable_inv_getri").id
+    return dll
 
 
 def clear_cache(prompt=False):
