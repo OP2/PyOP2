@@ -1,0 +1,6 @@
+class Relation:
+    ...
+
+
+class Closure(Relation):
+    ...
