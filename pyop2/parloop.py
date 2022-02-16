@@ -160,7 +160,11 @@ class Parloop:
             arglist += d.data._kernel_args_
 
         # Collect an ordered set of maps (ignore duplicates)
-        maps = {m: None for d in self.arguments for m in d.map_kernel_args}
+        # TODO We get the maps from the mesh, using the tags in the generated code
+        # to know which maps to retrieve and pass in.
+        maps = {}
+        for marg in self.kernel.data.get_by_tag("map"):
+            maps |= self.mesh.maps[marg.tags], None
         return arglist + tuple(maps.keys())
 
     @property

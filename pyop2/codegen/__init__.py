@@ -1,4 +1,5 @@
 from functools import singledispatch
+from itertools import chain
 
 import loopy as lp
 
@@ -7,27 +8,35 @@ from pyop2.codegen.ir import (Expr, Loop, Terminal)
 
 def make_kernel(expr, *args, **kwargs):
     """Return a loopy kernel corresponding to ``expr``."""
-    domains = ...
-    insns = ...
-    kernel_data = ...
+    domains = parse_domains(expr)
+    insns = parse_insns(expr)
+    kernel_data = parse_kernel_data(expr)
 
     return lp.make_kernel(domains, insns, kernel_data)
 
 
-@singledispatch
 def parse_domains(expr: Expr):
-    raise NotImplementedError
+    return frozenset(expr.domain) | chain(map(parse_domains, expr.children))
 
 
-@parse_domains.register
-def parse_domains_loop(expr: Loop):
-    subdomains = frozenset(filter(None, chain(map(parse_domains, expr.children))))
-    return frozenset(expr.domain) | subdomains
+def parse_insns(expr: Expr):
+    return frozenset(expr.insns) | chain(map(parse_insns, expr.children))
+
+def parse_insns_pack(expr: PackInstruction, domains: List[str]=None):
+    return lp.Assignment("tmp = dat[i]")
+
+@parse_insns.register
+def parse_insns_assignment(expr: UnpackInstruction, domains: List[str]=None):
+    return lp.Assignment("dat[j] = tmp[i]")
+
+def parse_kernel_data(expr: Expr, domains=None):
+    ...
 
 
-@parse_domains.register
-def parse_domains_terminal(expr: Terminal):
-    pass
+@parse_kernel_data.register(PackInstruction)
+@parse_kernel_data.register(UnpackInstruction)
+def parse_kernel_data_assignment(expr, domains):
+    return lp.ArrayArg(...)
 
 
 if __name__ == "__main__":
