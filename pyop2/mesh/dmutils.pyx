@@ -3026,7 +3026,7 @@ def fill_reference_coordinates_function(reference_coordinates_f):
 
 
 @PETSc.Log.EventDecorator()
-def _from_gmsh(filename, comm=None):
+def from_gmsh(filename, comm=None):
     """Read a Gmsh .msh file from `filename`.
 
     :kwarg comm: Optional communicator to build the mesh on (defaults to
@@ -3044,7 +3044,7 @@ def _from_gmsh(filename, comm=None):
 
 
 @PETSc.Log.EventDecorator()
-def _from_exodus(filename, comm):
+def from_exodus(filename, comm):
     """Read an Exodus .e or .exo file from `filename`.
 
     :arg comm: communicator to build the mesh on.
@@ -3055,7 +3055,7 @@ def _from_exodus(filename, comm):
 
 
 @PETSc.Log.EventDecorator()
-def _from_cgns(filename, comm):
+def from_cgns(filename, comm):
     """Read a CGNS .cgns file from `filename`.
 
     :arg comm: communicator to build the mesh on.
@@ -3065,7 +3065,7 @@ def _from_cgns(filename, comm):
 
 
 @PETSc.Log.EventDecorator()
-def _from_triangle(filename, dim, comm):
+def from_triangle(filename, dim, comm):
     """Read a set of triangle mesh files from `filename`.
 
     :arg dim: The embedding dimension.
@@ -3133,7 +3133,7 @@ def _from_triangle(filename, dim, comm):
 
 
 @PETSc.Log.EventDecorator()
-def _from_cell_list(dim, cells, coords, comm):
+def from_cell_list(dim, cells, coords, comm):
     """
     Create a DMPlex from a list of cells and coords.
 
