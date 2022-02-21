@@ -1,7 +1,17 @@
 import os
 
+from mpi4py import MPI
+import numpy as np
+from petsc4py import PETSc
+import ufl  # FIXME This should not be a dependency
+
+from pyop2.datatypes import IntType
+from pyop2.mpi import COMM_WORLD, dup_comm
+from pyop2.types import ExtrudedSet, Set, Dat, DataSet
+from pyop2.utils import cached_property
+
 from pyop2.mesh import dmutils as dmcommon
-from pyop2.mesh.impls.base import Mesh
+from pyop2.mesh.base import Mesh, DistributedMeshOverlapType
 
 
 class UnstructuredMesh(Mesh):
@@ -139,37 +149,28 @@ class UnstructuredMesh(Mesh):
         self._callback = callback
 
     @classmethod
-    def from_file(cls, meshfile):
-        comm = kwargs.get("comm", COMM_WORLD)
-        name = meshfile
+    def from_file(cls, meshfile, name, *, comm=COMM_WORLD, geometric_dim=None, **kwargs):
         basename, ext = os.path.splitext(meshfile)
-
-        if ext.lower() in ['.e', '.exo']:
-            plex = dmutils._from_exodus(meshfile, comm)
-        elif ext.lower() == '.cgns':
-            plex = dmutils._from_cgns(meshfile, comm)
-        elif ext.lower() == '.msh':
-            if geometric_dim is not None:
-                opts = {"dm_plex_gmsh_spacedim": geometric_dim}
-            else:
-                opts = {}
-            opts = OptionsManager(opts, "")
-            with opts.inserted_options():
-                plex = dmutils._from_gmsh(meshfile, comm)
-        elif ext.lower() == '.node':
-            plex = dmutils._from_triangle(meshfile, geometric_dim, comm)
+        if ext.lower() in {".e", ".exo"}:
+            plex = dmcommon.from_exodus(meshfile, comm)
+        elif ext.lower() == ".cgns":
+            plex = dmcommon.from_cgns(meshfile, comm)
+        elif ext.lower() == ".msh":
+            opts = {"dm_plex_gmsh_spacedim": geometric_dim} if geometric_dim else {}
+            with OptionsManager(opts, "").inserted_options():
+                plex = dmcommon.from_gmsh(meshfile, comm)
+        elif ext.lower() == ".node":
+            plex = dmcommon.from_triangle(meshfile, geometric_dim, comm)
         else:
-            raise RuntimeError("Mesh file %s has unknown format '%s'."
-                               % (meshfile, ext[1:]))
+            raise RuntimeError(f"Mesh file {meshfile} has unknown format '{ext[1:]}'")
 
-        return cls(plex)
-
+        return cls(plex, name, **kwargs)
 
     @property
     def comm(self):
         return self._comm
 
-    @utils.cached_property
+    @cached_property
     def cell_closure(self):
         """2D array of ordered cell closures
 
@@ -218,7 +219,7 @@ class UnstructuredMesh(Mesh):
         else:
             raise NotImplementedError("Cell type '%s' not supported." % cell)
 
-    @utils.cached_property
+    @cached_property
     def entity_orientations(self):
         return dmcommon.entity_orientations(self, self.cell_closure)
 
@@ -261,15 +262,15 @@ class UnstructuredMesh(Mesh):
         obj.point2facetnumber = point2facetnumber
         return obj
 
-    @utils.cached_property
+    @cached_property
     def exterior_facets(self):
         return self._facets("exterior")
 
-    @utils.cached_property
+    @cached_property
     def interior_facets(self):
         return self._facets("interior")
 
-    @utils.cached_property
+    @cached_property
     def cell_to_facets(self):
         """Returns a :class:`op2.Dat` that maps from a cell index to the local
         facet types on each cell, including the relevant subdomain markers.
@@ -283,11 +284,11 @@ class UnstructuredMesh(Mesh):
         cell_facets = dmcommon.cell_facet_labeling(self.topology_dm,
                                                    self._cell_numbering,
                                                    self.cell_closure)
-        if isinstance(self.cell_set, op2.ExtrudedSet):
-            dataset = op2.DataSet(self.cell_set.parent, dim=cell_facets.shape[1:])
+        if isinstance(self.cell_set, ExtrudedSet):
+            dataset = DataSet(self.cell_set.parent, dim=cell_facets.shape[1:])
         else:
-            dataset = op2.DataSet(self.cell_set, dim=cell_facets.shape[1:])
-        return op2.Dat(dataset, cell_facets, dtype=cell_facets.dtype,
+            dataset = DataSet(self.cell_set, dim=cell_facets.shape[1:])
+        return Dat(dataset, cell_facets, dtype=cell_facets.dtype,
                        name="cell-to-local-facet-dat")
 
     def num_cells(self):
@@ -314,10 +315,10 @@ class UnstructuredMesh(Mesh):
         eStart, eEnd = self.topology_dm.getDepthStratum(d)
         return eEnd - eStart
 
-    @utils.cached_property
+    @cached_property
     def cell_set(self):
         size = list(self._entity_classes[self.cell_dimension(), :])
-        return op2.Set(size, "Cells", comm=self.comm)
+        return Set(size, "Cells", comm=self.comm)
 
     @PETSc.Log.EventDecorator()
     def set_partitioner(self, distribute, partitioner_type=None):
@@ -363,5 +364,3 @@ class UnstructuredMesh(Mesh):
             partitioner.setShellPartition(self.comm.size, sizes, points)
         # Command line option `-petscpartitioner_type <type>` overrides.
         partitioner.setFromOptions()
-
-

@@ -78,11 +78,11 @@ if "clean" in sys.argv[1:]:
 try:
     from Cython.Distutils import build_ext
     cmdclass['build_ext'] = build_ext
-    sparsity_sources = ['pyop2/sparsity.pyx']
+    sparsity_sources = ['pyop2/sparsity.pyx', 'pyop2/mesh/dmutils.pyx']
 # Else we require the Cython-compiled .c file to be present and use that
 # Note: file is not in revision control but needs to be included in distributions
 except ImportError:
-    sparsity_sources = ['pyop2/sparsity.c']
+    sparsity_sources = ['pyop2/sparsity.c', 'pyop2/mesh/dmutils.pyx']
     sources = sparsity_sources
     from os.path import exists
     if not all([exists(f) for f in sources]):

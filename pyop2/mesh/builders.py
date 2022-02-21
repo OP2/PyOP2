@@ -1,4 +1,8 @@
-from pyop2.mesh.impls.unstructured import UnstructuredMesh
+import numpy as np
+
+import pyop2.mesh.dmutils as dmcommon
+from pyop2.mesh.unstructured import UnstructuredMesh
+from pyop2.mpi import COMM_WORLD
 
 
 def make_box_mesh(nx, ny, nz, Lx, Ly, Lz, reorder=None, distribution_parameters=None,
@@ -77,7 +81,7 @@ def make_box_mesh(nx, ny, nz, Lx, Ly, Lz, reorder=None, distribution_parameters=
     else:
         raise ValueError("Unrecognised value for diagonal '%r'", diagonal)
 
-    plex = mesh._from_cell_list(3, cells, coords, comm)
+    plex = dmcommon.from_cell_list(3, cells, coords, comm)
 
     # Apply boundary IDs
     plex.createLabel(dmcommon.FACE_SETS_LABEL)

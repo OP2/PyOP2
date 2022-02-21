@@ -1,4 +1,13 @@
-from pyop2.mesh.impls import Mesh
+from collections import defaultdict
+
+import numpy as np
+from petsc4py import PETSc
+import ufl  # FIXME This should not be a dependency
+
+from pyop2.mesh import dmutils as dmcommon
+from pyop2.mesh.base import Mesh
+from pyop2.mpi import dup_comm
+from pyop2.utils import cached_property
 
 
 # TODO: Could this be merged with MeshTopology given that dmcommon.pyx
@@ -67,7 +76,7 @@ class VertexOnlyMesh(Mesh):
     def comm(self):
         return self._comm
 
-    @utils.cached_property
+    @cached_property
     def cell_closure(self):
         """2D array of ordered cell closures
 
@@ -103,15 +112,15 @@ class VertexOnlyMesh(Mesh):
             raise ValueError("Unknown facet type '%s'" % kind)
         raise AttributeError("Cells in a VertexOnlyMeshTopology have no facets.")
 
-    @utils.cached_property
+    @cached_property
     def exterior_facets(self):
         return self._facets("exterior")
 
-    @utils.cached_property
+    @cached_property
     def interior_facets(self):
         return self._facets("interior")
 
-    @utils.cached_property
+    @cached_property
     def cell_to_facets(self):
         """Raises an AttributeError since cells in a
         `VertexOnlyMeshTopology` have no facets.
@@ -139,7 +148,7 @@ class VertexOnlyMesh(Mesh):
         else:
             return self.num_vertices()
 
-    @utils.cached_property
+    @cached_property
     def cell_set(self):
         size = list(self._entity_classes[self.cell_dimension(), :])
         return op2.Set(size, "Cells", comm=self.comm)

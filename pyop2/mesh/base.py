@@ -1,4 +1,174 @@
 import abc
+from collections import defaultdict
+import enum
+
+import numpy as np
+from petsc4py import PETSc
+
+from pyop2.datatypes import IntType
+from pyop2.mesh import dmutils as dmcommon
+import pyop2.types
+
+
+class DistributedMeshOverlapType(enum.Enum):
+    """How should the mesh overlap be grown for distributed meshes?
+
+    Possible options are:
+
+     - :attr:`NONE`:  Don't overlap distributed meshes, only useful for problems with
+              no interior facet integrals.
+     - :attr:`FACET`: Add ghost entities in the closure of the star of
+              facets.
+     - :attr:`VERTEX`: Add ghost entities in the closure of the star
+              of vertices.
+
+    Defaults to :attr:`FACET`.
+    """
+    NONE = 1
+    FACET = 2
+    VERTEX = 3
+
+
+class _Facets:
+    """Wrapper class for facet interation information on a :func:`Mesh`
+
+    .. warning::
+
+       The unique_markers argument **must** be the same on all processes."""
+
+    @PETSc.Log.EventDecorator()
+    def __init__(self, mesh, classes, kind, facet_cell, local_facet_number, markers=None,
+                 unique_markers=None):
+
+        self.mesh = mesh
+
+        classes = as_tuple(classes, int, 3)
+        self.classes = classes
+
+        self.kind = kind
+        assert kind in ["interior", "exterior"]
+        if kind == "interior":
+            self._rank = 2
+        else:
+            self._rank = 1
+
+        self.facet_cell = facet_cell
+
+        if isinstance(self.set, op2.ExtrudedSet):
+            dset = op2.DataSet(self.set.parent, self._rank)
+        else:
+            dset = op2.DataSet(self.set, self._rank)
+
+        # Dat indicating which local facet of each adjacent cell corresponds
+        # to the current facet.
+        self.local_facet_dat = op2.Dat(dset, local_facet_number, np.uintc,
+                                       "%s_%s_local_facet_number" %
+                                       (self.mesh.name, self.kind))
+
+        # assert that markers is a proper subset of unique_markers
+        if markers is not None:
+            assert set(markers) <= set(unique_markers).union([unmarked]), \
+                "Every marker has to be contained in unique_markers"
+
+        self.markers = markers
+        self.unique_markers = [] if unique_markers is None else unique_markers
+        self._subsets = {}
+
+    @cached_property
+    def set(self):
+        size = self.classes
+        if isinstance(self.mesh, ExtrudedMeshTopology):
+            label = "%s_facets" % self.kind
+            layers = self.mesh.entity_layers(1, label)
+            base = getattr(self.mesh._base_mesh, label).set
+            return op2.ExtrudedSet(base, layers=layers)
+        return op2.Set(size, "%sFacets" % self.kind.capitalize()[:3],
+                       comm=self.mesh.comm)
+
+    @cached_property
+    def _null_subset(self):
+        '''Empty subset for the case in which there are no facets with
+        a given marker value. This is required because not all
+        markers need be represented on all processors.'''
+
+        return op2.Subset(self.set, [])
+
+    @PETSc.Log.EventDecorator()
+    def measure_set(self, integral_type, subdomain_id,
+                    all_integer_subdomain_ids=None):
+        """Return an iteration set appropriate for the requested integral type.
+
+        :arg integral_type: The type of the integral (should be a facet measure).
+        :arg subdomain_id: The subdomain of the mesh to iterate over.
+             Either an integer, an iterable of integers or the special
+             subdomains ``"everywhere"`` or ``"otherwise"``.
+        :arg all_integer_subdomain_ids: Information to interpret the
+             ``"otherwise"`` subdomain.  ``"otherwise"`` means all
+             entities not explicitly enumerated by the integer
+             subdomains provided here.  For example, if
+             all_integer_subdomain_ids is empty, then ``"otherwise" ==
+             "everywhere"``.  If it contains ``(1, 2)``, then
+             ``"otherwise"`` is all entities except those marked by
+             subdomains 1 and 2.
+
+         :returns: A :class:`pyop2.Subset` for iteration.
+        """
+        if integral_type in ("exterior_facet_bottom",
+                             "exterior_facet_top",
+                             "interior_facet_horiz"):
+            # these iterate over the base cell set
+            return self.mesh.cell_subset(subdomain_id, all_integer_subdomain_ids)
+        elif not (integral_type.startswith("exterior_")
+                  or integral_type.startswith("interior_")):
+            raise ValueError("Don't know how to construct measure for '%s'" % integral_type)
+        if subdomain_id == "everywhere":
+            return self.set
+        if subdomain_id == "otherwise":
+            if all_integer_subdomain_ids is None:
+                return self.set
+            key = ("otherwise", ) + all_integer_subdomain_ids
+            try:
+                return self._subsets[key]
+            except KeyError:
+                ids = [np.where(self.markers == sid)[0]
+                       for sid in all_integer_subdomain_ids]
+                to_remove = np.unique(np.concatenate(ids))
+                indices = np.arange(self.set.total_size, dtype=np.int32)
+                indices = np.delete(indices, to_remove)
+                return self._subsets.setdefault(key, op2.Subset(self.set, indices))
+        else:
+            return self.subset(subdomain_id)
+
+    @PETSc.Log.EventDecorator()
+    def subset(self, markers):
+        """Return the subset corresponding to a given marker value.
+
+        :param markers: integer marker id or an iterable of marker ids
+            (or ``None``, for an empty subset).
+        """
+        valid_markers = set([unmarked]).union(self.unique_markers)
+        markers = as_tuple(markers, numbers.Integral)
+        if self.markers is None and valid_markers.intersection(markers):
+            return self._null_subset
+        try:
+            return self._subsets[markers]
+        except KeyError:
+            # check that the given markers are valid
+            if len(set(markers).difference(valid_markers)) > 0:
+                invalid = set(markers).difference(valid_markers)
+                raise LookupError("{0} are not a valid markers (not in {1})".format(invalid, self.unique_markers))
+
+            # build a list of indices corresponding to the subsets selected by
+            # markers
+            indices = np.concatenate([np.nonzero(self.markers == i)[0]
+                                      for i in markers])
+            return self._subsets.setdefault(markers, op2.Subset(self.set, indices))
+
+    @cached_property
+    def facet_cell_map(self):
+        """Map from facets to cells."""
+        return op2.Map(self.set, self.mesh.cell_set, self._rank, self.facet_cell,
+                       "facet_to_cell_map")
 
 
 class Mesh(abc.ABC):
@@ -285,7 +455,7 @@ class Mesh(abc.ABC):
                 indices = dmcommon.get_cell_markers(self.topology_dm,
                                                     self._cell_numbering,
                                                     subdomain_id)
-            return self._subsets.setdefault(key, op2.Subset(self.cell_set, indices))
+            return self._subsets.setdefault(key, pyop2.types.Subset(self.cell_set, indices))
 
     @PETSc.Log.EventDecorator()
     def measure_set(self, integral_type, subdomain_id,

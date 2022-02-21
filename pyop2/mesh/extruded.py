@@ -1,4 +1,16 @@
-from pyop2.mesh.impls import Mesh
+from collections import defaultdict
+
+import numpy as np
+from petsc4py import PETSc
+import ufl  # FIXME This should not be a dependency
+
+from pyop2.datatypes import IntType
+from pyop2.types import ExtrudedSet
+from pyop2.utils import cached_property
+
+from pyop2.mesh import extrusion_numbering as extnum
+from pyop2.mesh.base import Mesh, _Facets
+from pyop2.mesh.vertexonly import VertexOnlyMesh
 
 
 class ExtrudedMesh(Mesh):
@@ -14,15 +26,11 @@ class ExtrudedMesh(Mesh):
         """
 
         # TODO: refactor to call super().__init__
-
-        from firedrake_citations import Citations
-        Citations().register("McRae2016")
-        Citations().register("Bercea2016")
         # A cache of shared function space data on this mesh
         self._shared_data_cache = defaultdict(dict)
 
-        if isinstance(mesh.topology, VertexOnlyMeshTopology):
-            raise NotImplementedError("Extrusion not implemented for VertexOnlyMeshTopology")
+        if isinstance(mesh.topology, VertexOnlyMesh):
+            raise NotImplementedError("Extrusion not implemented for VertexOnlyMesh")
 
         mesh.init()
         self._base_mesh = mesh
@@ -56,7 +64,7 @@ class ExtrudedMesh(Mesh):
             """
         else:
             self.variable_layers = False
-        self.cell_set = op2.ExtrudedSet(mesh.cell_set, layers=layers)
+        self.cell_set = ExtrudedSet(mesh.cell_set, layers=layers)
 
     @property
     def comm(self):
@@ -66,7 +74,7 @@ class ExtrudedMesh(Mesh):
     def name(self):
         return self._base_mesh.name
 
-    @utils.cached_property
+    @cached_property
     def cell_closure(self):
         """2D array of ordered cell closures
 
@@ -74,7 +82,7 @@ class ExtrudedMesh(Mesh):
         """
         return self._base_mesh.cell_closure
 
-    @utils.cached_property
+    @cached_property
     def entity_orientations(self):
         return self._base_mesh.entity_orientations
 
@@ -134,15 +142,15 @@ class ExtrudedMesh(Mesh):
         if real_tensorproduct:
             nodes = np.asarray(nodes_per_entity)
             nodes_per_entity = sum(nodes[:, i] for i in range(2))
-            return super(ExtrudedMeshTopology, self).node_classes(nodes_per_entity)
+            return super().node_classes(nodes_per_entity)
         elif self.variable_layers:
             return extnum.node_classes(self, nodes_per_entity)
         else:
             nodes = np.asarray(nodes_per_entity)
             nodes_per_entity = sum(nodes[:, i]*(self.layers - i) for i in range(2))
-            return super(ExtrudedMeshTopology, self).node_classes(nodes_per_entity)
+            return super().node_classes(nodes_per_entity)
 
-    @utils.cached_property
+    @cached_property
     def layers(self):
         """Return the number of layers of the extruded mesh
         represented by the number of occurences of the base mesh."""
@@ -188,5 +196,3 @@ class ExtrudedMesh(Mesh):
         for col in column_list:
             cell_list += list(range(col, col + (self.layers - 1)))
         return cell_data[cell_list]
-
-
