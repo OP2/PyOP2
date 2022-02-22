@@ -4,7 +4,11 @@ from collections import OrderedDict
 from functools import reduce
 
 import numpy
+import loopy as lp
+from loopy.symbolic import SubArrayRef
 from loopy.types import OpaqueType
+from pymbolic import var
+import pymbolic.primitives as pym
 from pyop2.global_kernel import (GlobalKernelArg, DatKernelArg, MixedDatKernelArg,
                                  MatKernelArg, MixedMatKernelArg, PermutedMapKernelArg)
 from pyop2.codegen.representation import (Accumulate, Argument, Comparison,
@@ -169,10 +173,6 @@ class Pack(metaclass=ABCMeta):
         """Either yield an instruction, or else return an empty tuple (to indicate no instruction)"""
 
     @abstractmethod
-    def pack(self, loop_indices=None):
-        pass
-
-    @abstractmethod
     def emit_unpack_instruction(self, *, loop_indices=None):
         """Either yield an instruction, or else return an empty tuple (to indicate no instruction)"""
 
@@ -188,10 +188,7 @@ class GlobalPack(Pack):
         pack = self.pack(loop_indices)
         return Indexed(pack, (Index(e) for e in pack.shape))
 
-    def emit_pack_instruction(self, *, loop_indices=None):
-        return ()
-
-    def pack(self, loop_indices=None):
+    def emit_pack_instruction(self, loop_indices=None):
         if hasattr(self, "_pack"):
             return self._pack
 
@@ -241,9 +238,11 @@ class GlobalPack(Pack):
 
 
 class DatPack(Pack):
+    name_generator = itertools.count()
+
     def __init__(self, outer, access, map_=None, interior_horizontal=False,
                  view_index=None, layer_bounds=None,
-                 init_with_zero=False):
+                 init_with_zero=False, within_inames=None):
         self.outer = outer
         self.map_ = map_
         self.access = access
@@ -251,6 +250,23 @@ class DatPack(Pack):
         self.view_index = view_index
         self.layer_bounds = layer_bounds
         self.init_with_zero = init_with_zero
+
+        self.within_inames = within_inames
+        idx = next(self.name_generator)
+        self.id = idx
+        self.iname = f"i{idx}"
+        self.diminame=f"dimi{idx}"
+        self.temp_var_name = f"t{idx}"
+        self.map_name = "MYMAP"
+        self.extent = f"n{idx}"
+        self.domain = f"{{[{self.iname}]: 0<={self.iname}<{self.map_.shape[1]}}}"
+        self.temp_var = lp.TemporaryVariable(self.temp_var_name, self.outer.dtype, shape=tuple(self.map_.shape[1:]))
+        self.array_arg = lp.GlobalArg(self.outer.name, self.outer.dtype, shape=(None,), strides=lp.auto)
+        self.map_arg = lp.GlobalArg("MYMAP", IntType, shape=(None, 1), strides=lp.auto)
+        self.kernel_data = [self.temp_var, self.array_arg, self.map_arg]
+
+
+        self.pack_instructions = self.gen_pack_instructions()
 
     def _mask(self, map_):
         """Override this if the map_ needs a masking condition."""
@@ -266,46 +282,57 @@ class DatPack(Pack):
         f, i, *j = multiindex
         n, layer = self.pick_loop_indices(*loop_indices)
         if self.view_index is not None:
+            raise NotImplementedError
             j = tuple(j) + tuple(FixedIndex(i) for i in self.view_index)
         map_, (f, i) = self.map_.indexed((n, i, f), layer=layer)
         return Indexed(self.outer, MultiIndex(map_, *j)), self._mask(map_)
 
-    def pack(self, loop_indices=None):
+
+    def emit_pack_instruction(self):
+        raise Exception("Need to chagne API")
+
+    def gen_pack_instructions(self):
+        """Return a temporary variable?"""
         if self.map_ is None:
             return None
 
         if hasattr(self, "_pack"):
-            return self._pack
+            return self._pack,
 
         if self.interior_horizontal:
             shape = (2, )
         else:
             shape = (1, )
 
+        if self.view_index:
+            raise NotImplementedError
+        if self.interior_horizontal:
+            raise NotImplementedError
+
         shape = shape + self.map_.shape[1:]
         if self.view_index is None:
             shape = shape + self.outer.shape[1:]
 
-        if self.init_with_zero:
-            also_zero = {MIN, MAX}
-        else:
-            also_zero = set()
-        if self.access in {INC, WRITE} | also_zero:
-            val = Zero((), self.outer.dtype)
-            multiindex = MultiIndex(*(Index(e) for e in shape))
-            self._pack = Materialise(PackInst(), val, multiindex)
-        elif self.access in {READ, RW, MIN, MAX} - also_zero:
-            multiindex = MultiIndex(*(Index(e) for e in shape))
-            expr, mask = self._rvalue(multiindex, loop_indices=loop_indices)
-            if mask is not None:
-                expr = When(mask, expr)
-            self._pack = Materialise(PackInst(), expr, multiindex)
+        assignee = pym.Subscript(var(self.temp_var_name), (var(self.iname),))
+
+        if self.access in {INC, WRITE}:
+            expr = 0
+        elif self.access in {READ, RW}:
+            expr = pym.Subscript(var(self.outer.name), var(self.iname))
+        elif self.access in {MIN, MAX}:
+            raise NotImplementedError
+            expr = 0 if self.init_with_zero else pym.Subscript(self.outer.name, var(self.iname))
         else:
             raise ValueError("Don't know how to initialise pack for '%s' access" % self.access)
-        return self._pack
+        self._pack = lp.Assignment(assignee, expr, within_inames=self.within_inames,
+                id=f"insn_{self.id}", within_inames_is_final=True)
+        return self._pack,
 
     def kernel_arg(self, loop_indices=None):
+        # This shouldn't be necessary...
+        raise Exception
         if self.map_ is None:
+            raise NotImplementedError
             if loop_indices is None:
                 raise ValueError("Need iteration index")
             n, layer = self.pick_loop_indices(*loop_indices)
@@ -320,16 +347,11 @@ class DatPack(Pack):
             shape = pack.shape
             return Indexed(pack, (Index(e) for e in shape))
 
-    def emit_pack_instruction(self, *, loop_indices=None):
-        return ()
-
-    def emit_unpack_instruction(self, *, loop_indices=None):
-        pack = self.pack(loop_indices)
-        if pack is None:
-            return ()
-        elif self.access is READ:
+    def emit_unpack_instruction(self, *, depends_on=None):
+        if self.access is READ:
             return ()
         elif self.access in {INC, MIN, MAX}:
+            raise NotImplementedError
             op = {INC: Sum,
                   MIN: Min,
                   MAX: Max}[self.access]
@@ -341,13 +363,12 @@ class DatPack(Pack):
             else:
                 yield When(mask, acc)
         else:
-            multiindex = tuple(Index(e) for e in pack.shape)
-            rvalue, mask = self._rvalue(multiindex, loop_indices=loop_indices)
-            acc = Accumulate(UnpackInst(), rvalue, Indexed(pack, multiindex))
-            if mask is None:
-                yield acc
-            else:
-                yield When(mask, acc)
+            # TODO actually handle the map!!
+            expr = pym.Subscript(pym.Variable(self.temp_var_name), (var(self.iname),))
+            assignee = pym.Subscript(var(self.outer.name),
+                                     (pym.Subscript(var(self.map_name), (var("outeriname"),var(self.iname))),))
+            yield lp.Assignment(assignee, expr, depends_on=depends_on,
+                                 within_inames=self.within_inames)
 
 
 class MixedDatPack(Pack):
@@ -641,6 +662,8 @@ class WrapperBuilder(object):
         self.pass_layer_to_kernel = pass_layer_to_kernel
         self.single_cell = single_cell
         self.forward_arguments = tuple(Argument((), fa, pfx="farg") for fa in forward_arg_types)
+        self.loop_iname = "outeriname"
+        self.kernel_parameters = {}
 
     @property
     def requires_zeroed_output_arguments(self):
@@ -775,7 +798,8 @@ class WrapperBuilder(object):
             pack = arg.pack(argument, access, map_=map_,
                             interior_horizontal=interior_horizontal,
                             view_index=arg.index,
-                            init_with_zero=self.requires_zeroed_output_arguments)
+                            init_with_zero=self.requires_zeroed_output_arguments,
+                            within_inames=frozenset([self.loop_iname]))
             self.arguments.append(argument)
         elif isinstance(arg, MixedDatKernelArg):
             packs = []
@@ -882,29 +906,66 @@ class WrapperBuilder(object):
                 args.append(map_.values)
         return tuple(args)
 
+    @property
+    def domains(self):
+        domains = f"{{[{self.loop_iname}]: start<={self.loop_iname}<end}}",
+        domains += tuple(arg.domain for arg in self.packed_args)
+        return domains
+
+    @property
+    def kernel_data(self):
+        # ordering matters
+        kernel_data = (lp.ValueArg("start", IntType, is_input=True),
+                        lp.ValueArg("end", IntType, is_input=True))
+        kernel_data += tuple(*(a.kernel_data for a in self.packed_args))
+        return kernel_data
+
     def kernel_call(self):
-        args = self.kernel_args
-        access = tuple(self.loopy_argument_accesses)
-        # assuming every index is free index
-        free_indices = set(itertools.chain.from_iterable(arg.multiindex for arg in args))
-        # remove runtime index
-        free_indices = tuple(i for i in free_indices if isinstance(i, Index))
-        if self.pass_layer_to_kernel:
-            args = args + (self.layer_index, )
-            access = access + (READ,)
-        if self.forward_arguments:
-            args = self.forward_arguments + args
-            access = tuple([WRITE] * len(self.forward_arguments)) + access
-        return FunctionCall(self.kernel.name, KernelInst(), access, free_indices, *args)
+        refs = []
+        for arg in self.packed_args:
+            insn, = arg.pack_instructions
+            if isinstance(insn.assignee, pym.Subscript):
+                swept_inames = var(arg.iname),  # this is wrong
+                swept_inames = ()
+                refs.append(lp.symbolic.SubArrayRef(swept_inames, insn.assignee))
+            else:
+                refs.append(insn.assignee)
+
+        refs = tuple(refs)
+        self.kernel_parameters[self.kernel.name] = refs
+
+        depends_on = frozenset(insn.id for insn in self._pack_instructions)
+        expr = pym.Call(pym.Variable(self.kernel.name), ())
+        return lp.CallInstruction(refs, expr,
+                                  within_inames=frozenset([self.loop_iname]),
+                                  depends_on=depends_on, id="MYFUNCTIONID", within_inames_is_final=True)
+        # args = self.kernel_args
+        # access = tuple(self.loopy_argument_accesses)
+        # # assuming every index is free index
+        # free_indices = set(itertools.chain.from_iterable(arg.multiindex for arg in args))
+        # # remove runtime index
+        # free_indices = tuple(i for i in free_indices if isinstance(i, Index))
+        # if self.pass_layer_to_kernel:
+        #     args = args + (self.layer_index, )
+        #     access = access + (READ,)
+        # if self.forward_arguments:
+        #     args = self.forward_arguments + args
+        #     access = tuple([WRITE] * len(self.forward_arguments)) + access
+        # return FunctionCall(self.kernel.name, KernelInst(), access, free_indices, *args)
+
+    @property
+    def _pack_instructions(self):
+        return tuple(itertools.chain(*(pack.pack_instructions
+                            for pack in self.packed_args)))
 
     def emit_instructions(self):
-        yield from itertools.chain(*(pack.emit_pack_instruction(loop_indices=self.loop_indices)
-                                     for pack in self.packed_args))
+        yield from self._pack_instructions
         # Sometimes, actual instructions do not refer to all the loop
         # indices (e.g. all of them are globals). To ensure that loopy
         # knows about these indices, we emit a dummy instruction (that
         # doesn't generate any code) that does depend on them.
-        yield DummyInstruction(PackInst(), *(x for x in self.loop_indices if x is not None))
-        yield self.kernel_call()
-        yield from itertools.chain(*(pack.emit_unpack_instruction(loop_indices=self.loop_indices)
+        # yield DummyInstruction(PackInst(), *(x for x in self.loop_indices if x is not None))
+        kernel_call = self.kernel_call()
+        yield kernel_call
+        yield from itertools.chain(*(pack.emit_unpack_instruction(depends_on=frozenset({kernel_call.id}))
                                      for pack in self.packed_args))

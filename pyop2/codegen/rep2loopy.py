@@ -220,6 +220,7 @@ class PyOP2KernelCallable(loopy.ScalarCallable):
     def with_descrs(self, arg_id_to_descr, callables_table):
         from loopy.kernel.function_interface import ArrayArgDescriptor
         from loopy.kernel.array import FixedStrideArrayDimTag
+        import pdb; pdb.set_trace()
         new_arg_id_to_descr = arg_id_to_descr.copy()
         for i, des in arg_id_to_descr.items():
             # 1D arrays
@@ -416,18 +417,18 @@ def generate(builder, wrapper_name=None):
     parameters.kernel_name = builder.kernel.name
 
     # replace Materialise
-    mapper = Memoizer(replace_materialise)
-    mapper.initialisers = []
-    instructions = list(mapper(i) for i in instructions)
-
-    # merge indices
-    merger = index_merger(instructions)
-    instructions = list(merger(i) for i in instructions)
-    initialiser = list(itertools.chain(*mapper.initialisers))
-    merger = index_merger(initialiser)
-    initialiser = list(merger(i) for i in initialiser)
-    instructions = instructions + initialiser
-    mapper.initialisers = [tuple(merger(i) for i in inits) for inits in mapper.initialisers]
+    # mapper = Memoizer(replace_materialise)
+    # mapper.initialisers = []
+    # instructions = list(mapper(i) for i in instructions)
+    #
+    # # merge indices
+    # merger = index_merger(instructions)
+    # instructions = list(merger(i) for i in instructions)
+    # initialiser = list(itertools.chain(*mapper.initialisers))
+    # merger = index_merger(initialiser)
+    # initialiser = list(merger(i) for i in initialiser)
+    # instructions = instructions + initialiser
+    # mapper.initialisers = [tuple(merger(i) for i in inits) for inits in mapper.initialisers]
 
     def name_generator(prefix):
         yield from (f"{prefix}{i}" for i in itertools.count())
@@ -453,34 +454,36 @@ def generate(builder, wrapper_name=None):
         except KeyError:
             return node_names.setdefault(expr, next(namer))
 
-    instructions = rename_nodes(instructions, renamer)
-    mapper.initialisers = [rename_nodes(inits, renamer)
-                           for inits in mapper.initialisers]
+    # instructions = rename_nodes(instructions, renamer)
+    # mapper.initialisers = [rename_nodes(inits, renamer)
+    #                        for inits in mapper.initialisers]
     parameters.wrapper_arguments = rename_nodes(parameters.wrapper_arguments, renamer)
-    s, e = rename_nodes([mapper(e) for e in builder.layer_extents], renamer)
-    parameters.layer_start = s.name
-    parameters.layer_end = e.name
+    # s, e = rename_nodes([mapper(e) for e in builder.layer_extents], renamer)
+    # parameters.layer_start = s.name
+    # parameters.layer_end = e.name
+    parameters.layer_start, parameters.layer_end = builder.layer_extents
 
     # scheduling and loop nesting
-    deps = instruction_dependencies(instructions, mapper.initialisers)
-    within_inames = loop_nesting(instructions, deps, outer_inames, parameters.kernel_name)
+    # deps = instruction_dependencies(instructions, mapper.initialisers)
+    # within_inames = loop_nesting(instructions, deps, outer_inames, parameters.kernel_name)
 
     # generate loopy
     context = Bag()
     context.parameters = parameters
-    context.within_inames = within_inames
+    # context.within_inames = within_inames
     context.conditions = []
     context.index_ordering = []
-    context.instruction_dependencies = deps
+    # context.instruction_dependencies = deps
     context.kernel_parameters = {}
 
-    statements = list(statement(insn, context) for insn in instructions)
+    # statements = list(statement(insn, context) for insn in instructions)
     # remove the dummy instructions (they were only used to ensure
     # that the kernel knows about the outer inames).
-    statements = list(s for s in statements if not isinstance(s, DummyInstruction))
+    # statements = list(s for s in statements if not isinstance(s, DummyInstruction))
 
     domains = list(parameters.domains.values())
     if builder.single_cell:
+        raise NotImplementedError
         new_domains = []
         for d in domains:
             if d.get_dim_name(isl.dim_type.set, 0) == builder._loop_index.name:
@@ -500,8 +503,8 @@ def generate(builder, wrapper_name=None):
                     new_domains.append(d)
         domains = new_domains
 
-    assumptions, = reduce(operator.and_,
-                          parameters.assumptions.values()).params().get_basic_sets()
+    # assumptions, = reduce(operator.and_,
+    #                       parameters.assumptions.values()).params().get_basic_sets()
     options = loopy.Options(check_dep_resolution=True, ignore_boostable_into=True)
 
     # sometimes masks are not used, but we still need to create the function arguments
@@ -514,30 +517,31 @@ def generate(builder, wrapper_name=None):
     if wrapper_name is None:
         wrapper_name = "wrap_%s" % builder.kernel.name
 
-    pwaffd = isl.affs_from_space(assumptions.get_space())
-    assumptions = assumptions & pwaffd["start"].ge_set(pwaffd[0])
-    if builder.single_cell:
-        assumptions = assumptions & pwaffd["start"].lt_set(pwaffd["end"])
-    else:
-        assumptions = assumptions & pwaffd["start"].le_set(pwaffd["end"])
-    if builder.extruded:
-        assumptions = assumptions & pwaffd[parameters.layer_start].le_set(pwaffd[parameters.layer_end])
-    assumptions = reduce(operator.and_, assumptions.get_basic_sets())
+    # pwaffd = isl.affs_from_space(assumptions.get_space())
+    # assumptions = assumptions & pwaffd["start"].ge_set(pwaffd[0])
+    # if builder.single_cell:
+    #     assumptions = assumptions & pwaffd["start"].lt_set(pwaffd["end"])
+    # else:
+    #     assumptions = assumptions & pwaffd["start"].le_set(pwaffd["end"])
+    # if builder.extruded:
+    #     assumptions = assumptions & pwaffd[parameters.layer_start].le_set(pwaffd[parameters.layer_end])
+    # assumptions = reduce(operator.and_, assumptions.get_basic_sets())
 
-    wrapper = loopy.make_kernel(domains,
-                                statements,
-                                kernel_data=parameters.kernel_data,
+    wrapper = loopy.make_kernel(builder.domains,
+                                instructions,
+                                kernel_data=builder.kernel_data,
                                 target=loopy.CTarget(),
-                                temporary_variables=parameters.temporaries,
+                                # temporary_variables=parameters.temporaries,
                                 symbol_manglers=[symbol_mangler],
                                 options=options,
-                                assumptions=assumptions,
+                                # assumptions=assumptions,
                                 lang_version=(2018, 2),
                                 name=wrapper_name)
+    import pdb; pdb.set_trace()
 
     # prioritize loops
-    for indices in context.index_ordering:
-        wrapper = loopy.prioritize_loops(wrapper, indices)
+    # for indices in context.index_ordering:
+    #     wrapper = loopy.prioritize_loops(wrapper, indices)
 
     # register kernel
     kernel = builder.kernel
@@ -565,7 +569,7 @@ def generate(builder, wrapper_name=None):
             wrapper,
             kernel.name,
             PyOP2KernelCallable(name=kernel.name,
-                                parameters=context.kernel_parameters[kernel.name]))
+                                parameters=builder.kernel_parameters[kernel.name]))
         preamble = preamble + "\n" + code
 
     wrapper = loopy.register_preamble_generators(wrapper, [_PreambleGen(preamble)])

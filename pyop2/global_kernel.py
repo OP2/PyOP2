@@ -331,6 +331,7 @@ class GlobalKernel(Cached):
         from pyop2.codegen.rep2loopy import generate
 
         wrapper = generate(self.builder)
+        import pdb; pdb.set_trace()
         code = lp.generate_code_v2(wrapper)
 
         if self.local_kernel.cpp:
