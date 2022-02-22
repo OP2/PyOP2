@@ -1,74 +1,91 @@
+from functools import singledispatchmethod
+
 import loopy as lp
 from pytools import UniqueNameGenerator
 
 
-def isread(access):
+def _is_read(access):
     return access in {READ, RW}
 
-def iswritten(access):
+
+def _is_write(access):
     return access in {RW, WRITE}
 
 
-class GlobalKernelBuilder:
+class WrapperKernelBuilder:
 
-    def __init__(self, local_kernel, iterset):
-        self._local_kernel = local_kernel
-        self._iterset = iterset
+    def __init__(self, kernel, domains, kernel_data, *, mesh=None):
+        if len(kernel.arguments) != len(kernel_data):
+            raise ValueError
 
-        self._generate_domain_param = UniqueNameGenerator(...)
+        if not mesh and any(d.relation is not IDENTITY for d in kernel_data):
+            raise ValueError
 
-        self._domains = set()
-        self._read_insns = set()
-        self._local_knl_insn = ...
-        self._write_insns = set()
-        self._temp_vars = set()
+        self._kernel = kernel
+        self._domains = domains
+        self._kernel_data = kernel_data
 
-    def build():
-        return lp.make_kernel(self._domains, self._insns, ...)
+        self._unique_indices = itertools.Count()
+
+    def build(self):
+        
+        packing_knls = tuple(_packing_kernel(d)
+                            for d, access in zip(self._kernel_data, self._kernel.accesses)
+                            if _is_read(access))
+        eval_knl = ...
+        unpacking_knls = ...
+
+        return lp.fuse_kernels(...)
 
     @singledispatchmethod
-    def add_argument(self, arg):
+    def _gather_kernel(self, arg, access):
         raise NotImplementedError
 
-    @add_argument.register(DatArg)
-    def add_argument_dat(self, arg):
-        if not arg.relation:
-            # no map required
-            raise NotImplementedError
+    @_gather_kernel.register(DatArg)
+    def add_argument_dat(self, arg, access):
+        insn_id = next(self.insn_counter)
+        packed_data = f"p{insn_id}"
+        sparse_data = f"dat{insn_id}"
 
-        # Each relation corresponds to a new domain (w. param), indirection, temp vars...
-        # TODO How do I ensure uniqueness? Can loopy do that? Probably. Something to do with
-        # fusing unused inames.
-        within_inames, idx = self._add_relation(arg.relation, self._iterset_iname)
+        lp.ArrayArg(sparse_data)
+        lp.TemporaryArg(packed_data, within_inames=self._domain_inames)
 
-        # TODO arg.access not reasonable as belongs to local kernel
-        min_iname = within_inames[-1]
-        dat_var = ...
-        temp_var = ...
-        if isread(arg.access):
-            self._read_insns.add(f"{temp_var}[{min_iname}] = {dat_var}[{idx}]")
-        if iswritten(arg.access):
-            self._write_insns.add(f"{dat_var}[{idx}] = {temp_var}[{min_iname}]")
+        # I should recursively add relations here since that is easier than parsing tags
+        domains = []
+        indirections = []
+        inames = []
+        kernel_data = []
+        tags = {}
+        pt = self._domain_inames
+        for rel in arg.relations:  # this starts with the 'outer' one (e.g. closure before dofs)
+            # Step 1: Define my variables
+            idx = next(self.unique_indices)
+            iname = f"i{idx}"
+            map = f"map{idx}"
+            new_pt = ...
 
-    def _add_relation(self, relation, within_inames):
-        # start search from the bottom (nearest the iterset)
-        if relation.subrelation:
-            within_inames = self._add_relation(relation.subrelation, within_inames)
+            # Step 2: Get the map and its size
+            lp.TemporaryVariable(map)
+            lp.TemporaryVariable(extent)
+            lp.CInstruction(..., assignees={map, extent}, tags={rel.name})
+            insns.append(f"ierr = PetscSectionGetClosureIndices(dm,section,&closureSection,&closureIs);CHKERRQ(ierr);")
 
-        new_iname = ...
-        new_domain_param = self._generate_domain_param()
-        new_fn_call = ...
-        new_idx = ...  # i.e. j = map[i]
-        new_map = ...
+            # Step 3: This gives us a new domain
+            domains.append(f"[{iname}]: 0<={iname}<{extent}")
 
-        self._domains.add(f"[{new_iname}]: 0<={new_iname}<{new_domain_param}")
-        self._insns.add(
-            lp.FunctionCall(..., within_inames=within_inames),
-            f"{new_idx} = {new_map}[{new_iname}]"
-        )
+            # Step 4: Now determine the new placeholder variable
+            insns.append((f"{new_pt} = {map}[{pt},{iname}]"))
+            pt = new_pt
 
-        self._temp_vars.add(new_idx, new_map)
-        return within_inames
+            tags += {iname: rel.name}
+
+        # Lastly emit the actual pack instruction
+        pack_insn = f"p[{inames}] = dat[{tmp_var}]"
+
+        knl = lp.make_kernel([self._domains, f"[{iname}]: 0<={iname}<{extent}"],
+                              (f"{temp_var} = map[{iname}]"
+                               f"p{all_subinames} = dat[{temp_var}]"))
+        knl = lp.tag_inames(knl, tags)
 
     def _set_rw_deps(self):
         """Set read/write instruction dependencies."""

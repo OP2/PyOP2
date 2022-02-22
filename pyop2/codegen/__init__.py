@@ -1,42 +1,24 @@
+import collections.abc
 from functools import singledispatch
 from itertools import chain
 
 import loopy as lp
 
-from pyop2.codegen.ir import (Expr, Loop, Terminal)
 
+class DatArg:
 
-def make_kernel(expr, *args, **kwargs):
-    """Return a loopy kernel corresponding to ``expr``."""
-    domains = parse_domains(expr)
-    insns = parse_insns(expr)
-    kernel_data = parse_kernel_data(expr)
+    def __init__(self, data, relations):
+        if not isinstance(relations, collections.abc.Iterable):
+            relations = relations,
 
-    return lp.make_kernel(domains, insns, kernel_data)
+        self.data = data  # TODO Maybe this should just be a section or something?
+        self.relations = relations
 
-
-def parse_domains(expr: Expr):
-    return frozenset(expr.domain) | chain(map(parse_domains, expr.children))
-
-
-def parse_insns(expr: Expr):
-    return frozenset(expr.insns) | chain(map(parse_insns, expr.children))
-
-def parse_insns_pack(expr: PackInstruction, domains: List[str]=None):
-    return lp.Assignment("tmp = dat[i]")
-
-@parse_insns.register
-def parse_insns_assignment(expr: UnpackInstruction, domains: List[str]=None):
-    return lp.Assignment("dat[j] = tmp[i]")
-
-def parse_kernel_data(expr: Expr, domains=None):
-    ...
-
-
-@parse_kernel_data.register(PackInstruction)
-@parse_kernel_data.register(UnpackInstruction)
-def parse_kernel_data_assignment(expr, domains):
-    return lp.ArrayArg(...)
+    def __mul__(self, other):
+        if isinstance(other, Relation):
+            return type(self)(self.data, (*self.relations, other))
+        else:
+            return NotImplemented
 
 
 if __name__ == "__main__":

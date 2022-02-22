@@ -618,18 +618,23 @@ def par_loop(*args, **kwargs):
 
 
 @mpi.collective
-def parloop(knl, *args, **kwargs):
-    """Construct and execute a :class:`Parloop`.
+def parloop(kernel, domains, kernel_data, *, mesh=None):
+    # we can let ``mesh`` be ``None`` if there are no maps involved.
+    wrapper_knl = WrapperKernelBuilder(kernel, domains, kernel_data, mesh=mesh).build()
 
-    For a description of the possible arguments to this function see
-    :class:`Parloop` and :func:`LegacyParloop`.
-    """
-    if isinstance(knl, GlobalKernel):
-        Parloop(knl, *args, **kwargs)()
-    elif isinstance(knl, LocalKernel):
-        LegacyParloop(knl, *args, **kwargs)()
-    else:
-        raise KernelTypeError
+    # now we can do transformations on the new wrapper kernel...
+
+    # """Construct and execute a :class:`Parloop`.
+    #
+    # For a description of the possible arguments to this function see
+    # :class:`Parloop` and :func:`LegacyParloop`.
+    # """
+    # if isinstance(knl, GlobalKernel):
+    #     Parloop(knl, *args, **kwargs)()
+    # elif isinstance(knl, LocalKernel):
+    #     LegacyParloop(knl, *args, **kwargs)()
+    # else:
+    #     raise KernelTypeError
 
 
 def generate_single_cell_wrapper(iterset, args, forward_args=(),
