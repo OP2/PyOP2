@@ -507,6 +507,8 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
 
     def __mul__(self, other):
         """Pointwise multiplication or scaling of fields."""
+        if isinstance(other, Relation):
+           return pyop2.codegen.DatArg(self, other)
         return self._op(other, operator.mul)
 
     def __rmul__(self, other):
