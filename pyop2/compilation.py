@@ -387,7 +387,7 @@ class MacCompiler(Compiler):
             stdargs = []
         cppargs = stdargs + ['-fPIC', '-Wall', '-framework', 'Accelerate'] + \
             opt_flags + cppargs
-        ldargs = ['-dynamiclib'] + ldargs
+        ldargs = ['-dynamiclib', "%s" % os.environ['LDFLAGS']] + ldargs
         super(MacCompiler, self).__init__(cc,
                                           cppargs=cppargs,
                                           ldargs=ldargs,
