@@ -39,10 +39,7 @@ import pytest
 import numpy as np
 from numpy.testing import assert_equal
 
-from pyop2 import op2
-from pyop2 import exceptions
-from pyop2 import sequential
-from pyop2 import base
+from pyop2 import exceptions, op2
 
 
 @pytest.fixture
@@ -205,61 +202,6 @@ class TestClassAPI:
         assert not issubclass(type(dat), op2.Set)
 
 
-class TestArgAPI:
-
-    """
-    Arg API unit tests
-    """
-
-    def test_arg_split_dat(self, dat, m_iterset_toset):
-        arg = dat(op2.READ, m_iterset_toset)
-        for a in arg.split:
-            assert a == arg
-
-    def test_arg_split_mdat(self, mdat, mmap):
-        arg = mdat(op2.READ, mmap)
-        for a, d in zip(arg.split, mdat):
-            assert a.data == d
-
-    def test_arg_split_mat(self, mat, m_iterset_toset):
-        arg = mat(op2.INC, (m_iterset_toset, m_iterset_toset))
-        for a in arg.split:
-            assert a == arg
-
-    def test_arg_split_global(self, g):
-        arg = g(op2.READ)
-        for a in arg.split:
-            assert a == arg
-
-    def test_arg_eq_dat(self, dat, m_iterset_toset):
-        assert dat(op2.READ, m_iterset_toset) == dat(op2.READ, m_iterset_toset)
-        assert not dat(op2.READ, m_iterset_toset) != dat(op2.READ, m_iterset_toset)
-
-    def test_arg_ne_dat_mode(self, dat, m_iterset_toset):
-        a1 = dat(op2.READ, m_iterset_toset)
-        a2 = dat(op2.WRITE, m_iterset_toset)
-        assert a1 != a2
-        assert not a1 == a2
-
-    def test_arg_ne_dat_map(self, dat, m_iterset_toset):
-        m2 = op2.Map(m_iterset_toset.iterset, m_iterset_toset.toset, 1,
-                     np.ones(m_iterset_toset.iterset.size))
-        assert dat(op2.READ, m_iterset_toset) != dat(op2.READ, m2)
-        assert not dat(op2.READ, m_iterset_toset) == dat(op2.READ, m2)
-
-    def test_arg_eq_mat(self, mat, m_iterset_toset):
-        a1 = mat(op2.INC, (m_iterset_toset, m_iterset_toset))
-        a2 = mat(op2.INC, (m_iterset_toset, m_iterset_toset))
-        assert a1 == a2
-        assert not a1 != a2
-
-    def test_arg_ne_mat_mode(self, mat, m_iterset_toset):
-        a1 = mat(op2.INC, (m_iterset_toset, m_iterset_toset))
-        a2 = mat(op2.WRITE, (m_iterset_toset, m_iterset_toset))
-        assert a1 != a2
-        assert not a1 == a2
-
-
 class TestSetAPI:
 
     """
@@ -358,7 +300,7 @@ class TestExtrudedSetAPI:
         e = op2.ExtrudedSet(set, 5)
         k = op2.Kernel('static void k() { }', 'k')
         with pytest.raises(exceptions.MapValueError):
-            base.ParLoop(k, e, dat(op2.READ, m_iterset_toset))
+            op2.ParLoop(k, e, dat(op2.READ, m_iterset_toset))
 
 
 class TestSubsetAPI:
@@ -508,7 +450,7 @@ class TestMixedSetAPI:
     def test_mixed_set_repr(self, mset):
         "MixedSet repr should produce a MixedSet object when eval'd."
         from pyop2.op2 import Set, MixedSet  # noqa: needed by eval
-        assert isinstance(eval(repr(mset)), base.MixedSet)
+        assert isinstance(eval(repr(mset)), op2.MixedSet)
 
     def test_mixed_set_str(self, mset):
         "MixedSet should have the expected string representation."
@@ -718,7 +660,7 @@ class TestMixedDataSetAPI:
     def test_mixed_dset_repr(self, mdset):
         "MixedDataSet repr should produce a MixedDataSet object when eval'd."
         from pyop2.op2 import Set, DataSet, MixedDataSet  # noqa: needed by eval
-        assert isinstance(eval(repr(mdset)), base.MixedDataSet)
+        assert isinstance(eval(repr(mdset)), op2.MixedDataSet)
 
     def test_mixed_dset_str(self, mdset):
         "MixedDataSet should have the expected string representation."
@@ -764,7 +706,7 @@ class TestDatAPI:
 
     def test_dat_arg_default_map(self, dat):
         """Dat __call__ should default the Arg map to None if not given."""
-        assert dat(op2.READ).map is None
+        assert dat(op2.READ).map_ is None
 
     def test_dat_arg_illegal_map(self, dset):
         """Dat __call__ should not allow a map with a toset other than this
@@ -785,11 +727,11 @@ class TestDatAPI:
         assert d.dataset.cdim == 1
 
     def test_dat_dtype_type(self, dset):
-        "The type of a Dat's dtype property should by numpy.dtype."
+        "The type of a Dat's dtype property should be a numpy.dtype."
         d = op2.Dat(dset)
-        assert type(d.dtype) == np.dtype
+        assert isinstance(d.dtype, np.dtype)
         d = op2.Dat(dset, [1.0] * dset.size * dset.cdim)
-        assert type(d.dtype) == np.dtype
+        assert isinstance(d.dtype, np.dtype)
 
     def test_dat_split(self, dat):
         "Splitting a Dat should yield a tuple with self"
@@ -809,7 +751,7 @@ class TestDatAPI:
     def test_dat_int(self, dset):
         "Data type for int data should be numpy.int."
         d = op2.Dat(dset, [1] * dset.size * dset.cdim)
-        assert d.dtype == np.int
+        assert d.dtype == np.asarray(1).dtype
 
     def test_dat_convert_int_float(self, dset):
         "Explicit float type should override NumPy's default choice of int."
@@ -909,7 +851,7 @@ class TestMixedDatAPI:
     def test_mixed_dat_illegal_dtype(self, set):
         """Constructing a MixedDat from Dats of different dtype should fail."""
         with pytest.raises(exceptions.DataValueError):
-            op2.MixedDat((op2.Dat(set, dtype=np.int), op2.Dat(set)))
+            op2.MixedDat((op2.Dat(set, dtype=np.int32), op2.Dat(set)))
 
     def test_mixed_dat_dats(self, dats):
         """Constructing a MixedDat from an iterable of Dats should leave them
@@ -1000,7 +942,7 @@ class TestMixedDatAPI:
         "MixedDat repr should produce a MixedDat object when eval'd."
         from pyop2.op2 import Set, DataSet, MixedDataSet, Dat, MixedDat  # noqa: needed by eval
         from numpy import dtype  # noqa: needed by eval
-        assert isinstance(eval(repr(mdat)), base.MixedDat)
+        assert isinstance(eval(repr(mdat)), op2.MixedDat)
 
     def test_mixed_dat_str(self, mdat):
         "MixedDat should have the expected string representation."
@@ -1220,7 +1162,7 @@ class TestMatAPI:
 
     def test_mat_illegal_name(self, sparsity):
         "Mat name should be string."
-        with pytest.raises(sequential.NameTypeError):
+        with pytest.raises(exceptions.NameTypeError):
             op2.Mat(sparsity, name=2)
 
     def test_mat_dtype(self, mat):
@@ -1303,22 +1245,22 @@ class TestGlobalAPI:
     def test_global_float(self):
         "Data type for float data should be numpy.float64."
         g = op2.Global(1, 1.0)
-        assert g.dtype == np.double
+        assert g.dtype == np.asarray(1.0).dtype
 
     def test_global_int(self):
         "Data type for int data should be numpy.int."
         g = op2.Global(1, 1)
-        assert g.dtype == np.int
+        assert g.dtype == np.asarray(1).dtype
 
     def test_global_convert_int_float(self):
         "Explicit float type should override NumPy's default choice of int."
-        g = op2.Global(1, 1, 'double')
+        g = op2.Global(1, 1, dtype=np.float64)
         assert g.dtype == np.float64
 
     def test_global_convert_float_int(self):
         "Explicit int type should override NumPy's default choice of float."
-        g = op2.Global(1, 1.5, 'int')
-        assert g.dtype == np.int
+        g = op2.Global(1, 1.5, dtype=np.int64)
+        assert g.dtype == np.int64
 
     def test_global_illegal_dtype(self):
         "Illegal data type should raise DataValueError."
@@ -1380,10 +1322,6 @@ class TestGlobalAPI:
         """Global __call__ should not allow illegal access modes."""
         with pytest.raises(exceptions.ModeValueError):
             g(mode)
-
-    def test_global_arg_ignore_map(self, g, m_iterset_toset):
-        """Global __call__ should ignore the optional second argument."""
-        assert g(op2.READ, m_iterset_toset).map is None
 
 
 class TestMapAPI:
@@ -1622,8 +1560,8 @@ class TestKernelAPI:
 
     def test_kernel_properties(self):
         "Kernel constructor should correctly set attributes."
-        k = op2.Kernel("", 'foo')
-        assert k.name == 'foo'
+        k = op2.CStringLocalKernel("", "foo", accesses=(), dtypes=())
+        assert k.name == "foo"
 
     def test_kernel_repr(self, set):
         "Kernel should have the expected repr."
@@ -1663,7 +1601,7 @@ class TestParLoopAPI:
         map = op2.Map(set2, set1, 1, [0, 0, 0])
         kernel = op2.Kernel("void k() { }", "k")
         with pytest.raises(exceptions.MapValueError):
-            base.ParLoop(kernel, set1, dat(op2.READ, map))
+            op2.ParLoop(kernel, set1, dat(op2.READ, map))
 
     def test_illegal_mat_iterset(self, sparsity):
         """ParLoop should reject a Mat argument using a different iteration

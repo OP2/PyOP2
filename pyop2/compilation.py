@@ -33,6 +33,8 @@
 
 
 import os
+import platform
+import shutil
 import subprocess
 import sys
 import ctypes
@@ -46,7 +48,6 @@ from pyop2.mpi import dup_comm, get_compilation_comm, set_compilation_comm
 from pyop2.configuration import configuration
 from pyop2.logger import debug, progress, INFO
 from pyop2.exceptions import CompilationError
-from pyop2.base import JITModule
 
 
 def _check_hashes(x, y, datatype):
@@ -81,7 +82,7 @@ def sniff_compiler_version(cc):
         compiler = "unknown"
 
     ver = version.LooseVersion("unknown")
-    if compiler in ["gcc", "icc"]:
+    if compiler == "gcc":
         try:
             ver = subprocess.check_output([cc, "-dumpversion"],
                                           stderr=subprocess.DEVNULL).decode("utf-8")
@@ -181,7 +182,9 @@ class Compiler(object):
         self.comm = compilation_comm(comm)
         self._cc = os.environ.get(ccenv, cc)
         self._ld = os.environ.get('LDSHARED', ld)
-        self._cppargs = cppargs + configuration['cflags'].split() + self.workaround_cflags
+        self._cppargs = cppargs + configuration['cflags'].split()
+        if configuration["use_safe_cflags"]:
+            self._cppargs += self.workaround_cflags
         self._ldargs = ldargs + configuration['ldflags'].split()
 
     @property
@@ -233,7 +236,7 @@ class Compiler(object):
         library."""
 
         # Determine cache key
-        hsh = md5(str(jitmodule.cache_key[1:]).encode())
+        hsh = md5(str(jitmodule.cache_key).encode())
         hsh.update(self._cc.encode())
         if self._ld:
             hsh.update(self._ld.encode())
@@ -365,9 +368,17 @@ class MacCompiler(Compiler):
     """
 
     def __init__(self, cppargs=[], ldargs=[], cpp=False, comm=None):
-        opt_flags = ['-march=native', '-O3', '-ffast-math', '-fopenmp-simd']
-        if configuration['debug']:
-            opt_flags = ['-O0', '-g']
+        machine = platform.uname().machine
+        opt_flags = ["-O3", "-ffast-math", "-fopenmp-simd"]
+        if machine == "arm64":
+            # See https://stackoverflow.com/q/65966969
+            opt_flags.append("-mcpu=apple-a14")
+        elif machine == "x86_64":
+            opt_flags.append("-march=native")
+
+        if configuration["debug"]:
+            opt_flags = ["-O0", "-g"]
+
         cc = "mpicc"
         stdargs = ["-std=c99"]
         if cpp:
@@ -453,6 +464,8 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
     :kwarg comm: Optional communicator to compile the code on (only
         rank 0 compiles code) (defaults to COMM_WORLD).
     """
+    from pyop2.global_kernel import GlobalKernel
+
     if isinstance(jitmodule, str):
         class StrCode(object):
             def __init__(self, code, argtypes):
@@ -462,7 +475,7 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
                 # cache key
                 self.argtypes = argtypes
         code = StrCode(jitmodule, argtypes)
-    elif isinstance(jitmodule, JITModule):
+    elif isinstance(jitmodule, GlobalKernel):
         code = jitmodule
     else:
         raise ValueError("Don't know how to compile code of type %r" % type(jitmodule))
@@ -497,31 +510,27 @@ def clear_cache(prompt=False):
     :arg prompt: if ``True`` prompt before removing any files
     """
     cachedir = configuration['cache_dir']
+
     if not os.path.exists(cachedir):
+        print("Cache directory could not be found")
         return
-
-    files = [os.path.join(cachedir, f) for f in os.listdir(cachedir)
-             if os.path.isfile(os.path.join(cachedir, f))]
-    nfiles = len(files)
-
-    if nfiles == 0:
+    if len(os.listdir(cachedir)) == 0:
         print("No cached libraries to remove")
         return
 
     remove = True
     if prompt:
-
-        user = input("Remove %d cached libraries from %s? [Y/n]: " % (nfiles, cachedir))
+        user = input(f"Remove cached libraries from {cachedir}? [Y/n]: ")
 
         while user.lower() not in ['', 'y', 'n']:
             print("Please answer y or n.")
-            user = input("Remove %d cached libraries from %s? [Y/n]: " % (nfiles, cachedir))
+            user = input(f"Remove cached libraries from {cachedir}? [Y/n]: ")
 
         if user.lower() == 'n':
             remove = False
 
     if remove:
-        print("Removing %d cached libraries from %s" % (nfiles, cachedir))
-        [os.remove(f) for f in files]
+        print(f"Removing cached libraries from {cachedir}")
+        shutil.rmtree(cachedir)
     else:
         print("Not removing cached libraries")

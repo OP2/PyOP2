@@ -5,6 +5,8 @@ from functools import reduce
 
 import numpy
 from loopy.types import OpaqueType
+from pyop2.global_kernel import (GlobalKernelArg, DatKernelArg, MixedDatKernelArg,
+                                 MatKernelArg, MixedMatKernelArg, PermutedMapKernelArg)
 from pyop2.codegen.representation import (Accumulate, Argument, Comparison,
                                           DummyInstruction, Extent, FixedIndex,
                                           FunctionCall, Index, Indexed,
@@ -16,7 +18,7 @@ from pyop2.codegen.representation import (Accumulate, Argument, Comparison,
                                           When, Zero)
 from pyop2.datatypes import IntType
 from pyop2.op2 import (ALL, INC, MAX, MIN, ON_BOTTOM, ON_INTERIOR_FACETS,
-                       ON_TOP, READ, RW, WRITE, Subset)
+                       ON_TOP, READ, RW, WRITE)
 from pyop2.utils import cached_property
 
 
@@ -30,34 +32,31 @@ class Map(object):
 
     __slots__ = ("values", "offset", "interior_horizontal",
                  "variable", "unroll", "layer_bounds",
-                 "prefetch")
+                 "prefetch", "_pmap_count")
 
-    def __init__(self, map_, interior_horizontal, layer_bounds,
-                 values=None, offset=None, unroll=False):
-        self.variable = map_.iterset._extruded and not map_.iterset.constant_layers
+    def __init__(self, interior_horizontal, layer_bounds,
+                 arity, dtype,
+                 offset=None, unroll=False,
+                 extruded=False, constant_layers=False):
+        self.variable = extruded and not constant_layers
         self.unroll = unroll
         self.layer_bounds = layer_bounds
         self.interior_horizontal = interior_horizontal
         self.prefetch = {}
-        if values is not None:
-            raise RuntimeError
-            self.values = values
-            if map_.offset is not None:
-                assert offset is not None
-            self.offset = offset
-            return
 
-        offset = map_.offset
-        shape = (None, ) + map_.shape[1:]
-        values = Argument(shape, dtype=map_.dtype, pfx="map")
+        shape = (None, arity)
+        values = Argument(shape, dtype=dtype, pfx="map")
         if offset is not None:
-            if len(set(map_.offset)) == 1:
+            assert type(offset) == tuple
+            offset = numpy.array(offset, dtype=numpy.int32)
+            if len(set(offset)) == 1:
                 offset = Literal(offset[0], casting=True)
             else:
-                offset = NamedLiteral(offset, name=values.name + "_offset")
+                offset = NamedLiteral(offset, parent=values, suffix="offset")
 
         self.values = values
         self.offset = offset
+        self._pmap_count = itertools.count()
 
     @property
     def shape(self):
@@ -67,7 +66,7 @@ class Map(object):
     def dtype(self):
         return self.values.dtype
 
-    def indexed(self, multiindex, layer=None):
+    def indexed(self, multiindex, layer=None, permute=lambda x: x):
         n, i, f = multiindex
         if layer is not None and self.offset is not None:
             # For extruded mesh, prefetch the indirections for each map, so that they don't
@@ -76,7 +75,7 @@ class Map(object):
             base_key = None
             if base_key not in self.prefetch:
                 j = Index()
-                base = Indexed(self.values, (n, j))
+                base = Indexed(self.values, (n, permute(j)))
                 self.prefetch[base_key] = Materialise(PackInst(), base, MultiIndex(j))
 
             base = self.prefetch[base_key]
@@ -103,21 +102,56 @@ class Map(object):
             return Indexed(self.prefetch[key], (f, i)), (f, i)
         else:
             assert f.extent == 1 or f.extent is None
-            base = Indexed(self.values, (n, i))
+            base = Indexed(self.values, (n, permute(i)))
             return base, (f, i)
 
-    def indexed_vector(self, n, shape, layer=None):
+    def indexed_vector(self, n, shape, layer=None, permute=lambda x: x):
         shape = self.shape[1:] + shape
         if self.interior_horizontal:
             shape = (2, ) + shape
         else:
             shape = (1, ) + shape
         f, i, j = (Index(e) for e in shape)
-        base, (f, i) = self.indexed((n, i, f), layer=layer)
+        base, (f, i) = self.indexed((n, i, f), layer=layer, permute=permute)
         init = Sum(Product(base, Literal(numpy.int32(j.extent))), j)
         pack = Materialise(PackInst(), init, MultiIndex(f, i, j))
         multiindex = tuple(Index(e) for e in pack.shape)
         return Indexed(pack, multiindex), multiindex
+
+
+class PMap(Map):
+    __slots__ = ("permutation",)
+
+    def __init__(self, map_, permutation):
+        # Copy over properties
+        self.variable = map_.variable
+        self.unroll = map_.unroll
+        self.layer_bounds = map_.layer_bounds
+        self.interior_horizontal = map_.interior_horizontal
+        self.prefetch = {}
+        self.values = map_.values
+        self.offset = map_.offset
+        offset = map_.offset
+        # TODO: this is a hack, rep2loopy should be in charge of
+        # generating all names!
+        count = next(map_._pmap_count)
+        if offset is not None:
+            if offset.shape:
+                # Have a named literal
+                offset = offset.value[permutation]
+                offset = NamedLiteral(offset, parent=self.values, suffix=f"permutation{count}_offset")
+            else:
+                offset = map_.offset
+        self.offset = offset
+        self.permutation = NamedLiteral(permutation, parent=self.values, suffix=f"permutation{count}")
+
+    def indexed(self, multiindex, layer=None):
+        permute = lambda x: Indexed(self.permutation, (x,))
+        return super().indexed(multiindex, layer=layer, permute=permute)
+
+    def indexed_vector(self, n, shape, layer=None):
+        permute = lambda x: Indexed(self.permutation, (x,))
+        return super().indexed_vector(n, shape, layer=layer, permute=permute)
 
 
 class Pack(metaclass=ABCMeta):
@@ -588,15 +622,18 @@ class MixedMatPack(Pack):
 
 class WrapperBuilder(object):
 
-    def __init__(self, *, kernel, iterset, iteration_region=None, single_cell=False,
+    def __init__(self, *, kernel, subset, extruded, constant_layers, iteration_region=None, single_cell=False,
                  pass_layer_to_kernel=False, forward_arg_types=()):
         self.kernel = kernel
+        self.local_knl_args = iter(kernel.arguments)
         self.arguments = []
         self.argument_accesses = []
         self.packed_args = []
         self.indices = []
         self.maps = OrderedDict()
-        self.iterset = iterset
+        self.subset = subset
+        self.extruded = extruded
+        self.constant_layers = constant_layers
         if iteration_region is None:
             self.iteration_region = ALL
         else:
@@ -608,18 +645,6 @@ class WrapperBuilder(object):
     @property
     def requires_zeroed_output_arguments(self):
         return self.kernel.requires_zeroed_output_arguments
-
-    @property
-    def subset(self):
-        return isinstance(self.iterset, Subset)
-
-    @property
-    def extruded(self):
-        return self.iterset._extruded
-
-    @property
-    def constant_layers(self):
-        return self.extruded and self.iterset.constant_layers
 
     @cached_property
     def loop_extents(self):
@@ -702,8 +727,6 @@ class WrapperBuilder(object):
     def _layer_index(self):
         if self.constant_layers:
             return FixedIndex(0)
-        if self.subset:
-            return self._loop_index
         else:
             return self.loop_index
 
@@ -727,74 +750,81 @@ class WrapperBuilder(object):
             return (self.loop_index, None, self._loop_index)
 
     def add_argument(self, arg):
+        local_arg = next(self.local_knl_args)
+        access = local_arg.access
+        dtype = local_arg.dtype
         interior_horizontal = self.iteration_region == ON_INTERIOR_FACETS
-        if arg._is_dat:
-            if arg._is_mixed:
-                packs = []
-                for a in arg:
-                    shape = (None, *a.data.shape[1:])
-                    argument = Argument(shape, a.data.dtype, pfx="mdat")
-                    packs.append(a.data.pack(argument, arg.access, self.map_(a.map, unroll=a.unroll_map),
-                                             interior_horizontal=interior_horizontal,
-                                             init_with_zero=self.requires_zeroed_output_arguments))
-                    self.arguments.append(argument)
-                pack = MixedDatPack(packs, arg.access, arg.dtype, interior_horizontal=interior_horizontal)
-                self.packed_args.append(pack)
-                self.argument_accesses.append(arg.access)
-            else:
-                if arg._is_dat_view:
-                    view_index = arg.data.index
-                    data = arg.data._parent
-                else:
-                    view_index = None
-                    data = arg.data
-                shape = (None, *data.shape[1:])
-                argument = Argument(shape,
-                                    arg.data.dtype,
-                                    pfx="dat")
-                pack = arg.data.pack(argument, arg.access, self.map_(arg.map, unroll=arg.unroll_map),
-                                     interior_horizontal=interior_horizontal,
-                                     view_index=view_index,
-                                     init_with_zero=self.requires_zeroed_output_arguments)
-                self.arguments.append(argument)
-                self.packed_args.append(pack)
-                self.argument_accesses.append(arg.access)
-        elif arg._is_global:
-            argument = Argument(arg.data.dim,
-                                arg.data.dtype,
-                                pfx="glob")
-            pack = GlobalPack(argument, arg.access,
+
+        if isinstance(arg, GlobalKernelArg):
+            argument = Argument(arg.dim, dtype, pfx="glob")
+
+            pack = GlobalPack(argument, access,
                               init_with_zero=self.requires_zeroed_output_arguments)
             self.arguments.append(argument)
-            self.packed_args.append(pack)
-            self.argument_accesses.append(arg.access)
-        elif arg._is_mat:
-            if arg._is_mixed:
-                packs = []
-                for a in arg:
-                    argument = Argument((), PetscMat(), pfx="mat")
-                    map_ = tuple(self.map_(m, unroll=arg.unroll_map) for m in a.map)
-                    packs.append(arg.data.pack(argument, a.access, map_,
-                                               a.data.dims, a.data.dtype,
-                                               interior_horizontal=interior_horizontal))
-                    self.arguments.append(argument)
-                pack = MixedMatPack(packs, arg.access, arg.dtype,
-                                    arg.data.sparsity.shape)
-                self.packed_args.append(pack)
-                self.argument_accesses.append(arg.access)
+        elif isinstance(arg, DatKernelArg):
+            if arg.dim == ():
+                shape = (None, 1)
             else:
-                argument = Argument((), PetscMat(), pfx="mat")
-                map_ = tuple(self.map_(m, unroll=arg.unroll_map) for m in arg.map)
-                pack = arg.data.pack(argument, arg.access, map_,
-                                     arg.data.dims, arg.data.dtype,
-                                     interior_horizontal=interior_horizontal)
+                shape = (None, *arg.dim)
+            argument = Argument(shape, dtype, pfx="dat")
+
+            if arg.is_indirect:
+                map_ = self._add_map(arg.map_)
+            else:
+                map_ = None
+            pack = arg.pack(argument, access, map_=map_,
+                            interior_horizontal=interior_horizontal,
+                            view_index=arg.index,
+                            init_with_zero=self.requires_zeroed_output_arguments)
+            self.arguments.append(argument)
+        elif isinstance(arg, MixedDatKernelArg):
+            packs = []
+            for a in arg:
+                if a.dim == ():
+                    shape = (None, 1)
+                else:
+                    shape = (None, *a.dim)
+                argument = Argument(shape, dtype, pfx="mdat")
+
+                if a.is_indirect:
+                    map_ = self._add_map(a.map_)
+                else:
+                    map_ = None
+
+                packs.append(arg.pack(argument, access, map_,
+                                      interior_horizontal=interior_horizontal,
+                                      init_with_zero=self.requires_zeroed_output_arguments))
                 self.arguments.append(argument)
-                self.packed_args.append(pack)
-                self.argument_accesses.append(arg.access)
+            pack = MixedDatPack(packs, access, dtype,
+                                interior_horizontal=interior_horizontal)
+        elif isinstance(arg, MatKernelArg):
+            argument = Argument((), PetscMat(), pfx="mat")
+            maps = tuple(self._add_map(m, arg.unroll)
+                         for m in arg.maps)
+            pack = arg.pack(argument, access, maps,
+                            arg.dims, dtype,
+                            interior_horizontal=interior_horizontal)
+            self.arguments.append(argument)
+        elif isinstance(arg, MixedMatKernelArg):
+            packs = []
+            for a in arg:
+                argument = Argument((), PetscMat(), pfx="mat")
+                maps = tuple(self._add_map(m, a.unroll)
+                             for m in a.maps)
+
+                packs.append(arg.pack(argument, access, maps,
+                                      a.dims, dtype,
+                                      interior_horizontal=interior_horizontal))
+                self.arguments.append(argument)
+            pack = MixedMatPack(packs, access, dtype,
+                                arg.shape)
         else:
             raise ValueError("Unhandled argument type")
 
-    def map_(self, map_, unroll=False):
+        self.packed_args.append(pack)
+        self.argument_accesses.append(access)
+
+    def _add_map(self, map_, unroll=False):
         if map_ is None:
             return None
         interior_horizontal = self.iteration_region == ON_INTERIOR_FACETS
@@ -802,11 +832,31 @@ class WrapperBuilder(object):
         try:
             return self.maps[key]
         except KeyError:
-            map_ = Map(map_, interior_horizontal,
-                       (self.bottom_layer, self.top_layer),
-                       unroll=unroll)
+            if isinstance(map_, PermutedMapKernelArg):
+                imap = self._add_map(map_.base_map, unroll)
+                map_ = PMap(imap, numpy.asarray(map_.permutation, dtype=IntType))
+            else:
+                map_ = Map(interior_horizontal,
+                           (self.bottom_layer, self.top_layer),
+                           arity=map_.arity, offset=map_.offset, dtype=IntType,
+                           unroll=unroll,
+                           extruded=self.extruded,
+                           constant_layers=self.constant_layers)
             self.maps[key] = map_
             return map_
+
+    @cached_property
+    def loopy_argument_accesses(self):
+        """Loopy wants the CallInstruction to have argument access
+        descriptors aligned with how the callee treats the function.
+        In the cases of TSFC kernels with WRITE access, this is not
+        how we treats the function, so we have to keep track of the
+        difference here."""
+        if self.requires_zeroed_output_arguments:
+            mapping = {WRITE: INC}
+        else:
+            mapping = {}
+        return list(mapping.get(a, a) for a in self.argument_accesses)
 
     @property
     def kernel_args(self):
@@ -825,12 +875,16 @@ class WrapperBuilder(object):
         args.extend(self.arguments)
         # maps are refcounted
         for map_ in self.maps.values():
-            args.append(map_.values)
+            # But we don't need to emit stuff for PMaps because they
+            # are a Map (already seen + a permutation [encoded in the
+            # indexing]).
+            if not isinstance(map_, PMap):
+                args.append(map_.values)
         return tuple(args)
 
     def kernel_call(self):
         args = self.kernel_args
-        access = tuple(self.argument_accesses)
+        access = tuple(self.loopy_argument_accesses)
         # assuming every index is free index
         free_indices = set(itertools.chain.from_iterable(arg.multiindex for arg in args))
         # remove runtime index

@@ -39,17 +39,23 @@ from pyop2.configuration import configuration
 from pyop2.logger import debug, info, warning, error, critical, set_log_level
 from pyop2.mpi import MPI, COMM_WORLD, collective
 
-from pyop2.sequential import par_loop, Kernel  # noqa: F401
-from pyop2.sequential import READ, WRITE, RW, INC, MIN, MAX  # noqa: F401
-from pyop2.base import ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL  # noqa: F401
-from pyop2.sequential import Set, ExtrudedSet, MixedSet, Subset, DataSet, MixedDataSet  # noqa: F401
-from pyop2.sequential import Map, MixedMap, Sparsity, Halo  # noqa: F401
-from pyop2.sequential import Global, GlobalDataSet        # noqa: F401
-from pyop2.sequential import Dat, MixedDat, DatView, Mat  # noqa: F401
-from pyop2.sequential import ParLoop as SeqParLoop
-from pyop2.pyparloop import ParLoop as PyParLoop
+from pyop2.types import (
+    Set, ExtrudedSet, MixedSet, Subset, DataSet, MixedDataSet,
+    Map, MixedMap, PermutedMap, Sparsity, Halo,
+    Global, GlobalDataSet,
+    Dat, MixedDat, DatView, Mat
+)
+from pyop2.types import (READ, WRITE, RW, INC, MIN, MAX,
+                         ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL)
 
-import types
+from pyop2.local_kernel import CStringLocalKernel, LoopyLocalKernel, CoffeeLocalKernel, Kernel  # noqa: F401
+from pyop2.global_kernel import (GlobalKernelArg, DatKernelArg, MixedDatKernelArg,  # noqa: F401
+                                 MatKernelArg, MixedMatKernelArg, MapKernelArg, GlobalKernel)
+from pyop2.parloop import (GlobalParloopArg, DatParloopArg, MixedDatParloopArg,  # noqa: F401
+                           MatParloopArg, MixedMatParloopArg, Parloop, parloop, par_loop)
+from pyop2.parloop import (GlobalLegacyArg, DatLegacyArg, MixedDatLegacyArg,  # noqa: F401
+                           MatLegacyArg, MixedMatLegacyArg, LegacyParloop, ParLoop)
+
 import loopy
 
 __all__ = ['configuration', 'READ', 'WRITE', 'RW', 'INC', 'MIN', 'MAX',
@@ -58,15 +64,8 @@ __all__ = ['configuration', 'READ', 'WRITE', 'RW', 'INC', 'MIN', 'MAX',
            'set_log_level', 'MPI', 'init', 'exit', 'Kernel', 'Set', 'ExtrudedSet',
            'MixedSet', 'Subset', 'DataSet', 'GlobalDataSet', 'MixedDataSet',
            'Halo', 'Dat', 'MixedDat', 'Mat', 'Global', 'Map', 'MixedMap',
-           'Sparsity', 'par_loop', 'ParLoop',
-           'DatView']
-
-
-def ParLoop(kernel, *args, **kwargs):
-    if isinstance(kernel, types.FunctionType):
-        return PyParLoop(kernel, *args, **kwargs)
-    else:
-        return SeqParLoop(kernel, *args, **kwargs)
+           'Sparsity', 'parloop', 'Parloop', 'ParLoop', 'par_loop',
+           'DatView', 'PermutedMap']
 
 
 _initialised = False
