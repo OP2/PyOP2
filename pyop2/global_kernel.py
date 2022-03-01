@@ -15,7 +15,6 @@ from pyop2.configuration import configuration
 from pyop2.datatypes import IntType, as_ctypes
 from pyop2.types import IterationRegion
 from pyop2.utils import cached_property, get_petsc_dir
-from pyop2 import configuration
 from pyop2 import op2
 
 
@@ -355,7 +354,7 @@ class GlobalKernel(Cached):
             device_code = "\n\n".join(str(dp.ast) for dp in code.device_programs)
             return preamble + "\nextern \"C\" {\n" + device_code + "\n}\n"
         return code.device_code()
-    
+
     def vectorise(wrapper, iname, batch_size):
         """Return a vectorised version of wrapper, vectorising over iname.
 
@@ -381,8 +380,6 @@ class GlobalKernel(Cached):
         kernel = kernel.copy(temporary_variables=tmps)
 
         from lp.preprocess import check_cvec_vectorizability, cvec_retag_and_privatize, realize_ilp
-        from lp.kernel.data import OpenMPSIMDTag, VectorizeTag
-        from lp.transform.iname import tag_inames
 
         kernel = realize_ilp(kernel)  # FIXME: do we also need to realize the reductions first?
 
@@ -393,7 +390,7 @@ class GlobalKernel(Cached):
         kernel = cvec_retag_and_privatize(kernel, vector_inst, pragma_inst_to_tag, unr_inst_to_tag)
 
         wrapper = wrapper.with_root_kernel(kernel)
-        
+
         return wrapper
 
     @PETSc.Log.EventDecorator()
