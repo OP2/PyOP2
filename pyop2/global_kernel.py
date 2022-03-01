@@ -337,9 +337,9 @@ class GlobalKernel(Cached):
         else:
             iname = "n"
 
-        has_matrix = any(isinstance(arg, MatKernelArg) for arg in self._args)
-        has_rw = any(arg.access == op2.RW for arg in self._args)
-        is_cplx = any(arg.dtype.name == 'complex128' for arg in self._args)
+        has_matrix = any(isinstance(arg, MatKernelArg) for arg in self.arguments)
+        has_rw = any(arg.access == op2.RW for arg in self.arguments)
+        is_cplx = any(arg.dtype.name == 'complex128' for arg in self.arguments)
         vectorisable = not (has_matrix or has_rw) and (configuration["vectorization_strategy"])
 
         if (isinstance(self._kernel.code, lp.LoopKernel) and vectorisable):
