@@ -332,12 +332,12 @@ class GlobalKernel(Cached):
         from pyop2.codegen.rep2loopy import generate
 
         wrapper = generate(self.builder)
-        if self._iterset._extruded:
+        if self._extruded:
             iname = "layer"
         else:
             iname = "n"
 
-        has_matrix = any(arg._is_mat for arg in self._args)
+        has_matrix = any(isinstance(arg, MatKernelArg) for arg in self._args)
         has_rw = any(arg.access == op2.RW for arg in self._args)
         is_cplx = any(arg.dtype.name == 'complex128' for arg in self._args)
         vectorisable = not (has_matrix or has_rw) and (configuration["vectorization_strategy"])
