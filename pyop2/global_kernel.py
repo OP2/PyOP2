@@ -348,7 +348,6 @@ class GlobalKernel(Cached):
         :arg comm: The communicator the compilation is collective over.
         :returns: A ctypes function pointer for the compiled function.
         """
-        compiler = configuration["compiler"]
         extension = "cpp" if self.local_kernel.cpp else "c"
         cppargs = (self._cppargs
                    + ["-I%s/include" % d for d in get_petsc_dir()]
@@ -363,7 +362,7 @@ class GlobalKernel(Cached):
                                 cppargs=cppargs,
                                 ldargs=ldargs,
                                 restype=ctypes.c_int,
-                                compiler=compiler,
+                                compiler=None,
                                 comm=comm)
 
     @cached_property
