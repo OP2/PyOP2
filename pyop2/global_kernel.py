@@ -343,10 +343,6 @@ class GlobalKernel(Cached):
         vectorisable = (not (has_matrix or has_rw) and (configuration["vectorization_strategy"])) and not is_cplx
 
         if vectorisable:
-                #FIXME inside the vectorisation we loose the connection of the wrapper kernel
-                # to the kernels that it is calling
-                # I run into
-                # loopy.diagnostic.LoopyError: Unknown function 'expression_kernel' -- register a callable corresponding to it.
                 wrapper = self.vectorise(wrapper, iname, configuration["simd_width"])
         code = lp.generate_code_v2(wrapper)
 
@@ -399,7 +395,7 @@ class GlobalKernel(Cached):
         # but it throws the error
         # pytools.tag.NonUniqueTagError: Multiple tags are direct subclasses of the following UniqueTag(s): InameImplementationTag
 
-        return kernel
+        return wrapper.with_kernel(kernel)
 
     @PETSc.Log.EventDecorator()
     @mpi.collective
