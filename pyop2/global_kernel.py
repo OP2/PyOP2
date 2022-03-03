@@ -386,7 +386,7 @@ class GlobalKernel(Cached):
 
         # tag axes of the temporaries as vectorised
         for name, tmp in tmps.items():
-            tag = "vec" + len(tmp.shape)*",c"
+            tag = "vec" + (len(tmp.shape)-1)*",c"
             kernel = lp.tag_array_axes(kernel, name, tag)
 
         return wrapper.with_kernel(kernel)
