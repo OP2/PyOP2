@@ -377,17 +377,17 @@ class GlobalKernel(Cached):
 
         if configuration["vectorization_strategy"] == "ve":
             kernel = lp.split_iname(kernel, iname, batch_size, slabs=slabs, inner_iname=inner_iname)
-            
-        # tag the inner iname as vectorized
-        kernel = lp.tag_inames(kernel, {inner_iname: lp.VectorizeTag(lp.OpenMPSIMDTag())})
 
         # private the temporaries on the inner inames
         kernel = lp.privatize_temporaries_with_inames(kernel, inner_iname)
 
         # tag axes of the temporaries as vectorised
-        for name, tmp in tmps.items():
+        for name, tmp in kernel.temporary_variables.items():
             tag = "vec" + (len(tmp.shape)-1)*",c"
             kernel = lp.tag_array_axes(kernel, name, tag)
+
+        # tag the inner iname as vectorized
+        kernel = lp.tag_inames(kernel, {inner_iname: lp.VectorizeTag(lp.OpenMPSIMDTag())})
 
         return wrapper.with_kernel(kernel)
 
