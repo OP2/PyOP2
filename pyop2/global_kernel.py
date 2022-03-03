@@ -343,6 +343,10 @@ class GlobalKernel(Cached):
         vectorisable = (not (has_matrix or has_rw) and (configuration["vectorization_strategy"])) and not is_cplx
 
         if vectorisable:
+                #FIXME inside the vectorisation we loose the connection of the wrapper kernel
+                # to the kernels that it is calling
+                # I run into
+                # loopy.diagnostic.LoopyError: Unknown function 'expression_kernel' -- register a callable corresponding to it.
                 wrapper = self.vectorise(wrapper, iname, configuration["simd_width"])
         code = lp.generate_code_v2(wrapper)
 
@@ -353,7 +357,7 @@ class GlobalKernel(Cached):
             return preamble + "\nextern \"C\" {\n" + device_code + "\n}\n"
         return code.device_code()
 
-    def vectorise(wrapper, iname, batch_size):
+    def vectorise(self, wrapper, iname, batch_size):
         """Return a vectorised version of wrapper, vectorising over iname.
 
         :arg wrapper: A loopy kernel to vectorise.
