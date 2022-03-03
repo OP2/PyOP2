@@ -385,19 +385,9 @@ class GlobalKernel(Cached):
         kernel = lp.privatize_temporaries_with_inames(kernel, inner_iname)
 
         # tag axes of the temporaries as vectorised
-        if tmps:
-            # The following only works if I uncomment the error I ge in 
-            # File "/Users/sv2518/firedrakeinstalls/fresh/firedrake/src/loopy/loopy/kernel/array.py", line 803, in __init__
-            # The error is
-            # loopy.diagnostic.LoopyError: contradictory values for number of dimensions of array 't0' from shape, strides, dim_tags, or dim_names
-            kernel = lp.tag_array_axes(kernel, ",".join(tmps.keys()), "vec")
-        
-        # tag the inner iname as vectorized
-        kernel = lp.tag_inames(kernel, {inner_iname: lp.VectorizeTag()})
-        # FIXME I want to do 
-        # kernel = lp.tag_inames(kernel, {inner_iname: lp.VectorizeTag(lp.OpenMPSIMDTag())})
-        # but it throws the error
-        # pytools.tag.NonUniqueTagError: Multiple tags are direct subclasses of the following UniqueTag(s): InameImplementationTag
+        for name, tmp in tmps.items():
+            tag = "vec" + len(tmp.shape)*",c"
+            kernel = lp.tag_array_axes(kernel, name, tag)
 
         return wrapper.with_kernel(kernel)
 
