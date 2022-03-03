@@ -343,8 +343,8 @@ class GlobalKernel(Cached):
         vectorisable = (not (has_matrix or has_rw) and (configuration["vectorization_strategy"])) and not is_cplx
 
         if vectorisable:
-                wrapper = lp.inline_callable_kernel(wrapper, self.local_kernel.name)
-                wrapper = self.vectorise(wrapper, iname, configuration["simd_width"])
+            wrapper = lp.inline_callable_kernel(wrapper, self.local_kernel.name)
+            wrapper = self.vectorise(wrapper, iname, configuration["simd_width"])
         code = lp.generate_code_v2(wrapper)
 
         if self.local_kernel.cpp:
@@ -365,7 +365,7 @@ class GlobalKernel(Cached):
 
         wrapper = wrapper.copy(target=lp.CVectorExtensionsTarget())
         kernel = wrapper.default_entrypoint
-        
+
         # align temps
         alignment = configuration["alignment"]
         tmps = dict((name, tv.copy(alignment=alignment)) for name, tv in kernel.temporary_variables.items())
@@ -387,8 +387,9 @@ class GlobalKernel(Cached):
 
         # tag axes of the temporaries as vectorised
         for name, tmp in kernel.temporary_variables.items():
-            tag = "vec" + (len(tmp.shape)-1)*",c"
-            kernel = lp.tag_array_axes(kernel, name, tag)
+            if not (tmp.read_only and tmp.initializer is not None):
+                tag = (len(tmp.shape)-1)*"c," + "vec"
+                kernel = lp.tag_array_axes(kernel, name, tag)
 
         # tag the inner iname as vectorized
         kernel = lp.tag_inames(kernel, {inner_iname: lp.VectorizeTag(lp.OpenMPSIMDTag())})
