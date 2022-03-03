@@ -338,13 +338,11 @@ class GlobalKernel(Cached):
             iname = "n"
 
         has_matrix = any(isinstance(arg, MatKernelArg) for arg in self.arguments)
-        has_rw = any(arg.access == op2.RW for arg in self.arguments)
-        is_cplx = any(arg.dtype.name == 'complex128' for arg in self.arguments)
-        vectorisable = not (has_matrix or has_rw) and (configuration["vectorization_strategy"])
+        has_rw = any(arg.access == op2.RW for arg in self.local_kernel.arguments)
+        is_cplx = any(arg.dtype == 'complex128' for arg in self.local_kernel.arguments)
+        vectorisable = (not (has_matrix or has_rw) and (configuration["vectorization_strategy"])) and not is_cplx
 
-        if (isinstance(self._kernel.code, lp.LoopKernel) and vectorisable):
-            wrapper = lp.inline_callable_kernel(wrapper, self._kernel.name)
-            if not is_cplx:
+        if vectorisable:
                 wrapper = self.vectorise(wrapper, iname, configuration["simd_width"])
         code = lp.generate_code_v2(wrapper)
 
@@ -364,34 +362,40 @@ class GlobalKernel(Cached):
         if batch_size == 1:
             return wrapper
 
-        # create constant zero vectors
-        wrapper = wrapper.copy(target=lp.CVecTarget(batch_size))
-        kernel = wrapper.root_kernel
+        wrapper = wrapper.copy(target=lp.CVectorExtensionsTarget())
+        kernel = wrapper.default_entrypoint
+        
+        # align temps
+        alignment = configuration["alignment"]
+        tmps = dict((name, tv.copy(alignment=alignment)) for name, tv in kernel.temporary_variables.items())
+        kernel = kernel.copy(temporary_variables=tmps)
 
-        # split iname and vectorize the inner loop
+        # split iname
         slabs = (1, 1)
         inner_iname = iname + "_batch"
 
         if configuration["vectorization_strategy"] == "ve":
             kernel = lp.split_iname(kernel, iname, batch_size, slabs=slabs, inner_tag="vec", inner_iname=inner_iname)
 
-        alignment = configuration["alignment"]
-        tmps = dict((name, tv.copy(alignment=alignment)) for name, tv in kernel.temporary_variables.items())
-        kernel = kernel.copy(temporary_variables=tmps)
+        # private the temporaries on the inner inames
+        kernel = lp.privatize_temporaries_with_inames(kernel, inner_iname)
 
-        from lp.preprocess import check_cvec_vectorizability, cvec_retag_and_privatize, realize_ilp
+        # tag axes of the temporaries as vectorised
+        if tmps:
+            # The following only works if I uncomment the error I ge in 
+            # File "/Users/sv2518/firedrakeinstalls/fresh/firedrake/src/loopy/loopy/kernel/array.py", line 803, in __init__
+            # The error is
+            # loopy.diagnostic.LoopyError: contradictory values for number of dimensions of array 't0' from shape, strides, dim_tags, or dim_names
+            kernel = lp.tag_array_axes(kernel, ",".join(tmps.keys()), "vec")
+        
+        # tag the inner iname as vectorized
+        kernel = lp.tag_inames(kernel, {inner_iname: lp.VectorizeTag()})
+        # FIXME I want to do 
+        # kernel = lp.tag_inames(kernel, {inner_iname: lp.VectorizeTag(lp.OpenMPSIMDTag())})
+        # but it throws the error
+        # pytools.tag.NonUniqueTagError: Multiple tags are direct subclasses of the following UniqueTag(s): InameImplementationTag
 
-        kernel = realize_ilp(kernel)  # FIXME: do we also need to realize the reductions first?
-
-        # try to vectorise with vector extensionn
-        vector_inst, pragma_inst_to_tag, unr_inst_to_tag = check_cvec_vectorizability(kernel)
-
-        # if not possible fall back to OpenMP SIMD pragmas or unrolling by retagging, then privatize
-        kernel = cvec_retag_and_privatize(kernel, vector_inst, pragma_inst_to_tag, unr_inst_to_tag)
-
-        wrapper = wrapper.with_root_kernel(kernel)
-
-        return wrapper
+        return kernel
 
     @PETSc.Log.EventDecorator()
     @mpi.collective
