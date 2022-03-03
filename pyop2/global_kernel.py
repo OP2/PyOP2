@@ -375,10 +375,14 @@ class GlobalKernel(Cached):
         slabs = (1, 1)
         inner_iname = iname + "_batch"
 
+        # in the ideal world breaks a loop of n*batch_size into two loops:
+        # an outer loop of n/batch_size
+        # and an inner loop over batch_size
         if configuration["vectorization_strategy"] == "ve":
             kernel = lp.split_iname(kernel, iname, batch_size, slabs=slabs, inner_iname=inner_iname)
 
-        # private the temporaries on the inner inames
+        # adds a new axis to the temporary and indexes it with the provided iname
+        # i.e. stores the value at each instance of the loop.
         kernel = lp.privatize_temporaries_with_inames(kernel, inner_iname)
 
         # tag axes of the temporaries as vectorised
