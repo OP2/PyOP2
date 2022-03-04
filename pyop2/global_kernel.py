@@ -371,19 +371,24 @@ class GlobalKernel(Cached):
         alignment = configuration["alignment"]
         tmps = dict((name, tv.copy(alignment=alignment)) for name, tv in kernel.temporary_variables.items())
         kernel = kernel.copy(temporary_variables=tmps)
+        iel = kernel.get_var_name_generator()("iel")
+        # make iel-loop so that the loop undergoing array expansion has a lower
+        # bound of '0'
+        kernel = lp.affine_map_inames(kernel, iname, iel, f"{iel}=({iname}-start)")
 
         # split iname
         slabs = (1, 1)
-        inner_iname = iname + "_batch"
+        inner_iname = kernel.get_var_name_generator()(f"{iel}_batch")
 
         # in the ideal world breaks a loop of n*batch_size into two loops:
         # an outer loop of n/batch_size
         # and an inner loop over batch_size
         if configuration["vectorization_strategy"] == "ve":
-            kernel = lp.split_iname(kernel, iname, batch_size, slabs=slabs, inner_iname=inner_iname)
+            kernel = lp.split_iname(kernel, iel, batch_size, slabs=slabs, inner_iname=inner_iname)
 
         # adds a new axis to the temporary and indexes it with the provided iname
-        # i.e. stores the value at each instance of the loop.
+        # i.e. stores the value at each instance of the loop. (i.e. array
+        # expansion)
         kernel = lp.privatize_temporaries_with_inames(kernel, inner_iname)
 
         # tag axes of the temporaries as vectorised
