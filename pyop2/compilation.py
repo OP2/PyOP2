@@ -41,7 +41,7 @@ import sys
 import ctypes
 import collections
 from hashlib import md5
-from distutils import version
+from packaging.version import Version
 
 
 from pyop2.mpi import MPI, collective, COMM_WORLD
@@ -90,17 +90,17 @@ def sniff_compiler_version(exe):
             ver = subprocess.check_output([exe, "-dumpversion"],
                                           stderr=subprocess.DEVNULL).decode("utf-8")
             try:
-                ver = version.StrictVersion(ver.strip())
+                ver = Version(ver.strip())
             except ValueError:
                 # A sole digit, e.g. 7, results in a ValueError, so
                 # append a "do-nothing, but make it work" string.
-                ver = version.StrictVersion(ver.strip() + ".0")
-            if ver >= version.StrictVersion("7.0"):
+                ver = Version(ver.strip() + ".0")
+            if ver >= Version("7.0"):
                 try:
                     # gcc-7 series only spits out patch level on dumpfullversion.
                     fullver = subprocess.check_output([exe, "-dumpfullversion"],
                                                       stderr=subprocess.DEVNULL).decode("utf-8")
-                    fullver = version.StrictVersion(fullver.strip())
+                    fullver = Version(fullver.strip())
                     ver = fullver
                 except (subprocess.CalledProcessError, UnicodeDecodeError):
                     pass
@@ -421,18 +421,18 @@ class LinuxGnuCompiler(Compiler):
         """Flags to work around bugs in compilers."""
         ver = self.version
         cflags = []
-        if version.StrictVersion("4.8.0") <= ver < version.StrictVersion("4.9.0"):
+        if Version("4.8.0") <= ver < Version("4.9.0"):
             # GCC bug https://gcc.gnu.org/bugzilla/show_bug.cgi?id=61068
             cflags = ["-fno-ivopts"]
-        if version.StrictVersion("5.0") <= ver <= version.StrictVersion("5.4.0"):
+        if Version("5.0") <= ver <= Version("5.4.0"):
             cflags = ["-fno-tree-loop-vectorize"]
-        if version.StrictVersion("6.0.0") <= ver < version.StrictVersion("6.5.0"):
+        if Version("6.0.0") <= ver < Version("6.5.0"):
             # GCC bug https://gcc.gnu.org/bugzilla/show_bug.cgi?id=79920
             cflags = ["-fno-tree-loop-vectorize"]
-        if version.StrictVersion("7.1.0") <= ver < version.StrictVersion("7.1.2"):
+        if Version("7.1.0") <= ver < Version("7.1.2"):
             # GCC bug https://gcc.gnu.org/bugzilla/show_bug.cgi?id=81633
             cflags = ["-fno-tree-loop-vectorize"]
-        if version.StrictVersion("7.3") <= ver <= version.StrictVersion("7.5"):
+        if Version("7.3") <= ver <= Version("7.5"):
             # GCC bug https://gcc.gnu.org/bugzilla/show_bug.cgi?id=90055
             # See also https://github.com/firedrakeproject/firedrake/issues/1442
             # And https://github.com/firedrakeproject/firedrake/issues/1717
