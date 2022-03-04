@@ -449,6 +449,19 @@ class LinuxGnuCompiler(Compiler):
         return cflags
 
 
+class LinuxClangCompiler(Compiler):
+    """The clang for building a shared library on Linux systems."""
+
+    _ld = "ld.lld"
+
+    _cflags = ["-fPIC", "-Wall", "-std=gnu11"]
+    _cxxflags = ["-fPIC", "-Wall"]
+    _ldflags = ["-shared"]
+
+    _optflags = ["-march=native", "-O3", "-ffast-math"]
+    _debugflags = ["-O0", "-g"]
+
+
 class LinuxIntelCompiler(Compiler):
     """The Intel compiler for building a shared library on Linux systems."""
 
@@ -461,6 +474,26 @@ class LinuxIntelCompiler(Compiler):
 
     _optflags = ["-Ofast", "-xHost"]
     _debugflags = ["-O0", "-g"]
+
+
+class LinuxCrayCompiler(Compiler):
+    """The Cray compiler for building a shared library on Linux systems."""
+    _cc = "cc"
+    _cxx = "CC"
+
+    _cflags = ["-fPIC", "-Wall", "-std=gnu11"]
+    _cxxflags = ["-fPIC", "-Wall"]
+    _ldflags = ["-shared"]
+
+    _optflags = ["-march=native", "-O3", "-ffast-math"]
+    _debugflags = ["-O0", "-g"]
+
+    @property
+    def ldflags(self):
+        ldflags = super().ldflags
+        if '-llapack' in ldflags:
+            ldflags.remove('-llapack')
+        return ldflags
 
 
 @collective
