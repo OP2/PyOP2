@@ -656,7 +656,7 @@ class MacClangCompiler(ForkingCompiler):
     _cppflags = ["-fPIC", "-Wall", "-framework", "Accelerate"]
     _ldflags = ["-dynamiclib"]
 
-    _cflags = ["-std=c99"]
+    _cflags = ["-std=gnu11"]
     _cxxflags = []
 
     @property
@@ -679,7 +679,7 @@ class LinuxGnuCompiler(ForkingCompiler):
     _cppflags = ["-fPIC", "-Wall"]
     _ldflags = ["-shared"]
 
-    _cflags = ["-std=c99"]
+    _cflags = ["-std=gnu11"]
     _cxxflags = []
 
     _optflags = ["-march=native", "-O3", "-ffast-math"]
@@ -692,7 +692,7 @@ class LinuxIntelCompiler(ForkingCompiler):
     _cppflags = ["-fPIC", "-no-multibyte-chars"]
     _ldflags = ["-shared"]
 
-    _cflags = ["-std=c99"]
+    _cflags = ["-std=gnu11"]
     _cxxflags = []
 
     _optflags = ["-Ofast", "-xHost"]
