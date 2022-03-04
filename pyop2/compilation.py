@@ -494,6 +494,13 @@ class LinuxCrayCompiler(Compiler):
         return ldflags
 
 
+class AnonymousCompiler(Compiler):
+    """Compiler for building a shared library on systems with unknown compiler.
+    The properties of this compiler are entirely controlled through environment
+    variables"""
+    _name = "Unknown"
+
+
 @collective
 def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
          argtypes=None, restype=None, comm=None):
@@ -547,15 +554,14 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
         elif compiler_name == "Cray":
             compiler = LinuxCrayCompiler
         else:
-            raise CompilationError("Unrecognized compiler name '%s'" % compiler)
+            compiler = AnonymousCompiler
     elif sys.platform.find("darwin") == 0:
         if compiler_name == "clang":
             compiler = MacClangCompiler
         else:
-            raise CompilationError("Unrecognized compiler name '%s'" % compiler)
+            compiler = AnonymousCompiler
     else:
-        raise CompilationError("Don't know what compiler to use for platform '%s'" %
-                               sys.platform)
+        compiler = AnonymousCompiler
 
     dll = compiler(cppargs, ldargs, cpp=cpp, comm=comm, version=version).get_so(code, extension)
     fn = getattr(dll, fn_name)
