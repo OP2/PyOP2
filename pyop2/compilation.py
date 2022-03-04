@@ -266,7 +266,7 @@ class Compiler(ABC):
             compiler_flags = self.cflags
 
         # Determine cache key
-        hsh = md5(str(jitmodule.cache_key[1:]).encode())
+        hsh = md5(str(jitmodule.cache_key).encode())
         hsh.update(compiler.encode())
         if self.ld:
             hsh.update(self.ld.encode())
