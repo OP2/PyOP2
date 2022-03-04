@@ -65,27 +65,29 @@ CompilerInfo = collections.namedtuple("CompilerInfo", ["compiler",
                                                        "version"])
 
 
-def sniff_compiler_version(cc):
+def sniff_compiler_version(exe):
     try:
-        ver = subprocess.check_output([cc, "--version"]).decode("utf-8")
+        ver = subprocess.check_output([exe, "--version"]).decode("utf-8")
     except (subprocess.CalledProcessError, UnicodeDecodeError):
-        return CompilerInfo("unknown", version.LooseVersion("unknown"))
+        ver = ""
 
-    if ver.startswith("gcc"):
-        compiler = "gcc"
+    if ver.startswith("gcc") or ver.startswith("g++"):
+        compiler = "GNU"
     elif ver.startswith("clang"):
         compiler = "clang"
     elif ver.startswith("Apple LLVM"):
         compiler = "clang"
     elif ver.startswith("icc"):
-        compiler = "icc"
+        compiler = "Intel"
+    elif ver.startswith("Cray"):
+        compiler = "Cray"
     else:
         compiler = "unknown"
 
-    ver = version.LooseVersion("unknown")
-    if compiler == "gcc":
+    ver = None
+    if compiler == "GNU":
         try:
-            ver = subprocess.check_output([cc, "-dumpversion"],
+            ver = subprocess.check_output([exe, "-dumpversion"],
                                           stderr=subprocess.DEVNULL).decode("utf-8")
             try:
                 ver = version.StrictVersion(ver.strip())
@@ -93,10 +95,10 @@ def sniff_compiler_version(cc):
                 # A sole digit, e.g. 7, results in a ValueError, so
                 # append a "do-nothing, but make it work" string.
                 ver = version.StrictVersion(ver.strip() + ".0")
-            if compiler == "gcc" and ver >= version.StrictVersion("7.0"):
+            if ver >= version.StrictVersion("7.0"):
                 try:
                     # gcc-7 series only spits out patch level on dumpfullversion.
-                    fullver = subprocess.check_output([cc, "-dumpfullversion"],
+                    fullver = subprocess.check_output([exe, "-dumpfullversion"],
                                                       stderr=subprocess.DEVNULL).decode("utf-8")
                     fullver = version.StrictVersion(fullver.strip())
                     ver = fullver
@@ -156,20 +158,6 @@ def compilation_comm(comm):
 
 
 class Compiler(ABC):
-
-    compiler_versions = {}  # TODO: what to do with this?
-
-    _cc = "mpicc"
-    _cxx = "mpicxx"
-    _ld = None
-
-    _cflags = []
-    _cxxflags = []
-    _ldflags = []
-
-    _optflags = []
-    _debugflags = []
-
     """A compiler for shared libraries.
     :arg cc: C compiler executable (can be overriden by exporting the
         environment variable ``PYOP2_CC``).
@@ -187,7 +175,20 @@ class Compiler(ABC):
     :kwarg comm: Optional communicator to compile the code on
         (defaults to COMM_WORLD).
     """
-    def __init__(self, extra_compiler_flags=None, extra_linker_flags=None, cpp=False, comm=None):
+    _name = "unknown"
+
+    _cc = "mpicc"
+    _cxx = "mpicxx"
+    _ld = None
+
+    _cflags = []
+    _cxxflags = []
+    _ldflags = []
+
+    _optflags = []
+    _debugflags = []
+
+    def __init__(self, extra_compiler_flags=None, extra_linker_flags=None, cpp=False, comm=None, version=None):
         self._extra_compiler_flags = extra_compiler_flags or []
         self._extra_linker_flags = extra_linker_flags or []
 
@@ -197,6 +198,10 @@ class Compiler(ABC):
         # Ensure that this is an internal communicator.
         comm = dup_comm(comm or COMM_WORLD)
         self.comm = compilation_comm(comm)
+        self.version = version
+
+    def __repr__(self):
+        return f"<{self._name} compiler, version {self.ver or 'unknown'}>"
 
     @property
     def cc(self):
@@ -239,19 +244,6 @@ class Compiler(ABC):
     @property
     def bugfix_cflags(self):
         return []
-
-    @property
-    def compiler_version(self):
-        key = (id(self.comm), self._cc)
-        try:
-            return Compiler.compiler_versions[key]
-        except KeyError:
-            if self.comm.rank == 0:
-                ver = sniff_compiler_version(self._cc)
-            else:
-                ver = None
-            ver = self.comm.bcast(ver, root=0)
-            return Compiler.compiler_versions.setdefault(key, ver)
 
     @property
     def workaround_cflags(self):
@@ -393,6 +385,7 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
 
 class MacClangCompiler(Compiler):
     """A compiler for building a shared library on mac systems."""
+    _name = "Mac Clang"
 
     _cflags = ["-fPIC", "-Wall", "-framework", "Accelerate", "-std=gnu11"]
     _cxxflags = ["-fPIC", "-Wall", "-framework", "Accelerate"]
@@ -414,6 +407,7 @@ class MacClangCompiler(Compiler):
 
 class LinuxGnuCompiler(Compiler):
     """The GNU compiler for building a shared library on Linux systems."""
+    _name = "GNU"
 
     _cflags = ["-fPIC", "-Wall", "-std=gnu11"]
     _cxxflags = ["-fPIC", "-Wall"]
@@ -425,7 +419,7 @@ class LinuxGnuCompiler(Compiler):
     @property
     def workaround_cflags(self):
         """Flags to work around bugs in compilers."""
-        compiler, ver = self.compiler_version
+        ver = self.version
         cflags = []
         if version.StrictVersion("4.8.0") <= ver < version.StrictVersion("4.9.0"):
             # GCC bug https://gcc.gnu.org/bugzilla/show_bug.cgi?id=61068
@@ -451,6 +445,7 @@ class LinuxGnuCompiler(Compiler):
 
 class LinuxClangCompiler(Compiler):
     """The clang for building a shared library on Linux systems."""
+    _name = "Clang"
 
     _ld = "ld.lld"
 
@@ -464,6 +459,7 @@ class LinuxClangCompiler(Compiler):
 
 class LinuxIntelCompiler(Compiler):
     """The Intel compiler for building a shared library on Linux systems."""
+    _name = "Intel"
 
     _cc = "mpiicc"
     _cxx = "mpiicpc"
@@ -478,6 +474,8 @@ class LinuxIntelCompiler(Compiler):
 
 class LinuxCrayCompiler(Compiler):
     """The Cray compiler for building a shared library on Linux systems."""
+    _name = "Cray"
+
     _cc = "cc"
     _cxx = "CC"
 
@@ -532,26 +530,34 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
     else:
         raise ValueError("Don't know how to compile code of type %r" % type(jitmodule))
 
-    cpp = extension == "cpp"
-    # Sniff compiler here!
-    compiler = None
-    if not compiler:
-        compiler = (configuration['cxx'] if cpp else configuration['cc'])
-        compiler = compiler or ("g++" if cpp else "gcc")
-    if sys.platform.find('linux') == 0:
-        if compiler == 'icc':
-            compiler = LinuxIntelCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
-        elif compiler == 'gcc' or compiler == 'g++':
-            compiler = LinuxGnuCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
+    cpp = (extension == "cpp")
+
+    # Sniff compiler from executable
+    exe = (configuration["cxx"] if cpp else configuration["cc"])
+    exe = exe or ("g++" if cpp else "gcc")
+    compiler_name, version = sniff_compiler_version(exe)
+
+    if sys.platform.find("linux") == 0:
+        if compiler_name == "Intel":
+            compiler = LinuxIntelCompiler
+        elif compiler_name == "GNU":
+            compiler = LinuxGnuCompiler
+        elif compiler_name == "clang":
+            compiler = LinuxClangCompiler
+        elif compiler_name == "Cray":
+            compiler = LinuxCrayCompiler
         else:
             raise CompilationError("Unrecognized compiler name '%s'" % compiler)
-    elif sys.platform.find('darwin') == 0:
-        compiler = MacClangCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
+    elif sys.platform.find("darwin") == 0:
+        if compiler_name == "clang":
+            compiler = MacClangCompiler
+        else:
+            raise CompilationError("Unrecognized compiler name '%s'" % compiler)
     else:
         raise CompilationError("Don't know what compiler to use for platform '%s'" %
                                sys.platform)
-    dll = compiler.get_so(code, extension)
 
+    dll = compiler(cppargs, ldargs, cpp=cpp, comm=comm, version=version).get_so(code, extension)
     fn = getattr(dll, fn_name)
     fn.argtypes = code.argtypes
     fn.restype = restype
