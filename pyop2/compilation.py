@@ -161,34 +161,35 @@ class Compiler(ABC):
 
     _cc = "mpicc"
     _cxx = "mpicxx"
+    _ld = None
 
-    _cppflags = None
-    _ldflags = None
+    _cflags = []
+    _cxxflags = []
+    _ldflags = []
 
-    _cflags = None
-    _cxxflags = None
-
-    _optflags = None
-    _debugflags = None
+    _optflags = []
+    _debugflags = []
 
     """A compiler for shared libraries.
     :arg cc: C compiler executable (can be overriden by exporting the
-        environment variable ``CC``).
+        environment variable ``PYOP2_CC``).
     :arg ld: Linker executable (optional, if ``None``, we assume the compiler
         can build object files and link in a single invocation, can be
-        overridden by exporting the environment variable ``LDSHARED``).
-    :arg cppargs: A list of arguments to the C compiler (optional, prepended to
-        any flags specified as the cflags configuration option)
-    :arg ldargs: A list of arguments to the linker (optional, prepended to any
-        flags specified as the ldflags configuration option).
+        overridden by exporting the environment variable ``PYOP2_LD``).
+    :arg extra_compiler_flags: A list of arguments to the C compiler (CFLAGS)
+        or the C++ compiler (CXXFLAGS)
+        ``PYOP2_CFLAGS`` and ``PYOP2_CXXFLAGS`` can also be used to extend these options
+        (optional, prepended to any flags specified as the cflags configuration option)
+    :arg extra_linker_flags: A list of arguments to the linker (LDFLAGS)
+        (optional, prepended to any flags specified as the ldflags configuration option).
     :arg cpp: Should we try and use the C++ compiler instead of the C
         compiler?.
     :kwarg comm: Optional communicator to compile the code on
         (defaults to COMM_WORLD).
     """
-    def __init__(self, extra_cppflags=None, extra_ldflags=None, cpp=False, comm=None):
-        self._extra_cppflags = extra_cppflags or []
-        self._extra_ldflags = extra_ldflags or []
+    def __init__(self, extra_compiler_flags=None, extra_linker_flags=None, cpp=False, comm=None):
+        self._extra_compiler_flags = extra_compiler_flags or []
+        self._extra_linker_flags = extra_linker_flags or []
 
         self._cpp = cpp
         self._debug = configuration["debug"]
@@ -199,37 +200,41 @@ class Compiler(ABC):
 
     @property
     def cc(self):
-        return os.environ.get("PYOP2_CC", self._cxx if self._cpp else self._cc)
+        return configuration["cc"] or self._cc
+
+    @property
+    def cxx(self):
+        return configuration["cxx"] or self._cxx
 
     @property
     def ld(self):
-        return os.environ.get("PYOP2_LD", None)
+        return configuration["ld"] or self._ld
 
     @property
-    def cppflags(self):
-        try:
-            return os.environ["PYOP2_CPPFLAGS"]
-        except KeyError:
-            cppflags = self._cppflags + self._extra_cppflags
+    def cflags(self):
+        cflags = self._cflags + self._extra_compiler_flags
+        if self._debug:
+            cflags += self._debugflags
+        else:
+            cflags += self._optflags
+        cflags += configuration["cflags"]
+        return cflags
 
-            if not self._debug:
-                cppflags += self._debugflags
-            else:
-                cppflags += self._optflags
-
-            if self._cpp:
-                cppflags += self._cxxflags
-            else:
-                cppflags += self._cflags
-
-            return cppflags
+    @property
+    def cxxflags(self):
+        cxxflags = self._cxxflags + self._extra_compiler_flags
+        if self._debug:
+            cxxflags += self._debugflags
+        else:
+            cxxflags += self._optflags
+        cxxflags += configuration["cxxflags"]
+        return cxxflags
 
     @property
     def ldflags(self):
-        try:
-            return os.environ["PYOP2_LDFLAGS"]
-        except KeyError:
-            return self._ldflags + self._extra_ldflags
+        ldflags = self._ldflags + self._extra_linker_flags
+        ldflags += configuration["ldflags"]
+        return ldflags
 
     @property
     def bugfix_cflags(self):
@@ -260,13 +265,21 @@ class Compiler(ABC):
         Returns a :class:`ctypes.CDLL` object of the resulting shared
         library."""
 
+        # C or C++
+        if self._cpp:
+            compiler = self.cxx
+            compiler_flags = self.cxxflags
+        else:
+            compiler = self.cc
+            compiler_flags = self.cflags
+
         # Determine cache key
         hsh = md5(str(jitmodule.cache_key[1:]).encode())
-        hsh.update(self._cc.encode())
+        hsh.update(compiler.encode())
         if self.ld:
             hsh.update(self.ld.encode())
-        hsh.update("".join(self._cppflags).encode())
-        hsh.update("".join(self._ldflags).encode())
+        hsh.update("".join(compiler_flags).encode())
+        hsh.update("".join(self.ldflags).encode())
 
         basename = hsh.hexdigest()
 
@@ -310,7 +323,7 @@ class Compiler(ABC):
                         f.write(jitmodule.code_to_compile)
                     # Compiler also links
                     if self.ld is None:
-                        cc = [self.cc] + self.cppflags + \
+                        cc = [compiler] + compiler_flags + \
                              ['-o', tmpname, cname] + self.ldflags
                         debug('Compilation command: %s', ' '.join(cc))
                         with open(logfile, "w") as log:
@@ -326,8 +339,7 @@ class Compiler(ABC):
                                         if status != 0:
                                             raise subprocess.CalledProcessError(status, cmd)
                                     else:
-                                        subprocess.check_call(cc, stderr=err,
-                                                              stdout=log)
+                                        subprocess.check_call(cc, stderr=err, stdout=log)
                                 except subprocess.CalledProcessError as e:
                                     raise CompilationError(
                                         """Command "%s" return error status %d.
@@ -335,7 +347,7 @@ Unable to compile code
 Compile log in %s
 Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
                     else:
-                        cc = [self.cc] + self.cppflags + \
+                        cc = [compiler] + compiler_flags + \
                              ['-c', '-o', oname, cname]
                         ld = self.ld.split() + ['-o', tmpname, oname] + self.ldflags
                         debug('Compilation command: %s', ' '.join(cc))
@@ -382,11 +394,9 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
 class MacClangCompiler(Compiler):
     """A compiler for building a shared library on mac systems."""
 
-    _cppflags = ["-fPIC", "-Wall", "-framework", "Accelerate"]
+    _cflags = ["-fPIC", "-Wall", "-framework", "Accelerate", "-std=gnu11"]
+    _cxxflags = ["-fPIC", "-Wall", "-framework", "Accelerate"]
     _ldflags = ["-dynamiclib"]
-
-    _cflags = ["-std=gnu11"]
-    _cxxflags = []
 
     @property
     def _optflags(self):
@@ -403,13 +413,11 @@ class MacClangCompiler(Compiler):
 
 
 class LinuxGnuCompiler(Compiler):
-    """A compiler for building a shared library on Linux systems."""
+    """The GNU compiler for building a shared library on Linux systems."""
 
-    _cppflags = ["-fPIC", "-Wall"]
+    _cflags = ["-fPIC", "-Wall", "-std=gnu11"]
+    _cxxflags = ["-fPIC", "-Wall"]
     _ldflags = ["-shared"]
-
-    _cflags = ["-std=gnu11"]
-    _cxxflags = []
 
     _optflags = ["-march=native", "-O3", "-ffast-math"]
     _debugflags = ["-O0", "-g"]
@@ -444,11 +452,12 @@ class LinuxGnuCompiler(Compiler):
 class LinuxIntelCompiler(Compiler):
     """The Intel compiler for building a shared library on Linux systems."""
 
-    _cppflags = ["-fPIC", "-no-multibyte-chars"]
-    _ldflags = ["-shared"]
+    _cc = "mpiicc"
+    _cxx = "mpiicpc"
 
-    _cflags = ["-std=gnu11"]
-    _cxxflags = []
+    _cflags = ["-fPIC", "-no-multibyte-chars", "-std=gnu11"]
+    _cxxflags = ["-fPIC", "-no-multibyte-chars"]
+    _ldflags = ["-shared"]
 
     _optflags = ["-Ofast", "-xHost"]
     _debugflags = ["-O0", "-g"]
@@ -456,7 +465,7 @@ class LinuxIntelCompiler(Compiler):
 
 @collective
 def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
-         argtypes=None, restype=None, compiler=None, comm=None):
+         argtypes=None, restype=None, comm=None):
     """Build a shared library and return a function pointer from it.
 
     :arg jitmodule: The JIT Module which can generate the code to compile, or
@@ -490,22 +499,24 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
     else:
         raise ValueError("Don't know how to compile code of type %r" % type(jitmodule))
 
-    platform = sys.platform
     cpp = extension == "cpp"
+    # Sniff compiler here!
+    compiler = None
     if not compiler:
-        compiler = os.environ.get("PYOP2_CC", "gcc")
-    if platform.find('linux') == 0:
+        compiler = (configuration['cxx'] if cpp else configuration['cc'])
+        compiler = compiler or ("g++" if cpp else "gcc")
+    if sys.platform.find('linux') == 0:
         if compiler == 'icc':
             compiler = LinuxIntelCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
-        elif compiler == 'gcc':
+        elif compiler == 'gcc' or compiler == 'g++':
             compiler = LinuxGnuCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
         else:
             raise CompilationError("Unrecognized compiler name '%s'" % compiler)
-    elif platform.find('darwin') == 0:
+    elif sys.platform.find('darwin') == 0:
         compiler = MacClangCompiler(cppargs, ldargs, cpp=cpp, comm=comm)
     else:
         raise CompilationError("Don't know what compiler to use for platform '%s'" %
-                               platform)
+                               sys.platform)
     dll = compiler.get_so(code, extension)
 
     fn = getattr(dll, fn_name)

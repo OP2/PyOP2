@@ -77,24 +77,50 @@ class Configuration(dict):
         available for the resulting matrices.  (Default yes)
     """
     # name, env variable, type, default, write once
+    cache_dir = os.path.join(gettempdir(), "pyop2-cache-uid%s" % os.getuid())
     DEFAULTS = {
-        "simd_width": ("PYOP2_SIMD_WIDTH", int, 4),
-        "debug": ("PYOP2_DEBUG", bool, False),
-        "compute_kernel_flops": ("PYOP2_COMPUTE_KERNEL_FLOPS", bool, False),
-        "use_safe_cflags": ("PYOP2_USE_SAFE_CFLAGS", bool, True),
-        "type_check": ("PYOP2_TYPE_CHECK", bool, True),
-        "check_src_hashes": ("PYOP2_CHECK_SRC_HASHES", bool, True),
-        "log_level": ("PYOP2_LOG_LEVEL", (str, int), "WARNING"),
-        "dump_gencode": ("PYOP2_DUMP_GENCODE", bool, False),
-        "cache_dir": ("PYOP2_CACHE_DIR", str,
-                      os.path.join(gettempdir(),
-                                   "pyop2-cache-uid%s" % os.getuid())),
-        "node_local_compilation": ("PYOP2_NODE_LOCAL_COMPILATION", bool, True),
-        "no_fork_available": ("PYOP2_NO_FORK_AVAILABLE", bool, False),
-        "print_cache_size": ("PYOP2_PRINT_CACHE_SIZE", bool, False),
-        "print_summary": ("PYOP2_PRINT_SUMMARY", bool, False),
-        "matnest": ("PYOP2_MATNEST", bool, True),
-        "block_sparsity": ("PYOP2_BLOCK_SPARSITY", bool, True)
+        "cc":
+            ("PYOP2_CC", str, ""),
+        "cxx":
+            ("PYOP2_CXX", str, ""),
+        "ld":
+            ("PYOP2_LD", str, ""),
+        "cflags":
+            ("PYOP2_CFLAGS", str, ""),
+        "cxxflags":
+            ("PYOP2_CXXFLAGS", str, ""),
+        "ldflags":
+            ("PYOP2_LDFLAGS", str, ""),
+        "simd_width":
+            ("PYOP2_SIMD_WIDTH", int, 4),
+        "debug":
+            ("PYOP2_DEBUG", bool, False),
+        "compute_kernel_flops":
+            ("PYOP2_COMPUTE_KERNEL_FLOPS", bool, False),
+        "use_safe_cflags":
+            ("PYOP2_USE_SAFE_CFLAGS", bool, True),
+        "type_check":
+            ("PYOP2_TYPE_CHECK", bool, True),
+        "check_src_hashes":
+            ("PYOP2_CHECK_SRC_HASHES", bool, True),
+        "log_level":
+            ("PYOP2_LOG_LEVEL", (str, int), "WARNING"),
+        "dump_gencode":
+            ("PYOP2_DUMP_GENCODE", bool, False),
+        "cache_dir":
+            ("PYOP2_CACHE_DIR", str, cache_dir),
+        "node_local_compilation":
+            ("PYOP2_NODE_LOCAL_COMPILATION", bool, True),
+        "no_fork_available":
+            ("PYOP2_NO_FORK_AVAILABLE", bool, False),
+        "print_cache_size":
+            ("PYOP2_PRINT_CACHE_SIZE", bool, False),
+        "print_summary":
+            ("PYOP2_PRINT_SUMMARY", bool, False),
+        "matnest":
+            ("PYOP2_MATNEST", bool, True),
+        "block_sparsity":
+            ("PYOP2_BLOCK_SPARSITY", bool, True)
     }
     """Default values for PyOP2 configuration parameters"""
 

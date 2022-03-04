@@ -362,7 +362,6 @@ class GlobalKernel(Cached):
                                 cppargs=cppargs,
                                 ldargs=ldargs,
                                 restype=ctypes.c_int,
-                                compiler=None,
                                 comm=comm)
 
     @cached_property
