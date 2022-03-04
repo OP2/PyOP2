@@ -343,8 +343,9 @@ class GlobalKernel(Cached):
         vectorisable = (not (has_matrix or has_rw) and (configuration["vectorization_strategy"])) and not is_cplx
 
         if vectorisable:
-            wrapper = lp.inline_callable_kernel(wrapper, self.local_kernel.name)
-            wrapper = self.vectorise(wrapper, iname, configuration["simd_width"])
+            if isinstance(self.local_kernel.code, lp.TranslationUnit):
+                wrapper = lp.inline_callable_kernel(wrapper, self.local_kernel.name)
+                wrapper = self.vectorise(wrapper, iname, configuration["simd_width"])
         code = lp.generate_code_v2(wrapper)
 
         if self.local_kernel.cpp:
