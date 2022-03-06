@@ -349,7 +349,7 @@ class GlobalKernel(Cached):
         code = lp.generate_code_v2(wrapper)
 
         if self.local_kernel.cpp:
-            from lp.codegen.result import process_preambles
+            from loopy.codegen.result import process_preambles
             preamble = "".join(process_preambles(getattr(code, "device_preambles", [])))
             device_code = "\n\n".join(str(dp.ast) for dp in code.device_programs)
             return preamble + "\nextern \"C\" {\n" + device_code + "\n}\n"
