@@ -30,7 +30,7 @@ jobs:
       - name: Set correct Python version
         uses: actions/setup-python@v2
         with:
-          python-version: '3.8'
+          python-version: '3.9'
 
       - name: Clone PETSc
         uses: actions/checkout@v2
