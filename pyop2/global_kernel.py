@@ -344,6 +344,9 @@ class GlobalKernel(Cached):
 
         if vectorisable:
             if isinstance(self.local_kernel.code, lp.TranslationUnit):
+                # change target to generate vectorized code via gcc vector
+                # extensions
+                wrapper = wrapper.copy(target=lp.CVectorExtensionsTarget())
                 wrapper = lp.inline_callable_kernel(wrapper, self.local_kernel.name)
                 wrapper = self.vectorise(wrapper, iname, configuration["simd_width"])
         code = lp.generate_code_v2(wrapper)
@@ -364,7 +367,6 @@ class GlobalKernel(Cached):
         if batch_size == 1:
             return wrapper
 
-        wrapper = wrapper.copy(target=lp.CVectorExtensionsTarget())
         kernel = wrapper.default_entrypoint
 
         # align temps
