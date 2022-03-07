@@ -367,6 +367,14 @@ class GlobalKernel(Cached):
         if batch_size == 1:
             return wrapper
 
+        if not configuration["debug"]:
+            # loopy warns for every instruction that cannot be vectorized;
+            # ignore in non-debug mode.
+            new_entrypoint = wrapper.default_entrypoint.copy(
+                silenced_warnings=(wrapper.default_entrypoint.silenced_warnings
+                                   + ["vectorize_failed"]))
+            wrapper = wrapper.with_kernel(new_entrypoint)
+
         kernel = wrapper.default_entrypoint
 
         # align temps
