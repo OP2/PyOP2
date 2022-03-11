@@ -380,22 +380,54 @@ class GlobalKernel(Cached):
 
         # align temps
         alignment = configuration["alignment"]
-        tmps = dict((name, tv.copy(alignment=alignment)) for name, tv in kernel.temporary_variables.items())
+        tmps = {name: tv.copy(alignment=alignment)
+                for name, tv in kernel.temporary_variables.items()}
         kernel = kernel.copy(temporary_variables=tmps)
-        iel = kernel.get_var_name_generator()("iel")
-        # make iel-loop so that the loop undergoing array expansion has a lower
-        # bound of '0'
-        kernel = lp.affine_map_inames(kernel, iname, iel, f"{iel}=({iname}-start)")
+        shifted_iname = kernel.get_var_name_generator()(f"{iname}_shift")
+
+        # {{{
+
+        # Do not vectorize temporaries used outside *iname*
+        from functools import reduce
+        temps_not_to_vectorize = reduce(set.union,
+                                        [(insn.dependency_names()
+                                          & frozenset(kernel.temporary_variables))
+                                         for insn in kernel.instructions
+                                         if iname not in insn.within_inames],
+                                        set())
+
+        # Constant literal temporaries are arguments => cannot vectorize
+        temps_not_to_vectorize |= {name
+                                   for name, tv in kernel.temporary_variables.items()
+                                   if (tv.read_only
+                                       and tv.initializer is not None)}
+
+        # }}}
+
+        # {{{ TODO: placeholder until loopy's simplify_using_pwaff gets smarter
+
+        # transform to ensure that the loop undergoing array expansion has a
+        # lower bound of '0'
+        from loopy.symbolic import pw_aff_to_expr
+        import pymbolic.primitives as prim
+        lbound = pw_aff_to_expr(kernel.get_iname_bounds(iname).lower_bound_pw_aff)
+
+        kernel = lp.affine_map_inames(kernel, iname, shifted_iname,
+                                      [(prim.Variable(shifted_iname),
+                                       (prim.Variable(iname) - lbound))])
+
+        # }}}
 
         # split iname
         slabs = (1, 1)
-        inner_iname = kernel.get_var_name_generator()(f"{iel}_batch")
+        inner_iname = kernel.get_var_name_generator()(f"{shifted_iname}_batch")
 
         # in the ideal world breaks a loop of n*batch_size into two loops:
         # an outer loop of n/batch_size
         # and an inner loop over batch_size
         if configuration["vectorization_strategy"] == "ve":
-            kernel = lp.split_iname(kernel, iel, batch_size, slabs=slabs, inner_iname=inner_iname)
+            kernel = lp.split_iname(kernel, shifted_iname, batch_size, slabs=slabs,
+                                    inner_iname=inner_iname)
 
         # adds a new axis to the temporary and indexes it with the provided iname
         # i.e. stores the value at each instance of the loop. (i.e. array
@@ -404,12 +436,13 @@ class GlobalKernel(Cached):
 
         # tag axes of the temporaries as vectorised
         for name, tmp in kernel.temporary_variables.items():
-            if not (tmp.read_only and tmp.initializer is not None):
+            if name not in temps_not_to_vectorize:
                 tag = (len(tmp.shape)-1)*"c," + "vec"
                 kernel = lp.tag_array_axes(kernel, name, tag)
 
         # tag the inner iname as vectorized
-        kernel = lp.tag_inames(kernel, {inner_iname: lp.VectorizeTag(lp.OpenMPSIMDTag())})
+        kernel = lp.tag_inames(kernel,
+                               {inner_iname: lp.VectorizeTag(lp.OpenMPSIMDTag())})
 
         return wrapper.with_kernel(kernel)
 
