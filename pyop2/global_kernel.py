@@ -348,11 +348,11 @@ class GlobalKernel(Cached):
                 # change target to generate vectorized code via gcc vector
                 # extensions
                 wrapper = wrapper.copy(target=lp.CVectorExtensionsTarget())
+                # inline all inner kernels 
                 names = self.local_kernel.code.callables_table
                 for name in names:
                     if name in wrapper.callables_table.keys() \
                     and isinstance(wrapper.callables_table[name], lp.CallableKernel):
-                        print(name)
                         wrapper = lp.inline_callable_kernel(wrapper, name)
                 wrapper = self.vectorise(wrapper, iname, configuration["simd_width"])
         code = lp.generate_code_v2(wrapper)
