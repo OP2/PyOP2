@@ -508,6 +508,7 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
     fn.restype = restype
     return fn
 
+
 def _add_profiling_events(dll):
     """
         If PyOP2 is in profiling mode, add events to profile the local linear algebra calls.
