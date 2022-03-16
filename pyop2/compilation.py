@@ -515,7 +515,7 @@ def _add_profiling_events(dll):
         The event is generated here in python and then set in the shared library,
         so that memory is not allocated over and over again in the C kernel.
     """
-    if PETSc.Log.getActive():
+    if PETSc.Log.isActive():
         if hasattr(dll, "solve"):
             ctypes.c_int.in_dll(dll, 'USER_EVENT_solve_memcpy').value = PETSc.Log.Event("PyOP2SolveCallable_solve_memcpy").id
             ctypes.c_int.in_dll(dll, 'USER_EVENT_solve_getrf').value = PETSc.Log.Event("PyOP2SolveCallable_solve_getrf").id
