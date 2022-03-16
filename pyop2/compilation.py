@@ -186,7 +186,7 @@ class Compiler(object):
         self._cppargs = cppargs + configuration['cflags'].split()
         if configuration["use_safe_cflags"]:
             self._cppargs += self.workaround_cflags
-        if PETSc.Log.getActive():
+        if PETSc.Log.isActive():
             self._cppargs += ["-DPYOP2_PROFILING_ENABLED"]
         self._ldargs = ldargs + configuration['ldflags'].split()
 
