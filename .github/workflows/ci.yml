@@ -42,8 +42,6 @@ jobs:
         shell: bash
         working-directory: ${{ env.PETSC_DIR }}
         run: |
-          git fetch origin
-          git checkout connorjward/petsc4py-addlogisactive
           ./configure ${PETSC_CONFIGURE_OPTIONS}
           make
 
