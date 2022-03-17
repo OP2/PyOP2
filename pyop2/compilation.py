@@ -384,25 +384,21 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
 
 
 class MacClangCompiler(Compiler):
-    """A compiler for building a shared library on mac systems."""
+    """A compiler for building a shared library on Mac systems."""
     _name = "Mac Clang"
 
     _cflags = ["-fPIC", "-Wall", "-framework", "Accelerate", "-std=gnu11"]
     _cxxflags = ["-fPIC", "-Wall", "-framework", "Accelerate"]
     _ldflags = ["-dynamiclib"]
 
-    @property
-    def _optflags(self):
-        machine = platform.uname().machine
-        opt_flags = ["-O3", "-ffast-math"]
-        if machine == "arm64":
-            # See https://stackoverflow.com/q/65966969
-            opt_flags.append("-mcpu=apple-a14")
-        elif machine == "x86_64":
-            opt_flags.append("-march=native")
-        return opt_flags
-
+    _optflags = ["-O3", "-ffast-math", "-march=native"]
     _debugflags = ["-O0", "-g"]
+
+
+class MacClangARMCompiler(MacClangCompiler):
+    """A compiler for building a shared library on ARM based Mac systems."""
+    # See https://stackoverflow.com/q/65966969
+    _opt_flags = ["-O3", "-ffast-math", "-mcpu=apple-a14"]
 
 
 class LinuxGnuCompiler(Compiler):
@@ -540,8 +536,10 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
     cpp = (extension == "cpp")
 
     # Sniff compiler from executable
-    exe = (configuration["cxx"] if cpp else configuration["cc"])
-    exe = exe or ("g++" if cpp else "gcc")
+    if cpp:
+        exe = configuration["cxx"] or "g++"
+    else:
+        exe = configuration["cc"] or "gcc"
     compiler_name, version = sniff_compiler_version(exe)
 
     if sys.platform.find("linux") == 0:
@@ -557,7 +555,11 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
             compiler = AnonymousCompiler
     elif sys.platform.find("darwin") == 0:
         if compiler_name == "clang":
-            compiler = MacClangCompiler
+            machine = platform.uname().machine
+            if machine == "arm64":
+                compiler = MacClangARMCompiler
+            elif machine == "x86_64":
+                compiler = MacClangCompiler
         else:
             compiler = AnonymousCompiler
     else:
