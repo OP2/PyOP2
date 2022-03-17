@@ -89,12 +89,7 @@ def sniff_compiler_version(exe):
         try:
             ver = subprocess.check_output([exe, "-dumpversion"],
                                           stderr=subprocess.DEVNULL).decode("utf-8")
-            try:
-                ver = Version(ver.strip())
-            except ValueError:
-                # A sole digit, e.g. 7, results in a ValueError, so
-                # append a "do-nothing, but make it work" string.
-                ver = Version(ver.strip() + ".0")
+            ver = Version(ver.strip())
             if ver >= Version("7.0"):
                 try:
                     # gcc-7 series only spits out patch level on dumpfullversion.
