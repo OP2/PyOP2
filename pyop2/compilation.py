@@ -40,6 +40,7 @@ import subprocess
 import sys
 import ctypes
 import collections
+import shlex
 from hashlib import md5
 from packaging.version import Version
 
@@ -176,16 +177,16 @@ class Compiler(ABC):
     _cxx = "mpicxx"
     _ld = None
 
-    _cflags = []
-    _cxxflags = []
-    _ldflags = []
+    _cflags = ()
+    _cxxflags = ()
+    _ldflags = ()
 
-    _optflags = []
-    _debugflags = []
+    _optflags = ()
+    _debugflags = ()
 
     def __init__(self, extra_compiler_flags=None, extra_linker_flags=None, cpp=False, comm=None, version=None):
-        self._extra_compiler_flags = extra_compiler_flags or []
-        self._extra_linker_flags = extra_linker_flags or []
+        self._extra_compiler_flags = tuple(extra_compiler_flags) or ()
+        self._extra_linker_flags = tuple(extra_linker_flags) or ()
 
         self._cpp = cpp
         self._debug = configuration["debug"]
@@ -196,7 +197,7 @@ class Compiler(ABC):
         self.version = version
 
     def __repr__(self):
-        return f"<{self._name} compiler, version {self.ver or 'unknown'}>"
+        return f"<{self._name} compiler, version {self.version or 'unknown'}>"
 
     @property
     def cc(self):
@@ -212,37 +213,33 @@ class Compiler(ABC):
 
     @property
     def cflags(self):
-        cflags = self._cflags + self._extra_compiler_flags
+        cflags = self._cflags + self._extra_compiler_flags + self.bugfix_cflags
         if self._debug:
             cflags += self._debugflags
         else:
             cflags += self._optflags
-        cflags += configuration["cflags"]
+        cflags += tuple(shlex.split(configuration["cflags"]))
         return cflags
 
     @property
     def cxxflags(self):
-        cxxflags = self._cxxflags + self._extra_compiler_flags
+        cxxflags = self._cxxflags + self._extra_compiler_flags + self.bugfix_cflags
         if self._debug:
             cxxflags += self._debugflags
         else:
             cxxflags += self._optflags
-        cxxflags += configuration["cxxflags"]
+        cxxflags += tuple(shlex.split(configuration["cxxflags"]))
         return cxxflags
 
     @property
     def ldflags(self):
         ldflags = self._ldflags + self._extra_linker_flags
-        ldflags += configuration["ldflags"]
+        ldflags += tuple(shlex.split(configuration["ldflags"]))
         return ldflags
 
     @property
     def bugfix_cflags(self):
-        return []
-
-    @property
-    def workaround_cflags(self):
-        return []
+        return ()
 
     @collective
     def get_so(self, jitmodule, extension):
@@ -309,9 +306,9 @@ class Compiler(ABC):
                     with open(cname, "w") as f:
                         f.write(jitmodule.code_to_compile)
                     # Compiler also links
-                    if self.ld is None:
-                        cc = [compiler] + compiler_flags + \
-                             ['-o', tmpname, cname] + self.ldflags
+                    if not self.ld:
+                        cc = (compiler,) + compiler_flags + \
+                             ('-o', tmpname, cname) + self.ldflags
                         debug('Compilation command: %s', ' '.join(cc))
                         with open(logfile, "w") as log:
                             with open(errfile, "w") as err:
@@ -334,9 +331,9 @@ Unable to compile code
 Compile log in %s
 Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
                     else:
-                        cc = [compiler] + compiler_flags + \
-                             ['-c', '-o', oname, cname]
-                        ld = self.ld.split() + ['-o', tmpname, oname] + self.ldflags
+                        cc = (compiler,) + compiler_flags + \
+                             ('-c', '-o', oname, cname)
+                        ld = tuple(shlex.split(self.ld)) + ('-o', tmpname, oname) + self.ldflags
                         debug('Compilation command: %s', ' '.join(cc))
                         debug('Link command: %s', ' '.join(ld))
                         with open(logfile, "w") as log:
@@ -382,47 +379,47 @@ class MacClangCompiler(Compiler):
     """A compiler for building a shared library on Mac systems."""
     _name = "Mac Clang"
 
-    _cflags = ["-fPIC", "-Wall", "-framework", "Accelerate", "-std=gnu11"]
-    _cxxflags = ["-fPIC", "-Wall", "-framework", "Accelerate"]
-    _ldflags = ["-dynamiclib"]
+    _cflags = ("-fPIC", "-Wall", "-framework", "Accelerate", "-std=gnu11")
+    _cxxflags = ("-fPIC", "-Wall", "-framework", "Accelerate")
+    _ldflags = ("-dynamiclib",)
 
-    _optflags = ["-O3", "-ffast-math", "-march=native"]
-    _debugflags = ["-O0", "-g"]
+    _optflags = ("-O3", "-ffast-math", "-march=native")
+    _debugflags = ("-O0", "-g")
 
 
 class MacClangARMCompiler(MacClangCompiler):
     """A compiler for building a shared library on ARM based Mac systems."""
     # See https://stackoverflow.com/q/65966969
-    _opt_flags = ["-O3", "-ffast-math", "-mcpu=apple-a14"]
+    _opt_flags = ("-O3", "-ffast-math", "-mcpu=apple-a14")
 
 
 class LinuxGnuCompiler(Compiler):
     """The GNU compiler for building a shared library on Linux systems."""
     _name = "GNU"
 
-    _cflags = ["-fPIC", "-Wall", "-std=gnu11"]
-    _cxxflags = ["-fPIC", "-Wall"]
-    _ldflags = ["-shared"]
+    _cflags = ("-fPIC", "-Wall", "-std=gnu11")
+    _cxxflags = ("-fPIC", "-Wall")
+    _ldflags = ("-shared",)
 
-    _optflags = ["-march=native", "-O3", "-ffast-math"]
-    _debugflags = ["-O0", "-g"]
+    _optflags = ("-march=native", "-O3", "-ffast-math")
+    _debugflags = ("-O0", "-g")
 
     @property
-    def workaround_cflags(self):
+    def bugfix_cflags(self):
         """Flags to work around bugs in compilers."""
         ver = self.version
-        cflags = []
+        cflags = ()
         if Version("4.8.0") <= ver < Version("4.9.0"):
             # GCC bug https://gcc.gnu.org/bugzilla/show_bug.cgi?id=61068
-            cflags = ["-fno-ivopts"]
+            cflags = ("-fno-ivopts",)
         if Version("5.0") <= ver <= Version("5.4.0"):
-            cflags = ["-fno-tree-loop-vectorize"]
+            cflags = ("-fno-tree-loop-vectorize",)
         if Version("6.0.0") <= ver < Version("6.5.0"):
             # GCC bug https://gcc.gnu.org/bugzilla/show_bug.cgi?id=79920
-            cflags = ["-fno-tree-loop-vectorize"]
+            cflags = ("-fno-tree-loop-vectorize",)
         if Version("7.1.0") <= ver < Version("7.1.2"):
             # GCC bug https://gcc.gnu.org/bugzilla/show_bug.cgi?id=81633
-            cflags = ["-fno-tree-loop-vectorize"]
+            cflags = ("-fno-tree-loop-vectorize",)
         if Version("7.3") <= ver <= Version("7.5"):
             # GCC bug https://gcc.gnu.org/bugzilla/show_bug.cgi?id=90055
             # See also https://github.com/firedrakeproject/firedrake/issues/1442
@@ -430,7 +427,7 @@ class LinuxGnuCompiler(Compiler):
             # Bug also on skylake with the vectoriser in this
             # combination (disappears without
             # -fno-tree-loop-vectorize!)
-            cflags = ["-fno-tree-loop-vectorize", "-mno-avx512f"]
+            cflags = ("-fno-tree-loop-vectorize", "-mno-avx512f")
         return cflags
 
 
@@ -440,12 +437,12 @@ class LinuxClangCompiler(Compiler):
 
     _ld = "ld.lld"
 
-    _cflags = ["-fPIC", "-Wall", "-std=gnu11"]
-    _cxxflags = ["-fPIC", "-Wall"]
-    _ldflags = ["-shared"]
+    _cflags = ("-fPIC", "-Wall", "-std=gnu11")
+    _cxxflags = ("-fPIC", "-Wall")
+    _ldflags = ("-shared",)
 
-    _optflags = ["-march=native", "-O3", "-ffast-math"]
-    _debugflags = ["-O0", "-g"]
+    _optflags = ("-march=native", "-O3", "-ffast-math")
+    _debugflags = ("-O0", "-g")
 
 
 class LinuxIntelCompiler(Compiler):
@@ -455,12 +452,12 @@ class LinuxIntelCompiler(Compiler):
     _cc = "mpiicc"
     _cxx = "mpiicpc"
 
-    _cflags = ["-fPIC", "-no-multibyte-chars", "-std=gnu11"]
-    _cxxflags = ["-fPIC", "-no-multibyte-chars"]
-    _ldflags = ["-shared"]
+    _cflags = ("-fPIC", "-no-multibyte-chars", "-std=gnu11")
+    _cxxflags = ("-fPIC", "-no-multibyte-chars")
+    _ldflags = ("-shared",)
 
-    _optflags = ["-Ofast", "-xHost"]
-    _debugflags = ["-O0", "-g"]
+    _optflags = ("-Ofast", "-xHost")
+    _debugflags = ("-O0", "-g")
 
 
 class LinuxCrayCompiler(Compiler):
@@ -470,18 +467,18 @@ class LinuxCrayCompiler(Compiler):
     _cc = "cc"
     _cxx = "CC"
 
-    _cflags = ["-fPIC", "-Wall", "-std=gnu11"]
-    _cxxflags = ["-fPIC", "-Wall"]
-    _ldflags = ["-shared"]
+    _cflags = ("-fPIC", "-Wall", "-std=gnu11")
+    _cxxflags = ("-fPIC", "-Wall")
+    _ldflags = ("-shared",)
 
-    _optflags = ["-march=native", "-O3", "-ffast-math"]
-    _debugflags = ["-O0", "-g"]
+    _optflags = ("-march=native", "-O3", "-ffast-math")
+    _debugflags = ("-O0", "-g")
 
     @property
     def ldflags(self):
-        ldflags = super().ldflags
+        ldflags = super(LinuxCrayCompiler).ldflags
         if '-llapack' in ldflags:
-            ldflags.remove('-llapack')
+            ldflags = tuple(flag for flag in ldflags if flag != '-llapack')
         return ldflags
 
 
