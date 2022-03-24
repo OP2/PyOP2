@@ -292,6 +292,18 @@ class Compiler(ABC):
     def bugfix_cflags(self):
         return ()
 
+    @staticmethod
+    def expandWl(ldflags):
+        """Generator to expand the `-Wl` compiler flags for use as linker flags
+        :arg ldflags: linker flags for a compiler command
+        """
+        for flag in ldflags:
+            if flag.startswith('-Wl'):
+                for f in flag.lstrip('-Wl')[1:].split(','):
+                    yield f
+            else:
+                yield flag
+
     @collective
     def get_so(self, jitmodule, extension):
         """Build a shared library and load it
@@ -359,63 +371,65 @@ class Compiler(ABC):
                         f.write(jitmodule.code_to_compile)
                     # Compiler also links
                     if not self.ld:
-                        cc = (compiler,) + compiler_flags + \
-                             ('-o', tmpname, cname) + self.ldflags
+                        cc = (compiler,) \
+                            + compiler_flags \
+                            + ('-o', tmpname, cname) \
+                            + self.ldflags
                         debug('Compilation command: %s', ' '.join(cc))
-                        with open(logfile, "w") as log:
-                            with open(errfile, "w") as err:
-                                log.write("Compilation command:\n")
-                                log.write(" ".join(cc))
-                                log.write("\n\n")
-                                try:
-                                    if configuration['no_fork_available']:
-                                        cc += ["2>", errfile, ">", logfile]
-                                        cmd = " ".join(cc)
-                                        status = os.system(cmd)
-                                        if status != 0:
-                                            raise subprocess.CalledProcessError(status, cmd)
-                                    else:
-                                        subprocess.check_call(cc, stderr=err, stdout=log)
-                                except subprocess.CalledProcessError as e:
-                                    raise CompilationError(
-                                        """Command "%s" return error status %d.
+                        with open(logfile, "w") as log, open(errfile, "w") as err:
+                            log.write("Compilation command:\n")
+                            log.write(" ".join(cc))
+                            log.write("\n\n")
+                            try:
+                                if configuration['no_fork_available']:
+                                    cc += ["2>", errfile, ">", logfile]
+                                    cmd = " ".join(cc)
+                                    status = os.system(cmd)
+                                    if status != 0:
+                                        raise subprocess.CalledProcessError(status, cmd)
+                                else:
+                                    subprocess.check_call(cc, stderr=err, stdout=log)
+                            except subprocess.CalledProcessError as e:
+                                raise CompilationError(
+                                    """Command "%s" return error status %d.
 Unable to compile code
 Compile log in %s
 Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
                     else:
-                        cc = (compiler,) + compiler_flags + \
-                             ('-c', '-o', oname, cname)
-                        ld = tuple(shlex.split(self.ld)) + ('-o', tmpname, oname) + self.ldflags
+                        cc = (compiler,) \
+                            + compiler_flags \
+                            + ('-c', '-o', oname, cname)
+                        # Extract linker specific "cflags" from ldflags
+                        ld = tuple(shlex.split(self.ld)) \
+                            + ('-o', tmpname, oname) \
+                            + tuple(self.expandWl(self.ldflags))
                         debug('Compilation command: %s', ' '.join(cc))
                         debug('Link command: %s', ' '.join(ld))
-                        with open(logfile, "a") as log:
-                            with open(errfile, "a") as err:
-                                log.write("Compilation command:\n")
-                                log.write(" ".join(cc))
-                                log.write("\n\n")
-                                log.write("Link command:\n")
-                                log.write(" ".join(ld))
-                                log.write("\n\n")
-                                try:
-                                    if configuration['no_fork_available']:
-                                        cc += ["2>", errfile, ">", logfile]
-                                        ld += ["2>>", errfile, ">>", logfile]
-                                        cccmd = " ".join(cc)
-                                        ldcmd = " ".join(ld)
-                                        status = os.system(cccmd)
-                                        if status != 0:
-                                            raise subprocess.CalledProcessError(status, cccmd)
-                                        status = os.system(ldcmd)
-                                        if status != 0:
-                                            raise subprocess.CalledProcessError(status, ldcmd)
-                                    else:
-                                        subprocess.check_call(cc, stderr=err,
-                                                              stdout=log)
-                                        subprocess.check_call(ld, stderr=err,
-                                                              stdout=log)
-                                except subprocess.CalledProcessError as e:
-                                    raise CompilationError(
-                                        """Command "%s" return error status %d.
+                        with open(logfile, "a") as log, open(errfile, "a") as err:
+                            log.write("Compilation command:\n")
+                            log.write(" ".join(cc))
+                            log.write("\n\n")
+                            log.write("Link command:\n")
+                            log.write(" ".join(ld))
+                            log.write("\n\n")
+                            try:
+                                if configuration['no_fork_available']:
+                                    cc += ["2>", errfile, ">", logfile]
+                                    ld += ["2>>", errfile, ">>", logfile]
+                                    cccmd = " ".join(cc)
+                                    ldcmd = " ".join(ld)
+                                    status = os.system(cccmd)
+                                    if status != 0:
+                                        raise subprocess.CalledProcessError(status, cccmd)
+                                    status = os.system(ldcmd)
+                                    if status != 0:
+                                        raise subprocess.CalledProcessError(status, ldcmd)
+                                else:
+                                    subprocess.check_call(cc, stderr=err, stdout=log)
+                                    subprocess.check_call(ld, stderr=err, stdout=log)
+                            except subprocess.CalledProcessError as e:
+                                raise CompilationError(
+                                    """Command "%s" return error status %d.
 Unable to compile code
 Compile log in %s
 Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
