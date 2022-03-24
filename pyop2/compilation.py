@@ -39,16 +39,15 @@ import shutil
 import subprocess
 import sys
 import ctypes
-import collections
 import shlex
 from hashlib import md5
-from packaging.version import Version
+from packaging.version import Version, InvalidVersion
 
 
 from pyop2.mpi import MPI, collective, COMM_WORLD
 from pyop2.mpi import dup_comm, get_compilation_comm, set_compilation_comm
 from pyop2.configuration import configuration
-from pyop2.logger import debug, progress, INFO
+from pyop2.logger import warning, debug, progress, INFO
 from pyop2.exceptions import CompilationError
 
 
@@ -60,50 +59,84 @@ def _check_hashes(x, y, datatype):
 
 
 _check_op = MPI.Op.Create(_check_hashes, commute=True)
+_compiler = None
 
 
-CompilerInfo = collections.namedtuple("CompilerInfo", ["compiler",
-                                                       "version"])
+def set_default_compiler(compiler):
+    """Set the PyOP2 default compiler, globally.
 
-
-def sniff_compiler_version(exe):
-    try:
-        ver = subprocess.check_output([exe, "--version"]).decode("utf-8")
-    except (subprocess.CalledProcessError, UnicodeDecodeError):
-        ver = ""
-
-    if ver.startswith("gcc") or ver.startswith("g++"):
-        compiler = "GNU"
-    elif ver.startswith("clang"):
-        compiler = "clang"
-    elif ver.startswith("Apple LLVM"):
-        compiler = "clang"
-    elif ver.startswith("icc"):
-        compiler = "Intel"
-    elif ver.startswith("Cray"):
-        compiler = "Cray"
+    :arg compiler: String with name or path to compiler executable
+        OR a subclass of the Compiler class
+    """
+    global _compiler
+    if not _compiler:
+        if isinstance(compiler, str):
+            _compiler = sniff_compiler(compiler)
+        elif isinstance(compiler, Compiler):
+            _compiler = compiler
     else:
-        compiler = "unknown"
+        warning("`set_default_compiler` should only ever be called once,"
+                "calling multiple times is untested and may produce unexpected results")
 
-    ver = None
-    if compiler == "GNU":
-        try:
-            ver = subprocess.check_output([exe, "-dumpversion"],
-                                          stderr=subprocess.DEVNULL).decode("utf-8")
-            ver = Version(ver.strip())
-            if ver >= Version("7.0"):
-                try:
-                    # gcc-7 series only spits out patch level on dumpfullversion.
-                    fullver = subprocess.check_output([exe, "-dumpfullversion"],
-                                                      stderr=subprocess.DEVNULL).decode("utf-8")
-                    fullver = Version(fullver.strip())
-                    ver = fullver
-                except (subprocess.CalledProcessError, UnicodeDecodeError):
-                    pass
-        except (subprocess.CalledProcessError, UnicodeDecodeError):
-            pass
 
-    return CompilerInfo(compiler, ver)
+def sniff_compiler(exe):
+    """Obtain the correct compiler class by calling the compiler executable.
+
+    :arg exe: String with name or path to compiler executable
+    :returns: A compiler class
+    """
+    try:
+        output = subprocess.run(
+            [exe, "--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+            encoding="utf-8"
+        ).stdout
+    except (subprocess.CalledProcessError, UnicodeDecodeError):
+        output = ""
+
+    # Find the name of the compiler family
+    if output.startswith("gcc") or output.startswith("g++"):
+        name = "GNU"
+    elif output.startswith("clang"):
+        name = "clang"
+    elif output.startswith("Apple LLVM"):
+        name = "clang"
+    elif output.startswith("icc"):
+        name = "Intel"
+    elif "Cray" in output.split("\n")[0]:
+        # Cray is more awkward eg:
+        # Cray clang version 11.0.4  (<some_hash>)
+        # gcc (GCC) 9.3.0 20200312 (Cray Inc.)
+        name = "Cray"
+    else:
+        name = "unknown"
+
+    # Set the compiler instance based on the platform (and architecture)
+    if sys.platform.find("linux") == 0:
+        if name == "Intel":
+            compiler = LinuxIntelCompiler
+        elif name == "GNU":
+            compiler = LinuxGnuCompiler
+        elif name == "clang":
+            compiler = LinuxClangCompiler
+        elif name == "Cray":
+            compiler = LinuxCrayCompiler
+        else:
+            compiler = AnonymousCompiler
+    elif sys.platform.find("darwin") == 0:
+        if name == "clang":
+            machine = platform.uname().machine
+            if machine == "arm64":
+                compiler = MacClangARMCompiler
+            elif machine == "x86_64":
+                compiler = MacClangCompiler
+        else:
+            compiler = AnonymousCompiler
+    else:
+        compiler = AnonymousCompiler
+    return compiler
 
 
 @collective
@@ -155,17 +188,16 @@ def compilation_comm(comm):
 
 class Compiler(ABC):
     """A compiler for shared libraries.
-    :arg cc: C compiler executable (can be overriden by exporting the
-        environment variable ``PYOP2_CC``).
-    :arg ld: Linker executable (optional, if ``None``, we assume the compiler
-        can build object files and link in a single invocation, can be
-        overridden by exporting the environment variable ``PYOP2_LD``).
+
     :arg extra_compiler_flags: A list of arguments to the C compiler (CFLAGS)
         or the C++ compiler (CXXFLAGS)
-        ``PYOP2_CFLAGS`` and ``PYOP2_CXXFLAGS`` can also be used to extend these options
-        (optional, prepended to any flags specified as the cflags configuration option)
+        (optional, prepended to any flags specified as the cflags configuration option).
+        The environment variables ``PYOP2_CFLAGS`` and ``PYOP2_CXXFLAGS``
+        can also be used to extend these options.
     :arg extra_linker_flags: A list of arguments to the linker (LDFLAGS)
-        (optional, prepended to any flags specified as the ldflags configuration option).
+    (optional, prepended to any flags specified as the ldflags configuration option).
+        The environment variable ``PYOP2_LDFLAGS`` can also be used to
+        extend these options.
     :arg cpp: Should we try and use the C++ compiler instead of the C
         compiler?.
     :kwarg comm: Optional communicator to compile the code on
@@ -184,7 +216,7 @@ class Compiler(ABC):
     _optflags = ()
     _debugflags = ()
 
-    def __init__(self, extra_compiler_flags=None, extra_linker_flags=None, cpp=False, comm=None, version=None):
+    def __init__(self, extra_compiler_flags=None, extra_linker_flags=None, cpp=False, comm=None):
         self._extra_compiler_flags = tuple(extra_compiler_flags) or ()
         self._extra_linker_flags = tuple(extra_linker_flags) or ()
 
@@ -194,7 +226,7 @@ class Compiler(ABC):
         # Ensure that this is an internal communicator.
         comm = dup_comm(comm or COMM_WORLD)
         self.comm = compilation_comm(comm)
-        self.version = version
+        self.sniff_compiler_version()
 
     def __repr__(self):
         return f"<{self._name} compiler, version {self.version or 'unknown'}>"
@@ -237,6 +269,25 @@ class Compiler(ABC):
         ldflags += tuple(shlex.split(configuration["ldflags"]))
         return ldflags
 
+    def sniff_compiler_version(self, cpp=False):
+        """Attempt to determine the compiler version number.
+
+        :arg cpp: If set to True will use the C++ compiler rather than
+            the C compiler to determine the version number.
+        """
+        try:
+            exe = self.cxx if cpp else self.cc
+            output = subprocess.run(
+                [exe, "-dumpversion"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+                encoding="utf-8"
+            ).stdout
+            self.version = Version(output)
+        except (subprocess.CalledProcessError, UnicodeDecodeError, InvalidVersion):
+            self.version = None
+
     @property
     def bugfix_cflags(self):
         return ()
@@ -244,6 +295,7 @@ class Compiler(ABC):
     @collective
     def get_so(self, jitmodule, extension):
         """Build a shared library and load it
+
         :arg jitmodule: The JIT Module which can generate the code to compile.
         :arg extension: extension of the source file (c, cpp).
         Returns a :class:`ctypes.CDLL` object of the resulting shared
@@ -336,8 +388,8 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
                         ld = tuple(shlex.split(self.ld)) + ('-o', tmpname, oname) + self.ldflags
                         debug('Compilation command: %s', ' '.join(cc))
                         debug('Link command: %s', ' '.join(ld))
-                        with open(logfile, "w") as log:
-                            with open(errfile, "w") as err:
+                        with open(logfile, "a") as log:
+                            with open(errfile, "a") as err:
                                 log.write("Compilation command:\n")
                                 log.write(" ".join(cc))
                                 log.write("\n\n")
@@ -347,7 +399,7 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
                                 try:
                                     if configuration['no_fork_available']:
                                         cc += ["2>", errfile, ">", logfile]
-                                        ld += ["2>", errfile, ">", logfile]
+                                        ld += ["2>>", errfile, ">>", logfile]
                                         cccmd = " ".join(cc)
                                         ldcmd = " ".join(ld)
                                         status = os.system(cccmd)
@@ -403,6 +455,23 @@ class LinuxGnuCompiler(Compiler):
 
     _optflags = ("-march=native", "-O3", "-ffast-math")
     _debugflags = ("-O0", "-g")
+
+    def sniff_compiler_version(self, cpp=False):
+        super(LinuxGnuCompiler, self).sniff_compiler_version()
+        if self.version >= Version("7.0"):
+            try:
+                # gcc-7 series only spits out patch level on dumpfullversion.
+                exe = self.cxx if cpp else self.cc
+                output = subprocess.run(
+                    [exe, "-dumpfullversion"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True,
+                    encoding="utf-8"
+                ).stdout
+                self.version = Version(output)
+            except (subprocess.CalledProcessError, UnicodeDecodeError, InvalidVersion):
+                pass
 
     @property
     def bugfix_cflags(self):
@@ -490,7 +559,7 @@ class AnonymousCompiler(Compiler):
 
 
 @collective
-def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
+def load(jitmodule, extension, fn_name, cppargs=(), ldargs=(),
          argtypes=None, restype=None, comm=None):
     """Build a shared library and return a function pointer from it.
 
@@ -498,14 +567,13 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
         the string representing the source code.
     :arg extension: extension of the source file (c, cpp)
     :arg fn_name: The name of the function to return from the resulting library
-    :arg cppargs: A list of arguments to the C compiler (optional)
-    :arg ldargs: A list of arguments to the linker (optional)
+    :arg cppargs: A tuple of arguments to the C compiler (optional)
+    :arg ldargs: A tuple of arguments to the linker (optional)
     :arg argtypes: A list of ctypes argument types matching the arguments of
          the returned function (optional, pass ``None`` for ``void``). This is
          only used when string is passed in instead of JITModule.
     :arg restype: The return type of the function (optional, pass
          ``None`` for ``void``).
-    :arg compiler: The name of the C compiler (intel, ``None`` for default).
     :kwarg comm: Optional communicator to compile the code on (only
         rank 0 compiles code) (defaults to COMM_WORLD).
     """
@@ -526,38 +594,18 @@ def load(jitmodule, extension, fn_name, cppargs=[], ldargs=[],
         raise ValueError("Don't know how to compile code of type %r" % type(jitmodule))
 
     cpp = (extension == "cpp")
-
-    # Sniff compiler from executable
-    if cpp:
-        exe = configuration["cxx"] or "g++"
+    global _compiler
+    if _compiler:
+        # Use the global compiler if it has been set
+        compiler = _compiler
     else:
-        exe = configuration["cc"] or "gcc"
-    compiler_name, version = sniff_compiler_version(exe)
-
-    if sys.platform.find("linux") == 0:
-        if compiler_name == "Intel":
-            compiler = LinuxIntelCompiler
-        elif compiler_name == "GNU":
-            compiler = LinuxGnuCompiler
-        elif compiler_name == "clang":
-            compiler = LinuxClangCompiler
-        elif compiler_name == "Cray":
-            compiler = LinuxCrayCompiler
+        # Sniff compiler from executable
+        if cpp:
+            exe = configuration["cxx"] or "g++"
         else:
-            compiler = AnonymousCompiler
-    elif sys.platform.find("darwin") == 0:
-        if compiler_name == "clang":
-            machine = platform.uname().machine
-            if machine == "arm64":
-                compiler = MacClangARMCompiler
-            elif machine == "x86_64":
-                compiler = MacClangCompiler
-        else:
-            compiler = AnonymousCompiler
-    else:
-        compiler = AnonymousCompiler
-
-    dll = compiler(cppargs, ldargs, cpp=cpp, comm=comm, version=version).get_so(code, extension)
+            exe = configuration["cc"] or "gcc"
+        compiler = sniff_compiler(exe)
+    dll = compiler(cppargs, ldargs, cpp=cpp, comm=comm).get_so(code, extension)
     fn = getattr(dll, fn_name)
     fn.argtypes = code.argtypes
     fn.restype = restype

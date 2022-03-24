@@ -43,11 +43,17 @@ from pyop2.exceptions import ConfigurationError
 class Configuration(dict):
     r"""PyOP2 configuration parameters
 
-    :param compiler: compiler identifier (one of `gcc`, `icc`).
+    :param cc: C compiler (executable name eg: `gcc`
+        or path eg: `/opt/gcc/bin/gcc`).
+    :param cxx: C++ compiler (executable name eg: `g++`
+        or path eg: `/opt/gcc/bin/g++`).
+    :param ld: Linker (executable name `ld`
+        or path eg: `/opt/gcc/bin/ld`).
+    :param cflags: extra flags to be passed to the C compiler.
+    :param cxxflags: extra flags to be passed to the C++ compiler.
+    :param ldflags: extra flags to be passed to the linker.
     :param simd_width: number of doubles in SIMD instructions
         (e.g. 4 for AVX2, 8 for AVX512).
-    :param cflags: extra flags to be passed to the C compiler.
-    :param ldflags: extra flags to be passed to the linker.
     :param debug: Turn on debugging for generated code (turns off
         compiler optimisations).
     :param type_check: Should PyOP2 type-check API-calls?  (Default,
