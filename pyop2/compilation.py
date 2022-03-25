@@ -59,6 +59,7 @@ def _check_hashes(x, y, datatype):
 
 
 _check_op = MPI.Op.Create(_check_hashes, commute=True)
+global _compiler
 _compiler = None
 
 
@@ -69,14 +70,20 @@ def set_default_compiler(compiler):
         OR a subclass of the Compiler class
     """
     global _compiler
-    if not _compiler:
-        if isinstance(compiler, str):
-            _compiler = sniff_compiler(compiler)
-        elif isinstance(compiler, Compiler):
-            _compiler = compiler
+    if _compiler:
+        warning(
+            "`set_default_compiler` should only ever be called once, calling"
+            " multiple times is untested and may produce unexpected results"
+        )
+    if isinstance(compiler, str):
+        _compiler = sniff_compiler(compiler)
+    elif isinstance(compiler, type) and issubclass(compiler, Compiler):
+        _compiler = compiler
     else:
-        warning("`set_default_compiler` should only ever be called once,"
-                "calling multiple times is untested and may produce unexpected results")
+        raise TypeError(
+            "compiler must be a path to a compiler (a string) or a subclass"
+            " of the pyop2.compilation.Compiler class"
+        )
 
 
 def sniff_compiler(exe):
