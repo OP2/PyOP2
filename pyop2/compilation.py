@@ -522,7 +522,7 @@ class LinuxClangCompiler(Compiler):
 
     _cflags = ("-fPIC", "-Wall", "-std=gnu11")
     _cxxflags = ("-fPIC", "-Wall")
-    _ldflags = ("-shared",)
+    _ldflags = ("-shared", "-L/usr/lib")
 
     _optflags = ("-march=native", "-O3", "-ffast-math")
     _debugflags = ("-O0", "-g")
