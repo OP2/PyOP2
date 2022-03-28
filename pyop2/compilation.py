@@ -521,7 +521,7 @@ def _add_profiling_events(dll, events):
         if hasattr(dll, "inverse"):
             events += ('inv_memcpy', 'inv_getrf', 'inv_getri')
         # link all ids in DLL to the events generated here in python
-        for e in events:
+        for e in list(filter(lambda e : not e == None, events)):
             ctypes.c_int.in_dll(dll, 'ID_'+e).value = PETSc.Log.Event(e).id
     return dll
 
