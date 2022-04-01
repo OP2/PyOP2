@@ -391,7 +391,7 @@ class GlobalKernel(Cached):
         kernel = kernel.copy(temporary_variables=tmps)
         shifted_iname = kernel.get_var_name_generator()(f"{iname}_shift")
 
-        # {{{
+        # {{{ record temps that cannot be vectorized
 
         # Do not vectorize temporaries used outside *iname*
         from functools import reduce

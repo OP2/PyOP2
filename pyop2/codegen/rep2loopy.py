@@ -139,6 +139,7 @@ class LACallable(loopy.ScalarCallable, metaclass=abc.ABCMeta):
                 callables_table)
 
     def emit_call_insn(self, insn, target, expression_to_code_mapper):
+        from loopy.codegen import UnvectorizableError
         assert self.is_ready_for_codegen()
         assert isinstance(insn, loopy.CallInstruction)
 
@@ -146,6 +147,9 @@ class LACallable(loopy.ScalarCallable, metaclass=abc.ABCMeta):
 
         parameters = list(parameters)
         par_dtypes = [self.arg_id_to_dtype[i] for i, _ in enumerate(parameters)]
+
+        if expression_to_code_mapper.codegen_state.vectorization_info:
+            raise UnvectorizableError("LACallable: cannot take in vector arrays")
 
         parameters.append(insn.assignees[-1])
         par_dtypes.append(self.arg_id_to_dtype[0])
