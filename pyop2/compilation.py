@@ -59,7 +59,6 @@ def _check_hashes(x, y, datatype):
 
 
 _check_op = MPI.Op.Create(_check_hashes, commute=True)
-global _compiler
 _compiler = None
 
 
