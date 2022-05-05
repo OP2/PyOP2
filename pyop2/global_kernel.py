@@ -333,11 +333,14 @@ class GlobalKernel(Cached):
         else:
             iname = "n"
 
-        has_matrix = any(isinstance(arg, MatKernelArg) for arg in self.arguments)
+        # TODO: vectorizing 2-form assembly kernels is possible, but must
+        # change the arguments passed to MatSetValuesxxx (not yet implemented)
+        has_matrix = any(isinstance(arg, (MatKernelArg, MixedMatKernelArg))
+                         for arg in self.arguments)
         has_rw = any(arg.access == op2.RW for arg in self.local_kernel.arguments)
         is_cplx = (any(arg.dtype == 'complex128' for arg in self.local_kernel.arguments)
                    or any(arg.dtype.dtype == 'complex128' for arg in tuple(wrapper.default_entrypoint.temporary_variables.values())))
-        vectorisable = (not (has_matrix or has_rw) and (configuration["vectorization_strategy"])) and not is_cplx
+        vectorisable = ((not (has_matrix or has_rw)) and (configuration["vectorization_strategy"])) and not is_cplx
 
         if vectorisable:
             if isinstance(self.local_kernel.code, lp.TranslationUnit):
