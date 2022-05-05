@@ -177,6 +177,46 @@ class INVCallable(LACallable):
     """
     name = "inverse"
 
+    def with_descrs(self, arg_id_to_descr, callables_table):
+        a_descr = arg_id_to_descr.get(0)
+        a_inv_descr = arg_id_to_descr.get(-1)
+
+        if a_descr is None or a_inv_descr is None:
+            # shapes aren't specialized enough to be resolved
+            return self, callables_table
+
+        assert len(a_descr.shape) == 2
+        assert a_descr.shape == a_inv_descr.shape
+        assert a_descr.shape[1] == a_descr.shape[0]
+
+        return self.copy(arg_id_to_descr=arg_id_to_descr), callables_table
+
+    def emit_call_insn(self, insn, target, expression_to_code_mapper):
+        from loopy.codegen import UnvectorizableError
+
+        # Override codegen to emit stride info. to the blas calls.
+        in_descr = self.arg_id_to_descr[0]
+        out_descr = self.arg_id_to_descr[-1]
+        ecm = expression_to_code_mapper
+
+        # see pyop2/codegen/c/inverse.c for the func. signature
+        inc_a = in_descr.dim_tags[1].stride
+        inc_a_out = out_descr.dim_tags[1].stride
+        n = in_descr.shape[0]
+
+        a, = insn.expression.parameters
+        a_out, = insn.assignees
+
+        if ecm.codegen_state.vectorization_info is not None:
+            raise UnvectorizableError("cannot vectorize 'inverse'.")
+
+        c_parameters = [ecm(a_out).expr,
+                        ecm(a).expr,
+                        n,
+                        inc_a,
+                        inc_a_out]
+        return var(self.name_in_target)(*c_parameters), False
+
     def generate_preambles(self, target):
         assert isinstance(target, loopy.CTarget)
         yield ("inverse", inverse_preamble)
