@@ -65,8 +65,9 @@ static void inverse(PetscScalar* __restrict__ Aout, const PetscScalar* __restric
         fprintf(stderr, "Getri throws nonzero info.");
         abort();
     }
-    if ( N > BUF_SIZE ) {
+
+    if (Awork != work_buffer)
         free(Awork);
+    if (ipiv != ipiv_buffer)
         free(ipiv);
-    }
 }
