@@ -35,6 +35,10 @@ from pyop2.codegen.representation import (Index, FixedIndex, RuntimeIndex,
 from pyop2.codegen.representation import (PackInst, UnpackInst, KernelInst, PreUnpackInst)
 from pytools import ImmutableRecord
 from pyop2.codegen.loopycompat import _match_caller_callee_argument_dimension_
+from pyop2.configuration import target
+
+from petsc4py import PETSc
+
 
 # Read c files  for linear algebra callables in on import
 import os
@@ -86,7 +90,7 @@ class PetscCallable(loopy.ScalarCallable):
                 callables_table)
 
     def generate_preambles(self, target):
-        assert isinstance(target, loopy.CTarget)
+        assert isinstance(target, type(target))
         yield("00_petsc", "#include <petsc.h>")
         return
 
@@ -218,7 +222,7 @@ class INVCallable(LACallable):
         return var(self.name_in_target)(*c_parameters), False
 
     def generate_preambles(self, target):
-        assert isinstance(target, loopy.CTarget)
+        assert isinstance(target, type(target))
         yield ("inverse", inverse_preamble)
 
 
@@ -230,7 +234,7 @@ class SolveCallable(LACallable):
     name = "solve"
 
     def generate_preambles(self, target):
-        assert isinstance(target, loopy.CTarget)
+        assert isinstance(target, type(target))
         yield ("solve", solve_preamble)
 
 
@@ -572,7 +576,7 @@ def generate(builder, wrapper_name=None):
     wrapper = loopy.make_kernel(domains,
                                 statements,
                                 kernel_data=parameters.kernel_data,
-                                target=loopy.CTarget(),
+                                target=target,
                                 temporary_variables=parameters.temporaries,
                                 symbol_manglers=[symbol_mangler],
                                 options=options,
@@ -590,6 +594,8 @@ def generate(builder, wrapper_name=None):
     kernel = builder.kernel
     headers = set(kernel.headers)
     headers = headers | set(["#include <math.h>", "#include <complex.h>", "#include <petsc.h>"])
+    if PETSc.Log.isActive():
+        headers = headers | set(["#include <petsclog.h>"])
     preamble = "\n".join(sorted(headers))
 
     from coffee.base import Node
