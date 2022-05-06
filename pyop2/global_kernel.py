@@ -340,7 +340,8 @@ class GlobalKernel(Cached):
         has_rw = any(arg.access == op2.RW for arg in self.local_kernel.arguments)
         is_cplx = (any(arg.dtype == 'complex128' for arg in self.local_kernel.arguments)
                    or any(arg.dtype.dtype == 'complex128' for arg in tuple(wrapper.default_entrypoint.temporary_variables.values())))
-        vectorisable = ((not (has_matrix or has_rw)) and (configuration["vectorization_strategy"])) and not is_cplx
+        extruded_coords = self.local_kernel.name.endswith("extrusion")  # FIXME is there a better way to know that this kernel generated the extrusion coords?
+        vectorisable = ((not (has_matrix or has_rw)) and (configuration["vectorization_strategy"])) and not is_cplx and not extruded_coords
 
         if vectorisable:
             if isinstance(self.local_kernel.code, lp.TranslationUnit):
