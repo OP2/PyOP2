@@ -73,6 +73,6 @@ void solve(PetscScalar* __restrict__ out, const PetscScalar* __restrict__ A, con
     if (Awork != work_buffer)
       free(Awork);
 
-    if (out_proxy != out_proxy_buffer)
+    if ((out_proxy != out) && (out_proxy != out_proxy_buffer))
       free(out_proxy);
 }

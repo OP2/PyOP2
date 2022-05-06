@@ -70,4 +70,6 @@ static void inverse(PetscScalar* __restrict__ Aout, const PetscScalar* __restric
         free(Awork);
     if (ipiv != ipiv_buffer)
         free(ipiv);
+    if ((Aout_proxy != Aout) && (Aout_proxy != Aout_proxy_buffer))
+        free(Aout_proxy);
 }
