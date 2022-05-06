@@ -233,6 +233,51 @@ class SolveCallable(LACallable):
     """
     name = "solve"
 
+    def with_descrs(self, arg_id_to_descr, callables_table):
+        a_descr = arg_id_to_descr.get(0)
+        b_descr = arg_id_to_descr.get(1)
+        x_descr = arg_id_to_descr.get(-1)
+
+        if a_descr is None or b_descr is None:
+            # shapes aren't specialized enough to be resolved
+            return self, callables_table
+
+        assert len(a_descr.shape) == 2
+        assert len(x_descr.shape) == 1
+        assert b_descr.shape == x_descr.shape
+
+        return self.copy(arg_id_to_descr=arg_id_to_descr), callables_table
+
+    def emit_call_insn(self, insn, target, expression_to_code_mapper):
+        from loopy.codegen import UnvectorizableError
+
+        # Override codegen to emit stride info. to the blas calls.
+        a_descr = self.arg_id_to_descr[0]
+        b_descr = self.arg_id_to_descr[1]
+        out_descr = self.arg_id_to_descr[-1]
+        ecm = expression_to_code_mapper
+
+        # see pyop2/codegen/c/solve.c for the func. signature
+        inc_a = a_descr.dim_tags[1].stride
+        inc_b = b_descr.dim_tags[0].stride
+        inc_out = out_descr.dim_tags[0].stride
+        n = a_descr.shape[0]
+
+        a, b = insn.expression.parameters
+        out, = insn.assignees
+
+        if ecm.codegen_state.vectorization_info is not None:
+            raise UnvectorizableError("cannot vectorize 'inverse'.")
+
+        c_parameters = [ecm(out).expr,
+                        ecm(a).expr,
+                        ecm(b).expr,
+                        n,
+                        inc_a,
+                        inc_b,
+                        inc_out]
+        return var(self.name_in_target)(*c_parameters), False
+
     def generate_preambles(self, target):
         assert isinstance(target, type(target))
         yield ("solve", solve_preamble)
