@@ -439,7 +439,7 @@ class GlobalKernel(Cached):
         # }}}
 
         # split iname
-        slabs = (1, 1)
+        slabs = (0, 1)
         inner_iname = kernel.get_var_name_generator()(f"{shifted_iname}_batch")
 
         # in the ideal world breaks a loop of n*batch_size into two loops:
