@@ -326,6 +326,8 @@ class GlobalKernel(Cached):
     def code_to_compile(self):
         """Return the C/C++ source code as a string."""
         from pyop2.codegen.rep2loopy import generate
+        from loopy.symbolic import get_dependencies
+        from functools import reduce
 
         wrapper = generate(self.builder)
         if self._extruded:
@@ -355,7 +357,19 @@ class GlobalKernel(Cached):
                             and isinstance(wrapper.callables_table[name],
                                            lp.CallableKernel)):
                         wrapper = lp.inline_callable_kernel(wrapper, name)
-                wrapper = self.vectorise(wrapper, iname, configuration["simd_width"])
+
+                all_insn_preds = reduce(
+                    frozenset.union,
+                    (insn.predicates
+                     for insn in wrapper.default_entrypoint.instructions),
+                    frozenset())
+
+                if iname not in get_dependencies(tuple(all_insn_preds)):
+                    # https://github.com/inducer/loopy/issues/615
+                    # TODO: get rid of this guard once the loopy issue is fixed
+                    wrapper = self.vectorise(wrapper, iname,
+                                             configuration["simd_width"])
+
         code = lp.generate_code_v2(wrapper)
 
         if self.local_kernel.cpp:
