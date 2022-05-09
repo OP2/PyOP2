@@ -403,7 +403,6 @@ class GlobalKernel(Cached):
         tmps = {name: tv.copy(alignment=alignment)
                 for name, tv in kernel.temporary_variables.items()}
         kernel = kernel.copy(temporary_variables=tmps)
-        shifted_iname = kernel.get_var_name_generator()(f"{iname}_shift")
 
         # {{{ record temps that cannot be vectorized
 
@@ -431,7 +430,7 @@ class GlobalKernel(Cached):
         from loopy.symbolic import pw_aff_to_expr
         import pymbolic.primitives as prim
         lbound = pw_aff_to_expr(kernel.get_iname_bounds(iname).lower_bound_pw_aff)
-
+        shifted_iname = kernel.get_var_name_generator()(f"{iname}_shift")
         kernel = lp.affine_map_inames(kernel, iname, shifted_iname,
                                       [(prim.Variable(shifted_iname),
                                        (prim.Variable(iname) - lbound))])
@@ -439,6 +438,7 @@ class GlobalKernel(Cached):
         # }}}
 
         # split iname
+        # note there is no front slab needed because iname is shifted (see above)
         slabs = (0, 1)
         inner_iname = kernel.get_var_name_generator()(f"{shifted_iname}_batch")
 
