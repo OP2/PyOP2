@@ -90,6 +90,12 @@ class Configuration(dict):
         cdim > 1 be built as block sparsities, or dof sparsities.  The
         former saves memory but changes which preconditioners are
         available for the resulting matrices.  (Default yes)
+    :param vectorization_strategy: A :class:`str` describing the
+        vectorization strategy that must to be applied to the kernels. Can
+        be one of the following --
+
+        - ``sun2020study``: Cross-element vectorization strategy of
+          `<https://doi.org/10.1177/1094342020945005>`__.
     """
     # name, env variable, type, default, write once
     cache_dir = os.path.join(gettempdir(), "pyop2-cache-uid%s" % os.getuid())
@@ -109,7 +115,7 @@ class Configuration(dict):
         "simd_width":
             ("PYOP2_SIMD_WIDTH", int, default_simd_width()),
         "vectorization_strategy":
-            ("PYOP2_VECT_STRATEGY", str, "ve"),
+            ("PYOP2_VECT_STRATEGY", str, "sun2020study"),
         "alignment":
             ("PYOP2_ALIGNMENT", int, 64),
         "time":
