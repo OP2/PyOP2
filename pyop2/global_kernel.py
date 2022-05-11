@@ -340,8 +340,13 @@ class GlobalKernel(Cached):
         has_matrix = any(isinstance(arg, (MatKernelArg, MixedMatKernelArg))
                          for arg in self.arguments)
         has_rw = any(arg.access == op2.RW for arg in self.local_kernel.arguments)
-        is_cplx = (any(lp.types.NumpyType(dtype).is_complex() if not isinstance(dtype, lp.types.NumpyType) else dtype for dtype in self.local_kernel.dtypes)  # local args complex?
-                   or any(arg.dtype.is_complex() for arg in tuple(wrapper.default_entrypoint.temporary_variables.values())))  # global temps complex?
+        is_cplx = (any(lp.types.NumpyType(dtype).is_complex()
+                       if not isinstance(dtype, lp.types.NumpyType)
+                       else dtype.is_complex()
+                       for dtype in self.local_kernel.dtypes
+                       )  # local args complex?
+                   or any(arg.dtype.is_complex()
+                          for arg in tuple(wrapper.default_entrypoint.temporary_variables.values())))  # global temps complex?
         extruded_coords = self.local_kernel.name.endswith("extrusion")  # FIXME is there a better way to know that this kernel generated the extrusion coords?
         vectorisable = ((not (has_matrix or has_rw)) and (configuration["vectorization_strategy"])) and not is_cplx and not extruded_coords
 
@@ -367,8 +372,13 @@ class GlobalKernel(Cached):
                 if iname not in get_dependencies(tuple(all_insn_preds)):
                     # https://github.com/inducer/loopy/issues/615
                     # TODO: get rid of this guard once the loopy issue is fixed
-                    wrapper = self.vectorise(wrapper, iname,
-                                             configuration["simd_width"])
+                    if configuration["vectorization_strategy"] == "sun2020study":
+                        wrapper = self.vectorise(wrapper, iname,
+                                                 configuration["simd_width"])
+                    else:
+                        raise NotImplementedError(
+                            "Vectorization strategy"
+                            f" '{configuration['vectorization_strategy']}'")
 
         code = lp.generate_code_v2(wrapper)
 
@@ -387,6 +397,9 @@ class GlobalKernel(Cached):
         :arg batch_size: The vector width."""
         if batch_size == 1:
             return wrapper
+
+        from functools import reduce
+        import pymbolic.primitives as prim
 
         if not configuration["debug"]:
             # loopy warns for every instruction that cannot be vectorized;
@@ -407,7 +420,6 @@ class GlobalKernel(Cached):
         # {{{ record temps that cannot be vectorized
 
         # Do not vectorize temporaries used outside *iname*
-        from functools import reduce
         temps_not_to_vectorize = reduce(set.union,
                                         [(insn.dependency_names()
                                           & frozenset(kernel.temporary_variables))
@@ -421,6 +433,19 @@ class GlobalKernel(Cached):
                                    if (tv.read_only
                                        and tv.initializer is not None)}
 
+        # {{{ clang (unlike gcc) does not allow taking address of vector-type
+        # variable
+
+        # FIXME: Perform this only if we know we are not using gcc.
+        for insn in kernel.instructions:
+            if (
+                    isinstance(insn, lp.MultiAssignmentBase)
+                    and isinstance(insn.expression, prim.Call)
+                    and insn.expression.function.name in ["solve", "inverse"]):
+                temps_not_to_vectorize -= (insn.dependency_names())
+
+        # }}}
+
         # }}}
 
         # {{{ TODO: placeholder until loopy's simplify_using_pwaff gets smarter
@@ -428,7 +453,6 @@ class GlobalKernel(Cached):
         # transform to ensure that the loop undergoing array expansion has a
         # lower bound of '0'
         from loopy.symbolic import pw_aff_to_expr
-        import pymbolic.primitives as prim
         lbound = pw_aff_to_expr(kernel.get_iname_bounds(iname).lower_bound_pw_aff)
         shifted_iname = kernel.get_var_name_generator()(f"{iname}_shift")
         kernel = lp.affine_map_inames(kernel, iname, shifted_iname,
@@ -442,12 +466,8 @@ class GlobalKernel(Cached):
         slabs = (0, 1)
         inner_iname = kernel.get_var_name_generator()(f"{shifted_iname}_batch")
 
-        # in the ideal world breaks a loop of n*batch_size into two loops:
-        # an outer loop of n/batch_size
-        # and an inner loop over batch_size
-        if configuration["vectorization_strategy"] == "ve":
-            kernel = lp.split_iname(kernel, shifted_iname, batch_size, slabs=slabs,
-                                    inner_iname=inner_iname)
+        kernel = lp.split_iname(kernel, shifted_iname, batch_size, slabs=slabs,
+                                inner_iname=inner_iname)
 
         # adds a new axis to the temporary and indexes it with the provided iname
         # i.e. stores the value at each instance of the loop. (i.e. array
