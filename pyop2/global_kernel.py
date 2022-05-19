@@ -348,37 +348,37 @@ class GlobalKernel(Cached):
                    or any(arg.dtype.is_complex()
                           for arg in tuple(wrapper.default_entrypoint.temporary_variables.values())))  # global temps complex?
         extruded_coords = self.local_kernel.name.endswith("extrusion")  # FIXME is there a better way to know that this kernel generated the extrusion coords?
-        vectorisable = ((not (has_matrix or has_rw)) and (configuration["vectorization_strategy"])) and not is_cplx and not extruded_coords
+        is_loopy_kernel = isinstance(self.local_kernel.code, lp.TranslationUnit)
+        vectorisable = is_loopy_kernel and((not (has_matrix or has_rw)) and (configuration["vectorization_strategy"])) and not is_cplx and not extruded_coords
 
         if vectorisable:
-            if isinstance(self.local_kernel.code, lp.TranslationUnit):
-                # change target to generate vectorized code via gcc vector
-                # extensions
-                wrapper = wrapper.copy(target=lp.CVectorExtensionsTarget())
-                # inline all inner kernels
-                names = self.local_kernel.code.callables_table
-                for name in names:
-                    if (name in wrapper.callables_table.keys()
-                            and isinstance(wrapper.callables_table[name],
-                                           lp.CallableKernel)):
-                        wrapper = lp.inline_callable_kernel(wrapper, name)
+            # change target to generate vectorized code via gcc vector
+            # extensions
+            wrapper = wrapper.copy(target=lp.CVectorExtensionsTarget())
+            # inline all inner kernels
+            names = self.local_kernel.code.callables_table
+            for name in names:
+                if (name in wrapper.callables_table.keys()
+                        and isinstance(wrapper.callables_table[name],
+                                        lp.CallableKernel)):
+                    wrapper = lp.inline_callable_kernel(wrapper, name)
 
-                all_insn_preds = reduce(
-                    frozenset.union,
-                    (insn.predicates
-                     for insn in wrapper.default_entrypoint.instructions),
-                    frozenset())
+            all_insn_preds = reduce(
+                frozenset.union,
+                (insn.predicates
+                    for insn in wrapper.default_entrypoint.instructions),
+                frozenset())
 
-                if iname not in get_dependencies(tuple(all_insn_preds)):
-                    # https://github.com/inducer/loopy/issues/615
-                    # TODO: get rid of this guard once the loopy issue is fixed
-                    if configuration["vectorization_strategy"] == "sun2020study":
-                        wrapper = self.vectorise(wrapper, iname,
-                                                 configuration["simd_width"])
-                    else:
-                        raise NotImplementedError(
-                            "Vectorization strategy"
-                            f" '{configuration['vectorization_strategy']}'")
+            if iname not in get_dependencies(tuple(all_insn_preds)):
+                # https://github.com/inducer/loopy/issues/615
+                # TODO: get rid of this guard once the loopy issue is fixed
+                if configuration["vectorization_strategy"] == "sun2020study":
+                    wrapper = self.vectorise(wrapper, iname,
+                                                configuration["simd_width"])
+                else:
+                    raise NotImplementedError(
+                        "Vectorization strategy"
+                        f" '{configuration['vectorization_strategy']}'")
 
         code = lp.generate_code_v2(wrapper)
 
@@ -443,6 +443,8 @@ class GlobalKernel(Cached):
                     and isinstance(insn.expression, prim.Call)
                     and insn.expression.function.name in ["solve", "inverse"]):
                 temps_not_to_vectorize -= (insn.dependency_names())
+                print("NO GCC")
+                print((insn.dependency_names()))
 
         # }}}
 
