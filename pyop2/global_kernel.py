@@ -443,8 +443,6 @@ class GlobalKernel(Cached):
                     and isinstance(insn.expression, prim.Call)
                     and insn.expression.function.name in ["solve", "inverse"]):
                 temps_not_to_vectorize -= (insn.dependency_names())
-                print("NO GCC")
-                print((insn.dependency_names()))
 
         # }}}
 
