@@ -96,7 +96,7 @@ class Configuration(dict):
     :param alignment: A :class:`int` which specifies a size to which all temporaries
         are aligned in memory.
 
-        - ``sun2020study``: Cross-element vectorization strategy of
+        - ``cross-element``: Cross-element vectorization strategy of
           `<https://doi.org/10.1177/1094342020945005>`__.
     """
     # name, env variable, type, default, write once
@@ -117,7 +117,7 @@ class Configuration(dict):
         "simd_width":
             ("PYOP2_SIMD_WIDTH", int, default_simd_width()),
         "vectorization_strategy":
-            ("PYOP2_VECT_STRATEGY", str, "sun2020study"),
+            ("PYOP2_VECT_STRATEGY", str, "cross-element"),
         "alignment":
             ("PYOP2_ALIGNMENT", int, 64),
         "debug":

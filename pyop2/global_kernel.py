@@ -372,7 +372,7 @@ class GlobalKernel(Cached):
             if iname not in get_dependencies(tuple(all_insn_preds)):
                 # https://github.com/inducer/loopy/issues/615
                 # TODO: get rid of this guard once the loopy issue is fixed
-                if configuration["vectorization_strategy"] == "sun2020study":
+                if configuration["vectorization_strategy"] == "cross-element":
                     wrapper = self.vectorise(wrapper, iname,
                                                 configuration["simd_width"])
                 else:
