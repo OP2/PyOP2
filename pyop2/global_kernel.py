@@ -349,7 +349,7 @@ class GlobalKernel(Cached):
                           for arg in tuple(wrapper.default_entrypoint.temporary_variables.values())))  # global temps complex?
         extruded_coords = self.local_kernel.name.endswith("extrusion")  # FIXME is there a better way to know that this kernel generated the extrusion coords?
         is_loopy_kernel = isinstance(self.local_kernel.code, lp.TranslationUnit)
-        vectorisable = is_loopy_kernel and((not (has_matrix or has_rw)) and (configuration["vectorization_strategy"])) and not is_cplx and not extruded_coords
+        vectorisable = is_loopy_kernel and ((not (has_matrix or has_rw)) and (configuration["vectorization_strategy"])) and not is_cplx and not extruded_coords
 
         if vectorisable:
             # change target to generate vectorized code via gcc vector
@@ -359,8 +359,8 @@ class GlobalKernel(Cached):
             names = self.local_kernel.code.callables_table
             for name in names:
                 if (name in wrapper.callables_table.keys()
-                        and isinstance(wrapper.callables_table[name],
-                                        lp.CallableKernel)):
+                    and isinstance(wrapper.callables_table[name],
+                                   lp.CallableKernel)):
                     wrapper = lp.inline_callable_kernel(wrapper, name)
 
             all_insn_preds = reduce(
@@ -374,7 +374,7 @@ class GlobalKernel(Cached):
                 # TODO: get rid of this guard once the loopy issue is fixed
                 if configuration["vectorization_strategy"] == "cross-element":
                     wrapper = self.vectorise(wrapper, iname,
-                                                configuration["simd_width"])
+                                             configuration["simd_width"])
                 else:
                     raise NotImplementedError(
                         "Vectorization strategy"
