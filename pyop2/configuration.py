@@ -93,6 +93,8 @@ class Configuration(dict):
     :param vectorization_strategy: A :class:`str` describing the
         vectorization strategy that must to be applied to the kernels. Can
         be one of the following --
+    :param alignment: A :class:`int` which specifies a size to which all temporaries
+        are aligned in memory.
 
         - ``sun2020study``: Cross-element vectorization strategy of
           `<https://doi.org/10.1177/1094342020945005>`__.
@@ -118,8 +120,6 @@ class Configuration(dict):
             ("PYOP2_VECT_STRATEGY", str, "sun2020study"),
         "alignment":
             ("PYOP2_ALIGNMENT", int, 64),
-        "time":
-            ("PYOP2_TIME", bool, False),
         "debug":
             ("PYOP2_DEBUG", bool, False),
         "compute_kernel_flops":
