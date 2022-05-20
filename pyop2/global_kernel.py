@@ -387,6 +387,7 @@ class GlobalKernel(Cached):
             preamble = "".join(process_preambles(getattr(code, "device_preambles", [])))
             device_code = "\n\n".join(str(dp.ast) for dp in code.device_programs)
             return preamble + "\nextern \"C\" {\n" + device_code + "\n}\n"
+
         return code.device_code()
 
     def vectorise(self, wrapper, iname, batch_size):
@@ -442,7 +443,7 @@ class GlobalKernel(Cached):
                     isinstance(insn, lp.MultiAssignmentBase)
                     and isinstance(insn.expression, prim.Call)
                     and insn.expression.function.name in ["solve", "inverse"]):
-                temps_not_to_vectorize -= (insn.dependency_names())
+                temps_not_to_vectorize |= (insn.dependency_names())
 
         # }}}
 
