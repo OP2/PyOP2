@@ -86,9 +86,7 @@ class TestVectorisation:
         assert abs(ret - 32) < 1e-12
 
         # Test that we did not vectorise
-        print(configuration["cache_dir"])
         list_of_files = glob.glob(configuration["cache_dir"]+"/*/*.c")
-        print(list_of_files)
         latest_file = max(list_of_files, key=os.path.getctime)
         with open(latest_file, 'r') as file:
             generated_code = file.read()
