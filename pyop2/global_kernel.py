@@ -39,7 +39,7 @@ class MapKernelArg:
 
     @property
     def cache_key(self):
-        return type(self), self.arity, self.offset, configuration["vectorization_strategy"]
+        return type(self), self.arity, self.offset
 
 
 @dataclass(eq=False, frozen=True)
@@ -59,7 +59,7 @@ class PermutedMapKernelArg:
 
     @property
     def cache_key(self):
-        return type(self), self.base_map.cache_key, tuple(self.permutation), configuration["vectorization_strategy"]
+        return type(self), self.base_map.cache_key, tuple(self.permutation)
 
 
 @dataclass(frozen=True)
@@ -73,7 +73,7 @@ class GlobalKernelArg:
 
     @property
     def cache_key(self):
-        return type(self), self.dim, configuration["vectorization_strategy"]
+        return type(self), self.dim
 
     @property
     def maps(self):
@@ -112,7 +112,7 @@ class DatKernelArg:
     @property
     def cache_key(self):
         map_key = self.map_.cache_key if self.map_ is not None else None
-        return type(self), self.dim, map_key, self.index, configuration["vectorization_strategy"]
+        return type(self), self.dim, map_key, self.index
 
     @property
     def maps(self):
@@ -141,7 +141,7 @@ class MatKernelArg:
 
     @property
     def cache_key(self):
-        return type(self), self.dims, tuple(m.cache_key for m in self.maps), self.unroll, configuration["vectorization_strategy"]
+        return type(self), self.dims, tuple(m.cache_key for m in self.maps), self.unroll
 
 
 @dataclass(frozen=True)
@@ -161,7 +161,7 @@ class MixedDatKernelArg:
 
     @property
     def cache_key(self):
-        return tuple(a.cache_key for a in self.arguments) + tuple(configuration["vectorization_strategy"])
+        return tuple(a.cache_key for a in self.arguments) 
 
     @property
     def maps(self):
@@ -233,7 +233,8 @@ class GlobalKernel(Cached):
     @classmethod
     def _cache_key(cls, local_knl, arguments, **kwargs):
         key = [cls, local_knl.cache_key,
-               *kwargs.items(), configuration["simd_width"]]
+               *kwargs.items(), configuration["simd_width"],
+               configuration["vectorization_strategy"]]
 
         key.extend([a.cache_key for a in arguments])
 
