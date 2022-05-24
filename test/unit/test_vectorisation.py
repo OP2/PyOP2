@@ -77,7 +77,7 @@ class TestVectorisation:
 
     def test_no_vectorisation(self, md1, md):
         # turn vectorisation off
-        op2.init(**{"vectorization_strategy": ""})
+        configuration.reconfigure(vectorization_strategy="")
 
         # Test that unvectorised code produced the correct result
         ret = md.inner(md1)
@@ -93,7 +93,7 @@ class TestVectorisation:
         assert not (any(key in generated_code for key in some_vectorisation_keys)), "The kernel for an inner product has not been succesfully vectorised."
 
         # change vect config back to be turned on by default
-        op2.init(**{"vectorization_strategy": "cross-element"})
+        configuration.reconfigure(vectorization_strategy="cross-element")
 
 
 if __name__ == '__main__':
