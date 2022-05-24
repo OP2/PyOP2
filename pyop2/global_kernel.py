@@ -381,7 +381,6 @@ class GlobalKernel(Cached):
                         f" '{configuration['vectorization_strategy']}'")
 
         code = lp.generate_code_v2(wrapper)
-        print(code)
 
         if self.local_kernel.cpp:
             from loopy.codegen.result import process_preambles
