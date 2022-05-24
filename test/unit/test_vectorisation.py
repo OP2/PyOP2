@@ -33,9 +33,11 @@
 import numpy as np
 from pyop2 import op2
 from pyop2.configuration import configuration
-import glob
 import os
 import pytest
+from pyop2.parloop import LegacyParloop
+from pyop2.types.glob import Global
+from pyop2.types import Access
 
 
 some_vectorisation_keys = ["__attribute__", "vector_size", "aligned", "#pragma omp simd"]
@@ -48,49 +50,45 @@ class TestVectorisation:
         return op2.Set(1)
 
     @pytest.fixture
-    def md1(self, s):
-        n = op2.Dat(s, [3], np.float64)
-        o = op2.Dat(s, [4], np.float64)
-        md = op2.MixedDat([n, o])
-        return md
+    def d1(self, s):
+        return op2.Dat(s, [3], np.float64)
 
     @pytest.fixture
-    def md(self, s):
-        n = op2.Dat(s, [4], np.float64)
-        o = op2.Dat(s, [5], np.float64)
-        md = op2.MixedDat([n, o])
-        return md
+    def d(self, s):
+        return op2.Dat(s, [4], np.float64)
 
-    def test_vectorisation(self, md1, md):
+    def inner(self, s, o):
+        s._check_shape(o)
+        ret = Global(1, data=0, dtype=s.dtype)
+        inner_parloop = LegacyParloop(s._inner_kernel(o.dtype), s.dataset.set,
+                                      s(Access.READ), o(Access.READ), ret(Access.INC))
+        inner_parloop.compute()
+        return (inner_parloop.global_kernel, ret.data_ro[0])
+
+    def test_vectorisation(self, d1, d):
         # Test that vectorised code produced the correct result
-        ret = md.inner(md1)
-        assert abs(ret - 32) < 1e-12
-        ret = md1.inner(md)
-        assert abs(ret - 32) < 1e-12
+        kernel1, ret = self.inner(d, d1)
+        assert abs(ret - 12) < 1e-12
+        kernel2, ret = self.inner(d1, d)
+        assert abs(ret - 12) < 1e-12
 
         # Test that we actually vectorised
-        list_of_files = glob.glob(configuration["cache_dir"]+"/*/*.c")
-        latest_file = max(list_of_files, key=os.path.getctime)
-        with open(latest_file, 'r') as file:
-            generated_code = file.read()
-        assert (all(key in generated_code for key in some_vectorisation_keys)), "The kernel for an inner product has not been succesfully vectorised."
+        assert all(key in kernel1.code_to_compile for key in some_vectorisation_keys), "The kernel for an inner(d, d) has not been succesfully vectorised."
+        assert all(key in kernel2.code_to_compile for key in some_vectorisation_keys), "The kernel for an inner(d1, d) has not been succesfully vectorised."
 
-    def test_no_vectorisation(self, md1, md):
+    def test_no_vectorisation(self, d1, d):
         # turn vectorisation off
         configuration.reconfigure(vectorization_strategy="")
 
         # Test that unvectorised code produced the correct result
-        ret = md.inner(md1)
-        assert abs(ret - 32) < 1e-12
-        ret = md1.inner(md)
-        assert abs(ret - 32) < 1e-12
+        kernel1, ret = self.inner(d, d1)
+        assert abs(ret - 12) < 1e-12
+        kernel2, ret = self.inner(d1, d)
+        assert abs(ret - 12) < 1e-12
 
         # Test that we did not vectorise
-        list_of_files = glob.glob(configuration["cache_dir"]+"/*/*.c")
-        latest_file = max(list_of_files, key=os.path.getctime)
-        with open(latest_file, 'r') as file:
-            generated_code = file.read()
-        assert not (any(key in generated_code for key in some_vectorisation_keys)), "The kernel for an inner product has not been succesfully vectorised."
+        assert not any(key in kernel1.code_to_compile for key in some_vectorisation_keys), "The kernel for an inner(d, d) has been vectorised even though we turned it off."
+        assert not any(key in kernel2.code_to_compile for key in some_vectorisation_keys), "The kernel for an inner(d1, d) has been vectorised even though we turned it off."
 
         # change vect config back to be turned on by default
         configuration.reconfigure(vectorization_strategy="cross-element")
