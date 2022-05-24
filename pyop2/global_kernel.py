@@ -351,7 +351,6 @@ class GlobalKernel(Cached):
         is_loopy_kernel = isinstance(self.local_kernel.code, lp.TranslationUnit)
         vectorisable = is_loopy_kernel and ((not (has_matrix or has_rw)) and (configuration["vectorization_strategy"])) and not is_cplx and not extruded_coords
 
-        print(vectorisable)
         if vectorisable:
             # change target to generate vectorized code via gcc vector
             # extensions
