@@ -237,7 +237,7 @@ class Cached(object):
     @cached_property
     def cache_key(self):
         """Cache key."""
-        return self._key
+        return self._key + tuple(configuration["vectorization_strategy"])
 
 
 cached = cachetools.cached

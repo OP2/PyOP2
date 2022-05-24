@@ -39,7 +39,7 @@ class MapKernelArg:
 
     @property
     def cache_key(self):
-        return type(self), self.arity, self.offset
+        return type(self), self.arity, self.offset, configuration["vectorization_strategy"]
 
 
 @dataclass(eq=False, frozen=True)
@@ -59,7 +59,7 @@ class PermutedMapKernelArg:
 
     @property
     def cache_key(self):
-        return type(self), self.base_map.cache_key, tuple(self.permutation)
+        return type(self), self.base_map.cache_key, tuple(self.permutation), configuration["vectorization_strategy"]
 
 
 @dataclass(frozen=True)
@@ -73,7 +73,7 @@ class GlobalKernelArg:
 
     @property
     def cache_key(self):
-        return type(self), self.dim
+        return type(self), self.dim, configuration["vectorization_strategy"]
 
     @property
     def maps(self):
@@ -112,7 +112,7 @@ class DatKernelArg:
     @property
     def cache_key(self):
         map_key = self.map_.cache_key if self.map_ is not None else None
-        return type(self), self.dim, map_key, self.index
+        return type(self), self.dim, map_key, self.index, configuration["vectorization_strategy"]
 
     @property
     def maps(self):
@@ -141,7 +141,7 @@ class MatKernelArg:
 
     @property
     def cache_key(self):
-        return type(self), self.dims, tuple(m.cache_key for m in self.maps), self.unroll
+        return type(self), self.dims, tuple(m.cache_key for m in self.maps), self.unroll, configuration["vectorization_strategy"]
 
 
 @dataclass(frozen=True)
@@ -161,7 +161,7 @@ class MixedDatKernelArg:
 
     @property
     def cache_key(self):
-        return tuple(a.cache_key for a in self.arguments)
+        return tuple(a.cache_key for a in self.arguments) + tuple(configuration["vectorization_strategy"])
 
     @property
     def maps(self):
@@ -192,7 +192,7 @@ class MixedMatKernelArg:
 
     @property
     def cache_key(self):
-        return tuple(a.cache_key for a in self.arguments)
+        return tuple(a.cache_key for a in self.arguments) + tuple(configuration["vectorization_strategy"])
 
     @property
     def maps(self):
@@ -351,6 +351,7 @@ class GlobalKernel(Cached):
         is_loopy_kernel = isinstance(self.local_kernel.code, lp.TranslationUnit)
         vectorisable = is_loopy_kernel and ((not (has_matrix or has_rw)) and (configuration["vectorization_strategy"])) and not is_cplx and not extruded_coords
 
+        print(vectorisable)
         if vectorisable:
             # change target to generate vectorized code via gcc vector
             # extensions
@@ -381,6 +382,7 @@ class GlobalKernel(Cached):
                         f" '{configuration['vectorization_strategy']}'")
 
         code = lp.generate_code_v2(wrapper)
+        print(code)
 
         if self.local_kernel.cpp:
             from loopy.codegen.result import process_preambles

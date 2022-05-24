@@ -115,7 +115,7 @@ class LocalKernel(abc.ABC):
 
     @property
     def cache_key(self):
-        return self._immutable_cache_key, self.accesses, self.dtypes
+        return self._immutable_cache_key, self.accesses, self.dtypes, configuration["vectorization_strategy"]
 
     @cached_property
     def _immutable_cache_key(self):
