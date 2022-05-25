@@ -161,7 +161,7 @@ class MixedDatKernelArg:
 
     @property
     def cache_key(self):
-        return tuple(a.cache_key for a in self.arguments) 
+        return tuple(a.cache_key for a in self.arguments)
 
     @property
     def maps(self):
