@@ -95,11 +95,10 @@ class Configuration(dict):
     :param vectorization_strategy: A :class:`str` describing the
         vectorization strategy that must to be applied to the kernels. Can
         be one of the following --
-    :param alignment: A :class:`int` which specifies a size to which all temporaries
-        are aligned in memory.
-
         - ``cross-element``: Cross-element vectorization strategy of
           `<https://doi.org/10.1177/1094342020945005>`__.
+    :param alignment: A :class:`int` which specifies a size to which all temporaries
+        are aligned in memory.
     """
     # name, env variable, type, default, write once
     cache_dir = os.path.join(gettempdir(), "pyop2-cache-uid%s" % os.getuid())
