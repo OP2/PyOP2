@@ -54,7 +54,8 @@ def default_simd_width():
     else:
         raise ConfigurationError(f"The vector extension of your architecture is unknown.\
                                    Must be one of {str(avx_to_width.keys())}.\
-                                   We advise to disable vectorisation."
+                                   We advise to disable vectorisation \
+                                   with export PYOP2_VECT_STRATEGY=""."
                                  )
 
 
@@ -192,5 +193,7 @@ class Configuration(dict):
 
 
 configuration = Configuration()
+if configuration["vectorization_strategy"]:
+    configuration["simd_width"] = default_simd_width()
 
 target = CWithGNULibcTarget()
