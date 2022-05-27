@@ -40,25 +40,6 @@ from loopy.target.c import CWithGNULibcTarget
 from pyop2.exceptions import ConfigurationError
 
 
-def default_simd_width():
-    from cpuinfo import get_cpu_info
-    avx_to_width = {'avx': 2, 'avx1': 2, 'avx128': 2, 'avx2': 4,
-                    'avx256': 4, 'avx3': 8, 'avx512': 8}
-    longest_simd_extension = [t for t in get_cpu_info()["flags"] if t.startswith('avx')][-1]
-    if longest_simd_extension in avx_to_width.keys():
-        return avx_to_width[longest_simd_extension]
-    elif longest_simd_extension[:6] in avx_to_width.keys():
-        return avx_to_width[longest_simd_extension[:6]]
-    elif longest_simd_extension[:4] in avx_to_width.keys():
-        return avx_to_width[longest_simd_extension[:4]]
-    else:
-        raise ConfigurationError(f"The vector extension of your architecture is unknown.\
-                                   Must be one of {str(avx_to_width.keys())}.\
-                                   We advise to disable vectorisation \
-                                   with export PYOP2_VECT_STRATEGY=""."
-                                 )
-
-
 class Configuration(dict):
     r"""PyOP2 configuration parameters
 
@@ -117,7 +98,7 @@ class Configuration(dict):
         "ldflags":
             ("PYOP2_LDFLAGS", str, ""),
         "simd_width":
-            ("PYOP2_SIMD_WIDTH", int, 1),
+            ("PYOP2_SIMD_WIDTH", int, 4),
         "vectorization_strategy":
             ("PYOP2_VECT_STRATEGY", str, "cross-element"),
         "alignment":
@@ -193,7 +174,5 @@ class Configuration(dict):
 
 
 configuration = Configuration()
-if configuration["vectorization_strategy"]:
-    configuration["simd_width"] = default_simd_width()
 
 target = CWithGNULibcTarget()

@@ -46,6 +46,7 @@ from packaging.version import Version, InvalidVersion
 
 from pyop2.mpi import MPI, collective, COMM_WORLD
 from pyop2.mpi import dup_comm, get_compilation_comm, set_compilation_comm
+from pyop2.caching import cached
 from pyop2.configuration import configuration
 from pyop2.logger import warning, debug, progress, INFO
 from pyop2.exceptions import CompilationError
@@ -696,3 +697,23 @@ def clear_cache(prompt=False):
         shutil.rmtree(cachedir)
     else:
         print("Not removing cached libraries")
+
+
+@cached(cache={})
+def max_simd_width():
+    prg_str = '''#include <stdio.h>
+
+int get_simd_width(){
+    return __builtin_cpu_supports("avx512f") ? 8:
+        __builtin_cpu_supports("avx") ? 4:
+        __builtin_cpu_supports("sse") ? 2:
+        1;
+}
+'''
+    try:
+        simd_width = load(prg_str, "c", "get_simd_width", restype=ctypes.c_int)
+        width = simd_width()
+    except (OSError, CompilationError):
+        warning("Cannot sniff SIMD width, using default of 4 doubles")
+        width = 4
+    return width
