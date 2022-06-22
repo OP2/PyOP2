@@ -435,6 +435,10 @@ class GlobalKernel(Cached):
                                    if (tv.read_only
                                        and tv.initializer is not None)}
 
+        temps_not_to_vectorize |= {name
+                                   for name, tv in kernel.temporary_variables.items()
+                                   if kernel.writer_map().get(tv.name, set()) | kernel.reader_map().get(tv.name, set()) == set()}
+
         # {{{ clang (unlike gcc) does not allow taking address of vector-type
         # variable
 
