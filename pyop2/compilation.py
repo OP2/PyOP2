@@ -139,6 +139,8 @@ def sniff_compiler(exe):
                 compiler = MacClangARMCompiler
             elif machine == "x86_64":
                 compiler = MacClangCompiler
+        elif name == "GNU":
+            compiler = MacGNUCompiler
         else:
             compiler = AnonymousCompiler
     else:
@@ -456,19 +458,24 @@ class MacClangCompiler(Compiler):
     _cxxflags = ("-fPIC", "-Wall", "-framework", "Accelerate")
     _ldflags = ("-dynamiclib",)
 
-    _optflags = ("-O3", "-ffast-math", "-march=native")
+    _optflags = ("-O3", "-ffast-math", "-march=native", "-fopenmp-simd")
     _debugflags = ("-O0", "-g")
 
 
 class MacClangARMCompiler(MacClangCompiler):
     """A compiler for building a shared library on ARM based Mac systems."""
     # See https://stackoverflow.com/q/65966969
-    _optflags = ("-O3", "-ffast-math", "-mcpu=apple-a14")
+    _optflags = ("-O3", "-ffast-math", "-mcpu=apple-a14", "-fopenmp-simd")
     # Need to pass -L/opt/homebrew/opt/gcc/lib/gcc/11 to prevent linker error:
     # ld: file not found: @rpath/libgcc_s.1.1.dylib for architecture arm64 This
     # seems to be a homebrew configuration issue somewhere. Hopefully this
     # requirement will go away at some point.
     _ldflags = ("-dynamiclib", "-L/opt/homebrew/opt/gcc/lib/gcc/11")
+
+
+class MacGNUCompiler(MacClangCompiler):
+    """A compiler for building a shared library on Mac systems with a GNU compiler."""
+    _name = "Mac GNU"
 
 
 class LinuxGnuCompiler(Compiler):
@@ -551,7 +558,7 @@ class LinuxIntelCompiler(Compiler):
     _cxxflags = ("-fPIC", "-no-multibyte-chars")
     _ldflags = ("-shared",)
 
-    _optflags = ("-Ofast", "-xHost")
+    _optflags = ("-Ofast", "-xHost", "-qopenmp-simd")
     _debugflags = ("-O0", "-g")
 
 

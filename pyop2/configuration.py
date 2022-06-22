@@ -40,6 +40,25 @@ from loopy.target.c import CWithGNULibcTarget
 from pyop2.exceptions import ConfigurationError
 
 
+def default_simd_width():
+    from cpuinfo import get_cpu_info
+    avx_to_width = {'avx': 2, 'avx1': 2, 'avx128': 2, 'avx2': 4,
+                    'avx256': 4, 'avx3': 8, 'avx512': 8}
+    longest_simd_extension = [t for t in get_cpu_info()["flags"] if t.startswith('avx')][-1]
+    if longest_simd_extension in avx_to_width.keys():
+        return avx_to_width[longest_simd_extension]
+    elif longest_simd_extension[:6] in avx_to_width.keys():
+        return avx_to_width[longest_simd_extension[:6]]
+    elif longest_simd_extension[:4] in avx_to_width.keys():
+        return avx_to_width[longest_simd_extension[:4]]
+    else:
+        raise ConfigurationError(f"The vector extension of your architecture is unknown.\
+                                   Must be one of {str(avx_to_width.keys())}.\
+                                   We advise to disable vectorisation \
+                                   with export PYOP2_VECT_STRATEGY=""."
+                                 )
+
+
 class Configuration(dict):
     r"""PyOP2 configuration parameters
 
@@ -74,6 +93,13 @@ class Configuration(dict):
         cdim > 1 be built as block sparsities, or dof sparsities.  The
         former saves memory but changes which preconditioners are
         available for the resulting matrices.  (Default yes)
+    :param vectorization_strategy: A :class:`str` describing the
+        vectorization strategy that must to be applied to the kernels. Can
+        be one of the following --
+        - ``cross-element``: Cross-element vectorization strategy of
+          `<https://doi.org/10.1177/1094342020945005>`__.
+    :param alignment: A :class:`int` which specifies a size to which all temporaries
+        are aligned in memory.
     """
     # name, env variable, type, default, write once
     cache_dir = os.path.join(gettempdir(), "pyop2-cache-uid%s" % os.getuid())
@@ -91,9 +117,13 @@ class Configuration(dict):
         "ldflags":
             ("PYOP2_LDFLAGS", str, ""),
         "simd_width":
-            ("PYOP2_SIMD_WIDTH", int, 4),
+            ("PYOP2_SIMD_WIDTH", int, 1),
         "extra_info":
             ("PYOP2_EXTRA_INFO", bool, False),
+        "vectorization_strategy":
+            ("PYOP2_VECT_STRATEGY", str, "cross-element"),
+        "alignment":
+            ("PYOP2_ALIGNMENT", int, 64),
         "debug":
             ("PYOP2_DEBUG", bool, False),
         "compute_kernel_flops":
@@ -165,5 +195,7 @@ class Configuration(dict):
 
 
 configuration = Configuration()
+if configuration["vectorization_strategy"]:
+    configuration["simd_width"] = default_simd_width()
 
 target = CWithGNULibcTarget()
