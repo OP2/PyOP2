@@ -99,6 +99,8 @@ class Configuration(dict):
             ("PYOP2_LDFLAGS", str, ""),
         "simd_width":
             ("PYOP2_SIMD_WIDTH", int, 4),
+        "extra_info":
+            ("PYOP2_EXTRA_INFO", bool, False),
         "vectorization_strategy":
             ("PYOP2_VECT_STRATEGY", str, "cross-element"),
         "alignment":

@@ -187,6 +187,10 @@ class Parloop:
 
         :arg part: The :class:`SetPartition` to compute over.
         """
+        if configuration["extra_info"]:
+            nbytes = self.comm.allreduce(self.nbytes)
+            if self.comm.Get_rank() == 0:
+                print("{0}_BYTES= {1}".format(self.global_kernel.name, nbytes))
         with self._compute_event():
             PETSc.Log.logFlops(part.size*self.num_flops)
             self.global_kernel(self.comm, part.offset, part.offset+part.size, *self.arglist)
@@ -194,6 +198,22 @@ class Parloop:
     @cached_property
     def num_flops(self):
         return self.global_kernel.num_flops(self.iterset)
+
+    @cached_property
+    def nbytes(self):
+        nbytes = 0
+        seen = set()
+        for arg in self.arguments:
+            nbytes += arg.data.nbytes
+            for map_ in arg.maps:
+                if map_ is None:
+                    continue
+                for k in map_._kernel_args_:
+                    if k in seen:
+                        continue
+                    nbytes += map_.values.nbytes
+                    seen.add(k)
+        return nbytes
 
     @mpi.collective
     def compute(self):
