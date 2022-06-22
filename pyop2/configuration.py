@@ -92,8 +92,8 @@ class Configuration(dict):
             ("PYOP2_LDFLAGS", str, ""),
         "simd_width":
             ("PYOP2_SIMD_WIDTH", int, 4),
-        "time":
-            ("PYOP2_TIME", bool, False),
+        "extra_info":
+            ("PYOP2_EXTRA_INFO", bool, False),
         "debug":
             ("PYOP2_DEBUG", bool, False),
         "compute_kernel_flops":

@@ -187,7 +187,7 @@ class Parloop:
 
         :arg part: The :class:`SetPartition` to compute over.
         """
-        if configuration["time"]:
+        if configuration["extra_info"]:
             nbytes = self.comm.allreduce(self.nbytes)
             if self.comm.Get_rank() == 0:
                 print("{0}_BYTES= {1}".format(self.global_kernel.name, nbytes))
