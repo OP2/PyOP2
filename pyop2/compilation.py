@@ -487,7 +487,7 @@ class LinuxGnuCompiler(Compiler):
     _cxxflags = ("-fPIC", "-Wall")
     _ldflags = ("-shared",)
 
-    _optflags = ("-march=native", "-O3", "-ffast-math")
+    _optflags = ("-march=native", "-O3", "-ffast-math","-fopenmp")
     _debugflags = ("-O0", "-g")
 
     def sniff_compiler_version(self, cpp=False):
