@@ -203,9 +203,12 @@ class Parloop:
     def nbytes(self):
         nbytes = 0
         seen = set()
-        for arg in self.arguments:
-            nbytes += arg.data.nbytes
-            for map_ in arg.maps:
+        for lk_arg, gk_arg, pl_arg in self.zipped_arguments:
+            if lk_arg.access == Access.INC:
+                nbytes += pl_arg.data.nbytes * 2
+            else:
+                nbytes += pl_arg.data.nbytes 
+            for map_ in pl_arg.maps:
                 if map_ is None:
                     continue
                 for k in map_._kernel_args_:
