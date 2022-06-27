@@ -544,7 +544,7 @@ class LinuxClangCompiler(Compiler):
     _cxxflags = ("-fPIC", "-Wall")
     _ldflags = ("-shared", "-L/usr/lib")
 
-    _optflags = ("-march=native", "-O3", "-ffast-math")
+    _optflags = ("-march=native", "-O3", "-ffast-math", "-fopenmp-simd")
     _debugflags = ("-O0", "-g")
 
 
