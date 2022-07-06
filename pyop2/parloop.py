@@ -207,7 +207,7 @@ class Parloop:
             if lk_arg.access == Access.INC:
                 nbytes += pl_arg.data.nbytes * 2
             else:
-                nbytes += pl_arg.data.nbytes 
+                nbytes += pl_arg.data.nbytes
             for map_ in pl_arg.maps:
                 if map_ is None:
                     continue

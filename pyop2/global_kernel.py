@@ -355,7 +355,9 @@ class GlobalKernel(Cached):
         if vectorisable:
             # change target to generate vectorized code via gcc vector
             # extensions
-            wrapper = wrapper.copy(target=lp.CVectorExtensionsTarget())
+            wrapper = wrapper.copy(target=lp.CVectorExtensionsTarget(
+                vec_fallback=lp.VectorizationFallback.OMP_SIMD
+            ))
             # inline all inner kernels
             names = self.local_kernel.code.callables_table
             for name in names:
@@ -487,8 +489,7 @@ class GlobalKernel(Cached):
                 kernel = lp.tag_array_axes(kernel, name, tag)
 
         # tag the inner iname as vectorized
-        kernel = lp.tag_inames(kernel,
-                               {inner_iname: lp.VectorizeTag(lp.OpenMPSIMDTag())})
+        kernel = lp.tag_inames(kernel, {inner_iname: "vec"})
 
         return wrapper.with_kernel(kernel)
 
