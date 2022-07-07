@@ -491,17 +491,21 @@ class GlobalKernel(Cached):
         # tag the inner iname as vectorized
         kernel = lp.tag_inames(kernel, {inner_iname: "vec"})
 
-        all_insn_cinsn = list(insn for insn in wrapper.default_entrypoint.instructions  if isinstance(insn, lp.CInstruction))
-        # {{{ fallback -->
-        for insn in all_insn_cinsn:
-            wrapper = lp.distribute_loops(wrapper.default_entrypoint,
-                                            insn.id,
-                                            outer_inames=shifted_iname)
-            renamed_j, = wrapper.id_to_insn[insn.id].within_inames - shifted_iname
-            wrapper = lp.untag_inames(wrapper, renamed_j, VectorizeTag)
-            wrapper = lp.tag_inames(wrapper, {renamed_j: "unr"})
-
-        # }}}
+        # unroll CInstructions
+        from loopy.match import Id, Or
+        cinsn_ids = [cinsn.id
+                    for cinsn in kernel.instructions
+                    if (isinstance(cinsn, lp.CInstruction) and cinsn.predicates)]
+        cinsn_match = Or(tuple(Id(cinsn_id) for cinsn_id in cinsn_ids))
+        outer_inames = frozenset([shifted_iname+"_outer"])
+        kernel = lp.distribute_loops(kernel,
+                                     cinsn_match,
+                                     outer_inames=outer_inames)
+        inames_to_untag = [kernel.id_to_insn[cinsn_id].within_inames - outer_inames
+                           for cinsn_id in cinsn_ids]
+        for iname_to_untag in inames_to_untag:
+            kernel = lp.untag_inames(kernel, iname_to_untag, lp.VectorizeTag)
+        kernel = lp.tag_inames(kernel, {iname_to_untag: "unr" for iname_to_untag in inames_to_untag})
 
         return wrapper.with_kernel(kernel)
 
