@@ -383,6 +383,7 @@ class GlobalKernel(Cached):
                         "Vectorization strategy"
                         f" '{configuration['vectorization_strategy']}'")
 
+        print(wrapper)
         code = lp.generate_code_v2(wrapper)
 
         if self.local_kernel.cpp:
@@ -494,18 +495,23 @@ class GlobalKernel(Cached):
         # unroll CInstructions
         from loopy.match import Id, Or
         cinsn_ids = [cinsn.id
-                    for cinsn in kernel.instructions
-                    if (isinstance(cinsn, lp.CInstruction) and cinsn.predicates)]
+                     for cinsn in kernel.instructions
+                     if (isinstance(cinsn, lp.CInstruction) and cinsn.predicates)]
         cinsn_match = Or(tuple(Id(cinsn_id) for cinsn_id in cinsn_ids))
-        outer_inames = frozenset([shifted_iname+"_outer"])
+        outer_inames = reduce(set.union, [kernel.id_to_insn[cinsn_id].within_inames - set([inner_iname,])
+                                          for cinsn_id in cinsn_ids], set())
         kernel = lp.distribute_loops(kernel,
                                      cinsn_match,
                                      outer_inames=outer_inames)
-        inames_to_untag = reduce(set.union, [kernel.id_to_insn[cinsn_id].within_inames - outer_inames
-                           for cinsn_id in cinsn_ids], set())
-        for iname_to_untag in inames_to_untag:
-            kernel = lp.untag_inames(kernel, iname_to_untag, lp.VectorizeTag)
-        kernel = lp.tag_inames(kernel, {iname_to_untag: "unr" for iname_to_untag in inames_to_untag})
+        kernel = lp.untag_inames(kernel, inner_iname, lp.VectorizeTag)
+        kernel = lp.tag_inames(kernel, {inner_iname: "unr"})
+        
+        # remove noop instructions
+        # FIXME we need to this because there is a bug in distribute loops
+        noop_insn_ids =  set([cinsn.id
+                              for cinsn in kernel.instructions
+                              if isinstance(cinsn, lp.NoOpInstruction)])
+        kernel = lp.remove_instructions(kernel, noop_insn_ids)
 
         return wrapper.with_kernel(kernel)
 
