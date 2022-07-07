@@ -383,7 +383,6 @@ class GlobalKernel(Cached):
                         "Vectorization strategy"
                         f" '{configuration['vectorization_strategy']}'")
 
-        print(wrapper)
         code = lp.generate_code_v2(wrapper)
 
         if self.local_kernel.cpp:
