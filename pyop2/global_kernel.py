@@ -383,6 +383,7 @@ class GlobalKernel(Cached):
                         "Vectorization strategy"
                         f" '{configuration['vectorization_strategy']}'")
 
+        print(wrapper)
         code = lp.generate_code_v2(wrapper)
 
         if self.local_kernel.cpp:
@@ -501,8 +502,8 @@ class GlobalKernel(Cached):
         kernel = lp.distribute_loops(kernel,
                                      cinsn_match,
                                      outer_inames=outer_inames)
-        inames_to_untag = [kernel.id_to_insn[cinsn_id].within_inames - outer_inames
-                           for cinsn_id in cinsn_ids]
+        inames_to_untag = reduce(set.union, [kernel.id_to_insn[cinsn_id].within_inames - outer_inames
+                           for cinsn_id in cinsn_ids], set())
         for iname_to_untag in inames_to_untag:
             kernel = lp.untag_inames(kernel, iname_to_untag, lp.VectorizeTag)
         kernel = lp.tag_inames(kernel, {iname_to_untag: "unr" for iname_to_untag in inames_to_untag})
