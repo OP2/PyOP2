@@ -491,6 +491,18 @@ class GlobalKernel(Cached):
         # tag the inner iname as vectorized
         kernel = lp.tag_inames(kernel, {inner_iname: "vec"})
 
+        all_insn_cinsn = list(insn for insn in wrapper.default_entrypoint.instructions  if isinstance(insn, lp.CInstruction))
+        # {{{ fallback -->
+        for insn in all_insn_cinsn:
+            wrapper = lp.distribute_loops(wrapper.default_entrypoint,
+                                            insn.id,
+                                            outer_inames=shifted_iname)
+            renamed_j, = wrapper.id_to_insn[insn.id].within_inames - shifted_iname
+            wrapper = lp.untag_inames(wrapper, renamed_j, VectorizeTag)
+            wrapper = lp.tag_inames(wrapper, {renamed_j: "unr"})
+
+        # }}}
+
         return wrapper.with_kernel(kernel)
 
     @PETSc.Log.EventDecorator()
