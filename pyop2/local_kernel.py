@@ -4,6 +4,7 @@ import hashlib
 from typing import Union
 
 import coffee
+from coffee.visitors import EstimateFlops
 import loopy as lp
 from loopy.tools import LoopyKeyBuilder
 import numpy as np
@@ -226,7 +227,7 @@ class CoffeeLocalKernel(LocalKernel):
         elif not configuration["compute_kernel_flops"]:
             return 0
         else:
-            v = coffee.visitors.EstimateFlops()
+            v = EstimateFlops()
             return v.visit(self.code)
 
 
