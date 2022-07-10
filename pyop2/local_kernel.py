@@ -266,6 +266,7 @@ class LoopyLocalKernel(LocalKernel):
                                  'summing_if_branches_ops'])
                 knl = knl.copy(silenced_warnings=warnings,
                                options=lp.Options(ignore_boostable_into=True))
+                knl = lp.fix_parameters(knl, layer=1)
                 prog = prog.with_kernel(knl)
             else:
                 prog = self.code
