@@ -152,28 +152,9 @@ class LocalKernel(abc.ABC):
                      for acc, dtype in zip(self.accesses, self.dtypes))
 
     @cached_property
+    @abc.abstractmethod
     def num_flops(self):
         """Compute the numbers of FLOPs if not already known."""
-        if self.flop_count is not None:
-            return self.flop_count
-
-        if not configuration["compute_kernel_flops"]:
-            return 0
-
-        if isinstance(self.code, coffee.base.Node):
-            v = coffee.visitors.EstimateFlops()
-            return v.visit(self.code)
-        elif isinstance(self.code, lp.TranslationUnit):
-            op_map = lp.get_op_map(
-                self.code.copy(options=lp.Options(ignore_boostable_into=True),
-                               silenced_warnings=['insn_count_subgroups_upper_bound',
-                                                  'get_x_map_guessing_subgroup_size',
-                                                  'summing_if_branches_ops']),
-                subgroup_size='guess')
-            return op_map.filter_by(name=['add', 'sub', 'mul', 'div'],
-                                    dtype=[ScalarType]).eval_and_sum({})
-        else:
-            return 0
 
     def __eq__(self, other):
         if not isinstance(other, LocalKernel):
@@ -214,6 +195,13 @@ class CStringLocalKernel(LocalKernel):
     def dtypes(self, dtypes):
         self._dtypes = dtypes
 
+    @cached_property
+    def num_flops(self):
+        if self.flop_count is not None:
+            return self.flop_count
+        else:
+            return 0
+
 
 class CoffeeLocalKernel(LocalKernel):
     """:class:`LocalKernel` class where `code` has type :class:`coffee.base.Node`."""
@@ -230,6 +218,16 @@ class CoffeeLocalKernel(LocalKernel):
     @dtypes.setter
     def dtypes(self, dtypes):
         self._dtypes = dtypes
+
+    @cached_property
+    def num_flops(self):
+        if self.flop_count is not None:
+            return self.flop_count
+        elif not configuration["compute_kernel_flops"]:
+            return 0
+        else:
+            v = coffee.visitors.EstimateFlops()
+            return v.visit(self.code)
 
 
 class LoopyLocalKernel(LocalKernel):
@@ -250,3 +248,26 @@ class LoopyLocalKernel(LocalKernel):
         """Return the loopy arguments associated with the kernel."""
         return tuple(a for a in self.code.callables_table[self.name].subkernel.args
                      if isinstance(a, lp.ArrayArg))
+
+    @cached_property
+    def num_flops(self):
+        if self.flop_count is not None:
+            return self.flop_count
+        elif not configuration["compute_kernel_flops"]:
+            return 0
+        else:
+            if isinstance(self.code, lp.TranslationUnit):
+                prog = self.code.with_entrypoints(self.name)
+                knl = prog.default_entrypoint
+                warnings = list(knl.silenced_warnings)
+                warnings.extend(['insn_count_subgroups_upper_bound',
+                                 'get_x_map_guessing_subgroup_size',
+                                 'summing_if_branches_ops'])
+                knl = knl.copy(silenced_warnings=warnings,
+                               options=lp.Options(ignore_boostable_into=True))
+                prog = prog.with_kernel(knl)
+            else:
+                prog = self.code
+            op_map = lp.get_op_map(prog, subgroup_size=1)
+            return op_map.filter_by(name=['add', 'sub', 'mul', 'div'],
+                                    dtype=[ScalarType]).eval_and_sum({})
