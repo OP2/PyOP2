@@ -261,8 +261,7 @@ class LoopyLocalKernel(LocalKernel):
                 warnings.extend(['insn_count_subgroups_upper_bound',
                                  'get_x_map_guessing_subgroup_size',
                                  'summing_if_branches_ops'])
-                knl = knl.copy(silenced_warnings=warnings,
-                               options=lp.Options(ignore_boostable_into=True))
+                knl = knl.copy(silenced_warnings=warnings)
                 # for extrusion utils the layer arg must be fixed
                 # because usually it would be a value which is passed in from the global kernel
                 # theoretically this changes the result but not the FLOP count
