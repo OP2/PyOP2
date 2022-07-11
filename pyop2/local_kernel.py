@@ -199,10 +199,7 @@ class CStringLocalKernel(LocalKernel):
     def num_flops(self):
         """Set the numbers of FLOPs to 0 if not already known,
            because there is no way to measure or estimate the FLOPS for string kernels. """
-        if self.flop_count is not None:
-            return self.flop_count
-        else:
-            return 0
+        return self.flop_count if self.flop_count is not None else 0
 
 
 class CoffeeLocalKernel(LocalKernel):
@@ -225,11 +222,7 @@ class CoffeeLocalKernel(LocalKernel):
     def num_flops(self):
         """Compute the numbers of FLOPs if not already known
            using COFFEE's FLOP estimation algorithm."""
-        if self.flop_count is not None:
-            return self.flop_count
-        else:
-            v = EstimateFlops()
-            return v.visit(self.code)
+        return self.flop_count if self.flop_count is not None else EstimateFlops().visit(self.code)
 
 
 class LoopyLocalKernel(LocalKernel):
