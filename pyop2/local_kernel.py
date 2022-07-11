@@ -253,6 +253,8 @@ class LoopyLocalKernel(LocalKernel):
             return self.flop_count
         else:
             if isinstance(self.code, lp.TranslationUnit):
+                # in order to silence the warnings we need to access
+                # the callable kernels in the translation
                 prog = self.code.with_entrypoints(self.name)
                 knl = prog.default_entrypoint
                 warnings = list(knl.silenced_warnings)
@@ -261,6 +263,9 @@ class LoopyLocalKernel(LocalKernel):
                                  'summing_if_branches_ops'])
                 knl = knl.copy(silenced_warnings=warnings,
                                options=lp.Options(ignore_boostable_into=True))
+                # for extrusion utils the layer arg must be fixed
+                # because usually it would be a value which is passed in from the global kernel
+                # theoretically this changes the result but not the FLOP count
                 knl = lp.fix_parameters(knl, layer=1)
                 prog = prog.with_kernel(knl)
             else:
