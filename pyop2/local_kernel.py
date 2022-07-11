@@ -233,7 +233,7 @@ class LoopyLocalKernel(LocalKernel):
         or :class:`loopy.TranslationUnit`.
     """
 
-    @validate_type(("code", (lp.LoopKernel, lp.TranslationUnit), TypeError))
+    @validate_type(("code", (lp.TranslationUnit), TypeError))
     def __init__(self, code, *args, **kwargs):
         super().__init__(code, *args, **kwargs)
 
