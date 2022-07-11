@@ -10,7 +10,6 @@ from loopy.tools import LoopyKeyBuilder
 import numpy as np
 
 from pyop2 import version
-from pyop2.configuration import configuration
 from pyop2.datatypes import ScalarType
 from pyop2.exceptions import NameTypeError
 from pyop2.types import Access
@@ -224,8 +223,6 @@ class CoffeeLocalKernel(LocalKernel):
     def num_flops(self):
         if self.flop_count is not None:
             return self.flop_count
-        elif not configuration["compute_kernel_flops"]:
-            return 0
         else:
             v = EstimateFlops()
             return v.visit(self.code)
@@ -254,8 +251,6 @@ class LoopyLocalKernel(LocalKernel):
     def num_flops(self):
         if self.flop_count is not None:
             return self.flop_count
-        elif not configuration["compute_kernel_flops"]:
-            return 0
         else:
             if isinstance(self.code, lp.TranslationUnit):
                 prog = self.code.with_entrypoints(self.name)

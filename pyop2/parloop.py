@@ -188,7 +188,8 @@ class Parloop:
         :arg part: The :class:`SetPartition` to compute over.
         """
         with self._compute_event():
-            PETSc.Log.logFlops(part.size*self.num_flops)
+            if configuration["compute_kernel_flops"]:
+                PETSc.Log.logFlops(part.size*self.num_flops)
             self.global_kernel(self.comm, part.offset, part.offset+part.size, *self.arglist)
 
     @cached_property
