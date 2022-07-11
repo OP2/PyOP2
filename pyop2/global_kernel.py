@@ -492,26 +492,20 @@ class GlobalKernel(Cached):
         # tag the inner iname as vectorized
         kernel = lp.tag_inames(kernel, {inner_iname: "vec"})
 
-        # unroll CInstructions
-        from loopy.match import Id, Or
+        # {{{ duplicate the inames surrounding the CInstructions with predicates
+
         cinsn_ids = [cinsn.id
                      for cinsn in kernel.instructions
                      if (isinstance(cinsn, lp.CInstruction) and cinsn.predicates)]
-        cinsn_match = Or(tuple(Id(cinsn_id) for cinsn_id in cinsn_ids))
-        outer_inames = reduce(set.union, [kernel.id_to_insn[cinsn_id].within_inames - set([inner_iname,])
-                                          for cinsn_id in cinsn_ids], set())
-        kernel = lp.distribute_loops(kernel,
-                                     cinsn_match,
-                                     outer_inames=outer_inames)
-        kernel = lp.untag_inames(kernel, inner_iname, lp.VectorizeTag)
-        kernel = lp.tag_inames(kernel, {inner_iname: "unr"})
-        
-        # remove noop instructions
-        # FIXME we need to this because there is a bug in distribute loops
-        noop_insn_ids =  set([cinsn.id
-                              for cinsn in kernel.instructions
-                              if isinstance(cinsn, lp.NoOpInstruction)])
-        kernel = lp.remove_instructions(kernel, noop_insn_ids)
+
+        for cinsn_id in cinsn_ids:
+            kernel = lp.duplicate_inames(kernel,
+                                         (inner_iname,),
+                                         within=f"id:{cinsn_id}",
+                                         tags={inner_iname: "unr"}
+                                         )
+
+        # }}}
 
         return wrapper.with_kernel(kernel)
 
