@@ -252,23 +252,21 @@ class LoopyLocalKernel(LocalKernel):
         if self.flop_count is not None:
             return self.flop_count
         else:
-            if isinstance(self.code, lp.TranslationUnit):
-                # in order to silence the warnings we need to access
-                # the callable kernels in the translation
-                prog = self.code.with_entrypoints(self.name)
-                knl = prog.default_entrypoint
-                warnings = list(knl.silenced_warnings)
-                warnings.extend(['insn_count_subgroups_upper_bound',
-                                 'get_x_map_guessing_subgroup_size',
-                                 'summing_if_branches_ops'])
-                knl = knl.copy(silenced_warnings=warnings)
-                # for extrusion utils the layer arg must be fixed
-                # because usually it would be a value which is passed in from the global kernel
-                # theoretically this changes the result but not the FLOP count
-                knl = lp.fix_parameters(knl, layer=1)
-                prog = prog.with_kernel(knl)
-            else:
-                prog = self.code
+            assert isinstance(self.code, lp.TranslationUnit), "LocalLoopyKernels code should be a translation unit."
+            # in order to silence the warnings we need to access
+            # the callable kernels in the translation unit
+            prog = self.code.with_entrypoints(self.name)
+            knl = prog.default_entrypoint
+            warnings = list(knl.silenced_warnings)
+            warnings.extend(['insn_count_subgroups_upper_bound',
+                                'get_x_map_guessing_subgroup_size',
+                                'summing_if_branches_ops'])
+            knl = knl.copy(silenced_warnings=warnings)
+            # for extrusion utils the layer arg must be fixed
+            # because usually it would be a value which is passed in from the global kernel
+            # theoretically this changes the result but not the FLOP count
+            knl = lp.fix_parameters(knl, layer=1)
+            prog = prog.with_kernel(knl)
             op_map = lp.get_op_map(prog, subgroup_size=1)
             return op_map.filter_by(name=['add', 'sub', 'mul', 'div'],
                                     dtype=[ScalarType]).eval_and_sum({})
