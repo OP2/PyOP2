@@ -197,6 +197,8 @@ class CStringLocalKernel(LocalKernel):
 
     @cached_property
     def num_flops(self):
+        """Set the numbers of FLOPs to 0 if not already known,
+           because there is no way to measure or estimate the FLOPS for string kernels. """
         if self.flop_count is not None:
             return self.flop_count
         else:
@@ -221,6 +223,8 @@ class CoffeeLocalKernel(LocalKernel):
 
     @cached_property
     def num_flops(self):
+        """Compute the numbers of FLOPs if not already known
+           using COFFEE's FLOP estimation algorithm."""
         if self.flop_count is not None:
             return self.flop_count
         else:
@@ -249,6 +253,8 @@ class LoopyLocalKernel(LocalKernel):
 
     @cached_property
     def num_flops(self):
+        """Compute the numbers of FLOPs if not already known
+           using Loo.py's FLOP counting algorithm."""
         if self.flop_count is not None:
             return self.flop_count
         else:
@@ -259,8 +265,8 @@ class LoopyLocalKernel(LocalKernel):
             knl = prog.default_entrypoint
             warnings = list(knl.silenced_warnings)
             warnings.extend(['insn_count_subgroups_upper_bound',
-                                'get_x_map_guessing_subgroup_size',
-                                'summing_if_branches_ops'])
+                             'get_x_map_guessing_subgroup_size',
+                             'summing_if_branches_ops'])
             knl = knl.copy(silenced_warnings=warnings)
             # for extrusion utils the layer arg must be fixed
             # because usually it would be a value which is passed in from the global kernel
