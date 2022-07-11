@@ -96,6 +96,8 @@ class Configuration(dict):
             ("PYOP2_DEBUG", bool, False),
         "compute_kernel_flops":
             ("PYOP2_COMPUTE_KERNEL_FLOPS", bool, False),
+        "dump_slate_flops":
+            ("PYOP2_DUMP_SLATE_FLOPS", str, ""),
         "type_check":
             ("PYOP2_TYPE_CHECK", bool, True),
         "check_src_hashes":

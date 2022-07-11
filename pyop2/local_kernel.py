@@ -14,6 +14,8 @@ from pyop2.datatypes import ScalarType
 from pyop2.exceptions import NameTypeError
 from pyop2.types import Access
 from pyop2.utils import cached_property, validate_type
+from pyop2.mpi import COMM_WORLD
+from pyop2.configuration import configuration
 
 
 @dataclass(frozen=True)
@@ -266,5 +268,12 @@ class LoopyLocalKernel(LocalKernel):
             else:
                 prog = self.code
             op_map = lp.get_op_map(prog, subgroup_size=1)
-            return op_map.filter_by(name=['add', 'sub', 'mul', 'div'],
-                                    dtype=[ScalarType]).eval_and_sum({})
+
+            flops =  op_map.filter_by(name=['add', 'sub', 'mul', 'div'],
+                                      dtype=[ScalarType]).eval_and_sum({})
+            if (configuration["dump_slate_flops"] and
+                COMM_WORLD.rank == 0 and "slate" in self.name):
+                with open(configuration["dump_slate_flops"] , 'a+') as txt_file:
+                    txt_file.write(f'Flops of {self.name}: {flops}\n')
+
+            return flops
