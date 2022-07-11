@@ -383,7 +383,6 @@ class GlobalKernel(Cached):
                         "Vectorization strategy"
                         f" '{configuration['vectorization_strategy']}'")
 
-        print(wrapper)
         code = lp.generate_code_v2(wrapper)
 
         if self.local_kernel.cpp:
@@ -415,6 +414,17 @@ class GlobalKernel(Cached):
             wrapper = wrapper.with_kernel(new_entrypoint)
 
         kernel = wrapper.default_entrypoint
+
+        # {{{ get rid of noop insns
+
+        from loopy.match import Id, Or
+
+        noop_insn_ids = [Id(insn.id)
+                         for insn in kernel.instructions
+                         if isinstance(insn, lp.NoOpInstruction)]
+        kernel = lp.remove_instructions(kernel, Or(tuple(noop_insn_ids)))
+
+        # }}}
 
         # align temps
         alignment = configuration["alignment"]
