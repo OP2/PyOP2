@@ -188,9 +188,11 @@ class DataSet(caching.ObjectCached):
     @utils.cached_property
     def layout_vec(self):
         """A PETSc Vec compatible with the dof layout of this DataSet."""
+        from pyop2.op2 import compute_backend
         vec = PETSc.Vec().create(comm=self.comm)
         size = (self.size * self.cdim, None)
         vec.setSizes(size, bsize=self.cdim)
+        vec.setType(compute_backend.PETScVecType)
         vec.setUp()
         return vec
 
@@ -315,9 +317,11 @@ class GlobalDataSet(DataSet):
     @utils.cached_property
     def layout_vec(self):
         """A PETSc Vec compatible with the dof layout of this DataSet."""
+        from pyop2.op2 import compute_backend
         vec = PETSc.Vec().create(comm=self.comm)
         size = (self.size * self.cdim, None)
         vec.setSizes(size, bsize=self.cdim)
+        vec.setType(compute_backend.PETScVecType)
         vec.setUp()
         return vec
 
@@ -463,10 +467,12 @@ class MixedDataSet(DataSet):
     @utils.cached_property
     def layout_vec(self):
         """A PETSc Vec compatible with the dof layout of this MixedDataSet."""
+        from pyop2.op2 import compute_backend
         vec = PETSc.Vec().create(comm=self.comm)
         # Compute local and global size from sizes of layout vecs
         lsize, gsize = map(sum, zip(*(d.layout_vec.sizes for d in self)))
         vec.setSizes((lsize, gsize), bsize=1)
+        vec.setType(compute_backend.PETScVecType)
         vec.setUp()
         return vec
 

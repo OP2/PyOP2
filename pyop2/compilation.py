@@ -575,7 +575,7 @@ def load(jitmodule, extension, fn_name, cppargs=(), ldargs=(),
     :kwarg comm: Optional communicator to compile the code on (only
         rank 0 compiles code) (defaults to pyop2.mpi.COMM_WORLD).
     """
-    from pyop2.global_kernel import GlobalKernel
+    from pyop2.global_kernel import AbstractGlobalKernel as GlobalKernel
 
     if isinstance(jitmodule, str):
         class StrCode(object):
