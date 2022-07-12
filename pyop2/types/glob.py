@@ -10,12 +10,12 @@ from pyop2 import (
     mpi,
     utils
 )
+from pyop2.offload_utils import OffloadMixin
 from pyop2.types.access import Access
-from pyop2.types.dataset import GlobalDataSet
 from pyop2.types.data_carrier import DataCarrier, EmptyDataMixin, VecAccessMixin
 
 
-class Global(DataCarrier, EmptyDataMixin, VecAccessMixin):
+class Global(DataCarrier, EmptyDataMixin, VecAccessMixin, OffloadMixin):
 
     """OP2 global value.
 
@@ -90,15 +90,16 @@ class Global(DataCarrier, EmptyDataMixin, VecAccessMixin):
 
     def __str__(self):
         return "OP2 Global Argument: %s with dim %s and value %s" \
-            % (self._name, self._dim, self._data)
+            % (self._name, self._dim, self.data_ro)
 
     def __repr__(self):
-        return "Global(%r, %r, %r, %r)" % (self._dim, self._data,
-                                           self._data.dtype, self._name)
+        return "Global(%r, %r, %r, %r)" % (self._dim, self.data_ro,
+                                           self.data.dtype, self._name)
 
     @utils.cached_property
     def dataset(self):
-        return GlobalDataSet(self)
+        from pyop2.op2 import compute_backend
+        return compute_backend.GlobalDataSet(self)
 
     @property
     def shape(self):
@@ -266,7 +267,8 @@ class Global(DataCarrier, EmptyDataMixin, VecAccessMixin):
     @utils.cached_property
     def _vec(self):
         assert self.dtype == PETSc.ScalarType, \
-            "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
+            "Can't create Vec with type %s, must be %s" % (self.dtype,
+                                                           PETSc.ScalarType)
         # Can't duplicate layout_vec of dataset, because we then
         # carry around extra unnecessary data.
         # But use getSizes to save an Allreduce in computing the
@@ -288,7 +290,10 @@ class Global(DataCarrier, EmptyDataMixin, VecAccessMixin):
         """A context manager for a :class:`PETSc.Vec` from a :class:`Global`.
 
         :param access: Access descriptor: READ, WRITE, or RW."""
-        yield self._vec
-        if access is not Access.READ:
-            data = self._data
-            self.comm.Bcast(data, 0)
+        raise NotImplementedError()
+
+    def ensure_availability_on_host(self):
+        raise NotImplementedError()
+
+    def ensure_availability_on_device(self):
+        raise NotImplementedError()
