@@ -22,9 +22,11 @@ class OffloadMixin:
         raise NotImplementedError
 
     def is_available_on_host(self):
+        # bitwise op to detect both AVAILABLE_ON_HOST and AVAILABLE_ON_BOTH
         return bool(self.get_availability() & AVAILABLE_ON_HOST_ONLY)
 
     def is_available_on_device(self):
+        # bitwise op to detect both AVAILABLE_ON_DEVICE and AVAILABLE_ON_BOTH
         return bool(self.get_availability() & AVAILABLE_ON_DEVICE_ONLY)
 
 
