@@ -1,4 +1,3 @@
-import abc
 import contextlib
 import ctypes
 import itertools
@@ -16,13 +15,14 @@ from pyop2 import (
     mpi,
     utils
 )
+from pyop2.offload_utils import OffloadMixin
 from pyop2.types.access import Access
-from pyop2.types.dataset import DataSet, GlobalDataSet, MixedDataSet
+from pyop2.types.dataset import DataSet, GlobalDataSet
 from pyop2.types.data_carrier import DataCarrier, EmptyDataMixin, VecAccessMixin
 from pyop2.types.set import ExtrudedSet, GlobalSet, Set
 
 
-class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
+class AbstractDat(DataCarrier, EmptyDataMixin):
     """OP2 vector data. A :class:`Dat` holds values on every element of a
     :class:`DataSet`.o
 
@@ -305,19 +305,7 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
 
         :arg other: The destination :class:`Dat`
         :arg subset: A :class:`Subset` of elements to copy (optional)"""
-        if other is self:
-            return
-        if subset is None:
-            # If the current halo is valid we can also copy these values across.
-            if self.halo_valid:
-                other._data[:] = self._data
-                other.halo_valid = True
-            else:
-                other.data[:] = self.data_ro
-        elif subset.superset != self.dataset.set:
-            raise ex.MapValueError("The subset and dataset are incompatible")
-        else:
-            other.data[subset.owned_indices] = self.data_ro[subset.owned_indices]
+        raise NotImplementedError("Backend-specific subclass must implement it.")
 
     def __iter__(self):
         """Yield self when iterated over."""
@@ -373,12 +361,11 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
         return self._op_kernel_cache.setdefault(key, Kernel(knl, name))
 
     def _op(self, other, op):
-        from pyop2.types.glob import Global
+        from pyop2.op2 import compute_backend
         from pyop2.parloop import parloop
-
-        ret = Dat(self.dataset, None, self.dtype)
+        ret = compute_backend.Dat(self.dataset, None, self.dtype)
         if np.isscalar(other):
-            other = Global(1, data=other, comm=self.comm)
+            other = compute_backend.Global(1, data=other, comm=self.comm)
             globalp = True
         else:
             self._check_shape(other)
@@ -422,15 +409,16 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
         return self._iop_kernel_cache.setdefault(key, Kernel(knl, name))
 
     def _iop(self, other, op):
+        from pyop2.op2 import compute_backend
         from pyop2.parloop import parloop
-        from pyop2.types.glob import Global, Constant
+        from pyop2.types.glob import Constant
 
         globalp = False
         if np.isscalar(other):
-            other = Global(1, data=other, comm=self.comm)
+            other = compute_backend.Global(1, data=other, comm=self.comm)
             globalp = True
         elif isinstance(other, Constant):
-            other = Global(other, comm=self.comm)
+            other = compute_backend.Global(other, comm=self.comm)
             globalp = True
         elif other is not self:
             self._check_shape(other)
@@ -474,10 +462,10 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
 
         """
         from pyop2.parloop import parloop
-        from pyop2.types.glob import Global
+        from pyop2.op2 import compute_backend
 
         self._check_shape(other)
-        ret = Global(1, data=0, dtype=self.dtype, comm=self.comm)
+        ret = compute_backend.Global(1, data=0, dtype=self.dtype, comm=self.comm)
         parloop(self._inner_kernel(other.dtype), self.dataset.set,
                 self(Access.READ), other(Access.READ), ret(Access.INC))
         return ret.data_ro[0]
@@ -493,7 +481,8 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
         return sqrt(self.inner(self).real)
 
     def __pos__(self):
-        pos = Dat(self)
+        from pyop2.op2 import compute_backend
+        pos = compute_backend.Dat(self)
         return pos
 
     def __add__(self, other):
@@ -526,8 +515,9 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
 
     def __neg__(self):
         from pyop2.parloop import parloop
+        from pyop2.op2 import compute_backend
 
-        neg = Dat(self.dataset, dtype=self.dtype)
+        neg = compute_backend.Dat(self.dataset, dtype=self.dtype)
         parloop(self._neg_kernel, self.dataset.set, neg(Access.WRITE), self(Access.READ))
         return neg
 
@@ -754,7 +744,11 @@ class DatView(AbstractDat):
         return self._parent.data_wo_with_halos[self._idx]
 
 
-class Dat(AbstractDat, VecAccessMixin):
+class Dat(AbstractDat, VecAccessMixin, OffloadMixin):
+
+    @utils.cached_property
+    def can_be_represented_as_petscvec(self):
+        return ((self.dtype == PETSc.ScalarType) and self.cdim > 0)
 
     def __init__(self, *args, **kwargs):
         AbstractDat.__init__(self, *args, **kwargs)
@@ -765,14 +759,17 @@ class Dat(AbstractDat, VecAccessMixin):
     @utils.cached_property
     def _vec(self):
         assert self.dtype == PETSc.ScalarType, \
-            "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
+            "Can't create Vec with type %s, must be %s" % (self.dtype,
+                                                           PETSc.ScalarType)
         # Can't duplicate layout_vec of dataset, because we then
         # carry around extra unnecessary data.
         # But use getSizes to save an Allreduce in computing the
         # global size.
         size = self.dataset.layout_vec.getSizes()
         data = self._data[:size[0]]
-        return PETSc.Vec().createWithArray(data, size=size, bsize=self.cdim, comm=self.comm)
+        vec = PETSc.Vec().createWithArray(data, size=size,
+                                          bsize=self.cdim, comm=self.comm)
+        return vec
 
     @contextlib.contextmanager
     def vec_context(self, access):
@@ -801,12 +798,13 @@ class MixedDat(AbstractDat, VecAccessMixin):
 
     def __init__(self, mdset_or_dats):
         from pyop2.types.glob import Global
+        from pyop2.op2 import compute_backend
 
         def what(x):
             if isinstance(x, (Global, GlobalDataSet, GlobalSet)):
-                return Global
+                return compute_backend.Global
             elif isinstance(x, (Dat, DataSet, Set)):
-                return Dat
+                return compute_backend.Dat
             else:
                 raise ex.DataSetTypeError("Huh?!")
         if isinstance(mdset_or_dats, MixedDat):
@@ -863,7 +861,8 @@ class MixedDat(AbstractDat, VecAccessMixin):
     @utils.cached_property
     def dataset(self):
         r""":class:`MixedDataSet`\s this :class:`MixedDat` is defined on."""
-        return MixedDataSet(tuple(s.dataset for s in self._dats))
+        from pyop2.op2 import compute_backend
+        return compute_backend.MixedDataSet(tuple(s.dataset for s in self._dats))
 
     @utils.cached_property
     def _data(self):
@@ -1023,6 +1022,7 @@ class MixedDat(AbstractDat, VecAccessMixin):
         return ret
 
     def _op(self, other, op):
+        from pyop2.op2 import compute_backend
         ret = []
         if np.isscalar(other):
             for s in self:
@@ -1031,7 +1031,7 @@ class MixedDat(AbstractDat, VecAccessMixin):
             self._check_shape(other)
             for s, o in zip(self, other):
                 ret.append(op(s, o))
-        return MixedDat(ret)
+        return compute_backend.MixedDat(ret)
 
     def _iop(self, other, op):
         if np.isscalar(other):
@@ -1044,16 +1044,20 @@ class MixedDat(AbstractDat, VecAccessMixin):
         return self
 
     def __pos__(self):
+        from pyop2.op2 import compute_backend
+
         ret = []
         for s in self:
             ret.append(s.__pos__())
-        return MixedDat(ret)
+        return compute_backend.MixedDat(ret)
 
     def __neg__(self):
+        from pyop2.op2 import compute_backend
+
         ret = []
         for s in self:
             ret.append(s.__neg__())
-        return MixedDat(ret)
+        return compute_backend.MixedDat(ret)
 
     def __add__(self, other):
         """Pointwise addition of fields."""

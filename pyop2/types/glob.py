@@ -11,8 +11,8 @@ from pyop2 import (
     mpi,
     utils
 )
+from pyop2.offload_utils import OffloadMixin
 from pyop2.types.access import Access
-from pyop2.types.dataset import GlobalDataSet
 from pyop2.types.data_carrier import DataCarrier, EmptyDataMixin, VecAccessMixin
 
 
@@ -205,7 +205,7 @@ class SetFreeDataCarrier(DataCarrier, EmptyDataMixin):
 
 
 # must have comm, can be modified in parloop (implies a reduction)
-class Global(SetFreeDataCarrier, VecAccessMixin):
+class Global(SetFreeDataCarrier, VecAccessMixin, OffloadMixin):
     """OP2 global value.
 
     When a ``Global`` is passed to a :func:`pyop2.op2.par_loop`, the access
@@ -251,10 +251,10 @@ class Global(SetFreeDataCarrier, VecAccessMixin):
 
     def __str__(self):
         return "OP2 Global Argument: %s with dim %s and value %s" \
-            % (self._name, self._dim, self._data)
+            % (self._name, self._dim, self.data_ro)
 
     def __repr__(self):
-        return "Global(%r, %r, %r, %r)" % (self._dim, self._data,
+        return "Global(%r, %r, %r, %r)" % (self._dim, self.data_ro,
                                            self._data.dtype, self._name)
 
     @utils.validate_in(('access', _modes, ex.ModeValueError))
@@ -275,7 +275,8 @@ class Global(SetFreeDataCarrier, VecAccessMixin):
 
     @utils.cached_property
     def dataset(self):
-        return GlobalDataSet(self)
+        from pyop2.op2 import compute_backend
+        return compute_backend.GlobalDataSet(self)
 
     @mpi.collective
     def duplicate(self):
@@ -338,37 +339,24 @@ class Global(SetFreeDataCarrier, VecAccessMixin):
 
     @utils.cached_property
     def _vec(self):
-        assert self.dtype == PETSc.ScalarType, \
-            "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
-        # Can't duplicate layout_vec of dataset, because we then
-        # carry around extra unnecessary data.
-        # But use getSizes to save an Allreduce in computing the
-        # global size.
-        data = self._data
-        size = self.dataset.layout_vec.getSizes()
-        if self.comm.rank == 0:
-            return PETSc.Vec().createWithArray(data, size=size,
-                                               bsize=self.cdim,
-                                               comm=self.comm)
-        else:
-            return PETSc.Vec().createWithArray(np.empty(0, dtype=self.dtype),
-                                               size=size,
-                                               bsize=self.cdim,
-                                               comm=self.comm)
+        raise NotImplementedError("Backend-specific subclass must implement it.")
 
     @contextlib.contextmanager
     def vec_context(self, access):
         """A context manager for a :class:`PETSc.Vec` from a :class:`Global`.
 
         :param access: Access descriptor: READ, WRITE, or RW."""
-        yield self._vec
-        if access is not Access.READ:
-            data = self._data
-            self.comm.Bcast(data, 0)
+        raise NotImplementedError()
+
+    def ensure_availability_on_host(self):
+        raise NotImplementedError()
+
+    def ensure_availability_on_device(self):
+        raise NotImplementedError()
 
 
 # has no comm, can only be READ
-class Constant(SetFreeDataCarrier):
+class Constant(SetFreeDataCarrier, OffloadMixin):
     """OP2 constant value.
 
     When a ``Constant`` is passed to a :func:`pyop2.op2.par_loop`, the access
