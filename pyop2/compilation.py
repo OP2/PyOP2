@@ -154,6 +154,29 @@ def sniff_compiler(exe, comm=mpi.COMM_WORLD):
     return comm.bcast(compiler, 0)
 
 
+def _check_src_hashes(comm, global_kernel):
+    hsh = md5(str(global_kernel.cache_key[1:]).encode())
+    basename = hsh.hexdigest()
+    dirpart, basename = basename[:2], basename[2:]
+    cachedir = configuration["cache_dir"]
+    cachedir = os.path.join(cachedir, dirpart)
+
+    if configuration["check_src_hashes"] or configuration["debug"]:
+        matching = comm.allreduce(basename, op=_check_op)
+        if matching != basename:
+            # Dump all src code to disk for debugging
+            output = os.path.join(cachedir, "mismatching-kernels")
+            srcfile = os.path.join(output, "src-rank%d.c" % comm.rank)
+            if comm.rank == 0:
+                os.makedirs(output, exist_ok=True)
+            comm.barrier()
+            with open(srcfile, "w") as f:
+                f.write(global_kernel.code_to_compile)
+            comm.barrier()
+            raise CompilationError("Generated code differs across ranks"
+                                   f" (see output in {output})")
+
+
 class Compiler(ABC):
     """A compiler for shared libraries.
 
@@ -324,19 +347,8 @@ class Compiler(ABC):
         # atomically (avoiding races).
         tmpname = os.path.join(cachedir, "%s_p%d.so.tmp" % (basename, pid))
 
-        if configuration['check_src_hashes'] or configuration['debug']:
-            matching = self.comm.allreduce(basename, op=_check_op)
-            if matching != basename:
-                # Dump all src code to disk for debugging
-                output = os.path.join(configuration["cache_dir"], "mismatching-kernels")
-                srcfile = os.path.join(output, "src-rank%d.c" % self.comm.rank)
-                if self.comm.rank == 0:
-                    os.makedirs(output, exist_ok=True)
-                self.comm.barrier()
-                with open(srcfile, "w") as f:
-                    f.write(jitmodule.code_to_compile)
-                self.comm.barrier()
-                raise CompilationError("Generated code differs across ranks (see output in %s)" % output)
+        _check_src_hashes(self.comm, jitmodule)
+
         try:
             # Are we in the cache?
             return ctypes.CDLL(soname)
@@ -652,3 +664,81 @@ def clear_cache(prompt=False):
         shutil.rmtree(cachedir, ignore_errors=True)
     else:
         print("Not removing cached libraries")
+
+
+def _get_code_to_compile(comm, global_kernel):
+    # Determine cache key
+    hsh = md5(str(global_kernel.cache_key[1:]).encode())
+    basename = hsh.hexdigest()
+    cachedir = configuration["cache_dir"]
+    dirpart, basename = basename[:2], basename[2:]
+    cachedir = os.path.join(cachedir, dirpart)
+    cname = os.path.join(cachedir, f"{basename}_code.cu")
+
+    _check_src_hashes(comm, global_kernel)
+
+    if os.path.isfile(cname):
+        # Are we in the cache?
+        with open(cname, "r") as f:
+            code_to_compile = f.read()
+    else:
+        # No, let"s go ahead and build
+        if comm.rank == 0:
+            # No need to do this on all ranks
+            os.makedirs(cachedir, exist_ok=True)
+            with progress(INFO, "Compiling wrapper"):
+                # make sure that compiles successfully before writing to file
+                code_to_compile = global_kernel.code_to_compile
+                with open(cname, "w") as f:
+                    f.write(code_to_compile)
+        comm.barrier()
+
+    return code_to_compile
+
+
+@mpi.collective
+def get_prepared_cuda_function(comm, global_kernel):
+    from pycuda.compiler import SourceModule
+
+    # Determine cache key
+    hsh = md5(str(global_kernel.cache_key[1:]).encode())
+    basename = hsh.hexdigest()
+    cachedir = configuration["cache_dir"]
+    dirpart, basename = basename[:2], basename[2:]
+    cachedir = os.path.join(cachedir, dirpart)
+
+    nvcc_opts = ["-use_fast_math", "-w"]
+
+    code_to_compile = _get_code_to_compile(comm, global_kernel)
+    source_module = SourceModule(code_to_compile, options=nvcc_opts,
+                                 cache_dir=cachedir)
+
+    cu_func = source_module.get_function(global_kernel.name)
+
+    type_map = {ctypes.c_void_p: "P", ctypes.c_int: "i"}
+    argtypes = "".join(type_map[t] for t in global_kernel.argtypes)
+    cu_func.prepare(argtypes)
+
+    return cu_func
+
+
+@mpi.collective
+def get_opencl_kernel(comm, global_kernel):
+    import pyopencl as cl
+    from pyop2.backends.opencl import opencl_backend
+    cl_ctx = opencl_backend.context
+
+    # Determine cache key
+    hsh = md5(str(global_kernel.cache_key[1:]).encode())
+    basename = hsh.hexdigest()
+    cachedir = configuration["cache_dir"]
+    dirpart, basename = basename[:2], basename[2:]
+    cachedir = os.path.join(cachedir, dirpart)
+
+    code_to_compile = _get_code_to_compile(comm, global_kernel)
+
+    prg = cl.Program(cl_ctx, code_to_compile).build(options=[],
+                                                    cache_dir=cachedir)
+
+    cl_knl = cl.Kernel(prg, global_kernel.name)
+    return cl_knl
