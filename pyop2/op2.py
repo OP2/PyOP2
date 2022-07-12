@@ -50,11 +50,14 @@ from pyop2.types import (READ, WRITE, RW, INC, MIN, MAX,
 
 from pyop2.local_kernel import CStringLocalKernel, LoopyLocalKernel, CoffeeLocalKernel, Kernel  # noqa: F401
 from pyop2.global_kernel import (GlobalKernelArg, DatKernelArg, MixedDatKernelArg,  # noqa: F401
-                                 MatKernelArg, MixedMatKernelArg, MapKernelArg, GlobalKernel)
+                                 MatKernelArg, MixedMatKernelArg, MapKernelArg)
 from pyop2.parloop import (GlobalParloopArg, DatParloopArg, MixedDatParloopArg,  # noqa: F401
-                           MatParloopArg, MixedMatParloopArg, Parloop, parloop, par_loop)
+                           MatParloopArg, MixedMatParloopArg, AbstractParloop,
+                           parloop, par_loop)
 from pyop2.parloop import (GlobalLegacyArg, DatLegacyArg, MixedDatLegacyArg,  # noqa: F401
                            MatLegacyArg, MixedMatLegacyArg, LegacyParloop, ParLoop)
+
+from pyop2.backends.cpu import cpu_backend
 
 import loopy
 
@@ -64,7 +67,7 @@ __all__ = ['configuration', 'READ', 'WRITE', 'RW', 'INC', 'MIN', 'MAX',
            'set_log_level', 'MPI', 'init', 'exit', 'Kernel', 'Set', 'ExtrudedSet',
            'MixedSet', 'Subset', 'DataSet', 'GlobalDataSet', 'MixedDataSet',
            'Halo', 'Dat', 'MixedDat', 'Mat', 'Global', 'Map', 'MixedMap',
-           'Sparsity', 'parloop', 'Parloop', 'ParLoop', 'par_loop',
+           'Sparsity', 'parloop', 'AbstractParloop', 'ParLoop', 'par_loop',
            'DatView', 'PermutedMap']
 
 
@@ -121,3 +124,8 @@ def exit():
     configuration.reset()
     global _initialised
     _initialised = False
+
+
+compute_backend = cpu_backend
+
+GlobalKernel = cpu_backend.GlobalKernel
