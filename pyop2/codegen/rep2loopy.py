@@ -399,7 +399,7 @@ def instruction_dependencies(instructions, initialisers):
     return dict((op, (names[op], dep)) for op, dep in deps.items())
 
 
-def generate(builder, wrapper_name=None):
+def generate(builder, wrapper_name=None, include_math=True, include_petsc=True, include_complex=True):
     if builder.layer_index is not None:
         outer_inames = frozenset([builder._loop_index.name,
                                   builder.layer_index.name])
@@ -546,7 +546,16 @@ def generate(builder, wrapper_name=None):
     # register kernel
     kernel = builder.kernel
     headers = set(kernel.headers)
-    headers = headers | set(["#include <math.h>", "#include <complex.h>", "#include <petsc.h>"])
+
+    if include_math:
+        headers.add("#include <math.h>")
+
+    if include_petsc:
+        headers.add("#include <petsc.h>")
+
+    if include_complex:
+        headers.add("#include <complex.h>")
+
     if PETSc.Log.isActive():
         headers = headers | set(["#include <petsclog.h>"])
     preamble = "\n".join(sorted(headers))
@@ -621,15 +630,22 @@ def statement_assign(expr, context):
     if isinstance(lvalue, Indexed):
         context.index_ordering.append(tuple(i.name for i in lvalue.index_ordering()))
     lvalue, rvalue = tuple(expression(c, context.parameters) for c in expr.children)
-    within_inames = context.within_inames[expr]
+    if isinstance(expr.label, (PreUnpackInst, UnpackInst)):
+        tag = "scatter"
+    elif isinstance(expr.label, PackInst):
+        tag = "gather"
+    else:
+        raise NotImplementedError()
 
+    within_inames = context.within_inames[expr]
     id, depends_on = context.instruction_dependencies[expr]
     predicates = frozenset(context.conditions)
     return loopy.Assignment(lvalue, rvalue, within_inames=within_inames,
                             within_inames_is_final=True,
                             predicates=predicates,
                             id=id,
-                            depends_on=depends_on, depends_on_is_final=True)
+                            depends_on=depends_on, depends_on_is_final=True,
+                            tags=frozenset([tag]))
 
 
 @statement.register(FunctionCall)
