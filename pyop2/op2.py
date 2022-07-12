@@ -58,6 +58,7 @@ from pyop2.parloop import (GlobalLegacyArg, DatLegacyArg, MixedDatLegacyArg,  # 
                            MatLegacyArg, MixedMatLegacyArg, LegacyParloop, ParLoop)
 
 from pyop2.backends.cpu import cpu_backend
+from pyop2.offload_utils import set_offloading_backend, offloading
 
 import loopy
 
@@ -68,7 +69,7 @@ __all__ = ['configuration', 'READ', 'WRITE', 'RW', 'INC', 'MIN', 'MAX',
            'MixedSet', 'Subset', 'DataSet', 'GlobalDataSet', 'MixedDataSet',
            'Halo', 'Dat', 'MixedDat', 'Mat', 'Global', 'Map', 'MixedMap',
            'Sparsity', 'parloop', 'AbstractParloop', 'ParLoop', 'par_loop',
-           'DatView', 'PermutedMap']
+           'DatView', 'PermutedMap', 'set_offloading_backend', 'offloading']
 
 
 _initialised = False
