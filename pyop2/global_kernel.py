@@ -1,20 +1,18 @@
 import collections.abc
 import ctypes
+import abc
 from dataclasses import dataclass
 import itertools
-import os
 from typing import Optional, Tuple
 
-import loopy as lp
-from petsc4py import PETSc
 import numpy as np
 
-from pyop2 import compilation, mpi
+from pyop2 import mpi
 from pyop2.caching import Cached
 from pyop2.configuration import configuration
 from pyop2.datatypes import IntType, as_ctypes
 from pyop2.types import IterationRegion
-from pyop2.utils import cached_property, get_petsc_dir
+from pyop2.utils import cached_property
 
 
 # We set eq=False to force identity-based hashing. This is required for when
@@ -226,7 +224,7 @@ class MixedMatKernelArg:
         return MatPack
 
 
-class GlobalKernel(Cached):
+class AbstractGlobalKernel(Cached, abc.ABC):
     """Class representing the generated code for the global computation.
 
     :param local_kernel: :class:`pyop2.LocalKernel` instance representing the
@@ -349,48 +347,6 @@ class GlobalKernel(Cached):
         return builder
 
     @cached_property
-    def code_to_compile(self):
-        """Return the C/C++ source code as a string."""
-        from pyop2.codegen.rep2loopy import generate
-
-        wrapper = generate(self.builder)
-        code = lp.generate_code_v2(wrapper)
-
-        if self.local_kernel.cpp:
-            from loopy.codegen.result import process_preambles
-            preamble = "".join(process_preambles(getattr(code, "device_preambles", [])))
-            device_code = "\n\n".join(str(dp.ast) for dp in code.device_programs)
-            return preamble + "\nextern \"C\" {\n" + device_code + "\n}\n"
-        return code.device_code()
-
-    @PETSc.Log.EventDecorator()
-    @mpi.collective
-    def compile(self, comm):
-        """Compile the kernel.
-
-        :arg comm: The communicator the compilation is collective over.
-        :returns: A ctypes function pointer for the compiled function.
-        """
-        extension = "cpp" if self.local_kernel.cpp else "c"
-        cppargs = (
-            tuple("-I%s/include" % d for d in get_petsc_dir())
-            + tuple("-I%s" % d for d in self.local_kernel.include_dirs)
-            + ("-I%s" % os.path.abspath(os.path.dirname(__file__)),)
-        )
-        ldargs = (
-            tuple("-L%s/lib" % d for d in get_petsc_dir())
-            + tuple("-Wl,-rpath,%s/lib" % d for d in get_petsc_dir())
-            + ("-lpetsc", "-lm")
-            + tuple(self.local_kernel.ldargs)
-        )
-
-        return compilation.load(self, extension, self.name,
-                                cppargs=cppargs,
-                                ldargs=ldargs,
-                                restype=ctypes.c_int,
-                                comm=comm)
-
-    @cached_property
     def argtypes(self):
         """Return the ctypes datatypes of the compiled function."""
         # The first two arguments to the global kernel are the 'start' and 'stop'
@@ -410,3 +366,11 @@ class GlobalKernel(Cached):
             elif region not in {IterationRegion.TOP, IterationRegion.BOTTOM}:
                 size = layers - 1
         return size * self.local_kernel.num_flops
+
+    @abc.abstractproperty
+    def code_to_compile(self):
+        """Return the C/C++ source code as a string."""
+
+    @abc.abstractmethod
+    def compile(self):
+        pass
