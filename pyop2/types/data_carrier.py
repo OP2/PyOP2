@@ -8,6 +8,7 @@ from pyop2 import (
     utils
 )
 from pyop2.types.access import Access
+from petsc4py import PETSc
 
 
 class DataCarrier(abc.ABC):
@@ -56,25 +57,32 @@ class EmptyDataMixin(abc.ABC):
     Accessing the :attr:`_data` property allocates a zeroed data array
     if it does not already exist.
     """
-    def __init__(self, data, dtype, shape):
+    def __init__(self, data, dtype, shape, comm):
+        self._shape = shape
+        self._comm = comm
         if data is None:
             self._dtype = np.dtype(dtype if dtype is not None else dtypes.ScalarType)
         else:
-            self._numpy_data = utils.verify_reshape(data, dtype, shape, allow_none=True)
+            self._vec_data = utils.verify_reshape(data, dtype, shape, allow_none=True, comm=comm, do_you_want_a_vec=True)
             self._dtype = self._data.dtype
 
-    @utils.cached_property
+    @property
     def _data(self):
         """Return the user-provided data buffer, or a zeroed buffer of
         the correct size if none was provided."""
         if not self._is_allocated:
-            self._numpy_data = np.zeros(self.shape, dtype=self._dtype)
-        return self._numpy_data
+            numpy_data = np.zeros(self._shape, dtype=self._dtype)
+            if len(self._shape) == 1:
+                cdim = 1
+            else:
+                cdim = np.prod(self._shape[1:])
+            self._vec_data = PETSc.Vec().createWithArray(numpy_data, size=self._shape[0], bsize=cdim, comm=self._comm) #Jack skeptical about size=
+        return self._vec_data.array_w
 
     @property
     def _is_allocated(self):
         """Return True if the data buffer has been allocated."""
-        return hasattr(self, '_numpy_data')
+        return hasattr(self, '_vec_data')
 
 
 class VecAccessMixin(abc.ABC):

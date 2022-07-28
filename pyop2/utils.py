@@ -40,8 +40,10 @@ import numpy as np
 from decorator import decorator
 import argparse
 
+from pyop2 import datatypes
 from pyop2.exceptions import DataTypeError, DataValueError
 from pyop2.configuration import configuration
+from petsc4py import PETSc
 
 
 class cached_property(object):
@@ -221,15 +223,17 @@ class validate_dtype(validate_base):
                             % (self.file, self.line, arg))
 
 
-def verify_reshape(data, dtype, shape, allow_none=False):
-    """Verify data is of type dtype and try to reshaped to shape."""
+def verify_reshape(data, dtype, shape, allow_none=False, comm=None, do_you_want_a_vec=False):
+    """Verify data is of type dtype and try to reshape to specified shape."""
+
+
 
     try:
         t = np.dtype(dtype) if dtype is not None else None
     except TypeError:
         raise DataTypeError("Invalid data type: %s" % dtype)
     if data is None and allow_none:
-        return np.asarray([], dtype=t)
+        a = np.asarray([], dtype=t)
     elif data is None:
         raise DataValueError("Invalid data: None is not allowed!")
     else:
@@ -243,10 +247,16 @@ def verify_reshape(data, dtype, shape, allow_none=False):
             # Destructively modify shape.  Fails if data are not
             # contiguous, but that's what we want anyway.
             a.shape = shape
-            return a
         except ValueError:
             raise DataValueError("Invalid data: expected %d values, got %d!" %
                                  (np.prod(shape), np.asarray(data).size))
+
+    if do_you_want_a_vec:
+        if np.dtype(dtype) != datatypes.ScalarType:
+            raise Exception("no")
+        return PETSc.Vec().createWithArray(a, size=shape[0], bsize=np.prod(shape[1:]), comm=comm)  #Jack skeptical about size=
+    else:
+        return a
 
 
 def align(bytes, alignment=16):

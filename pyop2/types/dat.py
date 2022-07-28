@@ -67,6 +67,8 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
                          ('name', str, ex.NameTypeError))
     @utils.validate_dtype(('dtype', None, ex.DataTypeError))
     def __init__(self, dataset, data=None, dtype=None, name=None):
+        if np.dtype(dtype) != dtypes.ScalarType:
+            raise Exception("WIP: Cannot construct Integer Vec, IS not implemented")
 
         if isinstance(dataset, Dat):
             self.__init__(dataset.dataset, None, dtype=dataset.dtype,
@@ -78,7 +80,8 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
             # a dataset dimension of 1.
             dataset = dataset ** 1
         self._shape = (dataset.total_size,) + (() if dataset.cdim == 1 else dataset.dim)
-        EmptyDataMixin.__init__(self, data, dtype, self._shape)
+        #EmptyDataMixin.__init__(self, data, dtype, self._shape, dataset.comm)
+        self._vec = Vec(shape, dtype, ...)
 
         self._dataset = dataset
         self.comm = dataset.comm

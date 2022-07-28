@@ -68,13 +68,13 @@ def diterset(iterset):
 
 @pytest.fixture
 def x(indset):
-    return op2.Dat(indset, list(range(nelems)), np.uint32, "x")
+    return op2.Dat(indset, list(range(nelems)), np.float64, "x")
 
 
 @pytest.fixture
 def x2(indset):
     return op2.Dat(indset ** 2, np.array([list(range(nelems)), list(range(nelems))],
-                   dtype=np.uint32), np.uint32, "x2")
+                   dtype=np.float64), np.float64, "x2")
 
 
 @pytest.fixture
@@ -131,7 +131,7 @@ class TestIndirectLoop:
 
     def test_onecolor_wo(self, iterset, x, iterset2indset):
         """Set a Dat to a scalar value with op2.WRITE."""
-        kernel_wo = "static void kernel_wo(unsigned int* x) { *x = 42; }\n"
+        kernel_wo = "static void kernel_wo(double* x) { *x = 42; }\n"
 
         op2.par_loop(op2.Kernel(kernel_wo, "kernel_wo"),
                      iterset, x(op2.WRITE, iterset2indset))
@@ -147,15 +147,15 @@ class TestIndirectLoop:
 
     def test_indirect_inc(self, iterset, unitset, iterset2unitset):
         """Sum into a scalar Dat with op2.INC."""
-        u = op2.Dat(unitset, np.array([0], dtype=np.uint32), np.uint32, "u")
+        u = op2.Dat(unitset, np.array([0], dtype=np.float64), np.float64, "u")
         kernel_inc = "static void inc(unsigned int* x) { (*x) = (*x) + 1; }\n"
         op2.par_loop(op2.Kernel(kernel_inc, "inc"),
                      iterset, u(op2.INC, iterset2unitset))
         assert u.data[0] == nelems
 
     def test_indirect_max(self, iterset, indset, iterset2indset):
-        a = op2.Dat(indset, dtype=np.int32)
-        b = op2.Dat(indset, dtype=np.int32)
+        a = op2.Dat(indset, dtype=np.float64)
+        b = op2.Dat(indset, dtype=np.float64)
         a.data[:] = -10
         b.data[:] = -5
         kernel = "static void maxify(int *a, int *b) {*a = *a < *b ? *b : *a;}\n"
@@ -164,8 +164,8 @@ class TestIndirectLoop:
         assert np.allclose(a.data_ro, -5)
 
     def test_indirect_min(self, iterset, indset, iterset2indset):
-        a = op2.Dat(indset, dtype=np.int32)
-        b = op2.Dat(indset, dtype=np.int32)
+        a = op2.Dat(indset, dtype=np.float64)
+        b = op2.Dat(indset, dtype=np.float64)
         a.data[:] = 10
         b.data[:] = 5
         kernel = "static void minify(int *a, int *b) {*a = *a > *b ? *b : *a;}\n"
@@ -175,7 +175,7 @@ class TestIndirectLoop:
 
     def test_global_read(self, iterset, x, iterset2indset):
         """Divide a Dat by a Global."""
-        g = op2.Global(1, 2, np.uint32, "g")
+        g = op2.Global(1, 2, np.float64, "g")
 
         kernel_global_read = "static void global_read(unsigned int* x, unsigned int* g) { (*x) /= (*g); }\n"
 
@@ -187,7 +187,7 @@ class TestIndirectLoop:
 
     def test_global_inc(self, iterset, x, iterset2indset):
         """Increment each value of a Dat by one and a Global at the same time."""
-        g = op2.Global(1, 0, np.uint32, "g")
+        g = op2.Global(1, 0, np.float64, "g")
 
         kernel_global_inc = """
         static void global_inc(unsigned int *x, unsigned int *inc) {
@@ -213,10 +213,10 @@ class TestIndirectLoop:
         nedges = nelems - 1
         nodes = op2.Set(nelems, "nodes")
         edges = op2.Set(nedges, "edges")
-        node_vals = op2.Dat(nodes, np.arange(nelems, dtype=np.uint32),
-                            np.uint32, "node_vals")
-        edge_vals = op2.Dat(edges, np.zeros(nedges, dtype=np.uint32),
-                            np.uint32, "edge_vals")
+        node_vals = op2.Dat(nodes, np.arange(nelems, dtype=np.float64),
+                            np.float64, "node_vals")
+        edge_vals = op2.Dat(edges, np.zeros(nedges, dtype=np.float64),
+                            np.float64, "edge_vals")
 
         e_map = np.array([(i, i + 1) for i in range(nedges)], dtype=np.uint32)
         edge2node = op2.Map(edges, nodes, 2, e_map, "edge2node")
@@ -281,9 +281,9 @@ class TestMixedIndirectLoop:
 def test_permuted_map():
     fromset = op2.Set(1)
     toset = op2.Set(4)
-    d1 = op2.Dat(op2.DataSet(toset, 1), dtype=np.int32)
-    d2 = op2.Dat(op2.DataSet(toset, 1), dtype=np.int32)
-    d1.data[:] = np.arange(4, dtype=np.int32)
+    d1 = op2.Dat(op2.DataSet(toset, 1), dtype=np.float64)
+    d2 = op2.Dat(op2.DataSet(toset, 1), dtype=np.float64)
+    d1.data[:] = np.arange(4, dtype=np.float64)
     k = op2.Kernel("""
     void copy(int *to, const int * restrict from) {
         for (int i = 0; i < 4; i++) { to[i] = from[i]; }
@@ -293,16 +293,16 @@ def test_permuted_map():
     op2.par_loop(k, fromset, d2(op2.WRITE, m2), d1(op2.READ, m1))
     expect = np.empty_like(d1.data)
     expect[m1.values[..., m2.permutation]] = d1.data[m1.values]
-    assert (d1.data == np.arange(4, dtype=np.int32)).all()
+    assert (d1.data == np.arange(4, dtype=np.float64)).all()
     assert (d2.data == expect).all()
 
 
 def test_permuted_map_both():
     fromset = op2.Set(1)
     toset = op2.Set(4)
-    d1 = op2.Dat(op2.DataSet(toset, 1), dtype=np.int32)
-    d2 = op2.Dat(op2.DataSet(toset, 1), dtype=np.int32)
-    d1.data[:] = np.arange(4, dtype=np.int32)
+    d1 = op2.Dat(op2.DataSet(toset, 1), dtype=np.float64)
+    d2 = op2.Dat(op2.DataSet(toset, 1), dtype=np.float64)
+    d1.data[:] = np.arange(4, dtype=np.float64)
     k = op2.Kernel("""
     void copy(int *to, const int * restrict from) {
         for (int i = 0; i < 4; i++) { to[i] = from[i]; }
@@ -313,7 +313,7 @@ def test_permuted_map_both():
     op2.par_loop(k, fromset, d2(op2.WRITE, m2), d1(op2.READ, m3))
     expect = np.empty_like(d1.data)
     expect[m1.values[..., m2.permutation]] = d1.data[m1.values[..., m3.permutation]]
-    assert (d1.data == np.arange(4, dtype=np.int32)).all()
+    assert (d1.data == np.arange(4, dtype=np.float64)).all()
     assert (d2.data == expect).all()
 
 
