@@ -12,6 +12,7 @@ from pyop2 import (
 )
 from pyop2.offload_utils import OffloadMixin
 from pyop2.types.set import GlobalSet, MixedSet, Set
+from pyop2.array import MirroredArray
 
 
 class Map(OffloadMixin):
@@ -38,9 +39,9 @@ class Map(OffloadMixin):
         self._toset = toset
         self.comm = toset.comm
         self._arity = arity
-        self._values = utils.verify_reshape(values, dtypes.IntType,
-                                            (iterset.total_size, arity), allow_none=True)
-        self.shape = (iterset.total_size, arity)
+        shape = (iterset.total_size, arity)
+        self._values_array = MirroredArray.new(values, dtypes.IntType, shape)
+        self.shape = shape
         self._name = name or "map_#x%x" % id(self)
         if offset is None or len(offset) == 0:
             self._offset = None
@@ -48,6 +49,10 @@ class Map(OffloadMixin):
             self._offset = utils.verify_reshape(offset, dtypes.IntType, (arity, ))
         # A cache for objects built on top of this map
         self._cache = {}
+
+    @property
+    def _values(self):
+        return self._values_array.data_ro
 
     @utils.cached_property
     def _kernel_args_(self):

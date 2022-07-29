@@ -528,6 +528,7 @@ def generate(builder, wrapper_name=None, include_math=True, include_petsc=True, 
         assumptions = assumptions & pwaffd[parameters.layer_start].le_set(pwaffd[parameters.layer_end])
     assumptions = reduce(operator.and_, assumptions.get_basic_sets())
 
+    # import pdb; pdb.set_trace()
     wrapper = loopy.make_kernel(domains,
                                 statements,
                                 kernel_data=parameters.kernel_data,

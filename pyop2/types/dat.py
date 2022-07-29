@@ -19,6 +19,7 @@ from pyop2.types.access import Access
 from pyop2.types.dataset import DataSet, GlobalDataSet
 from pyop2.types.data_carrier import DataCarrier, EmptyDataMixin, VecAccessMixin
 from pyop2.types.set import ExtrudedSet, GlobalSet, Set
+from pyop2.array import MirroredArray
 
 
 class AbstractDat(DataCarrier, EmptyDataMixin):
@@ -78,7 +79,7 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
             # a dataset dimension of 1.
             dataset = dataset ** 1
         self._shape = (dataset.total_size,) + (() if dataset.cdim == 1 else dataset.dim)
-        EmptyDataMixin.__init__(self, data, dtype, self._shape)
+        self._array = MirroredArray.new(data, dtype, self._shape)
 
         self._dataset = dataset
         self.comm = dataset.comm
@@ -150,9 +151,7 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
         if self.dataset.total_size > 0 and self._data.size == 0 and self.cdim > 0:
             raise RuntimeError("Illegal access: no data associated with this Dat!")
         self.halo_valid = False
-        v = self._data[:self.dataset.size].view()
-        v.setflags(write=True)
-        return v
+        return self._array.data[:self.dataset.size]
 
     @property
     @mpi.collective
@@ -168,9 +167,7 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
         self.global_to_local_begin(Access.RW)
         self.global_to_local_end(Access.RW)
         self.halo_valid = False
-        v = self._data.view()
-        v.setflags(write=True)
-        return v
+        return self._array.data
 
     @property
     @mpi.collective
@@ -186,9 +183,7 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
         """
         if self.dataset.total_size > 0 and self._data.size == 0 and self.cdim > 0:
             raise RuntimeError("Illegal access: no data associated with this Dat!")
-        v = self._data[:self.dataset.size].view()
-        v.setflags(write=False)
-        return v
+        return self._array.data_ro[:self.dataset.size]
 
     @property
     @mpi.collective
@@ -206,9 +201,7 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
         """
         self.global_to_local_begin(Access.READ)
         self.global_to_local_end(Access.READ)
-        v = self._data.view()
-        v.setflags(write=False)
-        return v
+        return self._array.data_ro
 
     def save(self, filename):
         """Write the data array to file ``filename`` in NumPy format."""
@@ -237,7 +230,7 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
 
     @utils.cached_property
     def dtype(self):
-        return self._dtype
+        return self._array.dtype
 
     @utils.cached_property
     def nbytes(self):

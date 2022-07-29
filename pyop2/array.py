@@ -1,3 +1,15 @@
+import enum
+
+import numpy as np
+import pyopencl
+from petsc4py import PETSc
+
+from pyop2.configuration import configuration
+from pyop2.offload_utils import _offloading as offloading
+from pyop2.types.access import READ, RW, WRITE, INC
+from pyop2.utils import verify_reshape
+
+
 class Status(enum.Enum):
     """where is the up-to-date version?"""
     ON_HOST = enum.auto()
@@ -5,98 +17,155 @@ class Status(enum.Enum):
     ON_BOTH = enum.auto()
 
 
-"""
-e.g. 1
-
-d = Dat(...)
-
-!# this will create a numpy array of zeros
-
-e.g. 2:
-
-with offloading():
-    d = Dat(...)
-
-!# this will create a *backend* array of zeros
-
-e.g. 3:
-
-parloop(..., target=DEVICE)
-"""
+ON_HOST = Status.ON_HOST
+ON_DEVICE = Status.ON_DEVICE
+ON_BOTH = Status.ON_BOTH
 
 
-class Array:
+class MirroredArray:
     """An array that is available on both host and device, copying values where necessary."""
-    def __init__(self, shape, dtype):
-        self.status = ON_HOST # could change with offloading ctxt mngr
-        #self._host_data = None
-        #self._dev_ptr = None
-        self.initdata(offload)
 
-    def initdata(self, offload=False):
-        # offloat in {"cpu", "gpu"}
-        if offload == "cpu":
-            self._host_data = np.zeros(shape, dtype)
-            self._dev_ptr = None
-        elif offload == "gpu":
-            self._host_data = None
-            # this if statement is needed because backend is known at the
-            # start of the program but offload, i.e. where are we currently, is not.
-            if backend == "opencl":
-                self._dev_ptr = ...  # some incantation or other
-            elif backend == "cuda":
-                ...
+    def __init__(self, data, dtype, shape):
+        # TODO This could be allocated lazily
+        self.dtype = np.dtype(dtype)
+        if data is None:
+            self._host_data = np.zeros(shape, dtype=dtype)
+        else:
+            self._host_data = verify_reshape(data, dtype, shape)
+        self.availability = ON_BOTH
 
-    def as_petsc_vec(self):
-        if offload == "cpu":
-            return PETSc.Vec().createMPI(...)
-        elif offload == "gpu":
-            if backend == "cuda":
-                return PETSc.Vec().createCUDA(..)
-            ...
+    @classmethod
+    def new(cls, *args, **kwargs):
+        if configuration["backend"] == "CPU_ONLY":
+            return CPUOnlyArray(*args, **kwargs)
+        elif configuration["backend"] == "OPENCL":
+            return OpenCLArray(*args, **kwargs)
+        else:
+            raise ValueError
+
+    @property
+    def kernel_arg(self):
+        # lazy but for now assume that the data is always modified if we access
+        # the pointer
+        return self.device_ptr if offloading else self.host_ptr
+
+        # if offloading:
+        #     # N.B. not considering MAX, MIN here
+        #     if access in {RW, WRITE, INC}:
+        #         return self.device_ptr
+        #     else:
+        #         return self.device_ptr_ro
+        # else:
+        #     # N.B. not considering MAX, MIN here
+        #     if access in {RW, WRITE, INC}:
+        #         return self.host_ptr
+        #     else:
+        #         return self.host_ptr_ro
+
+    @property
+    def is_available_on_device(self):
+        return self.availability in {ON_DEVICE, ON_BOTH}
+
+    def ensure_availability_on_device(self):
+        if not self.is_available_on_host:
+            self.host_to_device_copy()
+
+    @property
+    def is_available_on_host(self):
+        return self.availability in {ON_HOST, ON_BOTH}
+
+    def ensure_availability_on_host(self):
+        if not self.is_available_on_host:
+            self.device_to_host_copy()
+
+    @property
+    def vec(self):
+        raise NotImplementedError
+        # if offload == "cpu":
+        #     return PETSc.Vec().createMPI(...)
+        # elif offload == "gpu":
+        #     if backend == "cuda":
+        #         return PETSc.Vec().createCUDA(..)
+        #     ...
 
 
     @property
     def data(self):
-        """numpy array"""
-        if self._host_data is None:
-            ...
+        self.ensure_availability_on_host()
+        self.availability = ON_HOST
+        v = self._host_data.view()
+        v.setflags(write=True)
+        return v
 
-        if self.status == ON_DEVICE:
-            self._device2hostcopy()
-        self.status = ON_HOST
-        return self._host_data  # (a numpy array), initially unallocated then lazily filled
-
+    @property
+    def data_ro(self):
+        self.ensure_availability_on_host()
+        v = self._host_data.view()
+        v.setflags(write=False)
+        return v
 
     @property
     def host_ptr(self):
+        self.ensure_availability_on_host()
+        self.availability = ON_HOST
         return self.data.ctypes.data
 
     @property
-    def dev_ptr_ro(self):
-        # depend on cuda/openCL/notimplemented (defined at start)
+    def host_ptr_ro(self):
+        self.ensure_availability_on_host()
+        return self.data.ctypes.data
 
-        #if self.status not in {ON_DEVICE, ON_BOTH}:
-        if self.status == ON_HOST:
-            self._host2devicecopy()
-        self.status = ON_BOTH
-        return self._dev_ptr
+
+class CPUOnlyArray(MirroredArray):
 
     @property
-    def dev_ptr_w(self):
-        # depend on cuda/openCL/notimplemented (defined at start)
+    def device_ptr(self):
+        return self.host_ptr
 
-        #if self.status not in {ON_DEVICE, ON_BOTH}:
-        if self.status == ON_HOST:
-            self._host2devicecopy()
-        self.status = ON_DEVICE
-        return self._dev_ptr
+    @property
+    def device_ptr_ro(self):
+        return self.host_ptr_ro
+
+    def host_to_device_copy(self):
+        pass
+
+    def device_to_host_copy(self):
+        pass
 
 
-class CudaVec(Vec):
-    ...
+if configuration["backend"] == "OPENCL":
+    # TODO: Instruct the user to pass
+    # -viennacl_backend opencl
+    # -viennacl_opencl_device_type gpu
+    # create a dummy vector and extract its associated command queue
+    x = PETSc.Vec().create(PETSc.COMM_WORLD)
+    x.setType("viennacl")
+    x.setSizes(size=1)
+    queue_ptr = x.getCLQueueHandle()
+    cl_queue = pyopencl.CommandQueue.from_int_ptr(queue_ptr, retain=False)
 
 
-class OpenCLVec(Vec):
-    ...
-    ...
+class OpenCLArray(MirroredArray):
+
+    def __init__(self, data, shape, dtype):
+        if data is None:
+            self._device_data = pyopencl.array.empty(cl_queue, shape, dtype)
+        else:
+            self._device_data = pyopencl.array.to_device(cl_queue, data)
+
+    @property
+    def device_ptr(self):
+        self.ensure_availability_on_device()
+        self.availability = ON_DEVICE
+        return self._device_data.data
+
+    @property
+    def device_ptr_ro(self):
+        self.ensure_availability_on_device()
+        return self._device_data.data
+
+    def host_to_device_copy(self):
+        self._device_data.set(self._host_data)
+
+    def device_to_host_copy(self):
+        self._device_data.get(self._host_data)

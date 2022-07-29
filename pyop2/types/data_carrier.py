@@ -8,6 +8,7 @@ from pyop2 import (
     utils
 )
 from pyop2.types.access import Access
+from pyop2.array import MirroredArray
 
 
 class DataCarrier(abc.ABC):
@@ -57,24 +58,16 @@ class EmptyDataMixin(abc.ABC):
     if it does not already exist.
     """
     def __init__(self, data, dtype, shape):
-        if data is None:
-            self._dtype = np.dtype(dtype if dtype is not None else dtypes.ScalarType)
-        else:
-            self._numpy_data = utils.verify_reshape(data, dtype, shape, allow_none=True)
-            self._dtype = self._data.dtype
-
-    @utils.cached_property
-    def _data(self):
-        """Return the user-provided data buffer, or a zeroed buffer of
-        the correct size if none was provided."""
-        if not self._is_allocated:
-            self._numpy_data = np.zeros(self.shape, dtype=self._dtype)
-        return self._numpy_data
+        self._array = MirroredArray.new(data, dtype, shape)
+        self._dtype = np.dtype(dtype)
 
     @property
-    def _is_allocated(self):
-        """Return True if the data buffer has been allocated."""
-        return hasattr(self, '_numpy_data')
+    def _data(self):
+        return self._array.data
+
+    @property
+    def _data_ro(self):
+        return self._array.data
 
 
 class VecAccessMixin(abc.ABC):

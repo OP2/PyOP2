@@ -12,10 +12,11 @@ from pyop2 import (
 )
 from pyop2.offload_utils import OffloadMixin
 from pyop2.types.access import Access
-from pyop2.types.data_carrier import DataCarrier, EmptyDataMixin, VecAccessMixin
+from pyop2.types.data_carrier import DataCarrier, VecAccessMixin
+from pyop2.array import MirroredArray
 
 
-class Global(DataCarrier, EmptyDataMixin, VecAccessMixin, OffloadMixin):
+class Global(DataCarrier, VecAccessMixin, OffloadMixin):
 
     """OP2 global value.
 
@@ -47,7 +48,8 @@ class Global(DataCarrier, EmptyDataMixin, VecAccessMixin, OffloadMixin):
             return
         self._dim = utils.as_tuple(dim, int)
         self._cdim = np.prod(self._dim).item()
-        EmptyDataMixin.__init__(self, data, dtype, self._dim)
+        self._array = MirroredArray.new(data, dtype, self._dim)
+        self._dtype = np.dtype(dtype)
         self._buf = np.empty(self.shape, dtype=self.dtype)
         self._name = name or "global_#x%x" % id(self)
         self.comm = comm
@@ -57,7 +59,7 @@ class Global(DataCarrier, EmptyDataMixin, VecAccessMixin, OffloadMixin):
 
     @utils.cached_property
     def _kernel_args_(self):
-        return (self._data.ctypes.data, )
+        return (self._array.kernel_arg,)
 
     @utils.cached_property
     def _argtypes_(self):
@@ -109,9 +111,9 @@ class Global(DataCarrier, EmptyDataMixin, VecAccessMixin, OffloadMixin):
     def data(self):
         """Data array."""
         self.increment_dat_version()
-        if len(self._data) == 0:
+        if len(self._array.data) == 0:
             raise RuntimeError("Illegal access: No data associated with this Global!")
-        return self._data
+        return self._array.data
 
     @property
     def dtype(self):
@@ -120,9 +122,7 @@ class Global(DataCarrier, EmptyDataMixin, VecAccessMixin, OffloadMixin):
     @property
     def data_ro(self):
         """Data array."""
-        view = self._data.view()
-        view.setflags(write=False)
-        return view
+        return self._array.data_ro
 
     @data.setter
     def data(self, value):

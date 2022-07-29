@@ -2,6 +2,10 @@ from enum import IntEnum
 from contextlib import contextmanager
 
 
+_offloading = False
+"""Global state indicating whether or not we are running on the host or device"""
+
+
 class DataAvailability(IntEnum):
     """
     Indicates whether the device or host contains valid data.
@@ -66,8 +70,9 @@ def offloading():
     region will be executed on backend as selected via
     :func:`set_offloading_backend`.
     """
-    from pyop2 import op2
-    op2.compute_backend.turn_on_offloading()
+    global _offloading
+
+    _offloading = True
     yield
-    op2.compute_backend.turn_off_offloading()
+    _offloading = False
     return

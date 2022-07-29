@@ -426,7 +426,7 @@ class AbstractParloop:
         reduced_globals = {}
         for i, (lk_arg, gk_arg, pl_arg) in enumerate(cls.zip_arguments(global_knl, arguments)):
             if isinstance(gk_arg, GlobalKernelArg) and lk_arg.access == Access.INC:
-                tmp = compute_backend.Global(gk_arg.dim, data=np.zeros_like(pl_arg.data._data), dtype=lk_arg.dtype)
+                tmp = compute_backend.Global(gk_arg.dim, data=np.zeros_like(pl_arg.data.data), dtype=lk_arg.dtype)
                 reduced_globals[tmp] = pl_arg
                 arguments[i] = GlobalParloopArg(tmp)
 
