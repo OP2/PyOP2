@@ -10,8 +10,8 @@ from pyop2.offload_utils import (AVAILABLE_ON_HOST_ONLY,
                                  AVAILABLE_ON_BOTH,
                                  DataAvailability)
 from pyop2.configuration import configuration
-from pyop2.types.set import (MixedSet, Subset as BaseSubset,
-                             ExtrudedSet as BaseExtrudedSet,
+from pyop2.types.set import (MixedSet, Subset,
+                             ExtrudedSet,
                              Set)
 from pyop2.types.map import Map, MixedMap
 from pyop2.types.dat import Dat as BaseDat, MixedDat, DatView
@@ -38,77 +38,6 @@ import pyopencl.array as cla
 def read_only_clarray_setitem(self, *args, **kwargs):
     # emulates np.ndarray.setitem for numpy arrays with read-only flags
     raise ValueError("assignment destination is read-only")
-
-
-class ExtrudedSet(BaseExtrudedSet):
-    """
-    ExtrudedSet for OpenCL.
-    """
-
-    def __init__(self, *args, **kwargs):
-        super(ExtrudedSet, self).__init__(*args, **kwargs)
-        self._availability_flag = AVAILABLE_ON_HOST_ONLY
-
-    @utils.cached_property
-    def opencl_layers_array(self):
-        self._availability_flag = AVAILABLE_ON_BOTH
-        return cla.to_device(opencl_backend.queue, self.layers_array)
-
-    def get_availability(self):
-        return self._availability_flag
-
-    def ensure_availability_on_device(self):
-        self.opencl_layers_array
-
-    def ensure_availability_on_host(self):
-        # ExtrudedSet once initialized is not over-written so always available
-        # on host.
-        pass
-
-    @property
-    def _kernel_args_(self):
-        if opencl_backend.offloading:
-            if not self.is_available_on_device():
-                self.ensure_availability_on_device()
-
-            return (self.opencl_layers_array.data,)
-        else:
-            return super(ExtrudedSet, self)._kernel_args_
-
-
-class Subset(BaseSubset):
-    """
-    Subset for OpenCL.
-    """
-    def __init__(self, *args, **kwargs):
-        super(Subset, self).__init__(*args, **kwargs)
-        self._availability_flag = AVAILABLE_ON_HOST_ONLY
-
-    def get_availability(self):
-        return self._availability_flag
-
-    @utils.cached_property
-    def _opencl_indices(self):
-        self._availability_flag = AVAILABLE_ON_BOTH
-        return cla.to_device(opencl_backend.queue, self._indices)
-
-    def ensure_availability_on_device(self):
-        self._opencl_indices
-
-    def ensure_availability_on_host(self):
-        # Subset once initialized is not over-written so always available
-        # on host.
-        pass
-
-    @property
-    def _kernel_args_(self):
-        if opencl_backend.offloading:
-            if not self.is_available_on_device():
-                self.ensure_availability_on_device()
-
-            return (self._opencl_indices.data,)
-        else:
-            return super(Subset, self)._kernel_args_
 
 
 class Dat(BaseDat):
@@ -205,122 +134,6 @@ class Dat(BaseDat):
 
         if access is not READ:
             self.halo_valid = False
-
-    @property
-    def _kernel_args_(self):
-        if self.can_be_represented_as_petscvec:
-            if opencl_backend.offloading:
-                self.ensure_availability_on_device()
-                # tell petsc that we have updated the data in the CL buffer
-                with self.vec as v:
-                    v.getCLMemHandle()
-                    v.restoreCLMemHandle()
-
-                return (self._opencl_data.data,)
-            else:
-                self.ensure_availability_on_host()
-                # tell petsc that we have updated the data on the host
-                with self.vec as v:
-                    v.stateIncrease()
-                return (self._data.ctypes.data, )
-        else:
-            if opencl_backend.offloading:
-                self.ensure_availability_on_device()
-
-                self._availability_flag = AVAILABLE_ON_DEVICE_ONLY
-                return (self._opencl_data.data, )
-            else:
-                self.ensure_availability_on_host()
-
-                self._availability_flag = AVAILABLE_ON_HOST_ONLY
-                return (self._data.ctypes.data, )
-
-    # @mpi.collective
-    # @property
-    # def data(self):
-    #     if self.dataset.total_size > 0 and self._data.size == 0 and self.cdim > 0:
-    #         raise RuntimeError("Illegal access: no data associated with this Dat!")
-    #
-    #     self.halo_valid = False
-    #     return self._data.data
-    #
-    #     if opencl_backend.offloading:
-    #
-    #         self.ensure_availability_on_device()
-    #
-    #         # {{{ marking data on the host as invalid
-    #
-    #         if self.can_be_represented_as_petscvec:
-    #             # report to petsc that we are updating values on the device
-    #             with self.vec as petscvec:
-    #                 petscvec.getCLMemHandle("w")
-    #                 petscvec.restoreCLMemHandle()
-    #         else:
-    #             self._availability_flag = AVAILABLE_ON_DEVICE_ONLY
-    #
-    #         # }}}
-    #         v = self._opencl_data[:self.dataset.size]
-    #     else:
-    #         self.ensure_availability_on_host()
-    #         v = self._data[:self.dataset.size].view()
-    #         v.setflags(write=True)
-    #
-    #         # {{{ marking data on the device as invalid
-    #
-    #         if self.can_be_represented_as_petscvec:
-    #             # report to petsc that we are altering data on the CPU
-    #             with self.vec as petscvec:
-    #                 petscvec.stateIncrease()
-    #         else:
-    #             self._availability_flag = AVAILABLE_ON_HOST_ONLY
-    #
-    #         # }}}
-    #
-    #     return v
-    #
-    # @property
-    # @mpi.collective
-    # def data_with_halos(self):
-    #     self.global_to_local_begin(RW)
-    #     self.global_to_local_end(RW)
-    #     return self.data
-    #
-    # @property
-    # @mpi.collective
-    # def data_ro(self):
-    #
-    #     if self.dataset.total_size > 0 and self._data.size == 0 and self.cdim > 0:
-    #         raise RuntimeError("Illegal access: no data associated with this Dat!")
-    #
-    #     self.halo_valid = False
-    #
-    #     if opencl_backend.offloading:
-    #         self.ensure_availability_on_device()
-    #         v = self._opencl_data[:self.dataset.size].view()
-    #         v.setitem = read_only_clarray_setitem
-    #     else:
-    #         self.ensure_availability_on_host()
-    #         v = self._data[:self.dataset.size].view()
-    #         v.setflags(write=False)
-    #
-    #     return v
-    #
-    # @property
-    # @mpi.collective
-    # def data_ro_with_halos(self):
-    #     self.global_to_local_begin(READ)
-    #     self.global_to_local_end(READ)
-    #
-    #     if opencl_backend.offloading:
-    #         self.ensure_availability_on_device()
-    #         v = self._opencl_data.view()
-    #         v.setitem = read_only_clarray_setitem
-    #     else:
-    #         self.ensure_availability_on_host()
-    #         v = self._data.view()
-    #         v.setflags(write=False)
-    #
-    #     return v
 
 
 class Global(BaseGlobal):

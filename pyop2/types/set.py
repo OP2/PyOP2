@@ -12,6 +12,7 @@ from pyop2 import (
     utils
 )
 from pyop2.offload_utils import OffloadMixin
+from pyop2.array import MirroredArray
 
 
 class Set:
@@ -323,8 +324,12 @@ class ExtrudedSet(Set, OffloadMixin):
             layers = np.asarray([[0, layers]], dtype=dtypes.IntType)
             self.constant_layers = True
 
-        self._layers = layers
+        self._layers_array = MirroredArray.new(layers, dtypes.IntType, layers.shape)
         self._extruded = True
+
+    @property
+    def _layers(self):
+        return self._layers_array.data
 
     @utils.cached_property
     def _kernel_args_(self):
