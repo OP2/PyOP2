@@ -67,7 +67,7 @@ class MirroredArray:
         return self.availability in {ON_DEVICE, ON_BOTH}
 
     def ensure_availability_on_device(self):
-        if not self.is_available_on_host:
+        if not self.is_available_on_device:
             self.host_to_device_copy()
 
     @property
