@@ -15,6 +15,7 @@ from pyop2.configuration import configuration
 from pyop2.datatypes import IntType, as_ctypes
 from pyop2.types import IterationRegion
 from pyop2.utils import cached_property, get_petsc_dir
+from pyop2 import op2
 
 
 # We set eq=False to force identity-based hashing. This is required for when
@@ -211,7 +212,7 @@ class MixedMatKernelArg:
 
     @property
     def cache_key(self):
-        return tuple(a.cache_key for a in self.arguments)
+        return tuple(a.cache_key for a in self.arguments) + tuple(configuration["vectorization_strategy"])
 
     @property
     def maps(self):
@@ -252,7 +253,8 @@ class GlobalKernel(Cached):
     @classmethod
     def _cache_key(cls, local_knl, arguments, **kwargs):
         key = [cls, local_knl.cache_key,
-               *kwargs.items(), configuration["simd_width"]]
+               *kwargs.items(), configuration["simd_width"],
+               configuration["vectorization_strategy"]]
 
         key.extend([a.cache_key for a in arguments])
 
@@ -345,8 +347,62 @@ class GlobalKernel(Cached):
     def code_to_compile(self):
         """Return the C/C++ source code as a string."""
         from pyop2.codegen.rep2loopy import generate
+        from loopy.symbolic import get_dependencies
+        from functools import reduce
 
         wrapper = generate(self.builder)
+        if self._extruded:
+            iname = "layer"
+        else:
+            iname = "n"
+
+        # TODO: vectorizing 2-form assembly kernels is possible, but must
+        # change the arguments passed to MatSetValuesxxx (not yet implemented)
+        has_matrix = any(isinstance(arg, (MatKernelArg, MixedMatKernelArg))
+                         for arg in self.arguments)
+        has_rw = any(arg.access == op2.RW for arg in self.local_kernel.arguments)
+        is_cplx = (any(lp.types.NumpyType(dtype).is_complex()
+                       if not isinstance(dtype, lp.types.NumpyType)
+                       else dtype.is_complex()
+                       for dtype in self.local_kernel.dtypes
+                       )  # local args complex?
+                   or any(arg.dtype.is_complex()
+                          for arg in tuple(wrapper.default_entrypoint.temporary_variables.values())))  # global temps complex?
+        extruded_coords = self.local_kernel.name.endswith("extrusion")  # FIXME is there a better way to know that this kernel generated the extrusion coords?
+        is_loopy_kernel = isinstance(self.local_kernel.code, lp.TranslationUnit)
+        vectorisable = is_loopy_kernel and ((not (has_matrix or has_rw)) and (configuration["vectorization_strategy"])) and not is_cplx and not extruded_coords
+
+        if vectorisable:
+            # change target to generate vectorized code via gcc vector
+            # extensions
+            wrapper = wrapper.copy(target=lp.CVectorExtensionsTarget(
+                vec_fallback=lp.VectorizationFallback.OMP_SIMD
+            ))
+            # inline all inner kernels
+            names = self.local_kernel.code.callables_table
+            for name in names:
+                if (name in wrapper.callables_table.keys()
+                    and isinstance(wrapper.callables_table[name],
+                                   lp.CallableKernel)):
+                    wrapper = lp.inline_callable_kernel(wrapper, name)
+
+            all_insn_preds = reduce(
+                frozenset.union,
+                (insn.predicates
+                    for insn in wrapper.default_entrypoint.instructions),
+                frozenset())
+
+            if iname not in get_dependencies(tuple(all_insn_preds)):
+                # https://github.com/inducer/loopy/issues/615
+                # TODO: get rid of this guard once the loopy issue is fixed
+                if configuration["vectorization_strategy"] == "cross-element":
+                    wrapper = self.vectorise(wrapper, iname,
+                                             configuration["simd_width"])
+                else:
+                    raise NotImplementedError(
+                        "Vectorization strategy"
+                        f" '{configuration['vectorization_strategy']}'")
+
         code = lp.generate_code_v2(wrapper)
 
         if self.local_kernel.cpp:
@@ -354,7 +410,134 @@ class GlobalKernel(Cached):
             preamble = "".join(process_preambles(getattr(code, "device_preambles", [])))
             device_code = "\n\n".join(str(dp.ast) for dp in code.device_programs)
             return preamble + "\nextern \"C\" {\n" + device_code + "\n}\n"
+
         return code.device_code()
+
+    def vectorise(self, wrapper, iname, batch_size):
+        """Return a vectorised version of wrapper, vectorising over iname.
+
+        :arg wrapper: A loopy kernel to vectorise.
+        :arg iname: The iteration index to vectorise over.
+        :arg batch_size: The vector width."""
+        if batch_size == 1:
+            return wrapper
+
+        from functools import reduce
+        import pymbolic.primitives as prim
+
+        if not configuration["debug"]:
+            # loopy warns for every instruction that cannot be vectorized;
+            # ignore in non-debug mode.
+            new_entrypoint = wrapper.default_entrypoint.copy(
+                silenced_warnings=(wrapper.default_entrypoint.silenced_warnings
+                                   + ["vectorize_failed"]))
+            wrapper = wrapper.with_kernel(new_entrypoint)
+
+        kernel = wrapper.default_entrypoint
+
+        # {{{ get rid of noop insns
+
+        from loopy.match import Id, Or
+
+        noop_insn_ids = [Id(insn.id)
+                         for insn in kernel.instructions
+                         if isinstance(insn, lp.NoOpInstruction)]
+        kernel = lp.remove_instructions(kernel, Or(tuple(noop_insn_ids)))
+
+        # }}}
+
+        # align temps
+        alignment = configuration["alignment"]
+        tmps = {name: tv.copy(alignment=alignment)
+                for name, tv in kernel.temporary_variables.items()}
+        kernel = kernel.copy(temporary_variables=tmps)
+
+        # {{{ record temps that cannot be vectorized
+
+        # Do not vectorize temporaries used outside *iname*
+        temps_not_to_vectorize = reduce(set.union,
+                                        [(insn.dependency_names()
+                                          & frozenset(kernel.temporary_variables))
+                                         for insn in kernel.instructions
+                                         if iname not in insn.within_inames],
+                                        set())
+
+        # Constant literal temporaries are arguments => cannot vectorize
+        temps_not_to_vectorize |= {name
+                                   for name, tv in kernel.temporary_variables.items()
+                                   if (tv.read_only
+                                       and tv.initializer is not None)}
+
+        temps_not_to_vectorize |= {name
+                                   for name, tv in kernel.temporary_variables.items()
+                                   if kernel.writer_map().get(tv.name, set()) | kernel.reader_map().get(tv.name, set()) == set()}
+
+        # {{{ clang (unlike gcc) does not allow taking address of vector-type
+        # variable
+
+        # FIXME: Perform this only if we know we are not using gcc.
+        for insn in kernel.instructions:
+            if (
+                    isinstance(insn, lp.MultiAssignmentBase)
+                    and isinstance(insn.expression, prim.Call)
+                    and insn.expression.function.name in ["solve", "inverse"]):
+                temps_not_to_vectorize |= (insn.dependency_names())
+
+        # }}}
+
+        # }}}
+
+        # {{{ TODO: placeholder until loopy's simplify_using_pwaff gets smarter
+
+        # transform to ensure that the loop undergoing array expansion has a
+        # lower bound of '0'
+        from loopy.symbolic import pw_aff_to_expr
+        lbound = pw_aff_to_expr(kernel.get_iname_bounds(iname).lower_bound_pw_aff)
+        shifted_iname = kernel.get_var_name_generator()(f"{iname}_shift")
+        kernel = lp.affine_map_inames(kernel, iname, shifted_iname,
+                                      [(prim.Variable(shifted_iname),
+                                       (prim.Variable(iname) - lbound))])
+
+        # }}}
+
+        # split iname
+        # note there is no front slab needed because iname is shifted (see above)
+        slabs = (0, 1)
+        inner_iname = kernel.get_var_name_generator()(f"{shifted_iname}_batch")
+
+        kernel = lp.split_iname(kernel, shifted_iname, batch_size, slabs=slabs,
+                                inner_iname=inner_iname)
+
+        # adds a new axis to the temporary and indexes it with the provided iname
+        # i.e. stores the value at each instance of the loop. (i.e. array
+        # expansion)
+        kernel = lp.privatize_temporaries_with_inames(kernel, inner_iname)
+
+        # tag axes of the temporaries as vectorised
+        for name, tmp in kernel.temporary_variables.items():
+            if name not in temps_not_to_vectorize:
+                tag = (len(tmp.shape)-1)*"c," + "vec"
+                kernel = lp.tag_array_axes(kernel, name, tag)
+
+        # tag the inner iname as vectorized
+        kernel = lp.tag_inames(kernel, {inner_iname: "vec"})
+
+        # {{{ duplicate the inames surrounding the CInstructions with predicates
+
+        cinsn_ids = [cinsn.id
+                     for cinsn in kernel.instructions
+                     if (isinstance(cinsn, lp.CInstruction) and cinsn.predicates)]
+
+        for cinsn_id in cinsn_ids:
+            kernel = lp.duplicate_inames(kernel,
+                                         (inner_iname,),
+                                         within=f"id:{cinsn_id}",
+                                         tags={inner_iname: "unr"}
+                                         )
+
+        # }}}
+
+        return wrapper.with_kernel(kernel)
 
     @PETSc.Log.EventDecorator()
     @mpi.collective

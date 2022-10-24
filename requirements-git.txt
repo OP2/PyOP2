@@ -1,2 +1,2 @@
 git+https://github.com/coneoproject/COFFEE.git#egg=coffee
-git+https://github.com/firedrakeproject/loopy.git@main#egg=loopy
+git+https://github.com/firedrakeproject/loopy.git@c_vecextensions_target_241022#egg=loopy

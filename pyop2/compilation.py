@@ -46,6 +46,7 @@ from packaging.version import Version, InvalidVersion
 
 from pyop2.mpi import MPI, collective, COMM_WORLD
 from pyop2.mpi import dup_comm, get_compilation_comm, set_compilation_comm
+from pyop2.caching import cached
 from pyop2.configuration import configuration
 from pyop2.logger import warning, debug, progress, INFO
 from pyop2.exceptions import CompilationError
@@ -458,14 +459,14 @@ class MacClangCompiler(Compiler):
     _cxxflags = ("-fPIC", "-Wall", "-framework", "Accelerate")
     _ldflags = ("-dynamiclib",)
 
-    _optflags = ("-O3", "-ffast-math", "-march=native")
+    _optflags = ("-O3", "-ffast-math", "-march=native", "-fopenmp-simd")
     _debugflags = ("-O0", "-g")
 
 
 class MacClangARMCompiler(MacClangCompiler):
     """A compiler for building a shared library on ARM based Mac systems."""
     # See https://stackoverflow.com/q/65966969
-    _optflags = ("-O3", "-ffast-math", "-mcpu=apple-a14")
+    _optflags = ("-O3", "-ffast-math", "-mcpu=apple-a14", "-fopenmp-simd")
     # Need to pass -L/opt/homebrew/opt/gcc/lib/gcc/11 to prevent linker error:
     # ld: file not found: @rpath/libgcc_s.1.1.dylib for architecture arm64 This
     # seems to be a homebrew configuration issue somewhere. Hopefully this
@@ -486,7 +487,7 @@ class LinuxGnuCompiler(Compiler):
     _cxxflags = ("-fPIC", "-Wall")
     _ldflags = ("-shared",)
 
-    _optflags = ("-march=native", "-O3", "-ffast-math")
+    _optflags = ("-march=native", "-O3", "-ffast-math", "-fopenmp")
     _debugflags = ("-O0", "-g")
 
     def sniff_compiler_version(self, cpp=False):
@@ -543,7 +544,7 @@ class LinuxClangCompiler(Compiler):
     _cxxflags = ("-fPIC", "-Wall")
     _ldflags = ("-shared", "-L/usr/lib")
 
-    _optflags = ("-march=native", "-O3", "-ffast-math")
+    _optflags = ("-march=native", "-O3", "-ffast-math", "-fopenmp-simd")
     _debugflags = ("-O0", "-g")
 
 
@@ -558,7 +559,7 @@ class LinuxIntelCompiler(Compiler):
     _cxxflags = ("-fPIC", "-no-multibyte-chars")
     _ldflags = ("-shared",)
 
-    _optflags = ("-Ofast", "-xHost")
+    _optflags = ("-Ofast", "-xHost", "-qopenmp-simd")
     _debugflags = ("-O0", "-g")
 
 
@@ -696,3 +697,23 @@ def clear_cache(prompt=False):
         shutil.rmtree(cachedir)
     else:
         print("Not removing cached libraries")
+
+
+@cached(cache={})
+def max_simd_width():
+    prg_str = '''#include <stdio.h>
+
+int get_simd_width(){
+    return __builtin_cpu_supports("avx512f") ? 8:
+        __builtin_cpu_supports("avx") ? 4:
+        __builtin_cpu_supports("sse") ? 2:
+        1;
+}
+'''
+    try:
+        simd_width = load(prg_str, "c", "get_simd_width", restype=ctypes.c_int)
+        width = simd_width()
+    except (OSError, CompilationError):
+        warning("Cannot sniff SIMD width, using default of 4 doubles")
+        width = 4
+    return width
