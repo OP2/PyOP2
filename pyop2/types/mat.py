@@ -18,7 +18,7 @@ from pyop2 import (
 from pyop2.types.access import Access
 from pyop2.types.data_carrier import DataCarrier
 from pyop2.types.dataset import DataSet, GlobalDataSet, MixedDataSet
-from pyop2.types.map import Map
+from pyop2.types.map import Map, ComposedMap
 from pyop2.types.set import MixedSet, Set, Subset
 
 
@@ -165,7 +165,7 @@ class Sparsity(caching.ObjectCached):
                 if not isinstance(m, Map):
                     raise ex.MapTypeError(
                         "All maps must be of type map, not type %r" % type(m))
-                if len(m.values_with_halo) == 0 and m.iterset.total_size > 0:
+                if not isinstance(m, ComposedMap) and len(m.values_with_halo) == 0 and m.iterset.total_size > 0:
                     raise ex.MapValueError(
                         "Unpopulated map values when trying to build sparsity.")
             # Make sure that the "to" Set of each map in a pair is the set of
@@ -824,6 +824,12 @@ class Mat(AbstractMat):
         """Iterate over all :class:`Mat` blocks by row and then by column."""
         yield from itertools.chain(*self.blocks)
 
+    @property
+    def dat_version(self):
+        if self.assembly_state != Mat.ASSEMBLED:
+            raise RuntimeError("Should not ask for state counter if the matrix is not assembled.")
+        return self.handle.stateGet()
+
     @mpi.collective
     def zero(self):
         """Zero the matrix."""
@@ -935,6 +941,10 @@ class MatBlock(AbstractMat):
                                                       iscol=colis)
         self.comm = parent.comm
         self.local_to_global_maps = self.handle.getLGMap()
+
+    @property
+    def dat_version(self):
+        return self.handle.stateGet()
 
     @utils.cached_property
     def _kernel_args_(self):

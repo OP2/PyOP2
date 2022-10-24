@@ -41,7 +41,7 @@ from pyop2.mpi import MPI, COMM_WORLD, collective
 
 from pyop2.types import (
     Set, ExtrudedSet, MixedSet, Subset, DataSet, MixedDataSet,
-    Map, MixedMap, PermutedMap, Sparsity, Halo,
+    Map, MixedMap, PermutedMap, ComposedMap, Sparsity, Halo,
     Global, GlobalDataSet,
     Dat, MixedDat, DatView, Mat
 )
@@ -56,7 +56,6 @@ from pyop2.parloop import (GlobalParloopArg, DatParloopArg, MixedDatParloopArg, 
 from pyop2.parloop import (GlobalLegacyArg, DatLegacyArg, MixedDatLegacyArg,  # noqa: F401
                            MatLegacyArg, MixedMatLegacyArg, LegacyParloop, ParLoop)
 
-import loopy
 
 __all__ = ['configuration', 'READ', 'WRITE', 'RW', 'INC', 'MIN', 'MAX',
            'ON_BOTTOM', 'ON_TOP', 'ON_INTERIOR_FACETS', 'ALL',
@@ -65,13 +64,10 @@ __all__ = ['configuration', 'READ', 'WRITE', 'RW', 'INC', 'MIN', 'MAX',
            'MixedSet', 'Subset', 'DataSet', 'GlobalDataSet', 'MixedDataSet',
            'Halo', 'Dat', 'MixedDat', 'Mat', 'Global', 'Map', 'MixedMap',
            'Sparsity', 'parloop', 'Parloop', 'ParLoop', 'par_loop',
-           'DatView', 'PermutedMap']
+           'DatView', 'PermutedMap', 'ComposedMap']
 
 
 _initialised = False
-
-# turn off loopy caching because pyop2 kernels are cached already
-loopy.set_caching_enabled(False)
 
 
 def initialised():
