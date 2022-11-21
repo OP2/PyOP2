@@ -18,3 +18,5 @@ the recommended way to obtain PyOP2 is by using the `Firedrake
 installation script
 <https://www.firedrakeproject.org/download.html>`__.  This will give
 you a Python 3 venv that contains a working PyOP2 installation.
+
+JACK IS CHECKING IF CI IS BROKEN
