@@ -93,13 +93,21 @@ def sniff_compiler(exe):
     :returns: A compiler class
     """
     try:
-        output = subprocess.run(
-            [exe, "--version"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=True,
-            encoding="utf-8"
-        ).stdout
+        if configuration['no_fork_available']:
+            output = ""
+            # ~ status = os.system([exe, "--version"])
+            # ~ # Redirect above to temp file?
+            # ~ if status != 0:
+            # ~     raise subprocess.CalledProcessError(status, cmd)
+        else:
+            output = subprocess.run(
+                [exe, "--version"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=5,
+                check=True,
+                encoding="utf-8"
+            ).stdout
     except (subprocess.CalledProcessError, UnicodeDecodeError):
         output = ""
 
@@ -286,14 +294,21 @@ class Compiler(ABC):
         """
         try:
             exe = self.cxx if cpp else self.cc
-            output = subprocess.run(
-                [exe, "-dumpversion"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=True,
-                encoding="utf-8"
-            ).stdout
-            self.version = Version(output)
+            if configuration['no_fork_available']:
+                self.version = None
+                # ~ status = os.system([exe, "--version"])
+                # ~ # Redirect above to temp file?
+                # ~ if status != 0:
+                # ~     raise subprocess.CalledProcessError(status, cmd)
+            else:
+                output = subprocess.run(
+                    [exe, "-dumpversion"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True,
+                    encoding="utf-8"
+                ).stdout
+                self.version = Version(output)
         except (subprocess.CalledProcessError, UnicodeDecodeError, InvalidVersion):
             self.version = None
 
@@ -391,7 +406,7 @@ class Compiler(ABC):
                             log.write("\n\n")
                             try:
                                 if configuration['no_fork_available']:
-                                    cc += ["2>", errfile, ">", logfile]
+                                    cc += ("2>", errfile, ">", logfile)
                                     cmd = " ".join(cc)
                                     status = os.system(cmd)
                                     if status != 0:
