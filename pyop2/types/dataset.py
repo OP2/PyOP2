@@ -455,6 +455,10 @@ class MixedDataSet(DataSet):
         defined on."""
         return MixedSet(s.set for s in self._dsets)
 
+    @property
+    def _set(self):
+        return MixedSet(s.set for s in self._dsets)
+
     def __iter__(self):
         r"""Yield all :class:`DataSet`\s when iterated over."""
         for ds in self._dsets:
