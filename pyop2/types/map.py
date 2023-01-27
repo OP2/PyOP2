@@ -215,8 +215,25 @@ class PermutedMap(Map):
 
         return PermutedMapKernelArg(self.map_._global_kernel_arg, tuple(self.permutation))
 
-    def __getattr__(self, name):
-        return getattr(self.map_, name)
+    @property
+    def toset(self):
+        return self.map_.toset
+
+    @property
+    def iterset(self):
+        return self.map_.iterset
+
+    @property
+    def _values(self):
+        return self.map_.values
+
+    @property
+    def arity(self):
+        return self.map_.arity
+
+    @property
+    def _offset(self):
+        return self.map_.offset
 
 
 class ComposedMap(Map):

@@ -62,11 +62,21 @@ class DataSet(caching.ObjectCached):
         """Restore from pickled state."""
         self.__dict__.update(d)
 
-    # Look up any unspecified attributes on the _set.
-    def __getattr__(self, name):
-        """Returns a Set specific attribute."""
-        value = getattr(self.set, name)
-        return value
+    @property
+    def size(self):
+        return self._set.size
+
+    @property
+    def total_size(self):
+        return self._set.total_size
+
+    @property
+    def halo(self):
+        return self._set.halo
+
+    @property
+    def sizes(self):
+        return self._set.sizes
 
     def __getitem__(self, idx):
         """Allow index to return self"""
@@ -244,7 +254,7 @@ class GlobalDataSet(DataSet):
     @utils.cached_property
     def size(self):
         """The number of local entries in the Dataset (1 on rank 0)"""
-        return 1 if mpi.MPI.comm.rank == 0 else 0
+        return 1 if self.comm.rank == 0 else 0
 
     def __iter__(self):
         """Yield self when iterated over."""
