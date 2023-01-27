@@ -62,11 +62,21 @@ class DataSet(caching.ObjectCached):
         """Restore from pickled state."""
         self.__dict__.update(d)
 
-    # Look up any unspecified attributes on the _set.
-    def __getattr__(self, name):
-        """Returns a Set specific attribute."""
-        value = getattr(self.set, name)
-        return value
+    @property
+    def size(self):
+        return self._set.size
+
+    @property
+    def total_size(self):
+        return self._set.total_size
+
+    @property
+    def halo(self):
+        return self._set.halo
+
+    @property
+    def sizes(self):
+        return self._set.sizes
 
     def __getitem__(self, idx):
         """Allow index to return self"""
@@ -443,6 +453,10 @@ class MixedDataSet(DataSet):
     def set(self):
         """Returns the :class:`MixedSet` this :class:`MixedDataSet` is
         defined on."""
+        return MixedSet(s.set for s in self._dsets)
+
+    @property
+    def _set(self):
         return MixedSet(s.set for s in self._dsets)
 
     def __iter__(self):

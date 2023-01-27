@@ -345,10 +345,17 @@ class ExtrudedSet(Set):
     def _wrapper_cache_key_(self):
         return self.parent._wrapper_cache_key_ + (self.constant_layers, )
 
-    def __getattr__(self, name):
-        """Returns a :class:`Set` specific attribute."""
-        value = getattr(self._parent, name)
-        return value
+    @utils.cached_property
+    def _sizes(self):
+        return self._parent.sizes
+
+    @property
+    def name(self):
+        return self._parent.name
+
+    @property
+    def _cache(self):
+        return self._parent._cache
 
     def __contains__(self, set):
         return set is self.parent
@@ -424,11 +431,13 @@ class Subset(ExtrudedSet):
     def _argtypes_(self):
         return self._superset._argtypes_ + (ctypes.c_voidp, )
 
-    # Look up any unspecified attributes on the _set.
-    def __getattr__(self, name):
-        """Returns a :class:`Set` specific attribute."""
-        value = getattr(self._superset, name)
-        return value
+    @property
+    def _parent(self):
+        return self._superset
+
+    @property
+    def constant_layers(self):
+        return self._superset.constant_layers
 
     def __pow__(self, e):
         """Derive a :class:`DataSet` with dimension ``e``"""
