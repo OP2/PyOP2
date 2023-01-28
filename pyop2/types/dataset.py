@@ -254,7 +254,7 @@ class GlobalDataSet(DataSet):
     @utils.cached_property
     def size(self):
         """The number of local entries in the Dataset (1 on rank 0)"""
-        return 1 if mpi.MPI.comm.rank == 0 else 0
+        return 1 if self.comm.rank == 0 else 0
 
     def __iter__(self):
         """Yield self when iterated over."""
