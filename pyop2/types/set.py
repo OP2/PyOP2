@@ -432,8 +432,8 @@ class Subset(ExtrudedSet):
         return self._superset._argtypes_ + (ctypes.c_voidp, )
 
     @property
-    def _parent(self):
-        return self._superset
+    def name(self):
+        return self._superset.name
 
     @property
     def constant_layers(self):
