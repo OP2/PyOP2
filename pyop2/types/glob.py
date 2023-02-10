@@ -206,7 +206,7 @@ class SetFreeDataCarrier(DataCarrier, EmptyDataMixin):
         return self._iop(other, operator.itruediv)
 
     def inner(self, other):
-        assert issubclass(other, type(self))
+        assert issubclass(type(other), type(self))
         return np.dot(self.data_ro, np.conj(other.data_ro))
 
 
@@ -231,12 +231,12 @@ class Global(SetFreeDataCarrier, VecAccessMixin):
     """
     _modes = [Access.READ, Access.INC, Access.MIN, Access.MAX]
 
-    def __init__(self, *args, comm=None, **kwargs):
+    def __init__(self, dim, data=None, dtype=None, name=None, comm=None):
         if comm is None:
             import warnings
             warnings.warn("PyOP2.Global has no comm, this is likely to break in parallel!")
         self.comm = mpi.internal_comm(comm)
-        super().__init__(*args, **kwargs)
+        super().__init__(dim, data, dtype, name)
         # Object versioning setup
         petsc_counter = (comm and self.dtype == PETSc.ScalarType)
         VecAccessMixin.__init__(self, petsc_counter=petsc_counter)
@@ -367,10 +367,10 @@ class Global(SetFreeDataCarrier, VecAccessMixin):
 class Literal(SetFreeDataCarrier):
     _modes = [Access.READ]
 
-    def __init__(self, *args, comm=None, **kwargs):
+    def __init__(self, dim, data=None, dtype=None, name=None, comm=None):
         if comm is not None:
             raise ValueError("Literals should not have communicators")
-        super().__init__(*args, **kwargs)
+        super().__init__(dim, data, dtype, name)
 
     def __str__(self):
         return "OP2 Literal Argument: %s with dim %s and value %s" \
