@@ -440,11 +440,39 @@ class Global(BaseGlobal):
 
     @utils.cached_property
     def _vec(self):
-        raise NotImplementedError()
+        assert self.dtype == PETSc.ScalarType, \
+            "Can't create Vec with type %s, must be %s" % (self.dtype,
+                                                           PETSc.ScalarType)
+        # Can't duplicate layout_vec of dataset, because we then
+        # carry around extra unnecessary data.
+        # But use getSizes to save an Allreduce in computing the
+        # global size.
+        data = self._data
+        size = self.dataset.layout_vec.getSizes()
+        if self.comm.rank == 0:
+            return PETSc.Vec().createViennaCLWithArrays(
+                data,
+                size=size,
+                bsize=self.cdim,
+                comm=self.comm
+            )
+        else:
+            return PETSc.Vec().createViennaCLWithArrays(
+                numpy.empty(0, dtype=self.dtype),
+                size=size,
+                bsize=self.cdim,
+                comm=self.comm
+            )
 
     @contextmanager
     def vec_context(self, access):
-        raise NotImplementedError()
+        """A context manager for a :class:`PETSc.Vec` from a :class:`Global`.
+
+        :param access: Access descriptor: READ, WRITE, or RW."""
+        yield self._vec
+        if access is not READ:
+            data = self._data
+            self.comm.Bcast(data, 0)
 
 
 @dataclass(frozen=True)
