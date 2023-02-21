@@ -705,5 +705,12 @@ class OpenCLBackend(AbstractComputeBackend):
     def cache_key(self):
         return (type(self), self.offloading)
 
+    def array(self, *args, **kwargs):
+        return cla.to_device(self.queue, *args, **kwargs)
+
+    @staticmethod
+    def zeros(*args, **kwargs):
+        return cla.zeros(*args, **kwargs)
+
 
 opencl_backend = OpenCLBackend()

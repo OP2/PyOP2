@@ -204,6 +204,8 @@ class CPUBackend(AbstractComputeBackend):
     Global = Global
     GlobalDataSet = GlobalDataSet
     PETScVecType = PETSc.Vec.Type.STANDARD
+    array = np.array
+    zeros = np.zeros
 
     def turn_on_offloading(self):
         pass

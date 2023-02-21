@@ -170,7 +170,13 @@ class Dat(BaseDat):
             self.data[:] = 0*self.data
             self.halo_valid = True
         else:
-            raise NotImplementedError
+            import pycuda.autoprimaryctx
+            for idx in subset.indices:
+                cuda.memcpy_htod_async(
+                    int(self.data[idx].gpudata),
+                    numpy.zeros(1)
+                )
+            pycuda.autoprimaryctx.context.synchronize()
 
     def copy(self, other, subset=None):
         raise NotImplementedError
@@ -686,6 +692,14 @@ class CUDABackend(AbstractComputeBackend):
     @property
     def cache_key(self):
         return (type(self), self.offloading)
+
+    @staticmethod
+    def array(*args, **kwargs):
+        return cuda_np.GPUArray(*args, **kwargs)
+
+    @staticmethod
+    def zeros(*args, **kwargs):
+        return cuda_np.zeros(*args, **kwargs)
 
 
 cuda_backend = CUDABackend()

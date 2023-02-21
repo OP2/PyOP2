@@ -24,6 +24,8 @@ class AbstractComputeBackend:
     Global = _not_implemented
     GlobalDataSet = _not_implemented
     PETScVecType = _not_implemented
+    array = _not_implemented
+    zeros = _not_implemented
 
     def __getattribute__(self, key):
         val = super().__getattribute__(key)
