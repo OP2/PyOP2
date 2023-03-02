@@ -72,7 +72,7 @@ def test_global_dat_version():
     assert g2.dat_version == 1
 
     # Access data setter
-    g2.data = d1
+    g2.data[...] = d1
 
     assert g1.dat_version == 2
     assert g2.dat_version == 2

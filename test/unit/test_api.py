@@ -825,7 +825,8 @@ class TestDatAPI:
     def test_dat_lazy_allocation(self, dset):
         "Temporary Dats should not allocate storage until accessed."
         d = op2.Dat(dset)
-        assert not d._is_allocated
+        assert not d._data._lazy_host_data
+        assert not d._data._lazy_device_data
 
     def test_dat_zero_cdim(self, set):
         "A Dat built on a DataSet with zero dim should be allowed."
@@ -1283,16 +1284,6 @@ class TestGlobalAPI:
         g = op2.Global((2, 2), [1] * 4, 'double', 'bar')
         assert g.dim == (2, 2) and g.dtype == np.float64 and g.name == 'bar' \
             and g.data.sum() == 4
-
-    def test_global_setter(self, g):
-        "Setter attribute on data should correct set data value."
-        g.data = 2
-        assert g.data.sum() == 2
-
-    def test_global_setter_malformed_data(self, g):
-        "Setter attribute should reject malformed data."
-        with pytest.raises(exceptions.DataValueError):
-            g.data = [1, 2]
 
     def test_global_iter(self, g):
         "Global should be iterable and yield self."

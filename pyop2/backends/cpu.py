@@ -110,6 +110,7 @@ class GlobalKernel(AbstractGlobalKernel):
         """Return the C/C++ source code as a string."""
         from pyop2.codegen.rep2loopy import generate
 
+        # import pdb; pdb.set_trace()
         wrapper = generate(self.builder)
         code = lp.generate_code_v2(wrapper)
 
@@ -162,11 +163,11 @@ class Parloop(AbstractParloop):
                       MAX: mpi.MPI.MAX}.get(self.accesses[idx])
 
             if mpi.MPI.VERSION >= 3:
-                requests.append(self.comm.Iallreduce(glob._data,
+                requests.append(self.comm.Iallreduce(glob.data,
                                                      glob._buf,
                                                      op=mpi_op))
             else:
-                self.comm.Allreduce(glob._data, glob._buf, op=mpi_op)
+                self.comm.Allreduce(glob.data, glob._buf, op=mpi_op)
         return tuple(requests)
 
     @PETSc.Log.EventDecorator("ParLoopRednEnd")
@@ -177,43 +178,10 @@ class Parloop(AbstractParloop):
             mpi.MPI.Request.Waitall(requests)
             for idx in self._reduction_idxs:
                 glob = self.arguments[idx].data
-                glob._data[:] = glob._buf
+                glob._array.data[:] = glob._buf
         else:
             assert len(requests) == 0
 
             for idx in self._reduction_idxs:
                 glob = self.arguments[idx].data
                 glob._data[:] = glob._buf
-
-
-class CPUBackend(AbstractComputeBackend):
-    GlobalKernel = GlobalKernel
-    Parloop = Parloop
-    Set = Set
-    ExtrudedSet = ExtrudedSet
-    MixedSet = MixedSet
-    Subset = Subset
-    DataSet = DataSet
-    MixedDataSet = MixedDataSet
-    Map = Map
-    MixedMap = MixedMap
-    Dat = Dat
-    MixedDat = MixedDat
-    DatView = DatView
-    Mat = Mat
-    Global = Global
-    GlobalDataSet = GlobalDataSet
-    PETScVecType = PETSc.Vec.Type.STANDARD
-
-    def turn_on_offloading(self):
-        pass
-
-    def turn_off_offloading(self):
-        pass
-
-    @property
-    def cache_key(self):
-        return (type(self),)
-
-
-cpu_backend = CPUBackend()

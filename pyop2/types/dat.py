@@ -1,3 +1,4 @@
+import collections
 import contextlib
 import ctypes
 import itertools
@@ -6,6 +7,7 @@ import operator
 import loopy as lp
 import numpy as np
 from petsc4py import PETSc
+import pytools
 
 from pyop2 import (
     configuration as conf,
@@ -14,14 +16,15 @@ from pyop2 import (
     mpi,
     utils
 )
-from pyop2.offload_utils import OffloadMixin
-from pyop2.types.access import Access
-from pyop2.types.dataset import DataSet, GlobalDataSet
-from pyop2.types.data_carrier import DataCarrier, EmptyDataMixin, VecAccessMixin
+from pyop2.types.access import READ, WRITE, RW, INC, MIN, MAX
+from pyop2.types.dataset import DataSet, GlobalDataSet, MixedDataSet
+from pyop2.types.data_carrier import DataCarrier, VecAccessMixin
 from pyop2.types.set import ExtrudedSet, GlobalSet, Set
+from pyop2.array import MirroredArray
+from pyop2.offload_utils import _offloading as offloading
 
 
-class AbstractDat(DataCarrier, EmptyDataMixin):
+class AbstractDat(DataCarrier):
     """OP2 vector data. A :class:`Dat` holds values on every element of a
     :class:`DataSet`.o
 
@@ -61,28 +64,35 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
     _zero_kernels = {}
     """Class-level cache for zero kernels."""
 
-    _modes = [Access.READ, Access.WRITE, Access.RW, Access.INC, Access.MIN, Access.MAX]
+    _modes = [READ, WRITE, RW, INC, MIN, MAX]
 
     @utils.validate_type(('dataset', (DataCarrier, DataSet, Set), ex.DataSetTypeError),
                          ('name', str, ex.NameTypeError))
     @utils.validate_dtype(('dtype', None, ex.DataTypeError))
     def __init__(self, dataset, data=None, dtype=None, name=None):
-
         if isinstance(dataset, Dat):
             self.__init__(dataset.dataset, None, dtype=dataset.dtype,
                           name="copy_of_%s" % dataset.name)
             dataset.copy(self)
             return
-        if type(dataset) is Set or type(dataset) is ExtrudedSet:
-            # If a Set, rather than a dataset is passed in, default to
-            # a dataset dimension of 1.
-            dataset = dataset ** 1
-        self._shape = (dataset.total_size,) + (() if dataset.cdim == 1 else dataset.dim)
-        EmptyDataMixin.__init__(self, data, dtype, self._shape)
 
-        self._dataset = dataset
+        # If a Set, rather than a dataset is passed in, default to
+        # a dataset dimension of 1.
+        if type(dataset) is Set or type(dataset) is ExtrudedSet:
+            dataset = dataset ** 1
+
+        # handle the interplay between dataset, data and dtype
+        shape = (dataset.total_size,) + (() if dataset.cdim == 1 else dataset.dim)
+        if data is not None:
+            data = utils.verify_reshape(data, dtype, shape)
+        else:
+            dtype = np.dtype(dtype or DataCarrier.DEFAULT_DTYPE)
+            data = (shape, dtype)
+
         self.comm = mpi.internal_comm(dataset.comm)
         self.halo_valid = True
+        self._dataset = dataset
+        self._data = MirroredArray.new(data)
         self._name = name or "dat_#x%x" % id(self)
 
         self._halo_frozen = False
@@ -92,9 +102,21 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
         if hasattr(self, "comm"):
             mpi.decref(self.comm)
 
-    @utils.cached_property
-    def _kernel_args_(self):
-        return (self._data.ctypes.data, )
+    @property
+    def kernel_args_rw(self):
+        return (self._data.ptr_rw,)
+
+    @property
+    def kernel_args_ro(self):
+        return (self._data.ptr_ro,)
+
+    @property
+    def kernel_args_wo(self):
+        return (self._data.ptr_wo,)
+
+    @property
+    def dat_version(self):
+        return self._data.state
 
     @utils.cached_property
     def _argtypes_(self):
@@ -152,14 +174,10 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
         :meth:`data_with_halos`.
 
         """
-        # Increment dat_version since this accessor assumes data modification
-        self.increment_dat_version()
         if self.dataset.total_size > 0 and self._data.size == 0 and self.cdim > 0:
             raise RuntimeError("Illegal access: no data associated with this Dat!")
         self.halo_valid = False
-        v = self._data[:self.dataset.size].view()
-        v.setflags(write=True)
-        return v
+        return self._data.data[:self.dataset.size]
 
     @property
     @mpi.collective
@@ -172,12 +190,10 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
         With this accessor, you get to see up to date halo values, but
         you should not try and modify them, because they will be
         overwritten by the next halo exchange."""
-        self.global_to_local_begin(Access.RW)
-        self.global_to_local_end(Access.RW)
+        self.global_to_local_begin(RW)
+        self.global_to_local_end(RW)
         self.halo_valid = False
-        v = self._data.view()
-        v.setflags(write=True)
-        return v
+        return self._data.data
 
     @property
     @mpi.collective
@@ -193,9 +209,7 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
         """
         if self.dataset.total_size > 0 and self._data.size == 0 and self.cdim > 0:
             raise RuntimeError("Illegal access: no data associated with this Dat!")
-        v = self._data[:self.dataset.size].view()
-        v.setflags(write=False)
-        return v
+        return self._data.data_ro[:self.dataset.size]
 
     @property
     @mpi.collective
@@ -211,11 +225,9 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
         overwritten by the next halo exchange.
 
         """
-        self.global_to_local_begin(Access.READ)
-        self.global_to_local_end(Access.READ)
-        v = self._data.view()
-        v.setflags(write=False)
-        return v
+        self.global_to_local_begin(READ)
+        self.global_to_local_end(READ)
+        return self._data.data_ro
 
     def save(self, filename):
         """Write the data array to file ``filename`` in NumPy format."""
@@ -238,13 +250,13 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
         else:
             self.data[:] = np.load(filename)
 
-    @utils.cached_property
+    @property
     def shape(self):
-        return self._shape
+        return self._data.shape
 
-    @utils.cached_property
+    @property
     def dtype(self):
-        return self._dtype
+        return self._data.dtype
 
     @utils.cached_property
     def nbytes(self):
@@ -265,10 +277,9 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
 
         :arg subset: A :class:`Subset` of entries to zero (optional)."""
         # Data modification
-        self.increment_dat_version()
         # If there is no subset we can safely zero the halo values.
         if subset is None:
-            self._data[:] = 0
+            self.data_with_halos[...] = 0
             self.halo_valid = True
         elif subset.superset != self.dataset.set:
             raise ex.MapValueError("The subset and dataset are incompatible")
@@ -286,10 +297,11 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
         if subset is None:
             # If the current halo is valid we can also copy these values across.
             if self.halo_valid:
-                other._data[:] = self._data
+                other.data_with_halos[...] = self.data_ro_with_halos
                 other.halo_valid = True
             else:
-                other.data[:] = self.data_ro
+                other.data[...] = self.data_ro
+                other.halo_valid = False
         elif subset.superset != self.dataset.set:
             raise ex.MapValueError("The subset and dataset are incompatible")
         else:
@@ -349,9 +361,10 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
         return self._op_kernel_cache.setdefault(key, Kernel(knl, name))
 
     def _op(self, other, op):
-        from pyop2.op2 import compute_backend
+        from pyop2.types.glob import Global
         from pyop2.parloop import parloop
-        ret = compute_backend.Dat(self.dataset, None, self.dtype)
+
+        ret = Dat(self.dataset, None, self.dtype)
         if np.isscalar(other):
             other = compute_backend.Global(1, data=other, comm=self.comm)
             globalp = True
@@ -359,7 +372,7 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
             self._check_shape(other)
             globalp = False
         parloop(self._op_kernel(op, globalp, other.dtype),
-                self.dataset.set, self(Access.READ), other(Access.READ), ret(Access.WRITE))
+                self.dataset.set, self(READ), other(READ), ret(WRITE))
         return ret
 
     def _iop_kernel(self, op, globalp, other_is_self, dtype):
@@ -397,7 +410,7 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
         return self._iop_kernel_cache.setdefault(key, Kernel(knl, name))
 
     def _iop(self, other, op):
-        from pyop2.op2 import compute_backend
+        from pyop2.types.glob import Global
         from pyop2.parloop import parloop
 
         globalp = False
@@ -406,9 +419,9 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
             globalp = True
         elif other is not self:
             self._check_shape(other)
-        args = [self(Access.INC)]
+        args = [self(INC)]
         if other is not self:
-            args.append(other(Access.READ))
+            args.append(other(READ))
         parloop(self._iop_kernel(op, globalp, other is self, other.dtype), self.dataset.set, *args)
         return self
 
@@ -446,12 +459,12 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
 
         """
         from pyop2.parloop import parloop
-        from pyop2.op2 import compute_backend
+        from pyop2.types.glob import Global
 
         self._check_shape(other)
         ret = compute_backend.Global(1, data=0, dtype=self.dtype, comm=self.comm)
         parloop(self._inner_kernel(other.dtype), self.dataset.set,
-                self(Access.READ), other(Access.READ), ret(Access.INC))
+                self(READ), other(READ), ret(INC))
         return ret.data_ro[0]
 
     @property
@@ -465,8 +478,7 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
         return sqrt(self.inner(self).real)
 
     def __pos__(self):
-        from pyop2.op2 import compute_backend
-        pos = compute_backend.Dat(self)
+        pos = Dat(self)
         return pos
 
     def __add__(self, other):
@@ -499,10 +511,9 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
 
     def __neg__(self):
         from pyop2.parloop import parloop
-        from pyop2.op2 import compute_backend
 
-        neg = compute_backend.Dat(self.dataset, dtype=self.dtype)
-        parloop(self._neg_kernel, self.dataset.set, neg(Access.WRITE), self(Access.READ))
+        neg = Dat(self.dataset, dtype=self.dtype)
+        parloop(self._neg_kernel, self.dataset.set, neg(WRITE), self(READ))
         return neg
 
     def __sub__(self, other):
@@ -556,11 +567,11 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
         halo = self.dataset.halo
         if halo is None or self._halo_frozen:
             return
-        if not self.halo_valid and access_mode in {Access.READ, Access.RW}:
-            halo.global_to_local_begin(self, Access.WRITE)
-        elif access_mode in {Access.INC, Access.MIN, Access.MAX}:
+        if not self.halo_valid and access_mode in {READ, RW}:
+            halo.global_to_local_begin(self, WRITE)
+        elif access_mode in {INC, MIN, MAX}:
             min_, max_ = dtypes.dtype_limits(self.dtype)
-            val = {Access.MAX: min_, Access.MIN: max_, Access.INC: 0}[access_mode]
+            val = {MAX: min_, MIN: max_, INC: 0}[access_mode]
             self._data[self.dataset.size:] = val
         else:
             # WRITE
@@ -575,10 +586,10 @@ class AbstractDat(DataCarrier, EmptyDataMixin):
         halo = self.dataset.halo
         if halo is None or self._halo_frozen:
             return
-        if not self.halo_valid and access_mode in {Access.READ, Access.RW}:
-            halo.global_to_local_end(self, Access.WRITE)
+        if not self.halo_valid and access_mode in {READ, RW}:
+            halo.global_to_local_end(self, WRITE)
             self.halo_valid = True
-        elif access_mode in {Access.INC, Access.MIN, Access.MAX}:
+        elif access_mode in {INC, MIN, MAX}:
             self.halo_valid = False
         else:
             # WRITE
@@ -662,9 +673,17 @@ class DatView(AbstractDat):
                                       name="view[%s](%s)" % (index, dat.name))
         self._parent = dat
 
-    @utils.cached_property
-    def _kernel_args_(self):
-        return self._parent._kernel_args_
+    @property
+    def kernel_args_rw(self):
+        return self._parent.kernel_args_rw
+
+    @property
+    def kernel_args_ro(self):
+        return self._parent.kernel_args_ro
+
+    @property
+    def kernel_args_wo(self):
+        return self._parent.kernel_args_wo
 
     @utils.cached_property
     def _argtypes_(self):
@@ -711,41 +730,86 @@ class DatView(AbstractDat):
         return full[idx]
 
 
-class Dat(AbstractDat, VecAccessMixin, OffloadMixin):
-
-    @utils.cached_property
-    def can_be_represented_as_petscvec(self):
-        return ((self.dtype == PETSc.ScalarType) and self.cdim > 0)
-
+class Dat(AbstractDat, VecAccessMixin):
     def __init__(self, *args, **kwargs):
-        AbstractDat.__init__(self, *args, **kwargs)
-        # Determine if we can rely on PETSc state counter
-        petsc_counter = (self.dtype == PETSc.ScalarType)
-        VecAccessMixin.__init__(self, petsc_counter=petsc_counter)
+        super().__init__(*args, **kwargs)
+        self._lazy_petsc_vec = None
 
-    @utils.cached_property
-    def _vec(self):
-        assert self.dtype == PETSc.ScalarType, \
-            "Can't create Vec with type %s, must be %s" % (self.dtype,
-                                                           PETSc.ScalarType)
-        # Can't duplicate layout_vec of dataset, because we then
-        # carry around extra unnecessary data.
-        # But use getSizes to save an Allreduce in computing the
-        # global size.
-        size = self.dataset.layout_vec.getSizes()
-        data = self._data[:size[0]]
-        vec = PETSc.Vec().createWithArray(data, size=size,
-                                          bsize=self.cdim, comm=self.comm)
-        return vec
+    @property
+    def petsc_vec(self):
+        if self.dtype != dtypes.ScalarType:
+            raise ex.DataTypeError(
+                "Only arrays with dtype matching PETSc's scalar type can be "
+                "represented as a PETSc Vec")
 
+        if self._lazy_petsc_vec is None:
+            assert self._data._lazy_host_data is not None
+
+            bsize = np.prod(self._data.shape[1:], dtype=int)
+            self._lazy_petsc_vec = PETSc.Vec().createWithArray(
+                self._data._lazy_host_data, size=self._data.size, bsize=bsize, comm=self.comm
+            )
+
+        return self._lazy_petsc_vec
+
+    @property
     @contextlib.contextmanager
-    def vec_context(self, access):
-        r"""A context manager for a :class:`PETSc.Vec` from a :class:`Dat`.
+    def vec(self):
+        """TODO"""
+        if offloading:
+            if not self._data.is_available_on_device:
+                self._data.host_to_device_copy()
+            self.petsc_vec.bindToCPU(False)
+        else:
+            if not self._data.is_available_on_host:
+                self._data.device_to_host_copy()
+            self.petsc_vec.bindToCPU(True)
 
-        :param access: Access descriptor: READ, WRITE, or RW."""
-        yield self._vec
-        if access is not Access.READ:
-            self.halo_valid = False
+        self.petsc_vec.stateSet(self._data.state)
+        yield self.petsc_vec
+        self._data.state = self.petsc_vec.stateGet()
+
+        self.halo_valid = False
+        if offloading:
+            self._data.is_available_on_host = False
+        else:
+            self._data.is_available_on_device = False
+
+    @property
+    @contextlib.contextmanager
+    def vec_ro(self):
+        """TODO"""
+        if offloading:
+            if not self._data.is_available_on_device:
+                self._data.host_to_device_copy()
+            self.petsc_vec.bindToCPU(False)
+        else:
+            if not self._data.is_available_on_host:
+                self._data.device_to_host_copy()
+            self.petsc_vec.bindToCPU(True)
+
+        self.petsc_vec.stateSet(self._data.state)
+        yield self.petsc_vec
+        self._data.state = self.petsc_vec.stateGet()
+
+    @property
+    @contextlib.contextmanager
+    def vec_wo(self):
+        """TODO"""
+        if offloading:
+            self.petsc_vec.bindToCPU(False)
+        else:
+            self.petsc_vec.bindToCPU(True)
+
+        self.petsc_vec.stateSet(self._data.state)
+        yield self.petsc_vec
+        self._data.state = self.petsc_vec.stateGet()
+
+        self.halo_valid = False
+        if offloading:
+            self._data.is_available_on_host = False
+        else:
+            self._data.is_available_on_device = False
 
 
 class MixedDat(AbstractDat, VecAccessMixin):
@@ -765,13 +829,12 @@ class MixedDat(AbstractDat, VecAccessMixin):
 
     def __init__(self, mdset_or_dats):
         from pyop2.types.glob import Global
-        from pyop2.op2 import compute_backend
 
         def what(x):
             if isinstance(x, (Global, GlobalDataSet, GlobalSet)):
-                return compute_backend.Global
+                return Global
             elif isinstance(x, (Dat, DataSet, Set)):
-                return compute_backend.Dat
+                return Dat
             else:
                 raise ex.DataSetTypeError("Huh?!")
         if isinstance(mdset_or_dats, MixedDat):
@@ -783,6 +846,8 @@ class MixedDat(AbstractDat, VecAccessMixin):
         # TODO: Think about different communicators on dats (c.f. MixedSet)
         self.comm = mpi.internal_comm(self._dats[0].comm)
 
+        self._lazy_petsc_vec = None
+
     @property
     def dat_version(self):
         return sum(d.dat_version for d in self._dats)
@@ -791,9 +856,17 @@ class MixedDat(AbstractDat, VecAccessMixin):
         from pyop2.parloop import MixedDatLegacyArg
         return MixedDatLegacyArg(self, path, access)
 
-    @utils.cached_property
-    def _kernel_args_(self):
-        return tuple(itertools.chain(*(d._kernel_args_ for d in self)))
+    @property
+    def kernel_args_rw(self):
+        return tuple(itertools.chain(*(d.kernel_args_rw for d in self)))
+
+    @property
+    def kernel_args_ro(self):
+        return tuple(itertools.chain(*(d.kernel_args_ro for d in self)))
+
+    @property
+    def kernel_args_wo(self):
+        return tuple(itertools.chain(*(d.kernel_args_wo for d in self)))
 
     @utils.cached_property
     def _argtypes_(self):
@@ -820,14 +893,7 @@ class MixedDat(AbstractDat, VecAccessMixin):
     @utils.cached_property
     def dataset(self):
         r""":class:`MixedDataSet`\s this :class:`MixedDat` is defined on."""
-        from pyop2.op2 import compute_backend
-        return compute_backend.MixedDataSet(tuple(s.dataset for s in self._dats))
-
-    @utils.cached_property
-    def _data(self):
-        """Return the user-provided data buffer, or a zeroed buffer of
-        the correct size if none was provided."""
-        return tuple(d._data for d in self)
+        return MixedDataSet(tuple(s.dataset for s in self._dats))
 
     @property
     @mpi.collective
@@ -969,7 +1035,6 @@ class MixedDat(AbstractDat, VecAccessMixin):
         return ret
 
     def _op(self, other, op):
-        from pyop2.op2 import compute_backend
         ret = []
         if np.isscalar(other):
             for s in self:
@@ -978,7 +1043,7 @@ class MixedDat(AbstractDat, VecAccessMixin):
             self._check_shape(other)
             for s, o in zip(self, other):
                 ret.append(op(s, o))
-        return compute_backend.MixedDat(ret)
+        return MixedDat(ret)
 
     def _iop(self, other, op):
         if np.isscalar(other):
@@ -991,20 +1056,16 @@ class MixedDat(AbstractDat, VecAccessMixin):
         return self
 
     def __pos__(self):
-        from pyop2.op2 import compute_backend
-
         ret = []
         for s in self:
             ret.append(s.__pos__())
-        return compute_backend.MixedDat(ret)
+        return MixedDat(ret)
 
     def __neg__(self):
-        from pyop2.op2 import compute_backend
-
         ret = []
         for s in self:
             ret.append(s.__neg__())
-        return compute_backend.MixedDat(ret)
+        return MixedDat(ret)
 
     def __add__(self, other):
         """Pointwise addition of fields."""
@@ -1064,42 +1125,121 @@ class MixedDat(AbstractDat, VecAccessMixin):
         # because we're not placing an array.
         return self.dataset.layout_vec.duplicate()
 
+    @property
+    def petsc_vec(self):
+        if self._lazy_petsc_vec is None:
+            subvecs = [dat.petsc_vec for dat in self._dats]
+            self._lazy_petsc_vec = PETSc.Vec().createNest(subvecs, comm=self.comm)
+
+        return self._lazy_petsc_vec
+
+    @property
     @contextlib.contextmanager
-    def vec_context(self, access):
-        r"""A context manager scattering the arrays of all components of this
-        :class:`MixedDat` into a contiguous :class:`PETSc.Vec` and reverse
-        scattering to the original arrays when exiting the context.
+    def vec(self):
+        """TODO"""
+        for subdat in self._dats:
+            if offloading:
+                if not subdat._data.is_available_on_device:
+                    subdat._data.host_to_device_copy()
+                subdat.petsc_vec.bindToCPU(False)
+            else:
+                if not subdat._data.is_available_on_host:
+                    subdat._data.device_to_host_copy()
+                subdat.petsc_vec.bindToCPU(True)
 
-        :param access: Access descriptor: READ, WRITE, or RW.
+            subdat.petsc_vec.stateSet(subdat._data.state)
 
-        .. note::
+        yield self.petsc_vec
 
-           The :class:`~PETSc.Vec` obtained from this context is in
-           the correct order to be left multiplied by a compatible
-           :class:`MixedMat`.  In parallel it is *not* just a
-           concatenation of the underlying :class:`Dat`\s."""
-        # Do the actual forward scatter to fill the full vector with
-        # values
-        if access is not Access.WRITE:
-            offset = 0
-            with self._vec as array:
-                for d in self:
-                    with d.vec_ro as v:
-                        size = v.local_size
-                        array[offset:offset+size] = v.array_r[:]
-                        offset += size
+        for subdat in self._dats:
+            subdat._data.state = subdat.petsc_vec.stateGet()
+            subdat.halo_valid = False
+            if offloading:
+                subdat._data.is_available_on_host = False
+            else:
+                subdat._data.is_available_on_device = False
 
-        yield self._vec
-        if access is not Access.READ:
-            # Reverse scatter to get the values back to their original locations
-            offset = 0
-            array = self._vec.array_r
-            for d in self:
-                with d.vec_wo as v:
-                    size = v.local_size
-                    v.array[:] = array[offset:offset+size]
-                    offset += size
-            self.halo_valid = False
+    @property
+    @contextlib.contextmanager
+    def vec_ro(self):
+        """TODO"""
+        for subdat in self._dats:
+            if offloading:
+                if not subdat._data.is_available_on_device:
+                    subdat._data.host_to_device_copy()
+                subdat.petsc_vec.bindToCPU(False)
+            else:
+                if not subdat._data.is_available_on_host:
+                    subdat._data.device_to_host_copy()
+                subdat.petsc_vec.bindToCPU(True)
+
+            subdat.petsc_vec.stateSet(subdat._data.state)
+
+        yield self.petsc_vec
+
+        for subdat in self._dats:
+            subdat._data.state = subdat.petsc_vec.stateGet()
+
+    @property
+    @contextlib.contextmanager
+    def vec_wo(self):
+        """TODO"""
+        for subdat in self._dats:
+            if offloading:
+                subdat.petsc_vec.bindToCPU(False)
+            else:
+                subdat.petsc_vec.bindToCPU(True)
+
+            subdat.petsc_vec.stateSet(subdat._data.state)
+
+        yield self.petsc_vec
+
+        for subdat in self._dats:
+            subdat._data.state = subdat.petsc_vec.stateGet()
+
+            subdat.halo_valid = False
+            if offloading:
+                subdat._data.is_available_on_host = False
+            else:
+                subdat._data.is_available_on_device = False
+
+    # TODO VecNest?
+    # @contextlib.contextmanager
+    # def vec_context(self, access):
+    #     r"""A context manager scattering the arrays of all components of this
+    #     :class:`MixedDat` into a contiguous :class:`PETSc.Vec` and reverse
+    #     scattering to the original arrays when exiting the context.
+    #
+    #     :param access: Access descriptor: READ, WRITE, or RW.
+    #
+    #     .. note::
+    #
+    #        The :class:`~PETSc.Vec` obtained from this context is in
+    #        the correct order to be left multiplied by a compatible
+    #        :class:`MixedMat`.  In parallel it is *not* just a
+    #        concatenation of the underlying :class:`Dat`\s."""
+    #     # Do the actual forward scatter to fill the full vector with
+    #     # values
+    #     if access in {READ, RW}:
+    #         offset = 0
+    #         with self.petsc_vec as array:
+    #             for subdat in self:
+    #                 with subdat.vec_ro as vec:
+    #                     size = vec.local_size
+    #                     array[offset:offset+size] = vec.array_r
+    #                     offset += size
+    #
+    #     yield self.petsc_vec
+    #     if access is not Access.READ:
+    #         # Reverse scatter to get the values back to their original locations
+    #         offset = 0
+    #         array = self._vec.array_r
+    #         for d in self:
+    #             with d.vec_wo as v:
+    #                 size = v.local_size
+    #                 v.array[:] = array[offset:offset+size]
+    #                 offset += size
+    #         self.halo_valid = False
 
 
 class frozen_halo:

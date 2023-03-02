@@ -12,11 +12,12 @@ from pyop2 import mpi, profiling
 from pyop2.configuration import configuration
 from pyop2.datatypes import as_numpy_dtype
 from pyop2.exceptions import KernelTypeError, MapValueError, SetTypeError
-from pyop2.global_kernel import (GlobalKernelArg, DatKernelArg, MixedDatKernelArg,
+from pyop2.global_kernel import (GlobalKernel, GlobalKernelArg, DatKernelArg, MixedDatKernelArg,
                                  MatKernelArg, MixedMatKernelArg)
 from pyop2.local_kernel import LocalKernel, CStringLocalKernel, CoffeeLocalKernel, LoopyLocalKernel
 from pyop2.types import (Access, Global, AbstractDat, Dat, DatView, MixedDat, Mat, Set,
                          MixedSet, ExtrudedSet, Subset, Map, ComposedMap, MixedMap)
+from pyop2.types.access import READ, WRITE, RW, INC, MIN, MAX
 from pyop2.utils import cached_property
 
 
@@ -60,7 +61,7 @@ class DatParloopArg(ParloopArg):
 
     @property
     def map_kernel_args(self):
-        return self.map_._kernel_args_ if self.map_ else ()
+        return self.map_.kernel_args if self.map_ else ()
 
     @property
     def maps(self):
@@ -82,7 +83,7 @@ class MixedDatParloopArg(ParloopArg):
 
     @property
     def map_kernel_args(self):
-        return self.map_._kernel_args_ if self.map_ else ()
+        return self.map_.kernel_args if self.map_ else ()
 
     @property
     def maps(self):
@@ -104,7 +105,7 @@ class MatParloopArg(ParloopArg):
     @property
     def map_kernel_args(self):
         rmap, cmap = self.maps
-        return tuple(itertools.chain(*itertools.product(rmap._kernel_args_, cmap._kernel_args_)))
+        return tuple(itertools.chain(*itertools.product(rmap.kernel_args, cmap.kernel_args)))
 
 
 @dataclass
@@ -122,10 +123,10 @@ class MixedMatParloopArg(ParloopArg):
     @property
     def map_kernel_args(self):
         rmap, cmap = self.maps
-        return tuple(itertools.chain(*itertools.product(rmap._kernel_args_, cmap._kernel_args_)))
+        return tuple(itertools.chain(*itertools.product(rmap.kernel_args, cmap.kernel_args)))
 
 
-class AbstractParloop:
+class Parloop:
     """A parallel loop invocation.
 
     :arg global_knl: The :class:`GlobalKernel` to be executed.
@@ -168,9 +169,18 @@ class AbstractParloop:
     @property
     def arglist(self):
         """Prepare the argument list for calling generated code."""
-        arglist = self.iterset._kernel_args_
-        for d in self.arguments:
-            arglist += d.data._kernel_args_
+        arglist = self.iterset.kernel_args_ro
+        for larg, _, plarg in self.zipped_arguments:
+            if larg.access == READ:
+                kernel_args = plarg.data.kernel_args_ro
+            elif larg.access in {WRITE, MIN, MAX}:
+                kernel_args = plarg.data.kernel_args_wo
+            elif larg.access in {RW, INC}:
+                # TODO: Is this definitely right for INC?
+                kernel_args = plarg.data.kernel_args_rw
+            else:
+                raise NotImplementedError
+            arglist += kernel_args
 
         # Collect an ordered set of maps (ignore duplicates)
         maps = {m: None for d in self.arguments for m in d.map_kernel_args}
@@ -350,13 +360,44 @@ class AbstractParloop:
                 seen.add(pl_arg.data)
         return tuple(indices)
 
-    @abc.abstractmethod
+    @PETSc.Log.EventDecorator("ParLoopRednBegin")
+    @mpi.collective
     def reduction_begin(self):
         """Begin reductions."""
+        requests = []
+        for idx in self._reduction_idxs:
+            glob = self.arguments[idx].data
 
-    @abc.abstractmethod
+            # FIXME also do for buf
+            # if not glob.data.is_available_on_host:
+            #     glob.data.device_to_host_copy()
+
+            mpi_op = {INC: mpi.MPI.SUM,
+                      MIN: mpi.MPI.MIN,
+                      MAX: mpi.MPI.MAX}.get(self.accesses[idx])
+            if mpi.MPI.VERSION >= 3:
+                requests.append(self.comm.Iallreduce(glob.data,
+                                                     glob._stashed_data.data,
+                                                     op=mpi_op))
+            else:
+                self.comm.Allreduce(glob.data, glob._stashed_data.data, op=mpi_op)
+        return tuple(requests)
+
+    @PETSc.Log.EventDecorator("ParLoopRednEnd")
+    @mpi.collective
     def reduction_end(self, requests):
         """Finish reductions."""
+        if mpi.MPI.VERSION >= 3:
+            mpi.MPI.Request.Waitall(requests)
+            for idx in self._reduction_idxs:
+                glob = self.arguments[idx].data
+                glob._data.data[...] = glob._stashed_data.data
+        else:
+            assert len(requests) == 0
+
+            for idx in self._reduction_idxs:
+                glob = self.arguments[idx].data
+                glob._data[...] = glob._stashed_data.data
 
     @cached_property
     def _reduction_idxs(self):
@@ -438,7 +479,6 @@ class AbstractParloop:
         :class:`Global` in parallel produces the right result. The same is not
         needed for MAX and MIN because they commute with the reduction.
         """
-        from pyop2.op2 import compute_backend
         arguments = list(arguments)
         reduced_globals = {}
         for i, (lk_arg, gk_arg, pl_arg) in enumerate(self.zip_arguments(global_knl, arguments)):
@@ -599,7 +639,6 @@ def LegacyParloop(local_knl, iterset, *args, **kwargs):
         raise SetTypeError("Iteration set is of the wrong type")
 
     # finish building the local kernel
-    from pyop2.op2 import compute_backend
     local_knl.accesses = tuple(a.access for a in args)
     if isinstance(local_knl, (CStringLocalKernel, CoffeeLocalKernel)):
         local_knl.dtypes = tuple(a.data.dtype for a in args)
@@ -609,7 +648,7 @@ def LegacyParloop(local_knl, iterset, *args, **kwargs):
     extruded_periodic = iterset._extruded_periodic
     constant_layers = extruded and iterset.constant_layers
     subset = isinstance(iterset, Subset)
-    global_knl = compute_backend.GlobalKernel(local_knl, global_knl_args,
+    global_knl = GlobalKernel.new(local_knl, global_knl_args,
                                               extruded=extruded,
                                               extruded_periodic=extruded_periodic,
                                               constant_layers=constant_layers,
@@ -617,7 +656,7 @@ def LegacyParloop(local_knl, iterset, *args, **kwargs):
                                               **kwargs)
 
     parloop_args = tuple(a.parloop_arg for a in args)
-    return compute_backend.Parloop(global_knl, iterset, parloop_args)
+    return Parloop(global_knl, iterset, parloop_args)
 
 
 def par_loop(*args, **kwargs):
@@ -631,10 +670,8 @@ def parloop(knl, *args, **kwargs):
     For a description of the possible arguments to this function see
     :class:`Parloop` and :func:`LegacyParloop`.
     """
-    from pyop2.global_kernel import AbstractGlobalKernel
-    if isinstance(knl, AbstractGlobalKernel):
-        from pyop2.op2 import compute_backend
-        compute_backend.Parloop(knl, *args, **kwargs)()
+    if isinstance(knl, GlobalKernel):
+        Parloop(knl, *args, **kwargs)()
     elif isinstance(knl, LocalKernel):
         LegacyParloop(knl, *args, **kwargs)()
     else:

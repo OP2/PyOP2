@@ -567,13 +567,6 @@ class TestSparsity:
     Sparsity tests
     """
 
-    def test_sparsity_null_maps(self):
-        """Building sparsity from a pair of non-initialized maps should fail."""
-        s = op2.Set(5)
-        with pytest.raises(MapValueError):
-            m = op2.Map(s, s, 1)
-            op2.Sparsity((s, s), (m, m))
-
     def test_sparsity_has_diagonal_space(self):
         # A sparsity should have space for diagonal entries if rmap==cmap
         s = op2.Set(1)

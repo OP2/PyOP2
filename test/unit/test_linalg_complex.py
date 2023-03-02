@@ -94,30 +94,30 @@ class TestLinAlgOp:
     """
 
     def test_add(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         assert all((x + y).data == 3 * y.data)
 
     def test_sub(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         assert all((x - y).data == y.data)
 
     def test_mul_complex(self, x, y):
-        x._data = (2+2j) * y.data
+        x.data[...] = (2+2j) * y.data
         assert all((x * y).data == (2+2j) * y.data * y.data)
 
     def test_div_complex(self, x, y):
-        x._data = (2+2j) * y.data
+        x.data[...] = (2+2j) * y.data
         # Note complex division does not have the same stability as
         # floating point when vectorised
         assert all(x.data / y.data == 2.0+2.j)
         assert np.allclose((x / y).data, 2.0+2.j)
 
     def test_mul(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         assert all((x * y).data == 2 * y.data * y.data)
 
     def test_div(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         x.data / y.data
         # Note complex division does not have the same stability as
         # floating point when vectorised
@@ -141,19 +141,19 @@ class TestLinAlgOp:
             x2 / y2
 
     def test_add_scalar(self, x, y):
-        x._data = y.data + 1.0
+        x.data[...] = y.data + 1.0
         assert all(x.data == (y + 1.0).data)
 
     def test_radd_scalar(self, x, y):
-        x._data = y.data + 1.0
+        x.data[...] = y.data + 1.0
         assert all(x.data == (1.0 + y).data)
 
     def test_add_complex_scalar(self, x, y):
-        x._data = y.data + (1.0+1.j)
+        x.data[...] = y.data + (1.0+1.j)
         assert all(x.data == (y + (1.0+1.j)).data)
 
     def test_radd_complex_scalar(self, x, y):
-        x._data = y.data + (1.0+1.j)
+        x.data[...] = y.data + (1.0+1.j)
         assert all(x.data == ((1.0+1.j) + y).data)
 
     def test_pos_copies(self, y):
@@ -167,39 +167,39 @@ class TestLinAlgOp:
         assert z is not y
 
     def test_sub_scalar(self, x, y):
-        x._data = y.data - 1.0
+        x.data[...] = y.data - 1.0
         assert all(x.data == (y - 1.0).data)
 
     def test_rsub_scalar(self, x, y):
-        x._data = 1.0 - y.data
+        x.data[...] = 1.0 - y.data
         assert all(x.data == (1.0 - y).data)
 
     def test_mul_scalar(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         assert all(x.data == (y * 2.0).data)
 
     def test_rmul_scalar(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         assert all(x.data == (2.0 * y).data)
 
     def test_sub_complex_scalar(self, x, y):
-        x._data = y.data - (1.0+1.j)
+        x.data[...] = y.data - (1.0+1.j)
         assert all(x.data == (y - (1.0+1.j)).data)
 
     def test_rsub_complex_scalar(self, x, y):
-        x._data = (1.0+1.j) - y.data
+        x.data[...] = (1.0+1.j) - y.data
         assert all(x.data == ((1.0+1.j) - y).data)
 
     def test_mul_complex_scalar(self, x, y):
-        x._data = (2+2j) * y.data
+        x.data[...] = (2+2j) * y.data
         assert all(x.data == (y * (2.0+2.j)).data)
 
     def test_rmul_complex_scalar(self, x, y):
-        x._data = (2+2j) * y.data
+        x.data[...] = (2+2j) * y.data
         assert all(x.data == ((2.0+2.j) * y).data)
 
     def test_div_scalar(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         assert all((x / 2.0).data == y.data)
 
     def test_add_ftype(self, y, yf):
@@ -252,7 +252,7 @@ class TestLinAlgOp:
 
     def test_linalg_and_parloop(self, x, y):
         """Linear algebra operators should force computation"""
-        x._data = np.zeros(x.dataset.total_size, dtype=np.complex128)
+        x.data[...] = np.zeros(x.dataset.total_size, dtype=np.complex128)
         k = op2.Kernel('static void k(complex double *x) { *x = 1.0+1.0*I; }', 'k')
         op2.par_loop(k, x.dataset.set, x(op2.WRITE))
         z = x + y
@@ -266,22 +266,22 @@ class TestLinAlgIop:
     """
 
     def test_iadd(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         x += y
         assert all(x.data == 3 * y.data)
 
     def test_isub(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         x -= y
         assert all(x.data == y.data)
 
     def test_imul(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         x *= y
         assert all(x.data == 2 * y.data * y.data)
 
     def test_idiv(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         x /= y
         # Note complex division does not have the same stability as
         # floating point when vectorised
@@ -304,42 +304,42 @@ class TestLinAlgIop:
             x2 /= y2
 
     def test_iadd_scalar(self, x, y):
-        x._data = y.data + 1.0
+        x.data[...] = y.data + 1.0
         y += 1.0
         assert all(x.data == y.data)
 
     def test_isub_scalar(self, x, y):
-        x._data = y.data - 1.0
+        x.data[...] = y.data - 1.0
         y -= 1.0
         assert all(x.data == y.data)
 
     def test_imul_scalar(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         y *= 2.0
         assert all(x.data == y.data)
 
     def test_idiv_scalar(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         x /= 2.0
         assert all(x.data == y.data)
 
     def test_iadd_complex_scalar(self, x, y):
-        x._data = y.data + (1.0+1.j)
+        x.data[...] = y.data + (1.0+1.j)
         y += (1.0+1.j)
         assert all(x.data == y.data)
 
     def test_isub_complex_scalar(self, x, y):
-        x._data = y.data - (1.0+1.j)
+        x.data[...] = y.data - (1.0+1.j)
         y -= (1.0+1.j)
         assert all(x.data == y.data)
 
     def test_imul_complex_scalar(self, x, y):
-        x._data = (2+2j) * y.data
+        x.data[...] = (2+2j) * y.data
         y *= (2.0+2.j)
         assert all(x.data == y.data)
 
     def test_idiv_complex_scalar(self, x, y):
-        x._data = (2+2j) * y.data
+        x.data[...] = (2+2j) * y.data
         x /= (2.0+2j)
         assert all(x.data == y.data)
 

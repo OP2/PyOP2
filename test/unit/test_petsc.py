@@ -74,10 +74,10 @@ class TestPETSc:
             assert np.allclose(v.array_r, [1.0, 2.0])
 
         d.data[0][:] = 0.0
-        d.data[0][:] = 0.0
+        d.data[1][:] = 0.0
 
         with d.vec_wo as v:
-            assert np.allclose(v.array_r, [1.0, 2.0])
+            assert np.allclose(v.array_r, [0.0, 0.0])
             v.array[:] = 1
 
         assert d.data[0][0] == 1

@@ -84,19 +84,19 @@ class TestLinAlgOp:
     """
 
     def test_add(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         assert all((x + y).data == 3 * y.data)
 
     def test_sub(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         assert all((x - y).data == y.data)
 
     def test_mul(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         assert all((x * y).data == 2 * y.data * y.data)
 
     def test_div(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         assert all((x / y).data == 2.0)
 
     def test_add_shape_mismatch(self, x2, y2):
@@ -116,11 +116,11 @@ class TestLinAlgOp:
             x2 / y2
 
     def test_add_scalar(self, x, y):
-        x._data = y.data + 1.0
+        x.data[...] = y.data + 1.0
         assert all(x.data == (y + 1.0).data)
 
     def test_radd_scalar(self, x, y):
-        x._data = y.data + 1.0
+        x.data[...] = y.data + 1.0
         assert all(x.data == (1.0 + y).data)
 
     def test_pos_copies(self, y):
@@ -134,23 +134,23 @@ class TestLinAlgOp:
         assert z is not y
 
     def test_sub_scalar(self, x, y):
-        x._data = y.data - 1.0
+        x.data[...] = y.data - 1.0
         assert all(x.data == (y - 1.0).data)
 
     def test_rsub_scalar(self, x, y):
-        x._data = 1.0 - y.data
+        x.data[...] = 1.0 - y.data
         assert all(x.data == (1.0 - y).data)
 
     def test_mul_scalar(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         assert all(x.data == (y * 2.0).data)
 
     def test_rmul_scalar(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         assert all(x.data == (2.0 * y).data)
 
     def test_div_scalar(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         assert all((x / 2.0).data == y.data)
 
     def test_add_ftype(self, y, yi):
@@ -187,7 +187,7 @@ class TestLinAlgOp:
 
     def test_linalg_and_parloop(self, x, y):
         """Linear algebra operators should force computation"""
-        x._data = np.zeros(x.dataset.total_size, dtype=np.float64)
+        x.data[...] = np.zeros(x.dataset.total_size, dtype=np.float64)
         k = op2.Kernel('static void k(double *x) { *x = 1.0; }', 'k')
         op2.par_loop(k, x.dataset.set, x(op2.WRITE))
         z = x + y
@@ -201,22 +201,22 @@ class TestLinAlgIop:
     """
 
     def test_iadd(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         x += y
         assert all(x.data == 3 * y.data)
 
     def test_isub(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         x -= y
         assert all(x.data == y.data)
 
     def test_imul(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         x *= y
         assert all(x.data == 2 * y.data * y.data)
 
     def test_idiv(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         x /= y
         assert all(x.data == 2.0)
 
@@ -237,22 +237,22 @@ class TestLinAlgIop:
             x2 /= y2
 
     def test_iadd_scalar(self, x, y):
-        x._data = y.data + 1.0
+        x.data[...] = y.data + 1.0
         y += 1.0
         assert all(x.data == y.data)
 
     def test_isub_scalar(self, x, y):
-        x._data = y.data - 1.0
+        x.data[...] = y.data - 1.0
         y -= 1.0
         assert all(x.data == y.data)
 
     def test_imul_scalar(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         y *= 2.0
         assert all(x.data == y.data)
 
     def test_idiv_scalar(self, x, y):
-        x._data = 2 * y.data
+        x.data[...] = 2 * y.data
         x /= 2.0
         assert all(x.data == y.data)
 

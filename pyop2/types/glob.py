@@ -1,21 +1,25 @@
+import collections
 import contextlib
 import ctypes
 import operator
+import numbers
 
 import numpy as np
 from petsc4py import PETSc
 
 from pyop2 import (
+    datatypes,
     exceptions as ex,
     mpi,
     utils
 )
-from pyop2.offload_utils import OffloadMixin
 from pyop2.types.access import Access
-from pyop2.types.data_carrier import DataCarrier, EmptyDataMixin, VecAccessMixin
+from pyop2.types.data_carrier import DataCarrier, VecAccessMixin
+from pyop2.array import MirroredArray
+from pyop2.offload_utils import _offloading as offloading
 
 
-class Global(DataCarrier, EmptyDataMixin, VecAccessMixin, OffloadMixin):
+class Global(DataCarrier, VecAccessMixin):
 
     """OP2 global value.
 
@@ -44,27 +48,43 @@ class Global(DataCarrier, EmptyDataMixin, VecAccessMixin, OffloadMixin):
             self.__init__(dim._dim, None, dtype=dim.dtype,
                           name="copy_of_%s" % dim.name, comm=dim.comm)
             dim.copy(self)
+            return
+
+        dim = utils.as_tuple(dim, int)
+
+        # TODO make this a function so can be shared by Dat and Global
+        # handle the interplay between dataset, data and dtype
+        if data is not None:
+            data = utils.verify_reshape(data, dtype, dim)
+            self._stashed_data = MirroredArray.new((data.shape, data.dtype))
         else:
-            self._dim = utils.as_tuple(dim, int)
-            self._cdim = np.prod(self._dim).item()
-            EmptyDataMixin.__init__(self, data, dtype, self._dim)
-            self._buf = np.empty(self.shape, dtype=self.dtype)
-            self._name = name or "global_#x%x" % id(self)
-            if comm is None:
-                import warnings
-                warnings.warn("PyOP2.Global has no comm, this is likely to break in parallel!")
-            self.comm = mpi.internal_comm(comm)
-            # Object versioning setup
-            petsc_counter = (comm and self.dtype == PETSc.ScalarType)
-            VecAccessMixin.__init__(self, petsc_counter=petsc_counter)
+            dtype = np.dtype(dtype or DataCarrier.DEFAULT_DTYPE)
+            data = (dim, dtype)
+            self._stashed_data = MirroredArray.new(data)
+        self._data = MirroredArray.new(data)
+
+        # TODO shouldn't need to set these
+        self._dim = dim
+        self._cdim = np.prod(dim)
+
+        self._name = name or "global_#x%x" % id(self)
+        self.comm = mpi.internal_comm(comm)
 
     def __del__(self):
         if hasattr(self, "comm"):
             mpi.decref(self.comm)
 
-    @utils.cached_property
-    def _kernel_args_(self):
-        return (self._data.ctypes.data, )
+    @property
+    def kernel_args_rw(self):
+        return (self._data.ptr_rw,)
+
+    @property
+    def kernel_args_ro(self):
+        return (self._data.ptr_ro,)
+
+    @property
+    def kernel_args_wo(self):
+        return (self._data.ptr_wo,)
 
     @utils.cached_property
     def _argtypes_(self):
@@ -100,7 +120,7 @@ class Global(DataCarrier, EmptyDataMixin, VecAccessMixin, OffloadMixin):
             % (self._name, self._dim, self.data_ro)
 
     def __repr__(self):
-        return "Global(%r, %r, %r, %r)" % (self._dim, self.data_ro,
+        return "Global(%r, %r, %r, %r)" % (self.shape, self.data_ro,
                                            self.data.dtype, self._name)
 
     @utils.cached_property
@@ -110,31 +130,21 @@ class Global(DataCarrier, EmptyDataMixin, VecAccessMixin, OffloadMixin):
 
     @property
     def shape(self):
-        return self._dim
+        return self._data.shape
 
     @property
     def data(self):
         """Data array."""
-        self.increment_dat_version()
-        if len(self._data) == 0:
-            raise RuntimeError("Illegal access: No data associated with this Global!")
-        return self._data
+        return self._data.data
 
     @property
     def dtype(self):
-        return self._dtype
+        return self._data.dtype
 
     @property
     def data_ro(self):
         """Data array."""
-        view = self._data.view()
-        view.setflags(write=False)
-        return view
-
-    @data.setter
-    def data(self, value):
-        self.increment_dat_version()
-        self._data[:] = utils.verify_reshape(value, self.dtype, self.dim)
+        return self._data.data_ro
 
     @property
     def data_with_halos(self):
@@ -178,8 +188,7 @@ class Global(DataCarrier, EmptyDataMixin, VecAccessMixin, OffloadMixin):
     @mpi.collective
     def zero(self, subset=None):
         assert subset is None
-        self.increment_dat_version()
-        self._data[...] = 0
+        self._data.data[...] = 0
 
     @mpi.collective
     def global_to_local_begin(self, access_mode):
@@ -301,36 +310,96 @@ class Global(DataCarrier, EmptyDataMixin, VecAccessMixin, OffloadMixin):
         assert isinstance(other, Global)
         return np.dot(self.data_ro, np.conj(other.data_ro))
 
-    @utils.cached_property
-    def _vec(self):
-        assert self.dtype == PETSc.ScalarType, \
-            "Can't create Vec with type %s, must be %s" % (self.dtype,
-                                                           PETSc.ScalarType)
-        # Can't duplicate layout_vec of dataset, because we then
-        # carry around extra unnecessary data.
-        # But use getSizes to save an Allreduce in computing the
-        # global size.
-        data = self._data
-        size = self.dataset.layout_vec.getSizes()
-        if self.comm.rank == 0:
-            return PETSc.Vec().createWithArray(data, size=size,
-                                               bsize=self.cdim,
-                                               comm=self.comm)
+    @property
+    def dat_version(self):
+        return self._data.state
+
+    @property
+    def petsc_vec(self):
+        if self._lazy_petsc_vec is None:
+            if self.dtype != datatypes.ScalarType:
+                raise ex.DataTypeError(
+                    "Only arrays with dtype matching PETSc's scalar type can be "
+                    "represented as a PETSc Vec")
+
+            assert self.comm is not None
+            assert self._data._lazy_host_data is not None
+
+            self._lazy_petsc_vec = PETSc.Vec().createWithArray(
+                self._data._lazy_host_data, size=self._data.size,
+                bsize=self.cdim, comm=self.comm)
+
+        return self._lazy_petsc_vec
+
+    @property
+    @contextlib.contextmanager
+    def vec(self):
+        """TODO"""
+        if offloading:
+            raise NotImplementedError("TODO")
+        # if offloading:
+        #     if not self._data.is_available_on_device:
+        #         self._data.host_to_device_copy()
+        #     self.petsc_vec.bindToCPU(False)
+        # else:
+        #     if not self._data.is_available_on_host:
+        #         self._data.device_to_host_copy()
+        #     self.petsc_vec.bindToCPU(True)
+
+        self.petsc_vec.stateSet(self._data.state)
+        yield self.petsc_vec
+        self._data.state = self.petsc_vec.stateGet()
+
+        if offloading:
+            self._data.is_available_on_host = False
         else:
-            return PETSc.Vec().createWithArray(np.empty(0, dtype=self.dtype),
-                                               size=size,
-                                               bsize=self.cdim,
-                                               comm=self.comm)
+            self._data.is_available_on_device = False
+        # not sure this is right
+        self.comm.Bcast(self._data._lazy_host_data, 0)
 
     @contextlib.contextmanager
     def vec_context(self, access):
-        """A context manager for a :class:`PETSc.Vec` from a :class:`Global`.
+        """A context manager for a :class:`PETSc.Vec` from a :class:`Global`."""
 
-        :param access: Access descriptor: READ, WRITE, or RW."""
-        raise NotImplementedError()
+    @property
+    @contextlib.contextmanager
+    def vec_ro(self):
+        """TODO"""
+        if offloading:
+            raise NotImplementedError("TODO")
+        if offloading:
+            if not self._data.is_available_on_device:
+                self._data.host_to_device_copy()
+            self.petsc_vec.bindToCPU(False)
+        else:
+            if not self._data.is_available_on_host:
+                self._data.device_to_host_copy()
+            self.petsc_vec.bindToCPU(True)
 
-    def ensure_availability_on_host(self):
-        raise NotImplementedError()
+        self.petsc_vec.stateSet(self._data.state)
+        yield self.petsc_vec
+        self._data.state = self.petsc_vec.stateGet()
 
-    def ensure_availability_on_device(self):
-        raise NotImplementedError()
+    @property
+    @contextlib.contextmanager
+    def vec_wo(self):
+        """TODO"""
+        if offloading:
+            raise NotImplementedError("TODO")
+        if offloading:
+            self.petsc_vec.bindToCPU(False)
+        else:
+            self.petsc_vec.bindToCPU(True)
+
+        self.petsc_vec.stateSet(self._data.state)
+        yield self.petsc_vec
+        self._data.state = self.petsc_vec.stateGet()
+
+        self.halo_valid = False
+        if offloading:
+            self._data.is_available_on_host = False
+        else:
+            self._data.is_available_on_device = False
+
+        # not sure this is right
+        self.comm.Bcast(self._data._lazy_host_data, 0)

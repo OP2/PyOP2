@@ -1,17 +1,21 @@
-import collections.abc
-import ctypes
 import abc
+import collections
+import ctypes
+import os
 from dataclasses import dataclass
 import itertools
 from typing import Optional, Tuple
 
+import loopy as lp
 import numpy as np
+from petsc4py import PETSc
 
-from pyop2 import mpi
+from pyop2 import compilation, mpi, utils
 from pyop2.caching import Cached
 from pyop2.configuration import configuration
 from pyop2.datatypes import IntType, as_ctypes
 from pyop2.types import IterationRegion
+from pyop2.offload_utils import OffloadingBackend, _backend as backend, _offloading as offloading
 from pyop2.utils import cached_property
 
 
@@ -224,7 +228,7 @@ class MixedMatKernelArg:
         return MatPack
 
 
-class AbstractGlobalKernel(Cached, abc.ABC):
+class GlobalKernel(Cached, abc.ABC):
     """Class representing the generated code for the global computation.
 
     :param local_kernel: :class:`pyop2.LocalKernel` instance representing the
@@ -263,6 +267,16 @@ class AbstractGlobalKernel(Cached, abc.ABC):
         key.extend([seen_maps[m] for a in arguments for m in a.maps])
 
         return tuple(key)
+
+    @classmethod
+    def new(cls, *args, **kwargs):
+        if offloading:
+            if backend == OffloadingBackend.CPU:
+                return CPUGlobalKernel(*args, **kwargs)
+            else:
+                raise NotImplementedError
+        else:
+            return CPUGlobalKernel(*args, **kwargs)
 
     def __init__(self, local_kernel, arguments, *,
                  extruded=False,
@@ -374,3 +388,160 @@ class AbstractGlobalKernel(Cached, abc.ABC):
     @abc.abstractmethod
     def compile(self):
         pass
+
+
+class CPUGlobalKernel(GlobalKernel):
+
+    @cached_property
+    def code_to_compile(self):
+        """Return the C/C++ source code as a string."""
+        from pyop2.codegen.rep2loopy import generate
+
+        wrapper = generate(self.builder)
+        code = lp.generate_code_v2(wrapper)
+
+        if self.local_kernel.cpp:
+            from loopy.codegen.result import process_preambles
+            preamble = "".join(
+                process_preambles(getattr(code, "device_preambles", [])))
+            device_code = "\n\n".join(str(dp.ast) for dp in code.device_programs)
+            return preamble + '\nextern "C" {\n' + device_code + "\n}\n"
+        return code.device_code()
+
+    @PETSc.Log.EventDecorator()
+    @mpi.collective
+    def compile(self, comm):
+        """Compile the kernel.
+
+        :arg comm: The communicator the compilation is collective over.
+        :returns: A ctypes function pointer for the compiled function.
+        """
+        extension = "cpp" if self.local_kernel.cpp else "c"
+        cppargs = (
+            tuple("-I%s/include" % d for d in utils.get_petsc_dir())
+            + tuple("-I%s" % d for d in self.local_kernel.include_dirs)
+            + ("-I%s" % os.path.abspath(os.path.dirname(__file__)),)
+        )
+        ldargs = (
+            tuple("-L%s/lib" % d for d in utils.get_petsc_dir())
+            + tuple("-Wl,-rpath,%s/lib" % d for d in utils.get_petsc_dir())
+            + ("-lpetsc", "-lm")
+            + tuple(self.local_kernel.ldargs)
+        )
+
+        return compilation.load(self, extension, self.name,
+                                cppargs=cppargs,
+                                ldargs=ldargs,
+                                restype=ctypes.c_int,
+                                comm=comm)
+
+
+class OpenCLGlobalKernel(GlobalKernel):
+    @classmethod
+    def _cache_key(cls, *args, **kwargs):
+        key = super()._cache_key(*args, **kwargs)
+        key = key + (configuration["gpu_strategy"], "opencl")
+        return key
+
+    @utils.cached_property
+    def encoded_cache_key(self):
+        return md5(str(self.cache_key[1:]).encode()).hexdigest()
+
+    @utils.cached_property
+    def computational_grid_expr_cache_file_path(self):
+        cachedir = configuration["cache_dir"]
+        return os.path.join(cachedir, f"{self.encoded_cache_key}_grid_params.py")
+
+    @utils.cached_property
+    def extra_args_cache_file_path(self):
+        cachedir = configuration["cache_dir"]
+        return os.path.join(cachedir, f"{self.encoded_cache_key}_extra_args.npz")
+
+    # @memoize_method
+    def get_grid_size(self, start, end):
+        fpath = self.computational_grid_expr_cache_file_path
+
+        with open(fpath, "r") as f:
+            globals_dict = {}
+            exec(f.read(), globals_dict)
+            get_grid_sizes = globals_dict["get_grid_sizes"]
+
+        return get_grid_sizes(start=start, end=end)
+
+    # @memoize_method
+    def get_extra_args(self):
+        """
+        Returns device buffers corresponding to array literals baked into
+        :attr:`local_kernel`.
+        """
+        fpath = self.extra_args_cache_file_path
+        npzfile = numpy.load(fpath)
+        assert npzfile["ids"].ndim == 1
+        assert len(npzfile.files) == len(npzfile["ids"]) + 1
+        extra_args_np = [npzfile[arg_id]
+                         for arg_id in npzfile["ids"]]
+        return tuple(cla.to_device(opencl_backend.queue, arg)
+                     for arg in extra_args_np)
+
+    @utils.cached_property
+    def argtypes(self):
+        result = super().argtypes
+        return result + (ctypes.c_voidp,) * len(self.get_extra_args())
+
+    @utils.cached_property
+    def code_to_compile(self):
+        from pyop2.codegen.rep2loopy import generate
+        from pyop2.transforms.gpu_utils import apply_gpu_transforms
+        from pymbolic.interop.ast import to_evaluatable_python_function
+
+        t_unit = generate(self.builder,
+                          include_math=False,
+                          include_petsc=False,
+                          include_complex=False)
+
+        # Make temporary variables with initializers kernel's arguments.
+        t_unit, extra_args = apply_gpu_transforms(t_unit, "opencl")
+
+        ary_ids = [f"_op2_arg_{i}"
+                   for i in range(len(extra_args))]
+
+        numpy.savez(self.extra_args_cache_file_path,
+                    ids=numpy.array(ary_ids),
+                    **{ary_id: extra_arg
+                       for ary_id, extra_arg in zip(ary_ids, extra_args)})
+
+        # {{{ save python code to get grid sizes
+
+        with open(self.computational_grid_expr_cache_file_path, "w") as f:
+            glens, llens = (t_unit
+                            .default_entrypoint
+                            .get_grid_size_upper_bounds_as_exprs(t_unit
+                                                                 .callables_table))
+            f.write(to_evaluatable_python_function((glens, llens), "get_grid_sizes"))
+
+        code = lp.generate_code_v2(t_unit).device_code()
+
+        # }}}
+
+        return code
+
+    @mpi.collective
+    def __call__(self, comm, *args):
+        key = id(comm)
+        try:
+            func = self._func_cache[key]
+        except KeyError:
+            func = self.compile(comm)
+            self._func_cache[key] = func
+
+        grid, block = self.get_grid_size(args[0], args[1])
+        func(grid, block, *args)
+
+    @mpi.collective
+    def compile(self, comm):
+        cl_knl = compilation.get_opencl_kernel(comm,
+                                               self)
+        return CLKernelWithExtraArgs(cl_knl, self.get_extra_args())
+
+class CUDAGlobalKernel(GlobalKernel):
+    ...

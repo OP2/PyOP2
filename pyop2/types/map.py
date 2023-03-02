@@ -11,11 +11,11 @@ from pyop2 import (
     utils
 )
 from pyop2 import mpi
-from pyop2.offload_utils import OffloadMixin
 from pyop2.types.set import GlobalSet, MixedSet, Set
+from pyop2.array import MirroredArray
 
 
-class Map(OffloadMixin):
+class Map:
 
     """OP2 map, a relation between two :class:`Set` objects.
 
@@ -34,23 +34,24 @@ class Map(OffloadMixin):
 
     @utils.validate_type(('iterset', Set, ex.SetTypeError), ('toset', Set, ex.SetTypeError),
                          ('arity', numbers.Integral, ex.ArityTypeError), ('name', str, ex.NameTypeError))
-    def __init__(self, iterset, toset, arity, values=None, name=None, offset=None, offset_quotient=None):
+    def __init__(self, iterset, toset, arity, values, name=None, offset=None, offset_quotient=None):
+        shape = (iterset.total_size, arity)
+        values = utils.verify_reshape(values, self.dtype, shape)
+
         self._iterset = iterset
         self._toset = toset
         self.comm = mpi.internal_comm(toset.comm)
         self._arity = arity
-        self._values = utils.verify_reshape(values, dtypes.IntType,
-                                            (iterset.total_size, arity), allow_none=True)
-        self.shape = (iterset.total_size, arity)
+        self._values = MirroredArray.new(values)
         self._name = name or "map_#x%x" % id(self)
         if offset is None or len(offset) == 0:
             self._offset = None
         else:
-            self._offset = utils.verify_reshape(offset, dtypes.IntType, (arity, ))
+            self._offset = utils.verify_reshape(offset, self.dtype, (arity, ))
         if offset_quotient is None or len(offset_quotient) == 0:
             self._offset_quotient = None
         else:
-            self._offset_quotient = utils.verify_reshape(offset_quotient, dtypes.IntType, (arity, ))
+            self._offset_quotient = utils.verify_reshape(offset_quotient, self.dtype, (arity, ))
         # A cache for objects built on top of this map
         self._cache = {}
 
@@ -58,9 +59,10 @@ class Map(OffloadMixin):
         if hasattr(self, "comm"):
             mpi.decref(self.comm)
 
-    @utils.cached_property
-    def _kernel_args_(self):
-        return (self._values.ctypes.data, )
+    @property
+    def kernel_args(self):
+        # we only ever read from maps
+        return (self._values.ptr_ro,)
 
     @utils.cached_property
     def _wrapper_cache_key_(self):
@@ -121,22 +123,22 @@ class Map(OffloadMixin):
         """Tuple of arity offsets for each constituent :class:`Map`."""
         return (0, self._arity)
 
-    @utils.cached_property
+    @property
     def values(self):
         """Mapping array.
 
         This only returns the map values for local points, to see the
         halo points too, use :meth:`values_with_halo`."""
-        return self._values[:self.iterset.size]
+        return self._values.data[:self.iterset.size]
 
-    @utils.cached_property
+    @property
     def values_with_halo(self):
         """Mapping array.
 
         This returns all map values (including halo points), see
         :meth:`values` if you only need to look at the local
         points."""
-        return self._values
+        return self._values.data
 
     @utils.cached_property
     def name(self):
@@ -264,8 +266,8 @@ class ComposedMap(Map):
         self.maps_ = tuple(maps_)
 
     @utils.cached_property
-    def _kernel_args_(self):
-        return tuple(itertools.chain(*[m._kernel_args_ for m in self.maps_]))
+    def kernel_args(self):
+        return tuple(itertools.chain(*[m.kernel_args for m in self.maps_]))
 
     @utils.cached_property
     def _wrapper_cache_key_(self):
@@ -329,9 +331,9 @@ class MixedMap(Map, caching.ObjectCached):
     def _cache_key(cls, maps):
         return maps
 
-    @utils.cached_property
-    def _kernel_args_(self):
-        return tuple(itertools.chain(*(m._kernel_args_ for m in self if m is not None)))
+    @property
+    def kernel_args(self):
+        return tuple(itertools.chain(*(m.kernel_args for m in self if m is not None)))
 
     @utils.cached_property
     def _argtypes_(self):
