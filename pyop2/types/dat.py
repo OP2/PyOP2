@@ -1,4 +1,3 @@
-import abc
 import contextlib
 import ctypes
 import itertools
@@ -17,11 +16,11 @@ from pyop2 import (
 )
 from pyop2.types.access import Access
 from pyop2.types.dataset import DataSet, GlobalDataSet, MixedDataSet
-from pyop2.types.data_carrier import DataCarrier, EmptyDataMixin, VecAccessMixin
+from pyop2.types.data_carrier import DataCarrier, EmptyDataMixin
 from pyop2.types.set import ExtrudedSet, GlobalSet, Set
 
 
-class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
+class Dat(DataCarrier, EmptyDataMixin):
     """OP2 vector data. A :class:`Dat` holds values on every element of a
     :class:`DataSet`.o
 
@@ -65,11 +64,9 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
 
     @utils.validate_type(('dataset', (DataCarrier, DataSet, Set), ex.DataSetTypeError),
                          ('name', str, ex.NameTypeError))
-    @utils.validate_dtype(('dtype', None, ex.DataTypeError))
     def __init__(self, dataset, data=None, dtype=None, name=None):
-
         if isinstance(dataset, Dat):
-            self.__init__(dataset.dataset, None, dtype=dataset.dtype,
+            self.__init__(dataset.dataset, None,
                           name="copy_of_%s" % dataset.name)
             dataset.copy(self)
             return
@@ -77,11 +74,14 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
             # If a Set, rather than a dataset is passed in, default to
             # a dataset dimension of 1.
             dataset = dataset ** 1
-        self._shape = (dataset.total_size,) + (() if dataset.cdim == 1 else dataset.dim)
-        EmptyDataMixin.__init__(self, data, dtype, self._shape)
+        if dtype:
+            import warnings
+            warnings.warn("dtype is a deprecated argument to Dat", DeprecationWarning)
+        self.comm = mpi.internal_comm(dataset.comm)
+
+        EmptyDataMixin.__init__(self, data, dataset.total_size, dataset.cdim, self.comm)
 
         self._dataset = dataset
-        self.comm = mpi.internal_comm(dataset.comm)
         self.halo_valid = True
         self._name = name or "dat_#x%x" % id(self)
 
@@ -94,7 +94,7 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
 
     @utils.cached_property
     def _kernel_args_(self):
-        return (self._data.ctypes.data, )
+        return (self.numpy_rw.ctypes.data, )
 
     @utils.cached_property
     def _argtypes_(self):
@@ -154,10 +154,10 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
         """
         # Increment dat_version since this accessor assumes data modification
         self.increment_dat_version()
-        if self.dataset.total_size > 0 and self._data.size == 0 and self.cdim > 0:
+        if self.dataset.total_size > 0 and self._vec.size == 0 and self.cdim > 0:
             raise RuntimeError("Illegal access: no data associated with this Dat!")
         self.halo_valid = False
-        v = self._data[:self.dataset.size].view()
+        v = self._vec.getArray()[:self.dataset.size].view()
         v.setflags(write=True)
         return v
 
@@ -217,6 +217,15 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
         v.setflags(write=False)
         return v
 
+    @contextlib.contextmanager
+    def vec_context(self, access):
+        r"""A context manager for a :class:`PETSc.Vec` from a :class:`Dat`.
+
+        :param access: Access descriptor: READ, WRITE, or RW."""
+        yield self._vec
+        if access is not Access.READ:
+            self.halo_valid = False
+
     def save(self, filename):
         """Write the data array to file ``filename`` in NumPy format."""
         np.save(filename, self.data_ro)
@@ -244,7 +253,7 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
 
     @utils.cached_property
     def dtype(self):
-        return self._dtype
+        return dtypes.ScalarType
 
     @utils.cached_property
     def nbytes(self):
@@ -638,7 +647,7 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
         self._frozen_access_mode = None
 
 
-class DatView(AbstractDat):
+class DatView(Dat):
     """An indexed view into a :class:`Dat`.
 
     This object can be used like a :class:`Dat` but the kernel will
@@ -710,37 +719,7 @@ class DatView(AbstractDat):
         return full[idx]
 
 
-class Dat(AbstractDat, VecAccessMixin):
-
-    def __init__(self, *args, **kwargs):
-        AbstractDat.__init__(self, *args, **kwargs)
-        # Determine if we can rely on PETSc state counter
-        petsc_counter = (self.dtype == PETSc.ScalarType)
-        VecAccessMixin.__init__(self, petsc_counter=petsc_counter)
-
-    @utils.cached_property
-    def _vec(self):
-        assert self.dtype == PETSc.ScalarType, \
-            "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
-        # Can't duplicate layout_vec of dataset, because we then
-        # carry around extra unnecessary data.
-        # But use getSizes to save an Allreduce in computing the
-        # global size.
-        size = self.dataset.layout_vec.getSizes()
-        data = self._data[:size[0]]
-        return PETSc.Vec().createWithArray(data, size=size, bsize=self.cdim, comm=self.comm)
-
-    @contextlib.contextmanager
-    def vec_context(self, access):
-        r"""A context manager for a :class:`PETSc.Vec` from a :class:`Dat`.
-
-        :param access: Access descriptor: READ, WRITE, or RW."""
-        yield self._vec
-        if access is not Access.READ:
-            self.halo_valid = False
-
-
-class MixedDat(AbstractDat, VecAccessMixin):
+class MixedDat(Dat):
     r"""A container for a bag of :class:`Dat`\s.
 
     Initialized either from a :class:`MixedDataSet`, a :class:`MixedSet`, or
@@ -1040,14 +1019,6 @@ class MixedDat(AbstractDat, VecAccessMixin):
     def __idiv__(self, other):
         """Pointwise division or scaling of fields."""
         return self._iop(other, operator.idiv)
-
-    @utils.cached_property
-    def _vec(self):
-        assert self.dtype == PETSc.ScalarType, \
-            "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
-        # In this case we can just duplicate the layout vec
-        # because we're not placing an array.
-        return self.dataset.layout_vec.duplicate()
 
     @contextlib.contextmanager
     def vec_context(self, access):

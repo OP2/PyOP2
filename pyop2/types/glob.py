@@ -6,16 +6,17 @@ import numpy as np
 from petsc4py import PETSc
 
 from pyop2 import (
+    datatypes,
     exceptions as ex,
     mpi,
     utils
 )
 from pyop2.types.access import Access
 from pyop2.types.dataset import GlobalDataSet
-from pyop2.types.data_carrier import DataCarrier, EmptyDataMixin, VecAccessMixin
+from pyop2.types.data_carrier import DataCarrier, EmptyDataMixin
 
 
-class Global(DataCarrier, EmptyDataMixin, VecAccessMixin):
+class Global(DataCarrier, EmptyDataMixin):
 
     """OP2 global value.
 
@@ -39,24 +40,28 @@ class Global(DataCarrier, EmptyDataMixin, VecAccessMixin):
 
     @utils.validate_type(('name', str, ex.NameTypeError))
     def __init__(self, dim, data=None, dtype=None, name=None, comm=None):
+        if dtype:
+            import warnings
+            warnings.warn("dont", DeprecationWarning)
+
+        if comm is None:
+            import warnings
+            warnings.warn("PyOP2.Global has no comm, this is likely to break in parallel!")
+
         if isinstance(dim, Global):
             # If g is a Global, Global(g) performs a deep copy. This is for compatibility with Dat.
             self.__init__(dim._dim, None, dtype=dim.dtype,
                           name="copy_of_%s" % dim.name, comm=dim.comm)
             dim.copy(self)
-        else:
-            self._dim = utils.as_tuple(dim, int)
-            self._cdim = np.prod(self._dim).item()
-            EmptyDataMixin.__init__(self, data, dtype, self._dim)
-            self._buf = np.empty(self.shape, dtype=self.dtype)
-            self._name = name or "global_#x%x" % id(self)
-            if comm is None:
-                import warnings
-                warnings.warn("PyOP2.Global has no comm, this is likely to break in parallel!")
-            self.comm = mpi.internal_comm(comm)
-            # Object versioning setup
-            petsc_counter = (comm and self.dtype == PETSc.ScalarType)
-            VecAccessMixin.__init__(self, petsc_counter=petsc_counter)
+            return
+
+        self.comm = mpi.internal_comm(comm)
+
+        self._dim = utils.as_tuple(dim, int)
+        self._cdim = np.prod(self._dim).item()
+        EmptyDataMixin.__init__(self, data, self._dim[0], self._dim[1:] or 1, comm=self.comm)
+        # self._buf = np.empty(self.shape, dtype=self.dtype)
+        self._name = name or "global_#x%x" % id(self)
 
     def __del__(self):
         if hasattr(self, "comm"):
@@ -121,7 +126,7 @@ class Global(DataCarrier, EmptyDataMixin, VecAccessMixin):
 
     @property
     def dtype(self):
-        return self._dtype
+        return datatypes.ScalarType
 
     @property
     def data_ro(self):
@@ -299,26 +304,6 @@ class Global(DataCarrier, EmptyDataMixin, VecAccessMixin):
     def inner(self, other):
         assert isinstance(other, Global)
         return np.dot(self.data_ro, np.conj(other.data_ro))
-
-    @utils.cached_property
-    def _vec(self):
-        assert self.dtype == PETSc.ScalarType, \
-            "Can't create Vec with type %s, must be %s" % (self.dtype, PETSc.ScalarType)
-        # Can't duplicate layout_vec of dataset, because we then
-        # carry around extra unnecessary data.
-        # But use getSizes to save an Allreduce in computing the
-        # global size.
-        data = self._data
-        size = self.dataset.layout_vec.getSizes()
-        if self.comm.rank == 0:
-            return PETSc.Vec().createWithArray(data, size=size,
-                                               bsize=self.cdim,
-                                               comm=self.comm)
-        else:
-            return PETSc.Vec().createWithArray(np.empty(0, dtype=self.dtype),
-                                               size=size,
-                                               bsize=self.cdim,
-                                               comm=self.comm)
 
     @contextlib.contextmanager
     def vec_context(self, access):

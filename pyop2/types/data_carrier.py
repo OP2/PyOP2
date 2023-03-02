@@ -1,6 +1,7 @@
 import abc
 
 import numpy as np
+from petsc4py import PETSc
 
 from pyop2 import (
     datatypes as dtypes,
@@ -56,55 +57,58 @@ class EmptyDataMixin(abc.ABC):
     Accessing the :attr:`_data` property allocates a zeroed data array
     if it does not already exist.
     """
-    def __init__(self, data, dtype, shape):
-        if data is None:
-            self._dtype = np.dtype(dtype if dtype is not None else dtypes.ScalarType)
-        else:
-            self._numpy_data = utils.verify_reshape(data, dtype, shape, allow_none=True)
-            self._dtype = self._data.dtype
+    def __init__(self, data, size, cdim, comm):
+        # if data is None:
+        #     self._dtype = np.dtype(dtype if dtype is not None else dtypes.ScalarType)
+        # else:
+        #     self._numpy_data = utils.verify_reshape(data, dtype, shape, allow_none=True)
+        #     self._dtype = self._data.dtype
 
-    @utils.cached_property
+        if data is None:
+            data = PETSc.Vec().create(comm=comm)
+            data.setSizes(size, cdim)
+            data.setUp()
+        else:
+            numpy_array = utils.verify_reshape(data, PETSc.ScalarType, (size, cdim), allow_none=True)
+            data = PETSc.Vec().createWithArray(numpy_array, size=size*cdim, bsize=cdim, comm=comm)
+        self._vec = data
+
+    @property
+    def numpy_rw(self):
+        return self._vec.array
+
+    @property
+    def numpy_ro(self):
+        return self._vec.array_r
+
+    @property
     def _data(self):
-        """Return the user-provided data buffer, or a zeroed buffer of
-        the correct size if none was provided."""
-        if not self._is_allocated:
-            self._numpy_data = np.zeros(self.shape, dtype=self._dtype)
-        return self._numpy_data
+        import warnings
+        warnings.warn("dont", DeprecationWarning)
+        return self.numpy_rw
+
+    # @utils.cached_property
+    # def _data(self):
+    #     """Return the user-provided data buffer, or a zeroed buffer of
+    #     the correct size if none was provided."""
+    #     if not self._is_allocated:
+    #         self._numpy_data = np.zeros(self.shape, dtype=self._dtype)
+    #     return self._numpy_data
 
     @property
     def _is_allocated(self):
         """Return True if the data buffer has been allocated."""
         return hasattr(self, '_numpy_data')
 
-
-class VecAccessMixin(abc.ABC):
-
-    def __init__(self, petsc_counter=None):
-        if petsc_counter:
-            # Use lambda since `_vec` allocates the data buffer
-            # -> Dat/Global should not allocate storage until accessed
-            self._dat_version = lambda: self._vec.stateGet()
-            self.increment_dat_version = lambda: self._vec.stateIncrease()
-        else:
-            # No associated PETSc Vec if incompatible type:
-            # -> Equip Dat/Global with their own counter.
-            self._version = 0
-            self._dat_version = lambda: self._version
-
-            def _inc():
-                self._version += 1
-            self.increment_dat_version = _inc
-
     @property
     def dat_version(self):
-        return self._dat_version()
+        return self._vec.stateGet()
+
+    def increment_dat_version(self):
+        self._vec.stateIncrease()
 
     @abc.abstractmethod
     def vec_context(self, access):
-        pass
-
-    @abc.abstractproperty
-    def _vec(self):
         pass
 
     @property

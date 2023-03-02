@@ -15,7 +15,7 @@ from pyop2.exceptions import KernelTypeError, MapValueError, SetTypeError
 from pyop2.global_kernel import (GlobalKernelArg, DatKernelArg, MixedDatKernelArg,
                                  MatKernelArg, MixedMatKernelArg, GlobalKernel)
 from pyop2.local_kernel import LocalKernel, CStringLocalKernel, CoffeeLocalKernel, LoopyLocalKernel
-from pyop2.types import (Access, Global, AbstractDat, Dat, DatView, MixedDat, Mat, Set,
+from pyop2.types import (Access, Global, Dat, DatView, MixedDat, Mat, Set,
                          MixedSet, ExtrudedSet, Subset, Map, ComposedMap, MixedMap)
 from pyop2.utils import cached_property
 
@@ -446,7 +446,7 @@ class Parloop:
     def _check_frozen_access_modes(cls, local_knl, arguments):
         """Check that any frozen :class:`Dat` are getting accessed with the right access mode."""
         for lknl_arg, pl_arg in zip(local_knl.arguments, arguments):
-            if isinstance(pl_arg.data, AbstractDat):
+            if isinstance(pl_arg.data, Dat):
                 if any(
                     d._halo_frozen and d._frozen_access_mode != lknl_arg.access
                     for d in pl_arg.data
