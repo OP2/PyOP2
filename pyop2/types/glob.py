@@ -133,14 +133,14 @@ class SetFreeDataCarrier(DataCarrier, EmptyDataMixin):
 
     def _op(self, other, op):
         ret = type(self)(self.dim, dtype=self.dtype, name=self.name, comm=self.comm)
-        if isinstance(other, Global):
+        if isinstance(other, self.__class__):
             ret.data[:] = op(self.data_ro, other.data_ro)
         else:
             ret.data[:] = op(self.data_ro, other)
         return ret
 
     def _iop(self, other, op):
-        if isinstance(other, Global):
+        if isinstance(other, self.__class__):
             op(self.data[:], other.data_ro)
         else:
             op(self.data[:], other)
