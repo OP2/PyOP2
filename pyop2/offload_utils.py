@@ -1,38 +1,19 @@
-from enum import IntEnum
 from contextlib import contextmanager
+import enum
 
 
-class DataAvailability(IntEnum):
-    """
-    Indicates whether the device or host contains valid data.
-    """
-    AVAILABLE_ON_HOST_ONLY = 1
-    AVAILABLE_ON_DEVICE_ONLY = 2
-    AVAILABLE_ON_BOTH = 3
+class OffloadingBackend(enum.Enum):
+    """TODO"""
+    CPU = enum.auto()
+    OPENCL = enum.auto()
+    CUDA = enum.auto()
 
 
-class OffloadMixin:
-    def get_availability(self):
-        raise NotImplementedError
+_offloading = False
+"""Global state indicating whether or not we are running on the host or device"""
 
-    def ensure_availability_on_host(self):
-        raise NotImplementedError
-
-    def ensure_availaibility_on_device(self):
-        raise NotImplementedError
-
-    def is_available_on_host(self):
-        # bitwise op to detect both AVAILABLE_ON_HOST and AVAILABLE_ON_BOTH
-        return bool(self.get_availability() & AVAILABLE_ON_HOST_ONLY)
-
-    def is_available_on_device(self):
-        # bitwise op to detect both AVAILABLE_ON_DEVICE and AVAILABLE_ON_BOTH
-        return bool(self.get_availability() & AVAILABLE_ON_DEVICE_ONLY)
-
-
-AVAILABLE_ON_HOST_ONLY = DataAvailability.AVAILABLE_ON_HOST_ONLY
-AVAILABLE_ON_DEVICE_ONLY = DataAvailability.AVAILABLE_ON_DEVICE_ONLY
-AVAILABLE_ON_BOTH = DataAvailability.AVAILABLE_ON_BOTH
+_backend = OffloadingBackend.CPU
+"""TODO"""
 
 
 def set_offloading_backend(backend):
@@ -52,10 +33,11 @@ def set_offloading_backend(backend):
           over the course of the program is an undefined behavior. (i.e.
           preferably avoided)
     """
-    from pyop2 import op2
-    from pyop2.backends import AbstractComputeBackend
-    assert isinstance(backend, AbstractComputeBackend)
-    op2.compute_backend = backend
+    global _backend
+
+    if not isinstance(backend, OffloadingBackend):
+        raise TypeError("TODO")
+    _backend = backend
 
 
 @contextmanager
@@ -66,8 +48,9 @@ def offloading():
     region will be executed on backend as selected via
     :func:`set_offloading_backend`.
     """
-    from pyop2 import op2
-    op2.compute_backend.turn_on_offloading()
+    global _offloading
+
+    _offloading = True
     yield
-    op2.compute_backend.turn_off_offloading()
+    _offloading = False
     return

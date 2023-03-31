@@ -641,9 +641,12 @@ class Mat(AbstractMat):
     # Firedrake relies on this to distinguish between MatBlock and not for boundary conditions
     local_to_global_maps = (None, None)
 
-    @utils.cached_property
-    def _kernel_args_(self):
+    @property
+    def kernel_args_rw(self):
         return tuple(a.handle.handle for a in self)
+
+    kernel_args_ro = kernel_args_rw
+    kernel_args_wo = kernel_args_rw
 
     @mpi.collective
     def _init(self):

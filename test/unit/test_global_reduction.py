@@ -400,7 +400,7 @@ static void k(double* g, double* x)
                      d1(op2.READ))
         assert g.data == d1.data.sum()
 
-        g.data = 10
+        g.data[...] = 10
         op2.par_loop(k1_inc_to_global, set,
                      g(op2.INC),
                      d1(op2.READ))

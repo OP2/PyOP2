@@ -270,8 +270,8 @@ class TestSetOperations:
         s = a.symmetric_difference(a)
         assert u is a
         assert i is a
-        assert d._indices.size == 0
-        assert s._indices.size == 0
+        assert d.indices.size == 0
+        assert s.indices.size == 0
 
     def test_set_subset_operations(self):
         """Test standard set operations between a set and a subset"""
@@ -283,8 +283,8 @@ class TestSetOperations:
         s = a.symmetric_difference(b)
         assert u is a
         assert i is b
-        assert (d._indices == [0, 1, 4, 6, 8, 9]).all()
-        assert (s._indices == d._indices).all()
+        assert (d.indices == [0, 1, 4, 6, 8, 9]).all()
+        assert (s.indices == d.indices).all()
 
     def test_subset_set_operations(self):
         """Test standard set operations between a subset and a set"""
@@ -296,8 +296,8 @@ class TestSetOperations:
         s = b.symmetric_difference(a)
         assert u is a
         assert i is b
-        assert d._indices.size == 0
-        assert (s._indices == [0, 1, 4, 6, 8, 9]).all()
+        assert d.indices.size == 0
+        assert (s.indices == [0, 1, 4, 6, 8, 9]).all()
 
     def test_subset_subset_operations(self):
         """Test standard set operations between two subsets"""
@@ -308,7 +308,7 @@ class TestSetOperations:
         i = b.intersection(c)
         d = b.difference(c)
         s = b.symmetric_difference(c)
-        assert (u._indices == [2, 3, 4, 5, 6, 7, 8]).all()
-        assert (i._indices == [2, ]).all()
-        assert (d._indices == [3, 5, 7]).all()
-        assert (s._indices == [3, 4, 5, 6, 7, 8]).all()
+        assert (u.indices == [2, 3, 4, 5, 6, 7, 8]).all()
+        assert (i.indices == [2, ]).all()
+        assert (d.indices == [3, 5, 7]).all()
+        assert (s.indices == [3, 4, 5, 6, 7, 8]).all()

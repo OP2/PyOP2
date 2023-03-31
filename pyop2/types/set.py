@@ -11,7 +11,7 @@ from pyop2 import (
     mpi,
     utils
 )
-from pyop2.offload_utils import OffloadMixin
+from pyop2.array import MirroredArray
 
 
 class Set:
@@ -56,7 +56,9 @@ class Set:
     _extruded = False
     _extruded_periodic = False
 
-    _kernel_args_ = ()
+    kernel_args_rw = ()
+    kernel_args_ro = ()
+    kernel_args_wo = ()
     _argtypes_ = ()
 
     @utils.cached_property
@@ -165,8 +167,7 @@ class Set:
             if np.isscalar(indices):
                 indices = [indices]
 
-        from pyop2.op2 import compute_backend
-        return compute_backend.Subset(self, indices)
+        return Subset(self, indices)
 
     def __contains__(self, dset):
         """Indicate whether a given DataSet is compatible with this Set."""
@@ -178,8 +179,8 @@ class Set:
 
     def __pow__(self, e):
         """Derive a :class:`DataSet` with dimension ``e``"""
-        from pyop2.op2 import compute_backend
-        return compute_backend.DataSet(self, dim=e)
+        from pyop2.types import DataSet
+        return DataSet(self, dim=e)
 
     @utils.cached_property
     def layers(self):
@@ -209,7 +210,7 @@ class Set:
         if other is self:
             return Subset(self, [])
         else:
-            return type(other)(self, np.setdiff1d(np.asarray(range(self.total_size), dtype=dtypes.IntType), other._indices))
+            return type(other)(self, np.setdiff1d(np.asarray(range(self.total_size), dtype=dtypes.IntType), other.indices))
 
     def symmetric_difference(self, other):
         self._check_operands(other)
@@ -224,7 +225,9 @@ class GlobalSet(Set):
     """A proxy set allowing a :class:`Global` to be used in place of a
     :class:`Dat` where appropriate."""
 
-    _kernel_args_ = ()
+    kernel_args_rw = ()
+    kernel_args_ro = ()
+    kernel_args_wo = ()
     _argtypes_ = ()
 
     def __init__(self, comm=None):
@@ -292,7 +295,7 @@ class GlobalSet(Set):
         return hash(type(self))
 
 
-class ExtrudedSet(Set, OffloadMixin):
+class ExtrudedSet(Set):
 
     """OP2 ExtrudedSet.
 
@@ -332,13 +335,35 @@ class ExtrudedSet(Set, OffloadMixin):
             layers = np.asarray([[0, layers]], dtype=dtypes.IntType)
             self.constant_layers = True
 
-        self._layers = layers
+        self._layers_array = MirroredArray.new(layers)
         self._extruded = True
         self._extruded_periodic = extruded_periodic
+        self._sizes = parent._sizes
+        self._cache = parent._cache
 
-    @utils.cached_property
-    def _kernel_args_(self):
-        return (self.layers_array.ctypes.data, )
+    @property
+    def comm(self):
+        return self._parent.comm
+
+    @property
+    def _name(self):
+        return self._parent._name
+
+    @property
+    def _layers(self):
+        return self._layers_array.data
+
+    @property
+    def kernel_args_rw(self):
+        return (self._layers_array.ptr_rw,)
+
+    @property
+    def kernel_args_ro(self):
+        return (self._layers_array.ptr_ro,)
+
+    @property
+    def kernel_args_wo(self):
+        return (self._layers_array.ptr_wo,)
 
     @utils.cached_property
     def _argtypes_(self):
@@ -381,7 +406,7 @@ class ExtrudedSet(Set, OffloadMixin):
         return self._layers
 
 
-class Subset(ExtrudedSet, OffloadMixin):
+class Subset(ExtrudedSet):
 
     """OP2 subset.
 
@@ -405,23 +430,42 @@ class Subset(ExtrudedSet, OffloadMixin):
         assert type(superset) is Set or type(superset) is ExtrudedSet, \
             'Subset construction failed, should not happen'
 
-        self._superset = superset
-        self._indices = utils.verify_reshape(indices, dtypes.IntType, (len(indices),))
+        indices = utils.verify_reshape(indices, dtypes.IntType, (len(indices),))
 
-        if len(self._indices) > 0 and (self._indices[0] < 0 or self._indices[-1] >= self._superset.total_size):
+        if len(indices) > 0 and (indices[0] < 0 or indices[-1] >= superset.total_size):
             raise ex.SubsetIndexOutOfBounds(
                 'Out of bounds indices in Subset construction: [%d, %d) not [0, %d)' %
-                (self._indices[0], self._indices[-1], self._superset.total_size))
+                (indices[0], indices[-1], superset.total_size))
 
-        self._sizes = ((self._indices < superset.core_size).sum(),
-                       (self._indices < superset.size).sum(),
-                       len(self._indices))
+        self._superset = superset
+        self._indices = MirroredArray.new(indices)
+        self._sizes = ((indices < superset.core_size).sum(),
+                       (indices < superset.size).sum(),
+                       len(indices))
         self._extruded = superset._extruded
         self._extruded_periodic = superset._extruded_periodic
+        self.constant_layers = superset.constant_layers if hasattr(superset, "constant_layers") else None
+        self._cache = superset._cache
 
-    @utils.cached_property
-    def _kernel_args_(self):
-        return self._superset._kernel_args_ + (self._indices.ctypes.data, )
+    @property
+    def name(self):
+        return self._superset.name
+
+    @property
+    def comm(self):
+        return self._superset.comm
+
+    @property
+    def kernel_args_rw(self):
+        return self._superset.kernel_args_rw + (self._indices.ptr_rw,)
+
+    @property
+    def kernel_args_ro(self):
+        return self._superset.kernel_args_ro + (self._indices.ptr_ro,)
+
+    @property
+    def kernel_args_wo(self):
+        return self._superset.kernel_args_wo + (self._indices.ptr_wo,)
 
     @utils.cached_property
     def _argtypes_(self):
@@ -442,7 +486,7 @@ class Subset(ExtrudedSet, OffloadMixin):
             (self._name, self._sizes)
 
     def __repr__(self):
-        return "Subset(%r, %r)" % (self._superset, self._indices)
+        return "Subset(%r, %r)" % (self._superset, self.indices)
 
     def __call__(self, *indices):
         """Build a :class:`Subset` from this :class:`Subset`
@@ -455,27 +499,26 @@ class Subset(ExtrudedSet, OffloadMixin):
             indices = indices[0]
             if np.isscalar(indices):
                 indices = [indices]
-        from pyop2.op2 import compute_backend
-        return compute_backend.Subset(self, indices)
+        return Subset(self, indices)
 
-    @utils.cached_property
+    @property
     def superset(self):
         """Returns the superset Set"""
         return self._superset
 
-    @utils.cached_property
+    @property
     def indices(self):
         """Returns the indices pointing in the superset."""
-        return self._indices
+        return self._indices.data
 
-    @utils.cached_property
+    @property
     def owned_indices(self):
         """Return the indices that correspond to the owned entities of the
         superset.
         """
         return self.indices[self.indices < self.superset.size]
 
-    @utils.cached_property
+    @property
     def layers_array(self):
         if self._superset.constant_layers:
             return self._superset.layers_array
@@ -497,28 +540,28 @@ class Subset(ExtrudedSet, OffloadMixin):
         if other is self._superset:
             return self
         else:
-            return type(self)(self._superset, np.intersect1d(self._indices, other._indices))
+            return type(self)(self._superset, np.intersect1d(self.indices, other.indices))
 
     def union(self, other):
         self._check_operands(other)
         if other is self._superset:
             return other
         else:
-            return type(self)(self._superset, np.union1d(self._indices, other._indices))
+            return type(self)(self._superset, np.union1d(self.indices, other.indices))
 
     def difference(self, other):
         self._check_operands(other)
         if other is self._superset:
             return Subset(other, [])
         else:
-            return type(self)(self._superset, np.setdiff1d(self._indices, other._indices))
+            return type(self)(self._superset, np.setdiff1d(self.indices, other.indices))
 
     def symmetric_difference(self, other):
         self._check_operands(other)
         if other is self._superset:
             return other.symmetric_difference(self)
         else:
-            return type(self)(self._superset, np.setxor1d(self._indices, other._indices))
+            return type(self)(self._superset, np.setxor1d(self.indices, other.indices))
 
 
 class SetPartition:
@@ -636,8 +679,8 @@ class MixedSet(Set, caching.ObjectCached):
 
     def __pow__(self, e):
         """Derive a :class:`MixedDataSet` with dimensions ``e``"""
-        from pyop2.op2 import compute_backend
-        return compute_backend.MixedDataSet(self._sets, e)
+        from pyop2.types import MixedDataSet
+        return MixedDataSet(self._sets, e)
 
     def __str__(self):
         return "OP2 MixedSet composed of Sets: %s" % (self._sets,)

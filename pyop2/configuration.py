@@ -84,6 +84,8 @@ class Configuration(dict):
     # name, env variable, type, default, write once
     cache_dir = os.path.join(gettempdir(), "pyop2-cache-uid%s" % os.getuid())
     DEFAULTS = {
+        "backend":
+            ("PYOP2_BACKEND", str, "CPU_ONLY"),
         "cc":
             ("PYOP2_CC", str, ""),
         "cxx":

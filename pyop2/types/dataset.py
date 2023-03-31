@@ -10,6 +10,7 @@ from pyop2 import (
     mpi,
     utils
 )
+from pyop2.offload_utils import _backend as backend, OffloadingBackend
 from pyop2.types.set import ExtrudedSet, GlobalSet, MixedSet, Set, Subset
 
 
@@ -188,11 +189,14 @@ class DataSet(caching.ObjectCached):
     @utils.cached_property
     def layout_vec(self):
         """A PETSc Vec compatible with the dof layout of this DataSet."""
-        from pyop2.op2 import compute_backend
+        if backend == OffloadingBackend.CPU:
+            vec_type = PETSc.Vec.Type.STANDARD
+        else:
+            raise NotImplementedError
+
         vec = PETSc.Vec().create(comm=self.comm)
-        size = (self.size * self.cdim, None)
-        vec.setSizes(size, bsize=self.cdim)
-        vec.setType(compute_backend.PETScVecType)
+        vec.setSizes(self.size*self.cdim, bsize=self.cdim)
+        vec.setType(vec_type)
         vec.setUp()
         return vec
 
