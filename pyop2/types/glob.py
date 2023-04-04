@@ -144,6 +144,14 @@ class Global(DataCarrier, EmptyDataMixin, VecAccessMixin):
         return self.data_ro
 
     @property
+    def halo_valid(self):
+        return True
+
+    @halo_valid.setter
+    def halo_valid(self, value):
+        pass
+
+    @property
     def split(self):
         return (self,)
 

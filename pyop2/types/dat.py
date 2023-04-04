@@ -655,12 +655,12 @@ class DatView(AbstractDat):
             if not (0 <= i < d):
                 raise ex.IndexValueError("Can't create DatView with index %s for Dat with shape %s" % (index, dat.dim))
         self.index = index
+        self._parent = dat
         # Point at underlying data
         super(DatView, self).__init__(dat.dataset,
                                       dat._data,
                                       dtype=dat.dtype,
                                       name="view[%s](%s)" % (index, dat.name))
-        self._parent = dat
 
     @utils.cached_property
     def _kernel_args_(self):
@@ -685,6 +685,14 @@ class DatView(AbstractDat):
     @utils.cached_property
     def shape(self):
         return (self.dataset.total_size, )
+
+    @property
+    def halo_valid(self):
+        return self._parent.halo_valid
+
+    @halo_valid.setter
+    def halo_valid(self, value):
+        self._parent.halo_valid = value
 
     @property
     def data(self):
