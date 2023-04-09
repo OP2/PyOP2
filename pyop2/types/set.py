@@ -11,6 +11,7 @@ from pyop2 import (
     mpi,
     utils
 )
+from pyop2.offload_utils import OffloadMixin
 
 
 class Set:
@@ -163,7 +164,9 @@ class Set:
             indices = indices[0]
             if np.isscalar(indices):
                 indices = [indices]
-        return Subset(self, indices)
+
+        from pyop2.op2 import compute_backend
+        return compute_backend.Subset(self, indices)
 
     def __contains__(self, dset):
         """Indicate whether a given DataSet is compatible with this Set."""
@@ -175,8 +178,8 @@ class Set:
 
     def __pow__(self, e):
         """Derive a :class:`DataSet` with dimension ``e``"""
-        from pyop2.types import DataSet
-        return DataSet(self, dim=e)
+        from pyop2.op2 import compute_backend
+        return compute_backend.DataSet(self, dim=e)
 
     @utils.cached_property
     def layers(self):
@@ -289,7 +292,7 @@ class GlobalSet(Set):
         return hash(type(self))
 
 
-class ExtrudedSet(Set):
+class ExtrudedSet(Set, OffloadMixin):
 
     """OP2 ExtrudedSet.
 
@@ -378,7 +381,7 @@ class ExtrudedSet(Set):
         return self._layers
 
 
-class Subset(ExtrudedSet):
+class Subset(ExtrudedSet, OffloadMixin):
 
     """OP2 subset.
 
@@ -452,7 +455,8 @@ class Subset(ExtrudedSet):
             indices = indices[0]
             if np.isscalar(indices):
                 indices = [indices]
-        return Subset(self, indices)
+        from pyop2.op2 import compute_backend
+        return compute_backend.Subset(self, indices)
 
     @utils.cached_property
     def superset(self):
@@ -632,8 +636,8 @@ class MixedSet(Set, caching.ObjectCached):
 
     def __pow__(self, e):
         """Derive a :class:`MixedDataSet` with dimensions ``e``"""
-        from pyop2.types import MixedDataSet
-        return MixedDataSet(self._sets, e)
+        from pyop2.op2 import compute_backend
+        return compute_backend.MixedDataSet(self._sets, e)
 
     def __str__(self):
         return "OP2 MixedSet composed of Sets: %s" % (self._sets,)
