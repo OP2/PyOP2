@@ -558,10 +558,12 @@ def generate(builder, wrapper_name=None):
     if isinstance(kernel.code, loopy.TranslationUnit):
         knl = kernel.code
         wrapper = loopy.merge([wrapper, knl])
-        names = knl.callables_table
-        for name in names:
-            if isinstance(wrapper.callables_table[name], CallableKernel):
-                wrapper = _match_caller_callee_argument_dimension_(wrapper, name)
+        wrapper = wrapper.copy(entrypoints=wrapper.entrypoints-{kernel.name})
+        # names = knl.callables_table
+        # for name in names:
+        #     if isinstance(wrapper.callables_table[name], CallableKernel):
+        #         wrapper = _match_caller_callee_argument_dimension_(wrapper, name)
+        wrapper = _match_caller_callee_argument_dimension_(wrapper, kernel.name)
     else:
         # kernel is a string, add it to preamble
         if isinstance(kernel.code, Node):

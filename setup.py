@@ -89,10 +89,7 @@ install_requires = [
     'decorator',
     'mpi4py',
     'numpy>=1.6',
-    'COFFEE',
 ]
-
-dep_links = ['git+https://github.com/coneoproject/COFFEE#egg=COFFEE-dev']
 
 version = sys.version_info[:2]
 
