@@ -353,7 +353,10 @@ class GlobalKernel(Cached):
         """Return the C/C++ source code as a string."""
         from pyop2.codegen.rep2loopy import generate
 
+        # import pdb; pdb.set_trace()
         wrapper = generate(self.builder)
+
+
         code = lp.generate_code_v2(wrapper)
 
         if self.local_kernel.cpp:
