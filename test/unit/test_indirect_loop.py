@@ -245,6 +245,7 @@ def mdat(mset):
 def mmap(iterset2indset, iterset2unitset):
     return op2.MixedMap((iterset2indset, iterset2unitset))
 
+
 class TestMixedIndirectLoop:
     """Mixed indirect loop tests."""
 
