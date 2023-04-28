@@ -72,8 +72,6 @@ def compute_ind_extr(nums,
     return ind
 
 
-from coffee.base import *
-
 # Data type
 valuetype = numpy.float64
 
@@ -423,7 +421,7 @@ static void comp_vol(double A[1], double x[6][2], double y[1])
                      pass_layer_arg=True)
         end = layers - 1
         start = 0
-        ref = np.arange(start, end)
+        ref = numpy.arange(start, end)
         assert [dat_f.data[end*n:end*(n+1)] == ref
                 for n in range(int(len(dat_f.data)/end) - 1)]
 
