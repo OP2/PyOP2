@@ -331,45 +331,6 @@ static void extrusion(double *xtr, double *x, int* j)
     return op2.Kernel(kernel_code, "extrusion")
 
 
-@pytest.fixture
-def vol_comp():
-    init = FlatBlock("""
-double area = x[0][0]*(x[2][1]-x[4][1]) + x[2][0]*(x[4][1]-x[0][1])
-           + x[4][0]*(x[0][1]-x[2][1]);
-if (area < 0)
-area = area * (-1.0);
-""")
-    assembly = Incr(Symbol("A", ("i0", "i1")),
-                    FlatBlock("0.5 * area * (x[1][2] - x[0][2])"))
-    assembly = c_for("i0", 6, c_for("i1", 6, assembly))
-    kernel_code = FunDecl("void", "vol_comp",
-                          [Decl("double", Symbol("A", (6, 6))),
-                           Decl("double", Symbol("x", (6, 3)))],
-                          Block([init, assembly], open_scope=False),
-                          pred=["static"])
-    return op2.Kernel(kernel_code.gencode(), "vol_comp")
-
-
-@pytest.fixture
-def vol_comp_rhs():
-    init = FlatBlock("""
-double area = x[0][0]*(x[2][1]-x[4][1]) + x[2][0]*(x[4][1]-x[0][1])
-           + x[4][0]*(x[0][1]-x[2][1]);
-if (area < 0)
-area = area * (-1.0);
-""")
-    assembly = Incr(Symbol("A", ("i0",)),
-                    FlatBlock("0.5 * area * (x[1][2] - x[0][2]) * y[0]"))
-    assembly = c_for("i0", 6, assembly)
-    kernel_code = FunDecl("void", "vol_comp_rhs",
-                          [Decl("double", Symbol("A", (6,))),
-                           Decl("double", Symbol("x", (6, 3))),
-                           Decl("int", Symbol("y", (1,)))],
-                          Block([init, assembly], open_scope=False),
-                          pred=["static"])
-    return op2.Kernel(kernel_code.gencode(), "vol_comp_rhs")
-
-
 class TestExtrusion:
 
     """

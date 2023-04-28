@@ -305,7 +305,7 @@ static void mass_ffc(double A[3][3], double x[3][2]) {
 
   for (unsigned int ip = 0; ip < 3; ip++)
     for (int j=0; j<3; ++j)
-      for (int k=0; k<3; ++k) 
+      for (int k=0; k<3; ++k)
         A[j][k] += FE0[ip][j]*FE0[ip][k]*W3[ip]*det;
 }
     """
