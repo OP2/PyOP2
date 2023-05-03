@@ -210,7 +210,7 @@ static void mass(double localTensor[3][3], double c0[3][2]) {
     for (int i_r_0=0; i_r_0<3; ++i_r_0) {
       for (int i_r_1=0; i_r_1<3; ++i_r_1) {
         double ST0 = 0.0;
-        ST0 += CG1[i_r_0][i_g] * CG1[i_r_1][i_g] * (c_q0[i_g][0][0] *                                c_q0[i_g][1][1] + -1 * c_q0[i_g][0][1] * c_q0[i_g][1][0]);
+        ST0 += CG1[i_r_0][i_g] * CG1[i_r_1][i_g] * (c_q0[i_g][0][0] * c_q0[i_g][1][1] + -1 * c_q0[i_g][0][1] * c_q0[i_g][1][0]);
         localTensor[i_r_0][i_r_1] += ST0 * w[i_g];
       }
     }
