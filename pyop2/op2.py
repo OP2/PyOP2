@@ -42,7 +42,7 @@ from pyop2.mpi import MPI, COMM_WORLD, collective
 from pyop2.types import (
     Set, ExtrudedSet, MixedSet, Subset, DataSet, MixedDataSet,
     Map, MixedMap, PermutedMap, ComposedMap, Sparsity, Halo,
-    Global, Literal, GlobalDataSet,
+    Global, GlobalDataSet,
     Dat, MixedDat, DatView, Mat
 )
 from pyop2.types import (READ, WRITE, RW, INC, MIN, MAX,
