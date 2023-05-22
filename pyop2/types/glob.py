@@ -159,10 +159,6 @@ class SetFreeDataCarrier(DataCarrier, EmptyDataMixin):
         self.__radd__(other) <==> other + self."""
         return self + other
 
-    def __neg__(self):
-        return type(self)(self.dim, data=-np.copy(self.data_ro),
-                          dtype=self.dtype, name=self.name)
-
     def __sub__(self, other):
         """Pointwise subtraction of fields."""
         return self._op(other, operator.sub)
@@ -259,6 +255,15 @@ class Global(SetFreeDataCarrier, VecAccessMixin):
 
         assert map_ is None
         return GlobalLegacyArg(self, access)
+
+    def __neg__(self):
+        return type(self)(
+            self.dim,
+            data=-np.copy(self.data_ro),
+            dtype=self.dtype,
+            name=self.name,
+            comm=self.comm
+        )
 
     @utils.cached_property
     def dataset(self):
@@ -390,6 +395,14 @@ class Literal(SetFreeDataCarrier):
 
         assert map_ is None
         return GlobalLegacyArg(self, access)
+
+    def __neg__(self):
+        return type(self)(
+            self.dim,
+            data=-np.copy(self.data_ro),
+            dtype=self.dtype,
+            name=self.name,
+        )
 
     def duplicate(self):
         """Return a deep copy of self."""
