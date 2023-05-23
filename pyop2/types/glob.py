@@ -19,12 +19,17 @@ class SetFreeDataCarrier(DataCarrier, EmptyDataMixin):
 
     @utils.validate_type(('name', str, ex.NameTypeError))
     def __init__(self, dim, data=None, dtype=None, name=None):
-        if issubclass(type(dim), type(self)):
+        if issubclass(type(dim), Global):
             # If g is a Global, Global(g) performs a deep copy.
-            # Similarly with Literal
             # This is for compatibility with Dat.
             self.__init__(dim._dim, None, dtype=dim.dtype,
                           name="copy_of_%s" % dim.name, comm=dim.comm)
+            dim.copy(self)
+        elif issubclass(type(dim), Literal):
+            # If g is a Local, Local(g) performs a deep copy.
+            # This is for compatibility with Dat.
+            self.__init__(dim._dim, None, dtype=dim.dtype,
+                          name="copy_of_%s" % dim.name)
             dim.copy(self)
         else:
             self._dim = utils.as_tuple(dim, int)
@@ -114,6 +119,15 @@ class SetFreeDataCarrier(DataCarrier, EmptyDataMixin):
     @halo_valid.setter
     def halo_valid(self, value):
         pass
+
+    @mpi.collective
+    def copy(self, other, subset=None):
+        """Copy the data in this :class:`SetFreeDataCarrier` into another.
+
+        :arg other: The destination :class:`Global`
+        :arg subset: A :class:`Subset` of elements to copy (optional)"""
+
+        other.data = np.copy(self.data_ro)
 
     @property
     def split(self):
@@ -279,15 +293,6 @@ class Global(SetFreeDataCarrier, VecAccessMixin):
             name=self.name,
             comm=self.comm
         )
-
-    @mpi.collective
-    def copy(self, other, subset=None):
-        """Copy the data in this :class:`Global` into another.
-
-        :arg other: The destination :class:`Global`
-        :arg subset: A :class:`Subset` of elements to copy (optional)"""
-
-        other.data = np.copy(self.data_ro)
 
     @mpi.collective
     def zero(self, subset=None):
