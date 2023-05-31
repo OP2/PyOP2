@@ -3,11 +3,19 @@ import ctypes
 
 import loopy as lp
 import numpy
-from petsc4py.PETSc import IntType, RealType, ScalarType
+from pyop2.petsc import PETSc
 
-IntType = numpy.dtype(IntType)
-RealType = numpy.dtype(RealType)
-ScalarType = numpy.dtype(ScalarType)
+
+def get_int_type():
+    return PETSc.IntType
+
+
+def get_real_type():
+    return PETSc.RealType
+
+
+def get_scalar_type():
+    return PETSc.ScalarType
 
 
 def as_cstr(dtype):

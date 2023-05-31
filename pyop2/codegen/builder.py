@@ -16,7 +16,7 @@ from pyop2.codegen.representation import (Accumulate, Argument, Comparison, Cond
                                           PreUnpackInst, Product, RuntimeIndex,
                                           Sum, Symbol, UnpackInst, Variable,
                                           When, Zero)
-from pyop2.datatypes import IntType
+from pyop2 import datatypes
 from pyop2.op2 import (ALL, INC, MAX, MIN, ON_BOTTOM, ON_INTERIOR_FACETS,
                        ON_TOP, READ, RW, WRITE)
 from pyop2.utils import cached_property
@@ -432,8 +432,8 @@ class MixedDatPack(Pack):
                 mi = MultiIndex(*(Index(e) for e in shape))
                 expr, mask = p._rvalue(mi, loop_indices)
                 extents = [numpy.prod(shape[i+1:], dtype=numpy.int32) for i in range(len(shape))]
-                index = reduce(Sum, [Product(i, Literal(IntType.type(e), casting=False)) for i, e in zip(mi, extents)], Literal(IntType.type(0), casting=False))
-                indices = MultiIndex(Sum(index, Literal(IntType.type(offset), casting=False)),)
+                index = reduce(Sum, [Product(i, Literal(datatypes.IntType.type(e), casting=False)) for i, e in zip(mi, extents)], Literal(datatypes.IntType.type(0), casting=False))
+                indices = MultiIndex(Sum(index, Literal(datatypes.IntType.type(offset), casting=False)),)
                 offset += numpy.prod(shape, dtype=numpy.int32)
                 if mask is not None:
                     expr = When(mask, expr)
@@ -469,8 +469,8 @@ class MixedDatPack(Pack):
                 mi = MultiIndex(*(Index(e) for e in shape))
                 rvalue, mask = p._rvalue(mi, loop_indices)
                 extents = [numpy.prod(shape[i+1:], dtype=numpy.int32) for i in range(len(shape))]
-                index = reduce(Sum, [Product(i, Literal(IntType.type(e), casting=False)) for i, e in zip(mi, extents)], Literal(IntType.type(0), casting=False))
-                indices = MultiIndex(Sum(index, Literal(IntType.type(offset), casting=False)),)
+                index = reduce(Sum, [Product(i, Literal(datatypes.IntType.type(e), casting=False)) for i, e in zip(mi, extents)], Literal(datatypes.IntType.type(0), casting=False))
+                indices = MultiIndex(Sum(index, Literal(datatypes.IntType.type(offset), casting=False)),)
                 rhs = Indexed(pack, indices)
                 offset += numpy.prod(shape, dtype=numpy.int32)
 
@@ -649,15 +649,15 @@ class MixedMatPack(Pack):
                 lvalue = Indexed(pack_, indices)
                 rextents = [numpy.prod(rshape[i+1:], dtype=numpy.int32) for i in range(len(rshape))]
                 cextents = [numpy.prod(cshape[i+1:], dtype=numpy.int32) for i in range(len(cshape))]
-                flat_row_index = reduce(Sum, [Product(i, Literal(IntType.type(e), casting=False))
+                flat_row_index = reduce(Sum, [Product(i, Literal(datatypes.IntType.type(e), casting=False))
                                               for i, e in zip(rindices, rextents)],
-                                        Literal(IntType.type(0), casting=False))
-                flat_col_index = reduce(Sum, [Product(i, Literal(IntType.type(e), casting=False))
+                                        Literal(datatypes.IntType.type(0), casting=False))
+                flat_col_index = reduce(Sum, [Product(i, Literal(datatypes.IntType.type(e), casting=False))
                                               for i, e in zip(cindices, cextents)],
-                                        Literal(IntType.type(0), casting=False))
+                                        Literal(datatypes.IntType.type(0), casting=False))
 
-                flat_index = MultiIndex(Sum(flat_row_index, Literal(IntType.type(roffset), casting=False)),
-                                        Sum(flat_col_index, Literal(IntType.type(coffset), casting=False)))
+                flat_index = MultiIndex(Sum(flat_row_index, Literal(datatypes.IntType.type(roffset), casting=False)),
+                                        Sum(flat_col_index, Literal(datatypes.IntType.type(coffset), casting=False)))
                 rvalue = Indexed(pack, flat_index)
                 # Copy from local mixed element tensor into non-mixed
                 mixed_to_local.append(Accumulate(PreUnpackInst(), lvalue, rvalue))
@@ -698,8 +698,8 @@ class WrapperBuilder(object):
 
     @cached_property
     def loop_extents(self):
-        return (Argument((), IntType, name="start"),
-                Argument((), IntType, name="end"))
+        return (Argument((), datatypes.IntType, name="start"),
+                Argument((), datatypes.IntType, name="end"))
 
     @cached_property
     def _loop_index(self):
@@ -712,7 +712,7 @@ class WrapperBuilder(object):
 
     @cached_property
     def _subset_indices(self):
-        return Argument(("end", ), IntType, name="subset_indices")
+        return Argument(("end", ), datatypes.IntType, name="subset_indices")
 
     @cached_property
     def loop_index(self):
@@ -724,14 +724,14 @@ class WrapperBuilder(object):
     @cached_property
     def _layers_array(self):
         if self.constant_layers:
-            return Argument((1, 2), IntType, name="layers")
+            return Argument((1, 2), datatypes.IntType, name="layers")
         else:
-            return Argument((None, 2), IntType, name="layers")
+            return Argument((None, 2), datatypes.IntType, name="layers")
 
     @cached_property
     def num_layers(self):
         cellStart = Indexed(self._layers_array, (self._layer_index, FixedIndex(0)))
-        cellEnd = Sum(Indexed(self._layers_array, (self._layer_index, FixedIndex(1))), Literal(IntType.type(-1)))
+        cellEnd = Sum(Indexed(self._layers_array, (self._layer_index, FixedIndex(1))), Literal(datatypes.IntType.type(-1)))
         n = Sum(cellEnd,
                 Product(Literal(numpy.int32(-1)), cellStart))
         return Materialise(PackInst(), n, MultiIndex())
@@ -751,7 +751,7 @@ class WrapperBuilder(object):
         if self.iteration_region == ON_BOTTOM:
             return Materialise(PackInst(),
                                Sum(Indexed(self._layers_array, (self._layer_index, FixedIndex(1))),
-                                   Literal(IntType.type(-1))),
+                                   Literal(datatypes.IntType.type(-1))),
                                MultiIndex())
         else:
             _, end = self.layer_extents
@@ -760,19 +760,19 @@ class WrapperBuilder(object):
     @cached_property
     def layer_extents(self):
         cellStart = Indexed(self._layers_array, (self._layer_index, FixedIndex(0)))
-        cellEnd = Sum(Indexed(self._layers_array, (self._layer_index, FixedIndex(1))), Literal(IntType.type(-1)))
+        cellEnd = Sum(Indexed(self._layers_array, (self._layer_index, FixedIndex(1))), Literal(datatypes.IntType.type(-1)))
         if self.iteration_region == ON_BOTTOM:
             start = cellStart
-            end = Sum(cellStart, Literal(IntType.type(1)))
+            end = Sum(cellStart, Literal(datatypes.IntType.type(1)))
         elif self.iteration_region == ON_TOP:
-            start = Sum(cellEnd, Literal(IntType.type(-1)))
+            start = Sum(cellEnd, Literal(datatypes.IntType.type(-1)))
             end = cellEnd
         elif self.iteration_region == ON_INTERIOR_FACETS:
             start = cellStart
             if self.extruded_periodic:
                 end = cellEnd
             else:
-                end = Sum(cellEnd, Literal(IntType.type(-1)))
+                end = Sum(cellEnd, Literal(datatypes.IntType.type(-1)))
         elif self.iteration_region == ALL:
             start = cellStart
             end = cellEnd
@@ -892,14 +892,14 @@ class WrapperBuilder(object):
         except KeyError:
             if isinstance(map_, PermutedMapKernelArg):
                 imap = self._add_map(map_.base_map, unroll)
-                map_ = PMap(imap, numpy.asarray(map_.permutation, dtype=IntType))
+                map_ = PMap(imap, numpy.asarray(map_.permutation, dtype=datatypes.IntType))
             elif isinstance(map_, ComposedMapKernelArg):
                 map_ = CMap(*(self._add_map(m, unroll) for m in map_.base_maps))
             else:
                 map_ = Map(interior_horizontal,
                            (self.bottom_layer, self.top_layer),
                            self.num_layers,
-                           arity=map_.arity, offset=map_.offset, offset_quotient=map_.offset_quotient, dtype=IntType,
+                           arity=map_.arity, offset=map_.offset, offset_quotient=map_.offset_quotient, dtype=datatypes.IntType,
                            unroll=unroll,
                            extruded=self.extruded,
                            extruded_periodic=self.extruded_periodic,

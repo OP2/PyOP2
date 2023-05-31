@@ -6,7 +6,7 @@ import numpy as np
 
 from pyop2 import (
     caching,
-    datatypes as dtypes,
+    datatypes,
     exceptions as ex,
     mpi,
     utils
@@ -206,7 +206,7 @@ class Set:
         if other is self:
             return Subset(self, [])
         else:
-            return type(other)(self, np.setdiff1d(np.asarray(range(self.total_size), dtype=dtypes.IntType), other._indices))
+            return type(other)(self, np.setdiff1d(np.asarray(range(self.total_size), dtype=datatypes.get_int_type()), other._indices))
 
     def symmetric_difference(self, other):
         self._check_operands(other)
@@ -312,7 +312,7 @@ class ExtrudedSet(Set):
         self._parent = parent
         self.comm = mpi.internal_comm(parent.comm)
         try:
-            layers = utils.verify_reshape(layers, dtypes.IntType, (parent.total_size, 2))
+            layers = utils.verify_reshape(layers, datatypes.get_int_type(), (parent.total_size, 2))
             self.constant_layers = False
             if layers.min(initial=0) < 0:
                 raise ex.SizeTypeError("Bottom of layers must be >= 0")
@@ -320,13 +320,13 @@ class ExtrudedSet(Set):
                 raise ex.SizeTypeError("Number of layers must be >= 0")
         except ex.DataValueError:
             # Legacy, integer
-            layers = np.asarray(layers, dtype=dtypes.IntType)
+            layers = np.asarray(layers, dtype=datatypes.get_int_type())
             if layers.shape:
                 raise ex.SizeTypeError(f"Specifying layers per entity, but provided "
                                        f"{layers.shape}, needed ({parent.total_size}, 2)")
             if layers < 2:
                 raise ex.SizeTypeError("Need at least two layers, not %d", layers)
-            layers = np.asarray([[0, layers]], dtype=dtypes.IntType)
+            layers = np.asarray([[0, layers]], dtype=datatypes.get_int_type())
             self.constant_layers = True
 
         self._layers = layers
@@ -403,7 +403,7 @@ class Subset(ExtrudedSet):
             'Subset construction failed, should not happen'
 
         self._superset = superset
-        self._indices = utils.verify_reshape(indices, dtypes.IntType, (len(indices),))
+        self._indices = utils.verify_reshape(indices, datatypes.get_int_type(), (len(indices),))
 
         if len(self._indices) > 0 and (self._indices[0] < 0 or self._indices[-1] >= self._superset.total_size):
             raise ex.SubsetIndexOutOfBounds(

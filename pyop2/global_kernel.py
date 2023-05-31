@@ -9,10 +9,10 @@ import loopy as lp
 from petsc4py import PETSc
 import numpy as np
 
-from pyop2 import compilation, mpi
+from pyop2 import compilation, datatypes, mpi
 from pyop2.caching import Cached
 from pyop2.configuration import configuration
-from pyop2.datatypes import IntType, as_ctypes
+from pyop2.datatypes import as_ctypes
 from pyop2.types import IterationRegion
 from pyop2.utils import cached_property, get_petsc_dir
 
@@ -395,7 +395,7 @@ class GlobalKernel(Cached):
         """Return the ctypes datatypes of the compiled function."""
         # The first two arguments to the global kernel are the 'start' and 'stop'
         # indices. All other arguments are declared to be void pointers.
-        dtypes = [as_ctypes(IntType)] * 2
+        dtypes = [as_ctypes(datatypes.IntType)] * 2
         dtypes.extend([ctypes.c_voidp for _ in self.builder.wrapper_args[2:]])
         return tuple(dtypes)
 

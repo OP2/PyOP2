@@ -37,8 +37,8 @@ import numpy as np
 cimport numpy as np
 import cython
 cimport petsc4py.PETSc as PETSc
-from petsc4py import PETSc
-from pyop2.datatypes import IntType
+from pyop2.petsc import PETSc
+from pyop2 import datatypes
 
 np.import_array()
 
@@ -109,12 +109,12 @@ def get_preallocation(PETSc.Mat preallocator, PetscInt nrow):
         dnz = <PetscInt[:nrow]>p.dnz
         dnz = np.asarray(dnz).copy()
     else:
-        dnz = np.zeros(0, dtype=IntType)
+        dnz = np.zeros(0, dtype=datatypes.IntType)
     if p.onz != NULL:
         onz = <PetscInt[:nrow]>p.onz
         onz = np.asarray(onz).copy()
     else:
-        onz = np.zeros(0, dtype=IntType)
+        onz = np.zeros(0, dtype=datatypes.IntType)
     return dnz, onz
 
 

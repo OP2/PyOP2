@@ -9,7 +9,7 @@ import numpy as np
 
 from pyop2 import version
 from pyop2.configuration import configuration
-from pyop2.datatypes import ScalarType
+from pyop2 import datatypes
 from pyop2.exceptions import NameTypeError
 from pyop2.types import Access
 from pyop2.utils import cached_property, validate_type
@@ -163,7 +163,7 @@ class LocalKernel(abc.ABC):
                                                   'summing_if_branches_ops']),
                 subgroup_size='guess')
             return op_map.filter_by(name=['add', 'sub', 'mul', 'div'],
-                                    dtype=[ScalarType]).eval_and_sum({})
+                                    dtype=[datatypes.ScalarType]).eval_and_sum({})
         else:
             return 0
 

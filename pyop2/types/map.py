@@ -29,7 +29,10 @@ class Map:
       map result will be passed to the kernel.
     """
 
-    dtype = dtypes.IntType
+    @property
+    @classmethod
+    def dtype(cls):
+        return dtypes.IntType
 
     @utils.validate_type(('iterset', Set, ex.SetTypeError), ('toset', Set, ex.SetTypeError),
                          ('arity', numbers.Integral, ex.ArityTypeError), ('name', str, ex.NameTypeError))

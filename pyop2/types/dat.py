@@ -6,7 +6,6 @@ import operator
 
 import loopy as lp
 import numpy as np
-from petsc4py import PETSc
 
 from pyop2 import (
     configuration as conf,
@@ -15,6 +14,7 @@ from pyop2 import (
     mpi,
     utils
 )
+from pyop2.petsc import PETSc
 from pyop2.types.access import Access
 from pyop2.types.dataset import DataSet, GlobalDataSet, MixedDataSet
 from pyop2.types.data_carrier import DataCarrier, EmptyDataMixin, VecAccessMixin

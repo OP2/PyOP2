@@ -32,30 +32,29 @@
 # OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-from petsc4py import PETSc
-from decorator import decorator
+import functools
+
+from pyop2.petsc import PETSc
 
 
-timed_stage = PETSc.Log.Stage
-"""Enter a code Stage, this is a PETSc log Stage.
-
-:arg name: The name of the stage."""
+__dir__ = ["timed_stage", "timed_event", "time_function"]
 
 
-timed_region = PETSc.Log.Event
-"""Time a code region, this a PETSc log Event.
+def __getattr__(name):
+    if name == "timed_stage":
+        return PETSc.Log.Stage
+    elif name == "timed_event":
+        return PETSc.Log.Event
+    else:
+        raise AttributeError(f"{name} not found")
 
-:arg name: The name of the region."""
 
-
-class timed_function(object):
-    def __init__(self, name=None):
-        self.name = name
-
-    def __call__(self, f):
-        def wrapper(f, *args, **kwargs):
-            if self.name is None:
-                self.name = f.__name__
-            with timed_region(self.name):
-                return f(*args, **kwargs)
-        return decorator(wrapper, f)
+def time_function(name=None):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            name_ = name or ".".join([func.__module__, func.__name__])
+            with PETSc.Log.Event(name_):
+                return func(*args, **kwargs)
+        return wrapper
+    return decorator
