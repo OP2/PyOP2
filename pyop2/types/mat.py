@@ -3,7 +3,6 @@ import ctypes
 import itertools
 
 import numpy as np
-from petsc4py import PETSc
 
 from pyop2 import (
     caching,
@@ -15,6 +14,7 @@ from pyop2 import (
     sparsity,
     utils
 )
+from pyop2.petsc import PETSc
 from pyop2.types.access import Access
 from pyop2.types.data_carrier import DataCarrier
 from pyop2.types.dataset import DataSet, GlobalDataSet, MixedDataSet

@@ -1,7 +1,6 @@
 import numbers
 
 import numpy as np
-from petsc4py import PETSc
 
 from pyop2 import (
     caching,
@@ -10,6 +9,7 @@ from pyop2 import (
     mpi,
     utils
 )
+from pyop2.petsc import PETSc
 from pyop2.types.set import ExtrudedSet, GlobalSet, MixedSet, Set, Subset
 
 

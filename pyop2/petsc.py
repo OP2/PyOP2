@@ -1,4 +1,6 @@
 import atexit
+import functools
+import os
 import sys
 
 import petsc4py
@@ -16,12 +18,11 @@ class LazyPETSc:
     def __getattr__(self, name):
         if not self.PETSc:
             print("INITIALISING PETSC", flush=True)
-            breakpoint()
             petsc4py.init(sys.argv)
             from petsc4py import PETSc
 
             # start logging
-            event = PETSc.Log.Event("pyop2")
+            event = PETSc.Log.Event("PETSc")
             event.begin()
             atexit.register(lambda: event.end())
 
@@ -30,3 +31,19 @@ class LazyPETSc:
 
 
 PETSc = LazyPETSc()
+
+
+@functools.lru_cache()
+def get_petsc_variables():
+    """Get dict of PETSc environment variables from the file:
+    $PETSC_DIR/$PETSC_ARCH/lib/petsc/conf/petscvariables
+
+    The result is memoized to avoid constantly reading the file.
+    """
+    config = petsc4py.get_config()
+    path = [config["PETSC_DIR"], config["PETSC_ARCH"], "lib/petsc/conf/petscvariables"]
+    variables_path = os.path.join(*path)
+    with open(variables_path) as fh:
+        # Split lines on first '=' (assignment)
+        splitlines = (line.split("=", maxsplit=1) for line in fh.readlines())
+    return {k.strip(): v.strip() for k, v in splitlines}

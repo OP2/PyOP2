@@ -48,7 +48,7 @@ from pyop2 import mpi
 from pyop2.configuration import configuration
 from pyop2.logger import warning, debug, progress, INFO
 from pyop2.exceptions import CompilationError
-from petsc4py import PETSc
+from pyop2.petsc import PETSc
 
 
 def _check_hashes(x, y, datatype):
@@ -58,8 +58,15 @@ def _check_hashes(x, y, datatype):
     return False
 
 
-_check_op = mpi.MPI.Op.Create(_check_hashes, commute=True)
 _compiler = None
+_lazy_check_op = None
+
+
+def get_check_op():
+    global _lazy_check_op
+    if _lazy_check_op is None:
+        _lazy_check_op = mpi.MPI.Op.Create(_check_hashes, commute=True)
+    return _lazy_check_op
 
 
 def set_default_compiler(compiler):
@@ -318,7 +325,7 @@ class Compiler(ABC):
         tmpname = os.path.join(cachedir, "%s_p%d.so.tmp" % (basename, pid))
 
         if configuration['check_src_hashes'] or configuration['debug']:
-            matching = self.comm.allreduce(basename, op=_check_op)
+            matching = self.comm.allreduce(basename, op=get_check_op())
             if matching != basename:
                 # Dump all src code to disk for debugging
                 output = os.path.join(configuration["cache_dir"], "mismatching-kernels")

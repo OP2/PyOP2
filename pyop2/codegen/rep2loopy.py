@@ -1,5 +1,6 @@
 import ctypes
 import numpy
+import os
 
 import loopy
 from loopy.symbolic import SubArrayRef
@@ -37,24 +38,35 @@ from pyop2.codegen.representation import (PackInst, UnpackInst, KernelInst, PreU
 from pytools import ImmutableRecord
 from pyop2.codegen.loopycompat import _match_caller_callee_argument_dimension_
 from pyop2.configuration import target
-
-from petsc4py import PETSc
-
-
-# Read c files  for linear algebra callables in on import
-import os
 from pyop2.mpi import COMM_WORLD
-if COMM_WORLD.rank == 0:
-    with open(os.path.dirname(__file__)+"/c/inverse.c", "r") as myfile:
-        inverse_preamble = myfile.read()
-    with open(os.path.dirname(__file__)+"/c/solve.c", "r") as myfile:
-        solve_preamble = myfile.read()
-else:
-    solve_preamble = None
-    inverse_preamble = None
+from pyop2.petsc import PETSc
 
-inverse_preamble = COMM_WORLD.bcast(inverse_preamble, root=0)
-solve_preamble = COMM_WORLD.bcast(solve_preamble, root=0)
+
+_lazy_solve_preamble = None
+_lazy_inverse_preamble = None
+
+
+def get_preamble(name):
+    """Read C files  for linear algebra callables."""
+    global _lazy_solve_preamble, _lazy_inverse_preamble
+
+    if _lazy_solve_preamble is None or _lazy_inverse_preamble is None:
+        if COMM_WORLD.rank == 0:
+            with open(os.path.dirname(__file__)+"/c/solve.c", "r") as myfile:
+                solve_preamble = myfile.read()
+            with open(os.path.dirname(__file__)+"/c/inverse.c", "r") as myfile:
+                inverse_preamble = myfile.read()
+        else:
+            solve_preamble = None
+            inverse_preamble = None
+        _lazy_solve_preamble = COMM_WORLD.bcast(solve_preamble, root=0)
+        _lazy_inverse_preamble = COMM_WORLD.bcast(inverse_preamble, root=0)
+
+    if name == "solve":
+        return _lazy_solve_preamble
+    else:
+        assert name == "inverse"
+        return _lazy_inverse_preamble
 
 
 class Bag(object):
@@ -180,7 +192,7 @@ class INVCallable(LACallable):
 
     def generate_preambles(self, target):
         assert isinstance(target, type(target))
-        yield ("inverse", inverse_preamble)
+        yield ("inverse", get_preamble("inverse"))
 
 
 class SolveCallable(LACallable):
@@ -192,7 +204,7 @@ class SolveCallable(LACallable):
 
     def generate_preambles(self, target):
         assert isinstance(target, type(target))
-        yield ("solve", solve_preamble)
+        yield ("solve", get_preamble("solve"))
 
 
 class _PreambleGen(ImmutableRecord):

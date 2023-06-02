@@ -6,7 +6,6 @@ from typing import Any, Optional, Tuple
 
 import loopy as lp
 import numpy as np
-from petsc4py import PETSc
 
 from pyop2 import mpi, profiling
 from pyop2.configuration import configuration
@@ -15,6 +14,8 @@ from pyop2.exceptions import KernelTypeError, MapValueError, SetTypeError
 from pyop2.global_kernel import (GlobalKernelArg, DatKernelArg, MixedDatKernelArg,
                                  MatKernelArg, MixedMatKernelArg, GlobalKernel)
 from pyop2.local_kernel import LocalKernel, CStringLocalKernel, LoopyLocalKernel
+from pyop2.petsc import PETSc
+from pyop2.profiling import time_function
 from pyop2.types import (Access, Global, AbstractDat, Dat, DatView, MixedDat, Mat, Set,
                          MixedSet, ExtrudedSet, Subset, Map, ComposedMap, MixedMap)
 from pyop2.utils import cached_property
@@ -205,7 +206,7 @@ class Parloop:
         # Parloop.compute is an alias for Parloop.__call__
         self()
 
-    @PETSc.Log.EventDecorator("ParLoopExecute")
+    @time_function("ParLoopExecute")
     @mpi.collective
     def __call__(self):
         """Execute the kernel over all members of the iteration space."""
@@ -350,7 +351,7 @@ class Parloop:
                 seen.add(pl_arg.data)
         return tuple(indices)
 
-    @PETSc.Log.EventDecorator("ParLoopRednBegin")
+    @time_function("ParLoopRednBegin")
     @mpi.collective
     def reduction_begin(self):
         """Begin reductions."""
@@ -367,7 +368,7 @@ class Parloop:
                 self.comm.Allreduce(glob._data, glob._buf, op=mpi_op)
         return tuple(requests)
 
-    @PETSc.Log.EventDecorator("ParLoopRednEnd")
+    @time_function("ParLoopRednEnd")
     @mpi.collective
     def reduction_end(self, requests):
         """Finish reductions."""

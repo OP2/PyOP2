@@ -6,13 +6,13 @@ import os
 from typing import Optional, Tuple
 
 import loopy as lp
-from petsc4py import PETSc
 import numpy as np
 
 from pyop2 import compilation, datatypes, mpi
 from pyop2.caching import Cached
 from pyop2.configuration import configuration
 from pyop2.datatypes import as_ctypes
+from pyop2.profiling import time_function
 from pyop2.types import IterationRegion
 from pyop2.utils import cached_property, get_petsc_dir
 
@@ -363,7 +363,7 @@ class GlobalKernel(Cached):
             return preamble + "\nextern \"C\" {\n" + device_code + "\n}\n"
         return code.device_code()
 
-    @PETSc.Log.EventDecorator()
+    @time_function()
     @mpi.collective
     def compile(self, comm):
         """Compile the kernel.

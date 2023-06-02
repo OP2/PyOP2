@@ -1,21 +1,37 @@
-
 import ctypes
 
 import loopy as lp
-import numpy
-from pyop2.petsc import PETSc
+import numpy as np
+from pyop2.petsc import get_petsc_variables
 
 
-def get_int_type():
-    return PETSc.IntType
+def _parse_int_type():
+    vars = get_petsc_variables()
+    int_size = int(vars["PETSC_INDEX_SIZE"])
+    if int_size == 32:
+        return np.dtype(np.int32)
+    else:
+        assert int_size == 64
+        return np.dtype(np.int64)
 
 
-def get_real_type():
-    return PETSc.RealType
+def _parse_real_type():
+    return np.dtype(np.float64)
 
 
-def get_scalar_type():
-    return PETSc.ScalarType
+def _parse_scalar_type():
+    vars = get_petsc_variables()
+    scalar_type = vars["PETSC_SCALAR"]
+    if scalar_type == "real":
+        return np.dtype(np.float64)
+    else:
+        assert scalar_type == "complex"
+        return np.dtype(np.complex128)
+
+
+IntType = _parse_int_type()
+RealType = _parse_real_type()
+ScalarType = _parse_scalar_type()
 
 
 def as_cstr(dtype):
@@ -32,7 +48,7 @@ def as_cstr(dtype):
             "uint64": "uint64_t",
             "float32": "float",
             "float64": "double",
-            "complex128": "double complex"}[numpy.dtype(dtype).name]
+            "complex128": "double complex"}[np.dtype(dtype).name]
 
 
 def as_ctypes(dtype):
@@ -48,12 +64,12 @@ def as_ctypes(dtype):
             "uint32": ctypes.c_uint32,
             "uint64": ctypes.c_uint64,
             "float32": ctypes.c_float,
-            "float64": ctypes.c_double}[numpy.dtype(dtype).name]
+            "float64": ctypes.c_double}[np.dtype(dtype).name]
 
 
 def as_numpy_dtype(dtype):
     """Convert a dtype-like object into a numpy dtype."""
-    if isinstance(dtype, numpy.dtype):
+    if isinstance(dtype, np.dtype):
         return dtype
     elif isinstance(dtype, lp.types.NumpyType):
         return dtype.numpy_dtype
@@ -69,11 +85,11 @@ def dtype_limits(dtype):
     :raises ValueError: If numeric limits could not be determined.
     """
     try:
-        info = numpy.finfo(dtype)
+        info = np.finfo(dtype)
     except ValueError:
         # maybe an int?
         try:
-            info = numpy.iinfo(dtype)
+            info = np.iinfo(dtype)
         except ValueError as e:
             raise ValueError("Unable to determine numeric limits from %s" % dtype) from e
     return info.min, info.max

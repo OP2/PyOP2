@@ -3,13 +3,13 @@ import ctypes
 import operator
 
 import numpy as np
-from petsc4py import PETSc
 
 from pyop2 import (
     exceptions as ex,
     mpi,
     utils
 )
+from pyop2.petsc import PETSc
 from pyop2.types.access import Access
 from pyop2.types.dataset import GlobalDataSet
 from pyop2.types.data_carrier import DataCarrier, EmptyDataMixin, VecAccessMixin
