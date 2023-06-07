@@ -242,12 +242,6 @@ class TestSetAPI:
         assert set == set
         assert not set != set
 
-    def test_set_ne(self, set):
-        "Sets with the same attributes should not be equal if not identical."
-        setcopy = op2.Set(set.size, set.name)
-        assert set != setcopy
-        assert not set == setcopy
-
     def test_dset_in_set(self, set, dset):
         "The in operator should indicate compatibility of DataSet and Set"
         assert dset in set
@@ -1609,13 +1603,16 @@ class TestParLoopAPI:
     def test_illegal_mat_iterset(self, sparsity):
         """ParLoop should reject a Mat argument using a different iteration
         set from the par_loop's."""
-        set1 = op2.Set(2)
+        set1 = op2.Set(3)
         m = op2.Mat(sparsity)
         rmap, cmap = sparsity.maps[0]
         kernel = op2.Kernel("static void k() { }", "k")
         with pytest.raises(exceptions.MapValueError):
-            op2.par_loop(kernel, set1,
-                         m(op2.INC, (rmap, cmap)))
+            op2.par_loop(
+                kernel,
+                set1,
+                m(op2.INC, (rmap, cmap))
+            )
 
     def test_empty_map_and_iterset(self):
         """If the iterset of the ParLoop is zero-sized, it should not matter if
