@@ -25,7 +25,7 @@ class SetFreeDataCarrier(DataCarrier, EmptyDataMixin):
             self.__init__(dim._dim, None, dtype=dim.dtype,
                           name="copy_of_%s" % dim.name, comm=dim.comm)
             dim.copy(self)
-        elif issubclass(type(dim), Literal):
+        elif issubclass(type(dim), Constant):
             # If g is a Local, Local(g) performs a deep copy.
             # This is for compatibility with Dat.
             self.__init__(dim._dim, None, dtype=dim.dtype,
@@ -374,20 +374,20 @@ class Global(SetFreeDataCarrier, VecAccessMixin):
 
 
 # has no comm, can only be READ
-class Literal(SetFreeDataCarrier):
+class Constant(SetFreeDataCarrier):
     _modes = [Access.READ]
 
     def __init__(self, dim, data=None, dtype=None, name=None, comm=None):
         if comm is not None:
-            raise ValueError("Literals should not have communicators")
+            raise ValueError("Constants should not have communicators")
         super().__init__(dim, data, dtype, name)
 
     def __str__(self):
-        return "OP2 Literal Argument: %s with dim %s and value %s" \
+        return "OP2 Constant Argument: %s with dim %s and value %s" \
             % (self._name, self._dim, self._data)
 
     def __repr__(self):
-        return "Literal(%r, %r, %r, %r)" % (
+        return "Constant(%r, %r, %r, %r)" % (
             self._dim,
             self._data,
             self._data.dtype,

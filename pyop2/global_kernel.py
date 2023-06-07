@@ -13,7 +13,7 @@ from pyop2 import compilation, mpi
 from pyop2.caching import Cached
 from pyop2.configuration import configuration
 from pyop2.datatypes import IntType, as_ctypes
-from pyop2.types import IterationRegion, Literal, READ
+from pyop2.types import IterationRegion, Constant, READ
 from pyop2.utils import cached_property, get_petsc_dir
 
 
@@ -283,11 +283,11 @@ class GlobalKernel(Cached):
             )
 
         if any(
-            isinstance(garg, Literal) and larg.access is not READ
+            isinstance(garg, Constant) and larg.access is not READ
             for larg, garg in zip(local_kernel.arguments, arguments)
         ):
             raise ValueError(
-                "Literals can only ever be read in a parloop, not modified"
+                "Constants can only ever be read in a parloop, not modified"
             )
 
         if pass_layer_arg and not extruded:
