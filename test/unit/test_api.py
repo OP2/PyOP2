@@ -1298,15 +1298,6 @@ class TestGlobalAPI:
         "Global len should be 1."
         assert len(g) == 1
 
-    # Globals now require comms so this test can never not raise a warning
-    # Furthermore, it no longer tests what it originally set out to test
-    # ~ def test_global_repr(self):
-        # ~ "Global repr should produce a Global object when eval'd."
-        # ~ from pyop2.op2 import Global  # noqa: needed by eval
-        # ~ from numpy import array, dtype  # noqa: needed by eval
-        # ~ g = op2.Global(1, 1, 'double', comm=COMM_WORLD)
-        # ~ assert isinstance(eval(repr(g)), op2.Global)
-
     def test_global_str(self):
         "Global should have the expected string representation."
         g = op2.Global(1, 1, 'double', comm=COMM_WORLD)

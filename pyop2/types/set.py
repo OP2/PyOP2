@@ -138,8 +138,8 @@ class Set:
         return hash((self._sizes, self._name))
 
     def __eq__(self, other):
-        """Two Sets are the same if they have the same sizes"""
-        return self._sizes == other._sizes
+        """Two Sets are the same if they have the same sizes and names."""
+        return self._sizes == other._sizes and self._name == other._name
 
     def __iter__(self):
         """Yield self when iterated over."""
