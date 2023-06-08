@@ -1594,7 +1594,7 @@ class TestParLoopAPI:
     def test_illegal_mat_iterset(self, sparsity):
         """ParLoop should reject a Mat argument using a different iteration
         set from the par_loop's."""
-        set1 = op2.Set(3)
+        set1 = op2.Set(2)
         m = op2.Mat(sparsity)
         rmap, cmap = sparsity.maps[0]
         kernel = op2.Kernel("static void k() { }", "k")

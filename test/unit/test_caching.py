@@ -118,7 +118,7 @@ class TestObjectCaching:
 
     @pytest.fixture(scope='class')
     def base_set2(self):
-        return op2.Set(2)
+        return op2.Set(1)
 
     @pytest.fixture(scope='class')
     def base_map(self, base_set):

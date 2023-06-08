@@ -99,7 +99,7 @@ class TestDirectLoop:
         with pytest.raises(MapValueError):
             op2.par_loop(
                 op2.Kernel(kernel_wo, "wo"),
-                op2.Set(42),
+                op2.Set(elems.size),
                 x(op2.WRITE)
             )
 
