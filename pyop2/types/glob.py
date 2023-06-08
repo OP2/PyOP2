@@ -1,6 +1,7 @@
 import contextlib
 import ctypes
 import operator
+import warnings
 
 import numpy as np
 from petsc4py import PETSc
@@ -242,8 +243,9 @@ class Global(SetFreeDataCarrier, VecAccessMixin):
     _modes = [Access.READ, Access.INC, Access.MIN, Access.MAX]
 
     def __init__(self, dim, data=None, dtype=None, name=None, comm=None):
+        if isinstance(dim, type(self)):
+            comm = dim.comm
         if comm is None:
-            import warnings
             warnings.warn("PyOP2.Global has no comm, this is likely to break in parallel!")
         self.comm = mpi.internal_comm(comm)
         super().__init__(dim, data, dtype, name)
