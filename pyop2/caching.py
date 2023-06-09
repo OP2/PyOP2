@@ -349,6 +349,8 @@ def _disk_cache_set(cachedir, key, value):
     tempfile.rename(filepath)
 
 
+# TODO LRU caches should probably emit a warning when they overflow, would make
+# development easier
 class CountedCache(collections.abc.MutableMapping, abc.ABC):
     def __init__(self):
         self.naccesses = 0
