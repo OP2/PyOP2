@@ -21,6 +21,133 @@ from pyop2.types.dataset import DataSet, GlobalDataSet, MixedDataSet
 from pyop2.types.map import Map, ComposedMap
 from pyop2.types.set import MixedSet, Set, Subset
 
+from pyop2.caching import cached, PLRUCache
+
+
+mycache = PLRUCache(16)
+
+def mykeyfunc(spar):
+    return spar.comm, (spar,)
+
+@cached(mycache, key=mykeyfunc)
+def _create_actual_monolithic_sparsity(spar):
+    #FIXME not handled
+    # blocks = []
+    # rows, cols = sparsity.shape
+    # for i in range(rows):
+    #     row = []
+    #     for j in range(cols):
+    #         row.append(MatBlock(???, i, j))
+    #     blocks.append(row)
+
+    mat = PETSc.Mat()
+    rset, cset = spar.dsets
+    rlgmap = rset.unblocked_lgmap
+    clgmap = cset.unblocked_lgmap
+
+    # duplicated
+    nrows = sum(d.size * d.cdim for d in spar.dsets[0])
+    ncols = sum(d.size * d.cdim for d in spar.dsets[1])
+
+    mat.createAIJ(size=((nrows, None), (ncols, None)),
+                  nnz=(spar.nnz, spar.onnz),
+                  bsize=1,
+                  comm=mpi.internal_comm(spar.comm))
+    mat.setLGMap(rmap=rlgmap, cmap=clgmap)
+    rows, cols = spar.shape
+    mat.setOption(mat.Option.IGNORE_ZERO_ENTRIES, False)
+    mat.setOption(mat.Option.KEEP_NONZERO_PATTERN, True)
+    # We completely fill the allocated matrix when zeroing the
+    # entries, so raise an error if we "missed" one.
+    mat.setOption(mat.Option.UNUSED_NONZERO_LOCATION_ERR, True)
+    mat.setOption(mat.Option.IGNORE_OFF_PROC_ENTRIES, False)
+    mat.setOption(mat.Option.NEW_NONZERO_ALLOCATION_ERR, True)
+    # The first assembly (filling with zeros) sets all possible entries.
+    mat.setOption(mat.Option.SUBSET_OFF_PROC_ENTRIES, True)
+    # Put zeros in all the places we might eventually put a value.
+    with profiling.timed_region("MatZeroInitial"):
+        rows, cols = spar.shape
+        for i in range(rows):
+            for j in range(cols):
+                subsparsity = SparsityBlock(spar, i, j)
+                rset, cset = spar.dsets
+                rowis = rset.local_ises[i]
+                colis = cset.local_ises[j]
+                handle = mat.getLocalSubMatrix(isrow=rowis,
+                                              iscol=colis)
+
+                sparsity.fill_with_zeros(handle,
+                                         subsparsity.dims[0][0],
+                                         subsparsity.maps,
+                                         subsparsity.iteration_regions,
+                                         set_diag=subsparsity._has_diagonal)
+
+    mat.assemble()
+    mat.setOption(mat.Option.NEW_NONZERO_LOCATION_ERR, True)
+    mat.setOption(mat.Option.IGNORE_ZERO_ENTRIES, True)
+    return mat
+
+
+@cached(mycache, key=mykeyfunc)
+def _create_block_sparsity(orig_sparsity):
+    rset, cset = orig_sparsity.dsets
+    if (isinstance(rset, GlobalDataSet) or isinstance(cset, GlobalDataSet)):
+        raise NotImplementedError
+
+    mat = PETSc.Mat()
+    row_lg = rset.lgmap
+    col_lg = cset.lgmap
+    rdim, cdim = orig_sparsity._dims[0][0]
+
+    if rdim == cdim and rdim > 1 and orig_sparsity._block_sparse:
+        # Size is total number of rows and columns, but the
+        # /sparsity/ is the block sparsity.
+        block_sparse = True
+        create = mat.createBAIJ
+    else:
+        # Size is total number of rows and columns, sparsity is
+        # the /dof/ sparsity.
+        block_sparse = False
+        create = mat.createAIJ
+
+    nrows = sum(d.size * d.cdim for d in orig_sparsity.dsets[0])
+    ncols = sum(d.size * d.cdim for d in orig_sparsity.dsets[1])
+    create(size=((nrows, None),
+                 (ncols, None)),
+           nnz=(orig_sparsity.nnz, orig_sparsity.onnz),
+           bsize=(rdim, cdim),
+           comm=orig_sparsity.comm)
+    mat.setLGMap(rmap=row_lg, cmap=col_lg)
+    # Stash entries destined for other processors
+    mat.setOption(mat.Option.IGNORE_OFF_PROC_ENTRIES, False)
+    # Any add or insertion that would generate a new entry that has not
+    # been preallocated will raise an error
+    mat.setOption(mat.Option.NEW_NONZERO_ALLOCATION_ERR, True)
+    # Do not ignore zeros while we fill the initial matrix so that
+    # petsc doesn't compress things out.
+    if not block_sparse:
+        mat.setOption(mat.Option.IGNORE_ZERO_ENTRIES, False)
+    # When zeroing rows (e.g. for enforcing Dirichlet bcs), keep those in
+    # the nonzero structure of the matrix. Otherwise PETSc would compact
+    # the sparsity and render our sparsity caching useless.
+    mat.setOption(mat.Option.KEEP_NONZERO_PATTERN, True)
+    # We completely fill the allocated matrix when zeroing the
+    # entries, so raise an error if we "missed" one.
+    mat.setOption(mat.Option.UNUSED_NONZERO_LOCATION_ERR, True)
+    # Put zeros in all the places we might eventually put a value.
+    with profiling.timed_region("MatZeroInitial"):
+        sparsity.fill_with_zeros(mat, orig_sparsity.dims[0][0],
+                                 orig_sparsity.maps, orig_sparsity.iteration_regions,
+                                 set_diag=orig_sparsity._has_diagonal)
+    mat.assemble()
+    mat.setOption(mat.Option.NEW_NONZERO_LOCATION_ERR, True)
+    # Now we've filled up our matrix, so the sparsity is
+    # "complete", we can ignore subsequent zero entries.
+    if not block_sparse:
+        mat.setOption(mat.Option.IGNORE_ZERO_ENTRIES, True)
+
+    return mat
+
 
 class Sparsity(caching.ObjectCached):
 
@@ -688,16 +815,10 @@ class Mat(AbstractMat):
         mat.assemble()
 
     def _init_monolithic(self):
-        mat = PETSc.Mat()
-        rset, cset = self.sparsity.dsets
-        rlgmap = rset.unblocked_lgmap
-        clgmap = cset.unblocked_lgmap
-        mat.createAIJ(size=((self.nrows, None), (self.ncols, None)),
-                      nnz=(self.sparsity.nnz, self.sparsity.onnz),
-                      bsize=1,
-                      comm=self.comm)
-        mat.setLGMap(rmap=rlgmap, cmap=clgmap)
-        self.handle = mat
+        # print("sparsity cache size: ", mycache.currsize(self.sparsity.comm))
+        sparsity = _create_actual_monolithic_sparsity(self.sparsity)
+        self.handle = sparsity.copy()
+
         self._blocks = []
         rows, cols = self.sparsity.shape
         for i in range(rows):
@@ -705,29 +826,6 @@ class Mat(AbstractMat):
             for j in range(cols):
                 row.append(MatBlock(self, i, j))
             self._blocks.append(row)
-        mat.setOption(mat.Option.IGNORE_ZERO_ENTRIES, False)
-        mat.setOption(mat.Option.KEEP_NONZERO_PATTERN, True)
-        # We completely fill the allocated matrix when zeroing the
-        # entries, so raise an error if we "missed" one.
-        mat.setOption(mat.Option.UNUSED_NONZERO_LOCATION_ERR, True)
-        mat.setOption(mat.Option.IGNORE_OFF_PROC_ENTRIES, False)
-        mat.setOption(mat.Option.NEW_NONZERO_ALLOCATION_ERR, True)
-        # The first assembly (filling with zeros) sets all possible entries.
-        mat.setOption(mat.Option.SUBSET_OFF_PROC_ENTRIES, True)
-        # Put zeros in all the places we might eventually put a value.
-        with profiling.timed_region("MatZeroInitial"):
-            for i in range(rows):
-                for j in range(cols):
-                    sparsity.fill_with_zeros(self[i, j].handle,
-                                             self[i, j].sparsity.dims[0][0],
-                                             self[i, j].sparsity.maps,
-                                             self[i, j].sparsity.iteration_regions,
-                                             set_diag=self[i, j].sparsity._has_diagonal)
-                    self[i, j].handle.assemble()
-
-        mat.assemble()
-        mat.setOption(mat.Option.NEW_NONZERO_LOCATION_ERR, True)
-        mat.setOption(mat.Option.IGNORE_ZERO_ENTRIES, True)
 
     def _init_nest(self):
         mat = PETSc.Mat()
@@ -747,62 +845,11 @@ class Mat(AbstractMat):
         self.handle = mat
 
     def _init_block(self):
+        # print("sparsity cache size: ", mycache.currsize(self.sparsity.comm))
+        bsparsity = _create_block_sparsity(self.sparsity)
+        self.handle = bsparsity.copy()
+
         self._blocks = [[self]]
-
-        rset, cset = self.sparsity.dsets
-        if (isinstance(rset, GlobalDataSet) or isinstance(cset, GlobalDataSet)):
-            self._init_global_block()
-            return
-
-        mat = PETSc.Mat()
-        row_lg = rset.lgmap
-        col_lg = cset.lgmap
-        rdim, cdim = self.dims[0][0]
-
-        if rdim == cdim and rdim > 1 and self.sparsity._block_sparse:
-            # Size is total number of rows and columns, but the
-            # /sparsity/ is the block sparsity.
-            block_sparse = True
-            create = mat.createBAIJ
-        else:
-            # Size is total number of rows and columns, sparsity is
-            # the /dof/ sparsity.
-            block_sparse = False
-            create = mat.createAIJ
-        create(size=((self.nrows, None),
-                     (self.ncols, None)),
-               nnz=(self.sparsity.nnz, self.sparsity.onnz),
-               bsize=(rdim, cdim),
-               comm=self.comm)
-        mat.setLGMap(rmap=row_lg, cmap=col_lg)
-        # Stash entries destined for other processors
-        mat.setOption(mat.Option.IGNORE_OFF_PROC_ENTRIES, False)
-        # Any add or insertion that would generate a new entry that has not
-        # been preallocated will raise an error
-        mat.setOption(mat.Option.NEW_NONZERO_ALLOCATION_ERR, True)
-        # Do not ignore zeros while we fill the initial matrix so that
-        # petsc doesn't compress things out.
-        if not block_sparse:
-            mat.setOption(mat.Option.IGNORE_ZERO_ENTRIES, False)
-        # When zeroing rows (e.g. for enforcing Dirichlet bcs), keep those in
-        # the nonzero structure of the matrix. Otherwise PETSc would compact
-        # the sparsity and render our sparsity caching useless.
-        mat.setOption(mat.Option.KEEP_NONZERO_PATTERN, True)
-        # We completely fill the allocated matrix when zeroing the
-        # entries, so raise an error if we "missed" one.
-        mat.setOption(mat.Option.UNUSED_NONZERO_LOCATION_ERR, True)
-        # Put zeros in all the places we might eventually put a value.
-        with profiling.timed_region("MatZeroInitial"):
-            sparsity.fill_with_zeros(mat, self.sparsity.dims[0][0],
-                                     self.sparsity.maps, self.sparsity.iteration_regions,
-                                     set_diag=self.sparsity._has_diagonal)
-        mat.assemble()
-        mat.setOption(mat.Option.NEW_NONZERO_LOCATION_ERR, True)
-        # Now we've filled up our matrix, so the sparsity is
-        # "complete", we can ignore subsequent zero entries.
-        if not block_sparse:
-            mat.setOption(mat.Option.IGNORE_ZERO_ENTRIES, True)
-        self.handle = mat
 
     def _init_global_block(self):
         """Initialise this block in the case where the matrix maps either
