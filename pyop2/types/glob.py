@@ -20,24 +20,11 @@ class SetFreeDataCarrier(DataCarrier, EmptyDataMixin):
 
     @utils.validate_type(('name', str, ex.NameTypeError))
     def __init__(self, dim, data=None, dtype=None, name=None):
-        if issubclass(type(dim), Global):
-            # If g is a Global, Global(g) performs a deep copy.
-            # This is for compatibility with Dat.
-            self.__init__(dim._dim, None, dtype=dim.dtype,
-                          name="copy_of_%s" % dim.name, comm=dim.comm)
-            dim.copy(self)
-        elif issubclass(type(dim), Constant):
-            # If g is a Local, Local(g) performs a deep copy.
-            # This is for compatibility with Dat.
-            self.__init__(dim._dim, None, dtype=dim.dtype,
-                          name="copy_of_%s" % dim.name)
-            dim.copy(self)
-        else:
-            self._dim = utils.as_tuple(dim, int)
-            self._cdim = np.prod(self._dim).item()
-            EmptyDataMixin.__init__(self, data, dtype, self._dim)
-            self._buf = np.empty(self.shape, dtype=self.dtype)
-            self._name = name or "%s_#x%x" % (self.__class__.__name__.lower(), id(self))
+        self._dim = utils.as_tuple(dim, int)
+        self._cdim = np.prod(self._dim).item()
+        EmptyDataMixin.__init__(self, data, dtype, self._dim)
+        self._buf = np.empty(self.shape, dtype=self.dtype)
+        self._name = name or "%s_#x%x" % (self.__class__.__name__.lower(), id(self))
 
     def __del__(self):
         if hasattr(self, "comm"):
@@ -243,15 +230,28 @@ class Global(SetFreeDataCarrier, VecAccessMixin):
     _modes = [Access.READ, Access.INC, Access.MIN, Access.MAX]
 
     def __init__(self, dim, data=None, dtype=None, name=None, comm=None):
-        if isinstance(dim, type(self)):
-            comm = dim.comm
-        if comm is None:
-            warnings.warn("PyOP2.Global has no comm, this is likely to break in parallel!")
-        self.comm = mpi.internal_comm(comm)
-        super().__init__(dim, data, dtype, name)
-        # Object versioning setup
-        petsc_counter = (comm and self.dtype == PETSc.ScalarType)
-        VecAccessMixin.__init__(self, petsc_counter=petsc_counter)
+        if isinstance(dim, (type(self), Constant)):
+            # If g is a Global, Global(g) performs a deep copy.
+            # If g is a Constant, Global(g) performs a deep copy,
+            # but a comm should be provided.
+            # This is for compatibility with Dat.
+            self.__init__(
+                dim._dim,
+                None,
+                dtype=dim.dtype,
+                name="copy_of_%s" % dim.name,
+                comm=comm or dim.comm
+            )
+            dim.copy(self)
+        else:
+            super().__init__(dim, data, dtype, name)
+            if comm is None:
+                warnings.warn("PyOP2.Global has no comm, this is likely to break in parallel!")
+            self.comm = mpi.internal_comm(comm)
+
+            # Object versioning setup
+            petsc_counter = (comm and self.dtype == PETSc.ScalarType)
+            VecAccessMixin.__init__(self, petsc_counter=petsc_counter)
 
     def __del__(self):
         if hasattr(self, "comm"):
@@ -377,12 +377,32 @@ class Global(SetFreeDataCarrier, VecAccessMixin):
 
 # has no comm, can only be READ
 class Constant(SetFreeDataCarrier):
+    """OP2 constant value.
+
+    When a ``Constant`` is passed to a :func:`pyop2.op2.par_loop`, the access
+    descriptor is always ``Access.READ``. Used in cases where collective
+    functionality is not required, or is not desirable.
+    For example: objects with no associated mesh and do not have a
+    communicator.
+    """
     _modes = [Access.READ]
 
     def __init__(self, dim, data=None, dtype=None, name=None, comm=None):
-        if comm is not None:
-            raise ValueError("Constants should not have communicators")
-        super().__init__(dim, data, dtype, name)
+        if isinstance(dim, (type(self), Global)):
+            # If g is a Constant, Constant(g) performs a deep copy.
+            # If g is a Global, Constant(g) performs a deep copy, dropping the comm.
+            # This is for compatibility with Dat.
+            self.__init__(
+                dim._dim,
+                None,
+                dtype=dim.dtype,
+                name="copy_of_%s" % dim.name
+            )
+            dim.copy(self)
+        else:
+            super().__init__(dim, data, dtype, name)
+            if comm is not None:
+                raise ValueError("Constants should not have communicators")
 
     def __str__(self):
         return "OP2 Constant Argument: %s with dim %s and value %s" \
