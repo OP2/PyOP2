@@ -69,3 +69,8 @@ def dtype_limits(dtype):
         except ValueError as e:
             raise ValueError("Unable to determine numeric limits from %s" % dtype) from e
     return info.min, info.max
+
+
+class PetscMatType(lp.types.OpaqueType):
+    def __init__(self):
+        super().__init__(name="Mat")

@@ -526,11 +526,6 @@ class LegacyArg(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def dtype(self):
-        pass
-
-    @property
-    @abc.abstractmethod
     def global_kernel_arg(self):
         """Return a corresponding :class:`GlobalKernelArg`."""
 
@@ -667,20 +662,20 @@ class MixedMatLegacyArg(LegacyArg):
 
 @dataclass
 class PassthroughArg(LegacyArg):
-    """Argument that is merely passed to the local kernel."""
+    """Argument that is simply passed to the local kernel without packing.
+
+    :param dtype: The datatype of the argument. This is needed for code generation.
+    :param data: 
+    """
     # We don't know what the local kernel is doing with this argument
     access = Access.RW
 
-    signature: str
-    data: Any
-
-    @property
-    def dtype(self):
-        return self.signature
+    dtype: Any
+    data: int
 
     @property
     def global_kernel_arg(self):
-        return PassthroughKernelArg(self.signature)
+        return PassthroughKernelArg()
 
     @property
     def parloop_arg(self):

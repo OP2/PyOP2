@@ -258,7 +258,7 @@ class TestDirectLoop:
 static void mat_inc(Mat mat) {
     PetscScalar values[] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
     PetscInt idxs[] = {0, 2, 4};
-    MatSetValues(mat, values, 3, idxs, 3, idxs, ADD_VALUES);
+    MatSetValues(mat, 3, idxs, 3, idxs, values, ADD_VALUES);
 }
         """
         kernel = op2.Kernel(c_kernel, "mat_inc")
@@ -270,11 +270,21 @@ static void mat_inc(Mat mat) {
         petsc_mat.setValues([0, 2, 4], [0, 2, 4], np.zeros((3, 3), dtype=PETSc.ScalarType))
         petsc_mat.assemble()
 
-        arg = op2.PassthroughArg(PetscMat(), petsc_mat.handle)
+        arg = op2.PassthroughArg(op2.PetscMatType(), petsc_mat.handle)
         op2.par_loop(kernel, iterset, arg)
         petsc_mat.assemble()
 
-        assert False, "TODO"
+        assert np.allclose(
+            petsc_mat.getValues(range(5), range(5)),
+            [
+                [10, 0, 20, 0, 30],
+                [0]*5,
+                [40, 0, 50, 0, 60],
+                [0]*5,
+                [70, 0, 80, 0, 90],
+            ]
+        )
+
 
 
 if __name__ == '__main__':

@@ -30,12 +30,3 @@ ON_INTERIOR_FACETS = IterationRegion.INTERIOR_FACETS
 
 ALL = IterationRegion.ALL
 """Iterate over all cells of an extruded mesh."""
-
-
-# TODO move this someplace better
-class PetscMatType(OpaqueType):
-
-    def __init__(self):
-        super().__init__(name="Mat")
-
-

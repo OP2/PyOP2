@@ -195,13 +195,10 @@ class MixedDatKernelArg:
         return DatPack
 
 
-@dataclass(frozen=True)
 class PassthroughKernelArg:
-    signature: str
-
     @property
     def cache_key(self):
-        return type(self), self.signature
+        return type(self)
 
     @property
     def maps(self):
@@ -342,7 +339,6 @@ class GlobalKernel(Cached):
         except KeyError:
             func = self.compile(comm)
             self._func_cache[key] = func
-        # breakpoint()
         func(*args)
 
     @property

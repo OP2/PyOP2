@@ -36,6 +36,7 @@
 import atexit
 
 from pyop2.configuration import configuration
+from pyop2.datatypes import PetscMatType
 from pyop2.logger import debug, info, warning, error, critical, set_log_level
 from pyop2.mpi import MPI, COMM_WORLD, collective
 
@@ -46,7 +47,7 @@ from pyop2.types import (  # noqa: F401
     Dat, MixedDat, DatView, Mat
 )
 from pyop2.types import (READ, WRITE, RW, INC, MIN, MAX,
-                         ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL, PetscMatType)
+                         ON_BOTTOM, ON_TOP, ON_INTERIOR_FACETS, ALL)
 
 from pyop2.local_kernel import CStringLocalKernel, LoopyLocalKernel, Kernel  # noqa: F401
 from pyop2.global_kernel import (GlobalKernelArg, DatKernelArg, MixedDatKernelArg,  # noqa: F401

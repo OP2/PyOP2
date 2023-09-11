@@ -22,12 +22,6 @@ from pyop2.op2 import (ALL, INC, MAX, MIN, ON_BOTTOM, ON_INTERIOR_FACETS,
 from pyop2.utils import cached_property
 
 
-class PetscMat(OpaqueType):
-
-    def __init__(self):
-        super().__init__(name="Mat")
-
-
 def _Remainder(a, b):
     # ad hoc replacement of Remainder()
     # Replace this with Remainder(a, b) once it gets fixed.
@@ -231,11 +225,10 @@ class PassthroughPack(Pack):
         self.outer = outer
 
     def kernel_arg(self, loop_indices=None):
-        # return Indexed(self.outer, ())
         return self.outer
 
     def pack(self, loop_indices=None):
-        assert False, "used?"
+        pass
 
     def emit_pack_instruction(self, **kwargs):
         return ()
