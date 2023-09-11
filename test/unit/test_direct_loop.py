@@ -34,6 +34,7 @@
 
 import pytest
 import numpy as np
+from petsc4py import PETSc
 
 from pyop2 import op2
 from pyop2.exceptions import MapValueError
@@ -248,6 +249,32 @@ class TestDirectLoop:
         op2.par_loop(k, y.dataset.set, y(op2.RW))
 
         assert (y.data == 10.5).all()
+
+    def test_passthrough_mat(self):
+        niters = 10
+        iterset = op2.Set(niters)
+
+        c_kernel = """
+static void mat_inc(Mat mat) {
+    PetscScalar values[] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
+    PetscInt idxs[] = {0, 2, 4};
+    MatSetValues(mat, values, 3, idxs, 3, idxs, ADD_VALUES);
+}
+        """
+        kernel = op2.Kernel(c_kernel, "mat_inc")
+
+        # create a tiny 5x5 sparse matrix
+        petsc_mat = PETSc.Mat().create()
+        petsc_mat.setSizes(5)
+        petsc_mat.setUp()
+        petsc_mat.setValues([0, 2, 4], [0, 2, 4], np.zeros((3, 3), dtype=PETSc.ScalarType))
+        petsc_mat.assemble()
+
+        arg = op2.PassthroughArg(PetscMat(), petsc_mat.handle)
+        op2.par_loop(kernel, iterset, arg)
+        petsc_mat.assemble()
+
+        assert False, "TODO"
 
 
 if __name__ == '__main__':

@@ -1,4 +1,5 @@
 import enum
+from loopy.types import OpaqueType
 
 from .access import *  # noqa: F401
 from .data_carrier import *  # noqa: F401
@@ -29,3 +30,12 @@ ON_INTERIOR_FACETS = IterationRegion.INTERIOR_FACETS
 
 ALL = IterationRegion.ALL
 """Iterate over all cells of an extruded mesh."""
+
+
+# TODO move this someplace better
+class PetscMatType(OpaqueType):
+
+    def __init__(self):
+        super().__init__(name="Mat")
+
+

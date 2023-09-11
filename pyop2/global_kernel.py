@@ -196,6 +196,19 @@ class MixedDatKernelArg:
 
 
 @dataclass(frozen=True)
+class PassthroughKernelArg:
+    signature: str
+
+    @property
+    def cache_key(self):
+        return type(self), self.signature
+
+    @property
+    def maps(self):
+        return ()
+
+
+@dataclass(frozen=True)
 class MixedMatKernelArg:
     """Class representing a :class:`pyop2.types.MixedDat` being passed to the kernel.
 
@@ -329,6 +342,7 @@ class GlobalKernel(Cached):
         except KeyError:
             func = self.compile(comm)
             self._func_cache[key] = func
+        # breakpoint()
         func(*args)
 
     @property

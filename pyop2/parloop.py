@@ -13,7 +13,7 @@ from pyop2.configuration import configuration
 from pyop2.datatypes import as_numpy_dtype
 from pyop2.exceptions import KernelTypeError, MapValueError, SetTypeError
 from pyop2.global_kernel import (GlobalKernelArg, DatKernelArg, MixedDatKernelArg,
-                                 MatKernelArg, MixedMatKernelArg, GlobalKernel)
+                                 MatKernelArg, MixedMatKernelArg, PassthroughKernelArg, GlobalKernel)
 from pyop2.local_kernel import LocalKernel, CStringLocalKernel, LoopyLocalKernel
 from pyop2.types import (Access, Global, AbstractDat, Dat, DatView, MixedDat, Mat, Set,
                          MixedSet, ExtrudedSet, Subset, Map, ComposedMap, MixedMap)
@@ -39,6 +39,10 @@ class GlobalParloopArg(ParloopArg):
     data: Global
 
     @property
+    def _kernel_args_(self):
+        return self.data._kernel_args_
+
+    @property
     def map_kernel_args(self):
         return ()
 
@@ -57,6 +61,10 @@ class DatParloopArg(ParloopArg):
     def __post_init__(self):
         if self.map_ is not None:
             self.check_map(self.map_)
+
+    @property
+    def _kernel_args_(self):
+        return self.data._kernel_args_
 
     @property
     def map_kernel_args(self):
@@ -81,6 +89,10 @@ class MixedDatParloopArg(ParloopArg):
         self.check_map(self.map_)
 
     @property
+    def _kernel_args_(self):
+        return self.data._kernel_args_
+
+    @property
     def map_kernel_args(self):
         return self.map_._kernel_args_ if self.map_ else ()
 
@@ -102,6 +114,10 @@ class MatParloopArg(ParloopArg):
             self.check_map(m)
 
     @property
+    def _kernel_args_(self):
+        return self.data._kernel_args_
+
+    @property
     def map_kernel_args(self):
         rmap, cmap = self.maps
         return tuple(itertools.chain(*itertools.product(rmap._kernel_args_, cmap._kernel_args_)))
@@ -120,9 +136,31 @@ class MixedMatParloopArg(ParloopArg):
             self.check_map(m)
 
     @property
+    def _kernel_args_(self):
+        return self.data._kernel_args_
+
+    @property
     def map_kernel_args(self):
         rmap, cmap = self.maps
         return tuple(itertools.chain(*itertools.product(rmap._kernel_args_, cmap._kernel_args_)))
+
+
+@dataclass
+class PassthroughParloopArg(ParloopArg):
+    # a pointer
+    data: int
+
+    @property
+    def _kernel_args_(self):
+        return (self.data,)
+
+    @property
+    def map_kernel_args(self):
+        return ()
+
+    @property
+    def maps(self):
+        return ()
 
 
 class Parloop:
@@ -170,7 +208,7 @@ class Parloop:
         """Prepare the argument list for calling generated code."""
         arglist = self.iterset._kernel_args_
         for d in self.arguments:
-            arglist += d.data._kernel_args_
+            arglist += d._kernel_args_
 
         # Collect an ordered set of maps (ignore duplicates)
         maps = {m: None for d in self.arguments for m in d.map_kernel_args}
@@ -488,6 +526,11 @@ class LegacyArg(abc.ABC):
 
     @property
     @abc.abstractmethod
+    def dtype(self):
+        pass
+
+    @property
+    @abc.abstractmethod
     def global_kernel_arg(self):
         """Return a corresponding :class:`GlobalKernelArg`."""
 
@@ -503,6 +546,10 @@ class GlobalLegacyArg(LegacyArg):
 
     data: Global
     access: Access
+
+    @property
+    def dtype(self):
+        return self.data.dtype
 
     @property
     def global_kernel_arg(self):
@@ -522,6 +569,10 @@ class DatLegacyArg(LegacyArg):
     access: Access
 
     @property
+    def dtype(self):
+        return self.data.dtype
+
+    @property
     def global_kernel_arg(self):
         map_arg = self.map_._global_kernel_arg if self.map_ is not None else None
         index = self.data.index if isinstance(self.data, DatView) else None
@@ -539,6 +590,10 @@ class MixedDatLegacyArg(LegacyArg):
     data: MixedDat
     map_: MixedMap
     access: Access
+
+    @property
+    def dtype(self):
+        return self.data.dtype
 
     @property
     def global_kernel_arg(self):
@@ -564,6 +619,10 @@ class MatLegacyArg(LegacyArg):
     needs_unrolling: Optional[bool] = False
 
     @property
+    def dtype(self):
+        return self.data.dtype
+
+    @property
     def global_kernel_arg(self):
         map_args = [m._global_kernel_arg for m in self.maps]
         return MatKernelArg(self.data.dims, tuple(map_args), unroll=self.needs_unrolling)
@@ -584,6 +643,10 @@ class MixedMatLegacyArg(LegacyArg):
     needs_unrolling: Optional[bool] = False
 
     @property
+    def dtype(self):
+        return self.data.dtype
+
+    @property
     def global_kernel_arg(self):
         nrows, ncols = self.data.sparsity.shape
         mr, mc = self.maps
@@ -600,6 +663,28 @@ class MixedMatLegacyArg(LegacyArg):
     @property
     def parloop_arg(self):
         return MixedMatParloopArg(self.data, tuple(self.maps), self.lgmaps)
+
+
+@dataclass
+class PassthroughArg(LegacyArg):
+    """Argument that is merely passed to the local kernel."""
+    # We don't know what the local kernel is doing with this argument
+    access = Access.RW
+
+    signature: str
+    data: Any
+
+    @property
+    def dtype(self):
+        return self.signature
+
+    @property
+    def global_kernel_arg(self):
+        return PassthroughKernelArg(self.signature)
+
+    @property
+    def parloop_arg(self):
+        return PassthroughParloopArg(self.data)
 
 
 def ParLoop(*args, **kwargs):
@@ -625,7 +710,7 @@ def LegacyParloop(local_knl, iterset, *args, **kwargs):
     # finish building the local kernel
     local_knl.accesses = tuple(a.access for a in args)
     if isinstance(local_knl, CStringLocalKernel):
-        local_knl.dtypes = tuple(a.data.dtype for a in args)
+        local_knl.dtypes = tuple(a.dtype for a in args)
 
     global_knl_args = tuple(a.global_kernel_arg for a in args)
     extruded = iterset._extruded

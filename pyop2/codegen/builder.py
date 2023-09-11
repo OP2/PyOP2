@@ -6,7 +6,7 @@ from functools import reduce
 import numpy
 from loopy.types import OpaqueType
 from pyop2.global_kernel import (GlobalKernelArg, DatKernelArg, MixedDatKernelArg,
-                                 MatKernelArg, MixedMatKernelArg, PermutedMapKernelArg, ComposedMapKernelArg)
+                                 MatKernelArg, MixedMatKernelArg, PermutedMapKernelArg, ComposedMapKernelArg, PassthroughKernelArg)
 from pyop2.codegen.representation import (Accumulate, Argument, Comparison, Conditional,
                                           DummyInstruction, Extent, FixedIndex,
                                           FunctionCall, Index, Indexed,
@@ -224,6 +224,24 @@ class Pack(metaclass=ABCMeta):
     @abstractmethod
     def emit_unpack_instruction(self, *, loop_indices=None):
         """Either yield an instruction, or else return an empty tuple (to indicate no instruction)"""
+
+
+class PassthroughPack(Pack):
+    def __init__(self, outer):
+        self.outer = outer
+
+    def kernel_arg(self, loop_indices=None):
+        # return Indexed(self.outer, ())
+        return self.outer
+
+    def pack(self, loop_indices=None):
+        assert False, "used?"
+
+    def emit_pack_instruction(self, **kwargs):
+        return ()
+
+    def emit_unpack_instruction(self, **kwargs):
+        return ()
 
 
 class GlobalPack(Pack):
@@ -813,7 +831,12 @@ class WrapperBuilder(object):
         dtype = local_arg.dtype
         interior_horizontal = self.iteration_region == ON_INTERIOR_FACETS
 
-        if isinstance(arg, GlobalKernelArg):
+        if isinstance(arg, PassthroughKernelArg):
+            argument = Argument((), dtype, pfx="arg")
+            pack = PassthroughPack(argument)
+            self.arguments.append(argument)
+
+        elif isinstance(arg, GlobalKernelArg):
             argument = Argument(arg.dim, dtype, pfx="glob")
 
             pack = GlobalPack(argument, access,
@@ -949,7 +972,7 @@ class WrapperBuilder(object):
         args = self.kernel_args
         access = tuple(self.loopy_argument_accesses)
         # assuming every index is free index
-        free_indices = set(itertools.chain.from_iterable(arg.multiindex for arg in args))
+        free_indices = set(itertools.chain.from_iterable(arg.multiindex for arg in args if isinstance(arg, Indexed)))
         # remove runtime index
         free_indices = tuple(i for i in free_indices if isinstance(i, Index))
         if self.pass_layer_to_kernel:
