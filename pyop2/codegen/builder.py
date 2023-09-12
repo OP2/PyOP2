@@ -16,7 +16,7 @@ from pyop2.codegen.representation import (Accumulate, Argument, Comparison, Cond
                                           PreUnpackInst, Product, RuntimeIndex,
                                           Sum, Symbol, UnpackInst, Variable,
                                           When, Zero)
-from pyop2.datatypes import IntType
+from pyop2.datatypes import IntType, PetscMatType
 from pyop2.op2 import (ALL, INC, MAX, MIN, ON_BOTTOM, ON_INTERIOR_FACETS,
                        ON_TOP, READ, RW, WRITE)
 from pyop2.utils import cached_property
@@ -872,7 +872,7 @@ class WrapperBuilder(object):
             pack = MixedDatPack(packs, access, dtype,
                                 interior_horizontal=interior_horizontal)
         elif isinstance(arg, MatKernelArg):
-            argument = Argument((), PetscMat(), pfx="mat")
+            argument = Argument((), PetscMatType(), pfx="mat")
             maps = tuple(self._add_map(m, arg.unroll)
                          for m in arg.maps)
             pack = arg.pack(argument, access, maps,
@@ -882,7 +882,7 @@ class WrapperBuilder(object):
         elif isinstance(arg, MixedMatKernelArg):
             packs = []
             for a in arg:
-                argument = Argument((), PetscMat(), pfx="mat")
+                argument = Argument((), PetscMatType(), pfx="mat")
                 maps = tuple(self._add_map(m, a.unroll)
                              for m in a.maps)
 
