@@ -74,3 +74,6 @@ def dtype_limits(dtype):
 class PetscMatType(lp.types.OpaqueType):
     def __init__(self):
         super().__init__(name="Mat")
+
+    def __repr__(self):
+        return type(self).__name__
