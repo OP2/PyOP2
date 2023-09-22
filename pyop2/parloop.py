@@ -665,7 +665,7 @@ class PassthroughArg(LegacyArg):
     """Argument that is simply passed to the local kernel without packing.
 
     :param dtype: The datatype of the argument. This is needed for code generation.
-    :param data: 
+    :param data: A pointer to the data.
     """
     # We don't know what the local kernel is doing with this argument
     access = Access.RW

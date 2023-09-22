@@ -36,7 +36,7 @@
 import atexit
 
 from pyop2.configuration import configuration
-from pyop2.datatypes import PetscMatType
+from pyop2.datatypes import PetscMatType  # noqa: F401
 from pyop2.logger import debug, info, warning, error, critical, set_log_level
 from pyop2.mpi import MPI, COMM_WORLD, collective
 
