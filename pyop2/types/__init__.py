@@ -1,5 +1,4 @@
 import enum
-from loopy.types import OpaqueType
 
 from .access import *  # noqa: F401
 from .data_carrier import *  # noqa: F401

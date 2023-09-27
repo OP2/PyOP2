@@ -4,7 +4,6 @@ from collections import OrderedDict
 from functools import reduce
 
 import numpy
-from loopy.types import OpaqueType
 from pyop2.global_kernel import (GlobalKernelArg, DatKernelArg, MixedDatKernelArg,
                                  MatKernelArg, MixedMatKernelArg, PermutedMapKernelArg, ComposedMapKernelArg, PassthroughKernelArg)
 from pyop2.codegen.representation import (Accumulate, Argument, Comparison, Conditional,
