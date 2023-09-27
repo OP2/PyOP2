@@ -71,9 +71,34 @@ def dtype_limits(dtype):
     return info.min, info.max
 
 
-class PetscMatType(lp.types.OpaqueType):
-    def __init__(self):
-        super().__init__(name="Mat")
+class PetscObjectType(lp.types.OpaqueType):
+    def __init__(self, name="PetscObject"):
+        super().__init__(name=name)
 
     def __repr__(self):
         return type(self).__name__
+
+
+class PetscISType(PetscObjectType):
+    def __init__(self):
+        super().__init__(name="IS")
+
+
+class PetscVecType(PetscObjectType):
+    def __init__(self):
+        super().__init__(name="Vec")
+
+
+class PetscMatType(PetscObjectType):
+    def __init__(self):
+        super().__init__(name="Mat")
+
+
+class PetscPCType(PetscObjectType):
+    def __init__(self):
+        super().__init__(name="PC")
+
+
+class PetscKSPType(PetscObjectType):
+    def __init__(self):
+        super().__init__(name="KSP")
