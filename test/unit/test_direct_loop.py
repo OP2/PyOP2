@@ -270,7 +270,7 @@ static void mat_inc(Mat mat) {
         petsc_mat.setValues([0, 2, 4], [0, 2, 4], np.zeros((3, 3), dtype=PETSc.ScalarType))
         petsc_mat.assemble()
 
-        arg = op2.PassthroughArg(op2.PetscMatType(), petsc_mat.handle)
+        arg = op2.PassthroughArg(op2.mat_dtype, petsc_mat.handle)
         op2.par_loop(kernel, iterset, arg)
         petsc_mat.assemble()
 
