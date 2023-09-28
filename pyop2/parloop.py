@@ -266,6 +266,8 @@ class Parloop:
     def increment_dat_version(self):
         """Increment dat versions of :class:`DataCarrier`s in the arguments."""
         for lk_arg, gk_arg, pl_arg in self.zipped_arguments:
+            if isinstance(pl_arg, PassthroughParloopArg):
+                continue
             assert isinstance(pl_arg.data, DataCarrier)
             if lk_arg.access is not Access.READ:
                 if pl_arg.data in self.reduced_globals:
