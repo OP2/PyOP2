@@ -77,6 +77,3 @@ class OpaqueType(lp.types.OpaqueType):
 
     def __repr__(self):
         return self.name
-
-
-mat_dtype = OpaqueType("Mat")
