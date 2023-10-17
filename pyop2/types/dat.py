@@ -833,6 +833,10 @@ class MixedDat(AbstractDat, VecAccessMixin):
     def _halo_frozen(self):
         return pytools.single_valued(d._halo_frozen for d in self._dats)
 
+    def increment_dat_version(self):
+        for d in self:
+            d.increment_dat_version()
+
     def __call__(self, access, path=None):
         from pyop2.parloop import MixedDatLegacyArg
         return MixedDatLegacyArg(self, path, access)
