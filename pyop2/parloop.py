@@ -363,7 +363,7 @@ class Parloop:
         seen = set()
         indices = []
         for i, (lknl_arg, gknl_arg, pl_arg) in enumerate(self.zipped_arguments):
-            if (isinstance(gknl_arg, DatKernelArg) and pl_arg.data not in seen
+            if (isinstance(gknl_arg, (DatKernelArg, MixedDatKernelArg)) and pl_arg.data not in seen
                     and gknl_arg.is_indirect
                     and lknl_arg.access in {Access.INC, Access.MIN, Access.MAX}):
                 indices.append(i)
