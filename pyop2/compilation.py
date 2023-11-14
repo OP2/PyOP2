@@ -42,6 +42,7 @@ import ctypes
 import shlex
 from hashlib import md5
 from packaging.version import Version, InvalidVersion
+import weakref
 
 
 from pyop2 import mpi
@@ -189,13 +190,9 @@ class Compiler(ABC):
 
         # Compilation communicators are reference counted on the PyOP2 comm
         self.pcomm = mpi.internal_comm(comm)
+        weakref.finalize(self, mpi.decref, self.pcomm)
         self.comm = mpi.compilation_comm(self.pcomm)
-
-    def __del__(self):
-        if hasattr(self, "comm"):
-            mpi.decref(self.comm)
-        if hasattr(self, "pcomm"):
-            mpi.decref(self.pcomm)
+        weakref.finalize(self, mpi.decref, self.comm)
 
     def __repr__(self):
         return f"<{self._name} compiler, version {self.version or 'unknown'}>"

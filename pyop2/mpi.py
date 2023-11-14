@@ -42,6 +42,7 @@ import gc
 import glob
 import os
 import tempfile
+import weakref
 
 from pyop2.configuration import configuration
 from pyop2.exceptions import CompilationError
@@ -267,9 +268,7 @@ class temp_internal_comm:
     def __init__(self, comm):
         self.user_comm = comm
         self.internal_comm = internal_comm(self.user_comm)
-
-    def __del__(self):
-        decref(self.internal_comm)
+        weakref.finalize(self, decref, self.internal_comm)
 
     def __enter__(self):
         """ Returns an internal comm that will be safely decref'd

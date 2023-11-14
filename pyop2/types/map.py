@@ -1,6 +1,7 @@
 import itertools
 import functools
 import numbers
+import weakref
 
 import numpy as np
 
@@ -37,6 +38,7 @@ class Map:
         self._iterset = iterset
         self._toset = toset
         self.comm = mpi.internal_comm(toset.comm)
+        weakref.finalize(self, mpi.decref, self.comm)
         self._arity = arity
         self._values = utils.verify_reshape(values, dtypes.IntType,
                                             (iterset.total_size, arity), allow_none=True)
@@ -52,10 +54,6 @@ class Map:
             self._offset_quotient = utils.verify_reshape(offset_quotient, dtypes.IntType, (arity, ))
         # A cache for objects built on top of this map
         self._cache = {}
-
-    def __del__(self):
-        if hasattr(self, "comm"):
-            mpi.decref(self.comm)
 
     @utils.cached_property
     def _kernel_args_(self):
@@ -201,6 +199,7 @@ class PermutedMap(Map):
             raise NotImplementedError("PermutedMap of ComposedMap not implemented: simply permute before composing")
         self.map_ = map_
         self.comm = mpi.internal_comm(map_.comm)
+        weakref.finalize(self, mpi.decref, self.comm)
         self.permutation = np.asarray(permutation, dtype=Map.dtype)
         assert (np.unique(permutation) == np.arange(map_.arity, dtype=Map.dtype)).all()
 
@@ -252,6 +251,7 @@ class ComposedMap(Map):
         self._iterset = maps_[-1].iterset
         self._toset = maps_[0].toset
         self.comm = mpi.internal_comm(self._toset.comm)
+        weakref.finalize(self, mpi.decref, self.comm)
         self._arity = maps_[0].arity
         # Don't call super().__init__() to avoid calling verify_reshape()
         self._values = None
@@ -316,6 +316,7 @@ class MixedMap(Map, caching.ObjectCached):
         if len(comms) == 0:
             raise ex.MapTypeError("Don't know how to make communicator")
         self.comm = mpi.internal_comm(comms[0])
+        weakref.finalize(self, mpi.decref, self.comm)
         self._initialized = True
 
     @classmethod
