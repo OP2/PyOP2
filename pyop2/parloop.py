@@ -3,6 +3,7 @@ import itertools
 import operator
 from dataclasses import dataclass
 from typing import Any, Optional, Tuple
+import weakref
 
 import loopy as lp
 import numpy as np
@@ -152,11 +153,8 @@ class Parloop:
         self.global_kernel = global_knl
         self.iterset = iterset
         self.comm = mpi.internal_comm(iterset.comm)
+        weakref.finalize(self, mpi.decref, self.comm)
         self.arguments, self.reduced_globals = self.prepare_reduced_globals(arguments, global_knl)
-
-    def __del__(self):
-        if hasattr(self, "comm"):
-            mpi.decref(self.comm)
 
     @property
     def local_kernel(self):

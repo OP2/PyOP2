@@ -1,6 +1,7 @@
 import ctypes
 import functools
 import numbers
+import weakref
 
 import numpy as np
 
@@ -66,6 +67,7 @@ class Set:
                          ('name', str, ex.NameTypeError))
     def __init__(self, size, name=None, halo=None, comm=None):
         self.comm = mpi.internal_comm(comm)
+        weakref.finalize(self, mpi.decref, self.comm)
         if isinstance(size, numbers.Integral):
             size = [size] * 3
         size = utils.as_tuple(size, numbers.Integral, 3)
@@ -77,12 +79,6 @@ class Set:
         self._partition_size = 1024
         # A cache of objects built on top of this set
         self._cache = {}
-
-    def __del__(self):
-        # Cannot use hasattr here, since child classes define `__getattr__`
-        # This causes infinite recursion when looked up!
-        if "comm" in self.__dict__:
-            mpi.decref(self.comm)
 
     @utils.cached_property
     def core_size(self):
@@ -234,6 +230,7 @@ class GlobalSet(Set):
 
     def __init__(self, comm=None):
         self.comm = mpi.internal_comm(comm)
+        weakref.finalize(self, mpi.decref, self.comm)
         self._cache = {}
 
     @utils.cached_property
@@ -319,6 +316,7 @@ class ExtrudedSet(Set):
     def __init__(self, parent, layers, extruded_periodic=False):
         self._parent = parent
         self.comm = mpi.internal_comm(parent.comm)
+        weakref.finalize(self, mpi.decref, self.comm)
         try:
             layers = utils.verify_reshape(layers, dtypes.IntType, (parent.total_size, 2))
             self.constant_layers = False
@@ -400,6 +398,7 @@ class Subset(ExtrudedSet):
                          ('indices', (list, tuple, np.ndarray), TypeError))
     def __init__(self, superset, indices):
         self.comm = mpi.internal_comm(superset.comm)
+        weakref.finalize(self, mpi.decref, self.comm)
 
         # sort and remove duplicates
         indices = np.unique(indices)
@@ -544,11 +543,8 @@ class MixedSet(Set, caching.ObjectCached):
             "All components of a MixedSet must have the same number of layers."
         # TODO: do all sets need the same communicator?
         self.comm = mpi.internal_comm(functools.reduce(lambda a, b: a or b, map(lambda s: s if s is None else s.comm, sets)))
+        weakref.finalize(self, mpi.decref, self.comm)
         self._initialized = True
-
-    def __del__(self):
-        if self._initialized and hasattr(self, "comm"):
-            mpi.decref(self.comm)
 
     @utils.cached_property
     def _kernel_args_(self):

@@ -3,6 +3,7 @@ import contextlib
 import ctypes
 import itertools
 import operator
+import weakref
 
 import loopy as lp
 import numpy as np
@@ -83,15 +84,12 @@ class AbstractDat(DataCarrier, EmptyDataMixin, abc.ABC):
 
         self._dataset = dataset
         self.comm = mpi.internal_comm(dataset.comm)
+        weakref.finalize(self, mpi.decref, self.comm)
         self.halo_valid = True
         self._name = name or "dat_#x%x" % id(self)
 
         self._halo_frozen = False
         self._frozen_access_mode = None
-
-    def __del__(self):
-        if hasattr(self, "comm"):
-            mpi.decref(self.comm)
 
     @utils.cached_property
     def _kernel_args_(self):
@@ -824,6 +822,7 @@ class MixedDat(AbstractDat, VecAccessMixin):
             raise ex.DataValueError('MixedDat with different dtypes is not supported')
         # TODO: Think about different communicators on dats (c.f. MixedSet)
         self.comm = mpi.internal_comm(self._dats[0].comm)
+        weakref.finalize(self, mpi.decref, self.comm)
 
     @property
     def dat_version(self):
