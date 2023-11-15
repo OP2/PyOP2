@@ -236,7 +236,7 @@ def is_pyop2_comm(comm):
         # ~ if not PYOP2_FINALIZED:
         raise PyOP2CommError("Communicator passed to is_pyop2_comm() is COMM_NULL")
         # ~ else:
-            # ~ ispyop2comm = True
+        # ~ ispyop2comm = True
     elif isinstance(comm, MPI.Comm):
         ispyop2comm = bool(comm.Get_attr(refcount_keyval))
     else:
