@@ -74,7 +74,8 @@ _COMM_CIDX = count()
 _DUPED_COMM_DICT = {}
 # Flag to indicate whether we are in cleanup (at exit)
 PYOP2_FINALIZED = False
-
+# Flag for outputting information at the end of testing (do not abuse!)
+_running_under_pytest = bool(os.environ.get('PYOP2_CI_TESTS'))
 
 class PyOP2CommError(ValueError):
     pass
@@ -178,6 +179,7 @@ def delcomm_outer(comm, keyval, icomm):
     # This will raise errors at cleanup time as some objects are already
     # deleted, so we just skip
     # ~ if not PYOP2_FINALIZED:
+    debug = finalize_safe_debug()
     if keyval not in (innercomm_keyval, compilationcomm_keyval):
         raise PyOP2CommError("Unexpected keyval")
 
@@ -484,15 +486,21 @@ def compilation_comm(comm):
     return comp_comm
 
 
+def finalize_safe_debug():
+    if PYOP2_FINALIZED:
+        if logger.level > DEBUG and not _running_under_pytest:
+            debug = lambda string: None
+        else:
+            debug = lambda string: print(string)
+    return debug
+
+
 @atexit.register
 def _free_comms():
     """Free all outstanding communicators."""
     global PYOP2_FINALIZED
     PYOP2_FINALIZED = True
-    if logger.level > DEBUG:
-        debug = lambda string: None
-    else:
-        debug = lambda string: print(string)
+    debug = finalize_safe_debug()
     debug("PyOP2 Finalizing")
     # Collect garbage as it may hold on to communicator references
 
