@@ -77,6 +77,7 @@ PYOP2_FINALIZED = False
 # Flag for outputting information at the end of testing (do not abuse!)
 _running_under_pytest = bool(os.environ.get('PYOP2_CI_TESTS'))
 
+
 class PyOP2CommError(ValueError):
     pass
 
