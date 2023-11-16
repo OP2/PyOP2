@@ -208,8 +208,7 @@ def delcomm_outer(comm, keyval, icomm):
     del _DUPED_COMM_DICT[cidx]
     gc.collect()
     refcount = icomm.Get_attr(refcount_keyval)
-    # TODO: Should be safe to remove `and not PYOP2_FINALIZED`
-    if refcount[0] > 1 and not PYOP2_FINALIZED:
+    if refcount[0] > 1:
         raise PyOP2CommError("References to comm still held, this will cause deadlock")
     icomm.Free()
 
