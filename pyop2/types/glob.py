@@ -2,7 +2,6 @@ import contextlib
 import ctypes
 import operator
 import warnings
-import weakref
 
 import numpy as np
 from petsc4py import PETSc
@@ -244,8 +243,7 @@ class Global(SetFreeDataCarrier, VecAccessMixin):
             super().__init__(dim, data, dtype, name)
             if comm is None:
                 warnings.warn("PyOP2.Global has no comm, this is likely to break in parallel!")
-            self.comm = mpi.internal_comm(comm)
-            weakref.finalize(self, mpi.decref, self.comm)
+            self.comm = mpi.internal_comm(comm, self)
 
             # Object versioning setup
             petsc_counter = (comm and self.dtype == PETSc.ScalarType)

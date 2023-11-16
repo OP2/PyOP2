@@ -3,7 +3,6 @@ import itertools
 import operator
 from dataclasses import dataclass
 from typing import Any, Optional, Tuple
-import weakref
 
 import loopy as lp
 import numpy as np
@@ -152,8 +151,7 @@ class Parloop:
 
         self.global_kernel = global_knl
         self.iterset = iterset
-        self.comm = mpi.internal_comm(iterset.comm)
-        weakref.finalize(self, mpi.decref, self.comm)
+        self.comm = mpi.internal_comm(iterset.comm, self)
         self.arguments, self.reduced_globals = self.prepare_reduced_globals(arguments, global_knl)
 
     @property

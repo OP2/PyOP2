@@ -1,7 +1,6 @@
 import abc
 import ctypes
 import itertools
-import weakref
 
 import numpy as np
 from petsc4py import PETSc
@@ -67,15 +66,17 @@ class Sparsity(caching.ObjectCached):
             self._dims = (((1, 1),),)
             self._d_nnz = None
             self._o_nnz = None
-            self.lcomm = mpi.internal_comm(dsets[0].comm if isinstance(dsets[0], GlobalDataSet) else self._rmaps[0].comm)
-            weakref.finalize(self, mpi.decref, self.lcomm)
-            self.rcomm = mpi.internal_comm(dsets[1].comm if isinstance(dsets[1], GlobalDataSet) else self._cmaps[0].comm)
-            weakref.finalize(self, mpi.decref, self.rcomm)
+            self.lcomm = mpi.internal_comm(
+                dsets[0].comm if isinstance(dsets[0], GlobalDataSet) else self._rmaps[0].comm,
+                self
+            )
+            self.rcomm = mpi.internal_comm(
+                dsets[1].comm if isinstance(dsets[1], GlobalDataSet) else self._cmaps[0].comm,
+                self
+            )
         else:
-            self.lcomm = mpi.internal_comm(self._rmaps[0].comm)
-            weakref.finalize(self, mpi.decref, self.lcomm)
-            self.rcomm = mpi.internal_comm(self._cmaps[0].comm)
-            weakref.finalize(self, mpi.decref, self.rcomm)
+            self.lcomm = mpi.internal_comm(self._rmaps[0].comm, self)
+            self.rcomm = mpi.internal_comm(self._cmaps[0].comm, self)
 
             rset, cset = self.dsets
 
@@ -93,8 +94,7 @@ class Sparsity(caching.ObjectCached):
 
         if self.lcomm != self.rcomm:
             raise ValueError("Haven't thought hard enough about different left and right communicators")
-        self.comm = mpi.internal_comm(self.lcomm)
-        weakref.finalize(self, mpi.decref, self.comm)
+        self.comm = mpi.internal_comm(self.lcomm, self)
         self._name = name or "sparsity_#x%x" % id(self)
         self.iteration_regions = iteration_regions
         # If the Sparsity is defined on MixedDataSets, we need to build each
@@ -364,13 +364,10 @@ class SparsityBlock(Sparsity):
         self._dims = tuple([tuple([parent.dims[i][j]])])
         self._blocks = [[self]]
         self.iteration_regions = parent.iteration_regions
-        self.lcomm = mpi.internal_comm(self.dsets[0].comm)
-        weakref.finalize(self, mpi.decref, self.lcomm)
-        self.rcomm = mpi.internal_comm(self.dsets[1].comm)
-        weakref.finalize(self, mpi.decref, self.rcomm)
+        self.lcomm = mpi.internal_comm(self.dsets[0].comm, self)
+        self.rcomm = mpi.internal_comm(self.dsets[1].comm, self)
         # TODO: think about lcomm != rcomm
-        self.comm = mpi.internal_comm(self.lcomm)
-        weakref.finalize(self, mpi.decref, self.comm)
+        self.comm = mpi.internal_comm(self.lcomm, self)
         self._initialized = True
 
     @classmethod
@@ -429,12 +426,9 @@ class AbstractMat(DataCarrier, abc.ABC):
                          ('name', str, ex.NameTypeError))
     def __init__(self, sparsity, dtype=None, name=None):
         self._sparsity = sparsity
-        self.lcomm = mpi.internal_comm(sparsity.lcomm)
-        weakref.finalize(self, mpi.decref, self.lcomm)
-        self.rcomm = mpi.internal_comm(sparsity.rcomm)
-        weakref.finalize(self, mpi.decref, self.rcomm)
-        self.comm = mpi.internal_comm(sparsity.comm)
-        weakref.finalize(self, mpi.decref, self.comm)
+        self.lcomm = mpi.internal_comm(sparsity.lcomm, self)
+        self.rcomm = mpi.internal_comm(sparsity.rcomm, self)
+        self.comm = mpi.internal_comm(sparsity.comm, self)
         dtype = dtype or dtypes.ScalarType
         self._datatype = np.dtype(dtype)
         self._name = name or "mat_#x%x" % id(self)
@@ -939,8 +933,7 @@ class MatBlock(AbstractMat):
         colis = cset.local_ises[j]
         self.handle = parent.handle.getLocalSubMatrix(isrow=rowis,
                                                       iscol=colis)
-        self.comm = mpi.internal_comm(parent.comm)
-        weakref.finalize(self, mpi.decref, self.comm)
+        self.comm = mpi.internal_comm(parent.comm, self)
         self.local_to_global_maps = self.handle.getLGMap()
 
     @property
