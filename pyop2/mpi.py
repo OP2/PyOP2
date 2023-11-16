@@ -75,7 +75,7 @@ _DUPED_COMM_DICT = {}
 # Flag to indicate whether we are in cleanup (at exit)
 PYOP2_FINALIZED = False
 # Flag for outputting information at the end of testing (do not abuse!)
-_running_under_pytest = bool(os.environ.get('PYOP2_CI_TESTS'))
+_running_on_ci = bool(os.environ.get('PYOP2_CI_TESTS'))
 
 
 class PyOP2CommError(ValueError):
@@ -177,9 +177,7 @@ def delcomm_outer(comm, keyval, icomm):
     :arg icomm: The inner communicator, should have a reference to
         ``comm``.
     """
-    # This will raise errors at cleanup time as some objects are already
-    # deleted, so we just skip
-    # ~ if not PYOP2_FINALIZED:
+    # Use debug printer that is safe to use at exit time
     debug = finalize_safe_debug()
     if keyval not in (innercomm_keyval, compilationcomm_keyval):
         raise PyOP2CommError("Unexpected keyval")
@@ -189,8 +187,6 @@ def delcomm_outer(comm, keyval, icomm):
     if keyval == compilationcomm_keyval:
         debug(f'Deleting compilationcomm keyval on {comm.name}')
 
-    # Let's be charitable and assume the comm has already been destroyed
-    # ~ if icomm == MPI.COMM_NULL:
     ocomm = icomm.Get_attr(outercomm_keyval)
     if ocomm is None:
         raise PyOP2CommError("Inner comm does not have expected reference to outer comm")
@@ -199,6 +195,7 @@ def delcomm_outer(comm, keyval, icomm):
         raise PyOP2CommError("Inner comm has reference to non-matching outer comm")
     icomm.Delete_attr(outercomm_keyval)
 
+    # An inner comm may or may not hold a reference to a compilation comm
     comp_comm = icomm.Get_attr(compilationcomm_keyval)
     if comp_comm is not None:
         debug('Removing compilation comm on inner comm')
@@ -211,6 +208,7 @@ def delcomm_outer(comm, keyval, icomm):
     del _DUPED_COMM_DICT[cidx]
     gc.collect()
     refcount = icomm.Get_attr(refcount_keyval)
+    # TODO: Should be safe to remove `and not PYOP2_FINALIZED`
     if refcount[0] > 1 and not PYOP2_FINALIZED:
         raise PyOP2CommError("References to comm still held, this will cause deadlock")
     icomm.Free()
@@ -232,14 +230,10 @@ def is_pyop2_comm(comm):
 
     :arg comm: Communicator to query
     """
-    global PYOP2_FINALIZED
     if isinstance(comm, PETSc.Comm):
         ispyop2comm = False
     elif comm == MPI.COMM_NULL:
-        # ~ if not PYOP2_FINALIZED:
         raise PyOP2CommError("Communicator passed to is_pyop2_comm() is COMM_NULL")
-        # ~ else:
-        # ~ ispyop2comm = True
     elif isinstance(comm, MPI.Comm):
         ispyop2comm = bool(comm.Get_attr(refcount_keyval))
     else:
@@ -248,7 +242,8 @@ def is_pyop2_comm(comm):
 
 
 def pyop2_comm_status():
-    """ Prints the reference counts for all comms PyOP2 has duplicated
+    """ Return string containing a table of the reference counts for all
+    communicators  PyOP2 has duplicated.
     """
     status_string = 'PYOP2 Communicator reference counts:\n'
     status_string += '| Communicator name                      | Count |\n'
@@ -324,25 +319,17 @@ def incref(comm):
     assert is_pyop2_comm(comm)
     refcount = comm.Get_attr(refcount_keyval)
     refcount[0] += 1
-    print(f"INCREF {comm.name} TO {refcount[0]}")
 
 
 def decref(comm):
     """ Decrement communicator reference count
     """
-    # ~ if not PYOP2_FINALIZED:
     assert is_pyop2_comm(comm)
     refcount = comm.Get_attr(refcount_keyval)
     refcount[0] -= 1
-    print(f"DECREF {comm.name} TO {refcount[0]}")
-    if refcount[0] == 1:
-        # Freeing the comm is handled by the destruction of the user comm
-        pass
-    elif refcount[0] < 1:
+    # Freeing the internal comm is handled by the destruction of the user comm
+    if refcount[0] < 1:
         raise PyOP2CommError("Reference count is less than 1, decref called too many times")
-
-    # ~ elif comm != MPI.COMM_NULL:
-        # ~ comm.Free()
 
 
 def dup_comm(comm_in):
@@ -489,7 +476,7 @@ def compilation_comm(comm):
 
 def finalize_safe_debug():
     if PYOP2_FINALIZED:
-        if logger.level > DEBUG and not _running_under_pytest:
+        if logger.level > DEBUG and not _running_on_ci:
             debug = lambda string: None
         else:
             debug = lambda string: print(string)
