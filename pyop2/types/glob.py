@@ -27,10 +27,6 @@ class SetFreeDataCarrier(DataCarrier, EmptyDataMixin):
         self._buf = np.empty(self.shape, dtype=self.dtype)
         self._name = name or "%s_#x%x" % (self.__class__.__name__.lower(), id(self))
 
-    # ~ def __del__(self): # TODO !?
-        # ~ if hasattr(self, "comm"):
-            # ~ mpi.decref(self.comm)
-
     @utils.cached_property
     def _kernel_args_(self):
         return (self._data.ctypes.data, )
