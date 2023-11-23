@@ -1,8 +1,8 @@
 import ctypes
-import functools
 import numbers
 
 import numpy as np
+import pytools
 
 from pyop2 import (
     caching,
@@ -538,10 +538,7 @@ class MixedSet(Set, caching.ObjectCached):
             "All components of a MixedSet must have the same number of layers."
         # TODO: do all sets need the same communicator?
         self.comm = mpi.internal_comm(
-            functools.reduce(
-                lambda a, b: a or b,
-                map(lambda s: s if s is None else s.comm, sets)
-            ),
+            pytools.single_valued(s.comm for s in sets if s is not None),
             self
         )
         self._initialized = True
