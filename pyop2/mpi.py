@@ -42,6 +42,7 @@ import gc
 import glob
 import os
 import tempfile
+import weakref
 
 from pyop2.configuration import configuration
 from pyop2.exceptions import CompilationError
@@ -266,10 +267,7 @@ class temp_internal_comm:
     """
     def __init__(self, comm):
         self.user_comm = comm
-        self.internal_comm = internal_comm(self.user_comm)
-
-    def __del__(self):
-        decref(self.internal_comm)
+        self.internal_comm = internal_comm(self.user_comm, self)
 
     def __enter__(self):
         """ Returns an internal comm that will be safely decref'd
@@ -283,10 +281,12 @@ class temp_internal_comm:
         pass
 
 
-def internal_comm(comm):
+def internal_comm(comm, obj):
     """ Creates an internal comm from the user comm.
     If comm is None, create an internal communicator from COMM_WORLD
     :arg comm: A communicator or None
+    :arg obj: The object which the comm is an attribute of
+    (usually `self`)
 
     :returns pyop2_comm: A PyOP2 internal communicator
     """
@@ -309,6 +309,7 @@ def internal_comm(comm):
         pyop2_comm = comm
     else:
         pyop2_comm = dup_comm(comm)
+    weakref.finalize(obj, decref, pyop2_comm)
     return pyop2_comm
 
 
@@ -445,10 +446,13 @@ def set_compilation_comm(comm, comp_comm):
 
 
 @collective
-def compilation_comm(comm):
+def compilation_comm(comm, obj):
     """Get a communicator for compilation.
 
     :arg comm: The input communicator, must be a PyOP2 comm.
+    :arg obj: The object which the comm is an attribute of
+    (usually `self`)
+
     :returns: A communicator used for compilation (may be smaller)
     """
     if not is_pyop2_comm(comm):
@@ -470,10 +474,20 @@ def compilation_comm(comm):
     else:
         comp_comm = comm
     incref(comp_comm)
+    weakref.finalize(obj, decref, comp_comm)
     return comp_comm
 
 
 def finalize_safe_debug():
+    ''' Return function for debug output.
+
+    When Python is finalizing the logging module may be finalized before we have
+    finished writing debug information. In this case we fall back to using the
+    Python `print` function to output debugging information.
+
+    Furthermore, we always want to see this finalization information when
+    running the CI tests.
+    '''
     if PYOP2_FINALIZED:
         if logger.level > DEBUG and not _running_on_ci:
             debug = lambda string: None
