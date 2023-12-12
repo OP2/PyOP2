@@ -479,6 +479,15 @@ def compilation_comm(comm, obj):
 
 
 def finalize_safe_debug():
+    ''' Return function for debug output.
+
+    When Python is finalizing the logging module may be finalized before we have
+    finished writing debug information. In this case we fall back to using the
+    Python `print` function to output debugging information.
+
+    Furthermore, we always want to see this finalization information when
+    running the CI tests.
+    '''
     if PYOP2_FINALIZED:
         if logger.level > DEBUG and not _running_on_ci:
             debug = lambda string: None
