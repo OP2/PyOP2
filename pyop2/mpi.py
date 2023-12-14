@@ -188,6 +188,10 @@ def delcomm_outer(comm, keyval, icomm):
     if keyval == compilationcomm_keyval:
         debug(f'Deleting compilationcomm keyval on {comm.name}')
 
+    # In certain circumstances icomm may have been destroyed before we
+    # get here in which case there is nothing we can do and running this
+    # code just produces spurious errors
+    # ~ if icomm != MPI.COMM_NULL:
     ocomm = icomm.Get_attr(outercomm_keyval)
     if ocomm is None:
         raise PyOP2CommError("Inner comm does not have expected reference to outer comm")
@@ -210,7 +214,7 @@ def delcomm_outer(comm, keyval, icomm):
     gc.collect()
     refcount = icomm.Get_attr(refcount_keyval)
     if refcount[0] > 1:
-        raise PyOP2CommError("References to comm still held, this will cause deadlock")
+        raise PyOP2CommError(f"References {refcount[0]} to comm {icomm.name} still held, this will cause deadlock")
     icomm.Free()
 
 
@@ -344,6 +348,7 @@ def dup_comm(comm_in):
     internal_comm = comm_in.Get_attr(innercomm_keyval)
     if internal_comm is None:
         # Haven't seen this comm before, duplicate it.
+        # ~ import pytest; pytest.set_trace()
         internal_comm = comm_in.Dup()
         comm_in.Set_attr(innercomm_keyval, internal_comm)
         internal_comm.Set_attr(outercomm_keyval, comm_in)
@@ -488,6 +493,7 @@ def finalize_safe_debug():
     Furthermore, we always want to see this finalization information when
     running the CI tests.
     '''
+    global debug
     if PYOP2_FINALIZED:
         if logger.level > DEBUG and not _running_on_ci:
             debug = lambda string: None
@@ -520,7 +526,10 @@ def _free_comms():
     debug("STATE2")
     debug(pyop2_comm_status())
     debug(f"Freeing comms in list (length {len(_DUPED_COMM_DICT)})")
-    for key in sorted(_DUPED_COMM_DICT.keys()):
+
+    # Destroy any remaining communicators in reverse order
+    for key in sorted(_DUPED_COMM_DICT.keys(), reverse=True):
+        # ~ import pytest; pytest.set_trace()
         comm = _DUPED_COMM_DICT[key]
         if comm != MPI.COMM_NULL:
             refcount = comm.Get_attr(refcount_keyval)
