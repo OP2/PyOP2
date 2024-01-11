@@ -49,6 +49,8 @@ from pyop2.exceptions import CompilationError
 from pyop2.logger import debug, logger, DEBUG
 from pyop2.utils import trim
 
+import inspect #Remove
+from warnings import warn
 
 __all__ = (
     "COMM_WORLD",
@@ -214,7 +216,18 @@ def delcomm_outer(comm, keyval, icomm):
     gc.collect()
     refcount = icomm.Get_attr(refcount_keyval)
     if refcount[0] > 1:
-        raise PyOP2CommError(f"References {refcount[0]} to comm {icomm.name} still held, this will cause deadlock")
+        if MPI.COMM_WORLD.rank == 0:
+            with open('bad_tests.txt', 'a') as fh:
+                import traceback
+                fh.write(''.join(traceback.format_stack()) + '='*80 + '\n')
+        # ~ ref = icomm.Get_attr(references_keyval)
+        # ~ print(f'#REFERENCES of {icomm.name}')
+        # ~ print("\n".join(ref))
+        # ~ raise PyOP2CommError(f"References {refcount[0]} to comm {icomm.name} still held, this will cause deadlock")
+        warn( # replace with debug
+            f"{refcount[0]} references to comm {icomm.name} still held, "
+            "objects holding these references are now invalid"
+        )
     icomm.Free()
 
 
@@ -226,6 +239,7 @@ innercomm_keyval = MPI.Comm.Create_keyval(delete_fn=delcomm_outer)
 outercomm_keyval = MPI.Comm.Create_keyval()
 compilationcomm_keyval = MPI.Comm.Create_keyval(delete_fn=delcomm_outer)
 
+references_keyval = MPI.Comm.Create_keyval()
 
 def is_pyop2_comm(comm):
     """Returns ``True`` if ``comm`` is a PyOP2 communicator,
@@ -285,6 +299,19 @@ class temp_internal_comm:
         pass
 
 
+def free_user_comm_with(comm, obj):
+    def __call__(comm):
+        icomm = comm.Get_attr(innercomm_keyval)
+        # ~ decref(icomm)
+        print('Free comm')
+        comm.Free()
+        print('End free comm, now decref')
+        decref(icomm)
+        # ~ incref(icomm)
+
+    weakref.finalize(obj, __call__, comm)
+
+
 def internal_comm(comm, obj):
     """ Creates an internal comm from the user comm.
     If comm is None, create an internal communicator from COMM_WORLD
@@ -311,8 +338,12 @@ def internal_comm(comm, obj):
     if is_pyop2_comm(comm):
         incref(comm)
         pyop2_comm = comm
+        ref = pyop2_comm.Get_attr(references_keyval)
+        ref.append(str(obj.__class__))
     else:
         pyop2_comm = dup_comm(comm)
+        pyop2_comm.Set_attr(references_keyval, [str(obj.__class__)])
+    print(f"Comm {pyop2_comm.name} referenced by object {obj.__class__}")
     weakref.finalize(obj, decref, pyop2_comm)
     return pyop2_comm
 
@@ -328,12 +359,13 @@ def incref(comm):
 def decref(comm):
     """ Decrement communicator reference count
     """
-    assert is_pyop2_comm(comm)
-    refcount = comm.Get_attr(refcount_keyval)
-    refcount[0] -= 1
-    # Freeing the internal comm is handled by the destruction of the user comm
-    if refcount[0] < 1:
-        raise PyOP2CommError("Reference count is less than 1, decref called too many times")
+    if comm != MPI.COMM_NULL:
+        assert is_pyop2_comm(comm)
+        refcount = comm.Get_attr(refcount_keyval)
+        refcount[0] -= 1
+        # Freeing the internal comm is handled by the destruction of the user comm
+        if refcount[0] < 1:
+            raise PyOP2CommError("Reference count is less than 1, decref called too many times")
 
 
 def dup_comm(comm_in):
