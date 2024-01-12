@@ -532,7 +532,7 @@ def _free_comms():
     debug("STATE2")
     debug(pyop2_comm_status())
     debug(f"Freeing comms in list (length {len(_DUPED_COMM_DICT)})")
-    for key in sorted(_DUPED_COMM_DICT.keys()):
+    for key in sorted(_DUPED_COMM_DICT.keys(), reverse=True):
         comm = _DUPED_COMM_DICT[key]
         if comm != MPI.COMM_NULL:
             refcount = comm.Get_attr(refcount_keyval)
