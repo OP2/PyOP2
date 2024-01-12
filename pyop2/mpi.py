@@ -210,7 +210,13 @@ def delcomm_outer(comm, keyval, icomm):
     gc.collect()
     refcount = icomm.Get_attr(refcount_keyval)
     if refcount[0] > 1:
-        raise PyOP2CommError("References to comm still held, this will cause deadlock")
+        # In the case where `comm` is a custom user communicator there may be references
+        # to the inner comm still held and this is not an issue, but there is not an
+        # easy way to distinguish this case, so we just log the event.
+        debug(
+            f"There are still {refcount[0]} references to {comm.name}, "
+            "this will cause deadlock if the communicator has been incorrectly freed"
+        )
     icomm.Free()
 
 
@@ -324,12 +330,17 @@ def incref(comm):
 def decref(comm):
     """ Decrement communicator reference count
     """
-    assert is_pyop2_comm(comm)
-    refcount = comm.Get_attr(refcount_keyval)
-    refcount[0] -= 1
-    # Freeing the internal comm is handled by the destruction of the user comm
-    if refcount[0] < 1:
-        raise PyOP2CommError("Reference count is less than 1, decref called too many times")
+    if comm == MPI.COMM_NULL:
+        # This case occurs if the the outer communicator has already been freed by
+        # the user
+        debug("Cannot decref an already freed communicator")
+    else:
+        assert is_pyop2_comm(comm)
+        refcount = comm.Get_attr(refcount_keyval)
+        refcount[0] -= 1
+        # Freeing the internal comm is handled by the destruction of the user comm
+        if refcount[0] < 1:
+            raise PyOP2CommError("Reference count is less than 1, decref called too many times")
 
 
 def dup_comm(comm_in):
@@ -488,6 +499,7 @@ def finalize_safe_debug():
     Furthermore, we always want to see this finalization information when
     running the CI tests.
     '''
+    global debug
     if PYOP2_FINALIZED:
         if logger.level > DEBUG and not _running_on_ci:
             debug = lambda string: None
