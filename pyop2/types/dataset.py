@@ -29,18 +29,12 @@ class DataSet(caching.ObjectCached):
             return
         if isinstance(iter_set, Subset):
             raise NotImplementedError("Deriving a DataSet from a Subset is unsupported")
-        self.comm = mpi.internal_comm(iter_set.comm)
+        self.comm = mpi.internal_comm(iter_set.comm, self)
         self._set = iter_set
         self._dim = utils.as_tuple(dim, numbers.Integral)
         self._cdim = np.prod(self._dim).item()
         self._name = name or "dset_#x%x" % id(self)
         self._initialized = True
-
-    def __del__(self):
-        # Cannot use hasattr here, since we define `__getattr__`
-        # This causes infinite recursion when looked up!
-        if "comm" in self.__dict__:
-            mpi.decref(self.comm)
 
     @classmethod
     def _process_args(cls, *args, **kwargs):
@@ -156,11 +150,11 @@ class DataSet(caching.ObjectCached):
         ises = []
         nlocal_rows = 0
         for dset in self:
-            nlocal_rows += dset.size * dset.cdim
+            nlocal_rows += dset.layout_vec.local_size
         offset = self.comm.scan(nlocal_rows)
         offset -= nlocal_rows
         for dset in self:
-            nrows = dset.size * dset.cdim
+            nrows = dset.layout_vec.local_size
             iset = PETSc.IS().createStride(nrows, first=offset, step=1,
                                            comm=self.comm)
             iset.setBlockSize(dset.cdim)
@@ -211,7 +205,7 @@ class GlobalDataSet(DataSet):
         if self._initialized:
             return
         self._global = global_
-        self.comm = mpi.internal_comm(global_.comm)
+        self.comm = mpi.internal_comm(global_.comm, self)
         self._globalset = GlobalSet(comm=self.comm)
         self._name = "gdset_#x%x" % id(self)
         self._initialized = True
@@ -283,27 +277,6 @@ class GlobalDataSet(DataSet):
             lgmap = PETSc.LGMap().create(indices=indices,
                                          bsize=1, comm=self.lgmap.comm)
             return lgmap
-
-    @utils.cached_property
-    def field_ises(self):
-        """A list of PETSc ISes defining the global indices for each set in
-        the DataSet.
-
-        Used when extracting blocks from matrices for solvers."""
-        ises = []
-        nlocal_rows = 0
-        for dset in self:
-            nlocal_rows += dset.size * dset.cdim
-        offset = self.comm.scan(nlocal_rows)
-        offset -= nlocal_rows
-        for dset in self:
-            nrows = dset.size * dset.cdim
-            iset = PETSc.IS().createStride(nrows, first=offset, step=1,
-                                           comm=self.comm)
-            iset.setBlockSize(dset.cdim)
-            ises.append(iset)
-            offset += nrows
-        return tuple(ises)
 
     @utils.cached_property
     def local_ises(self):
@@ -381,7 +354,7 @@ class MixedDataSet(DataSet):
             comm = self._process_args(arg, dims)[0][0].comm
         except AttributeError:
             comm = None
-        self.comm = mpi.internal_comm(comm)
+        self.comm = mpi.internal_comm(comm, self)
         self._initialized = True
 
     @classmethod

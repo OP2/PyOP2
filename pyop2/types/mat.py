@@ -66,18 +66,19 @@ class Sparsity(caching.ObjectCached):
             self._dims = (((1, 1),),)
             self._d_nnz = None
             self._o_nnz = None
-            self._nrows = None if isinstance(dsets[0], GlobalDataSet) else self._rmaps[0].toset.size
-            self._ncols = None if isinstance(dsets[1], GlobalDataSet) else self._cmaps[0].toset.size
-            self.lcomm = mpi.internal_comm(dsets[0].comm if isinstance(dsets[0], GlobalDataSet) else self._rmaps[0].comm)
-            self.rcomm = mpi.internal_comm(dsets[1].comm if isinstance(dsets[1], GlobalDataSet) else self._cmaps[0].comm)
+            self.lcomm = mpi.internal_comm(
+                dsets[0].comm if isinstance(dsets[0], GlobalDataSet) else self._rmaps[0].comm,
+                self
+            )
+            self.rcomm = mpi.internal_comm(
+                dsets[1].comm if isinstance(dsets[1], GlobalDataSet) else self._cmaps[0].comm,
+                self
+            )
         else:
-            self.lcomm = mpi.internal_comm(self._rmaps[0].comm)
-            self.rcomm = mpi.internal_comm(self._cmaps[0].comm)
+            self.lcomm = mpi.internal_comm(self._rmaps[0].comm, self)
+            self.rcomm = mpi.internal_comm(self._cmaps[0].comm, self)
 
             rset, cset = self.dsets
-            # All rmaps and cmaps have the same data set - just use the first.
-            self._nrows = rset.size
-            self._ncols = cset.size
 
             self._has_diagonal = (rset == cset)
 
@@ -93,7 +94,7 @@ class Sparsity(caching.ObjectCached):
 
         if self.lcomm != self.rcomm:
             raise ValueError("Haven't thought hard enough about different left and right communicators")
-        self.comm = mpi.internal_comm(self.lcomm)
+        self.comm = mpi.internal_comm(self.lcomm, self)
         self._name = name or "sparsity_#x%x" % id(self)
         self.iteration_regions = iteration_regions
         # If the Sparsity is defined on MixedDataSets, we need to build each
@@ -128,14 +129,6 @@ class Sparsity(caching.ObjectCached):
                 self._o_nnz = onnz
             self._blocks = [[self]]
         self._initialized = True
-
-    def __del__(self):
-        if hasattr(self, "comm"):
-            mpi.decref(self.comm)
-        if hasattr(self, "lcomm"):
-            mpi.decref(self.lcomm)
-        if hasattr(self, "rcomm"):
-            mpi.decref(self.rcomm)
 
     _cache = {}
 
@@ -278,16 +271,6 @@ class Sparsity(caching.ObjectCached):
                 len(self._dsets[1] or [1]))
 
     @utils.cached_property
-    def nrows(self):
-        """The number of rows in the ``Sparsity``."""
-        return self._nrows
-
-    @utils.cached_property
-    def ncols(self):
-        """The number of columns in the ``Sparsity``."""
-        return self._ncols
-
-    @utils.cached_property
     def nested(self):
         r"""Whether a sparsity is monolithic (even if it has a block structure).
 
@@ -376,17 +359,15 @@ class SparsityBlock(Sparsity):
         self._dsets = (parent.dsets[0][i], parent.dsets[1][j])
         self._rmaps = tuple(m.split[i] for m in parent.rmaps)
         self._cmaps = tuple(m.split[j] for m in parent.cmaps)
-        self._nrows = self._dsets[0].size
-        self._ncols = self._dsets[1].size
         self._has_diagonal = i == j and parent._has_diagonal
         self._parent = parent
         self._dims = tuple([tuple([parent.dims[i][j]])])
         self._blocks = [[self]]
         self.iteration_regions = parent.iteration_regions
-        self.lcomm = mpi.internal_comm(self.dsets[0].comm)
-        self.rcomm = mpi.internal_comm(self.dsets[1].comm)
+        self.lcomm = mpi.internal_comm(self.dsets[0].comm, self)
+        self.rcomm = mpi.internal_comm(self.dsets[1].comm, self)
         # TODO: think about lcomm != rcomm
-        self.comm = mpi.internal_comm(self.lcomm)
+        self.comm = mpi.internal_comm(self.lcomm, self)
         self._initialized = True
 
     @classmethod
@@ -445,21 +426,13 @@ class AbstractMat(DataCarrier, abc.ABC):
                          ('name', str, ex.NameTypeError))
     def __init__(self, sparsity, dtype=None, name=None):
         self._sparsity = sparsity
-        self.lcomm = mpi.internal_comm(sparsity.lcomm)
-        self.rcomm = mpi.internal_comm(sparsity.rcomm)
-        self.comm = mpi.internal_comm(sparsity.comm)
+        self.lcomm = mpi.internal_comm(sparsity.lcomm, self)
+        self.rcomm = mpi.internal_comm(sparsity.rcomm, self)
+        self.comm = mpi.internal_comm(sparsity.comm, self)
         dtype = dtype or dtypes.ScalarType
         self._datatype = np.dtype(dtype)
         self._name = name or "mat_#x%x" % id(self)
         self.assembly_state = Mat.ASSEMBLED
-
-    def __del__(self):
-        if hasattr(self, "comm"):
-            mpi.decref(self.comm)
-        if hasattr(self, "lcomm"):
-            mpi.decref(self.lcomm)
-        if hasattr(self, "rcomm"):
-            mpi.decref(self.rcomm)
 
     @utils.validate_in(('access', _modes, ex.ModeValueError))
     def __call__(self, access, path, lgmaps=None, unroll_map=False):
@@ -520,7 +493,7 @@ class AbstractMat(DataCarrier, abc.ABC):
     @utils.cached_property
     def nrows(self):
         "The number of rows in the matrix (local to this process)"
-        return sum(d.size * d.cdim for d in self.sparsity.dsets[0])
+        return self.sparsity.dsets[0].layout_vec.local_size
 
     @utils.cached_property
     def nblock_rows(self):
@@ -530,7 +503,8 @@ class AbstractMat(DataCarrier, abc.ABC):
         by the dimension of the row :class:`DataSet`.
         """
         assert len(self.sparsity.dsets[0]) == 1, "Block rows don't make sense for mixed Mats"
-        return self.sparsity.dsets[0].size
+        layout_vec = self.sparsity.dsets[0].layout_vec
+        return layout_vec.local_size // layout_vec.block_size
 
     @utils.cached_property
     def nblock_cols(self):
@@ -540,12 +514,13 @@ class AbstractMat(DataCarrier, abc.ABC):
         divided by the dimension of the column :class:`DataSet`.
         """
         assert len(self.sparsity.dsets[1]) == 1, "Block cols don't make sense for mixed Mats"
-        return self.sparsity.dsets[1].size
+        layout_vec = self.sparsity.dsets[1].layout_vec
+        return layout_vec.local_size // layout_vec.block_size
 
     @utils.cached_property
     def ncols(self):
         "The number of columns in the matrix (local to this process)"
-        return sum(d.size * d.cdim for d in self.sparsity.dsets[1])
+        return self.sparsity.dsets[1].layout_vec.local_size
 
     @utils.cached_property
     def sparsity(self):
@@ -958,7 +933,7 @@ class MatBlock(AbstractMat):
         colis = cset.local_ises[j]
         self.handle = parent.handle.getLocalSubMatrix(isrow=rowis,
                                                       iscol=colis)
-        self.comm = mpi.internal_comm(parent.comm)
+        self.comm = mpi.internal_comm(parent.comm, self)
         self.local_to_global_maps = self.handle.getLGMap()
 
     @property
