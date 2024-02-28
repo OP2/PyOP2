@@ -667,10 +667,11 @@ class Mat(AbstractMat):
         rset, cset = self.sparsity.dsets
         rlgmap = rset.unblocked_lgmap
         clgmap = cset.unblocked_lgmap
-        mat.createAIJ(size=((self.nrows, None), (self.ncols, None)),
-                      nnz=(self.sparsity.nnz, self.sparsity.onnz),
-                      bsize=1,
-                      comm=self.comm)
+        mat.create(comm=self.comm)
+        mat.setType(self.mat_type)
+        mat.setSizes(((self.nrows, None), (self.ncols, None)))
+        mat.setPreallocationNNZ((self.sparsity.nnz, self.sparsity.onnz))
+        mat.setBlockSize(1)
         mat.setLGMap(rmap=rlgmap, cmap=clgmap)
         self.handle = mat
         self._blocks = []
@@ -738,17 +739,18 @@ class Mat(AbstractMat):
             # Size is total number of rows and columns, but the
             # /sparsity/ is the block sparsity.
             block_sparse = True
-            create = mat.createBAIJ
+            mat_type = "baij"
         else:
             # Size is total number of rows and columns, sparsity is
             # the /dof/ sparsity.
             block_sparse = False
-            create = mat.createAIJ
-        create(size=((self.nrows, None),
-                     (self.ncols, None)),
-               nnz=(self.sparsity.nnz, self.sparsity.onnz),
-               bsize=(rdim, cdim),
-               comm=self.comm)
+            mat_type = self.mat_type
+
+        mat.create(comm=self.comm)
+        mat.setType(mat_type)
+        mat.setSizes(((self.nrows, None), (self.ncols, None)))
+        mat.setPreallocationNNZ((self.sparsity.nnz, self.sparsity.onnz))
+        mat.setBlockSizes(rdim, cdim)
         mat.setLGMap(rmap=row_lg, cmap=col_lg)
         # Stash entries destined for other processors
         mat.setOption(mat.Option.IGNORE_OFF_PROC_ENTRIES, False)
