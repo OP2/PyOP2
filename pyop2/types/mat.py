@@ -738,14 +738,14 @@ class Mat(AbstractMat):
         if rdim == cdim and rdim > 1 and self.sparsity._block_sparse:
             # Size is total number of rows and columns, but the
             # /sparsity/ is the block sparsity.
-            block_sparse = True
             mat_type = "baij"
         else:
             # Size is total number of rows and columns, sparsity is
             # the /dof/ sparsity.
-            block_sparse = False
             mat_type = self.mat_type
+            mat_type = "aij"
 
+        block_sparse = mat_type.endswith("baij")
         mat.create(comm=self.comm)
         mat.setType(mat_type)
         mat.setSizes(((self.nrows, None), (self.ncols, None)))
