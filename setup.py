@@ -146,6 +146,6 @@ setup(name='PyOP2',
       cmdclass=cmdclass,
       ext_modules=[Extension('pyop2.sparsity', sparsity_sources,
                              include_dirs=['pyop2'] + includes, language="c",
-                             libraries=["petsc"],
-                             extra_link_args=(["-L%s/lib" % d for d in petsc_dirs]
-                                              + ["-Wl,-rpath,%s/lib" % d for d in petsc_dirs]))])
+                             extra_link_args=([]
+                                              + ['-Wl,-rpath,%s/lib -L%s/lib' % (d,d) for d in petsc_dirs]
+                                              + ['-lpetsc']))])
