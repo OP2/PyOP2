@@ -113,7 +113,7 @@ class DataSet(caching.ObjectCached):
         indices for this :class:`DataSet`.
         """
         lgmap = PETSc.LGMap()
-        if self.comm.size == 1:
+        if self.comm.size == 1 and self.halo is None:
             lgmap.create(indices=np.arange(self.size, dtype=dtypes.IntType),
                          bsize=self.cdim, comm=self.comm)
         else:
@@ -183,7 +183,7 @@ class DataSet(caching.ObjectCached):
     def layout_vec(self):
         """A PETSc Vec compatible with the dof layout of this DataSet."""
         vec = PETSc.Vec().create(comm=self.comm)
-        size = (self.size * self.cdim, None)
+        size = ((self.size - self.set.constrained_size) * self.cdim, None)
         vec.setSizes(size, bsize=self.cdim)
         vec.setUp()
         return vec
