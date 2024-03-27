@@ -79,6 +79,11 @@ class Set:
         self._cache = {}
 
     @utils.cached_property
+    def indices(self):
+        """Returns all indices."""
+        return np.arange(self.total_size, dtype=dtypes.IntType)
+
+    @utils.cached_property
     def core_size(self):
         """Core set size.  Owned elements not touching halo elements."""
         return self._sizes[Set._CORE_SIZE]
