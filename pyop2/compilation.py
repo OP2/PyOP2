@@ -249,7 +249,7 @@ class Compiler(ABC):
         # MPI ranks is expensive
         exe = self.cxx if cpp else self.cc
         version = None
-        if mpi.COMM_WORLD.rank == 0:
+        if self.comm.rank == 0:
             # `-dumpversion` is not sufficient to get the whole version string (for some compilers),
             # but other compilers do not implement `-dumpfullversion`!
             for dumpstring in ["-dumpfullversion", "-dumpversion"]:
@@ -265,7 +265,7 @@ class Compiler(ABC):
                     break
                 except (subprocess.CalledProcessError, UnicodeDecodeError, InvalidVersion):
                     continue
-        self.version = mpi.COMM_WORLD.bcast(version, 0)
+        self.version = self.comm.bcast(version, 0)
 
     @property
     def bugfix_cflags(self):
