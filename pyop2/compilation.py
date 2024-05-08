@@ -89,12 +89,14 @@ def sniff_compiler(exe, comm=mpi.COMM_WORLD):
     """Obtain the correct compiler class by calling the compiler executable.
 
     :arg exe: String with name or path to compiler executable
+    :arg comm: Comm over which we want to determine the compiler type
     :returns: A compiler class
     """
-    # Note:
-    # Sniffing compiler for very large numbers of MPI ranks is expensive
     compiler = None
     if comm.rank == 0:
+        # Note:
+        # Sniffing compiler for very large numbers of MPI ranks is
+        # expensive so we do this on one rank and broadcast
         try:
             output = subprocess.run(
                 [exe, "--version"],
@@ -546,7 +548,7 @@ class AnonymousCompiler(Compiler):
 
 @mpi.collective
 def load(jitmodule, extension, fn_name, cppargs=(), ldargs=(),
-         argtypes=None, restype=None, comm=mpi.COMM_WORLD):
+         argtypes=None, restype=None, comm=None):
     """Build a shared library and return a function pointer from it.
 
     :arg jitmodule: The JIT Module which can generate the code to compile, or
