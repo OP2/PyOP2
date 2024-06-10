@@ -139,7 +139,7 @@ setup(name='PyOP2',
           'Programming Language :: Python :: 3.6',
       ],
       install_requires=install_requires + test_requires,
-      packages=['pyop2', 'pyop2.codegen', 'pyop2.types'],
+      packages=['pyop2', 'pyop2.backends', 'pyop2.codegen', 'pyop2.types', 'pyop2.transforms'],
       package_data={
           'pyop2': ['assets/*', '*.h', '*.pxd', '*.pyx', 'codegen/c/*.c']},
       scripts=glob('scripts/*'),

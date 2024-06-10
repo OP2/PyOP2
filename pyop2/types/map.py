@@ -11,10 +11,11 @@ from pyop2 import (
     utils
 )
 from pyop2 import mpi
+from pyop2.offload_utils import OffloadMixin
 from pyop2.types.set import GlobalSet, MixedSet, Set
 
 
-class Map:
+class Map(OffloadMixin):
 
     """OP2 map, a relation between two :class:`Set` objects.
 
