@@ -75,9 +75,8 @@ class Map(object):
     def dtype(self):
         return self.values.dtype
 
-    @property
-    def _permute(self):
-        return lambda x: x
+    def _permute(self, x):
+        return x
 
     def indexed(self, multiindex, layer=None):
         n, i, f = multiindex
