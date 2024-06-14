@@ -171,9 +171,8 @@ class PMap(Map):
         self.offset_quotient = map_.offset_quotient
         self.permutation = NamedLiteral(permutation, parent=self.values, suffix=f"permutation{count}")
 
-    @property
-    def _permute(self):
-        return lambda x: Indexed(self.permutation, (x,))
+    def _permute(self, x):
+        return Indexed(self.permutation, (x,))
 
 
 class CMap(Map):
