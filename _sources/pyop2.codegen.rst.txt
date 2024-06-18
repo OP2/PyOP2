@@ -1,0 +1,61 @@
+pyop2.codegen package
+=====================
+
+Submodules
+----------
+
+pyop2.codegen.builder module
+----------------------------
+
+.. automodule:: pyop2.codegen.builder
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+pyop2.codegen.loopycompat module
+--------------------------------
+
+.. automodule:: pyop2.codegen.loopycompat
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+pyop2.codegen.node module
+-------------------------
+
+.. automodule:: pyop2.codegen.node
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+pyop2.codegen.optimise module
+-----------------------------
+
+.. automodule:: pyop2.codegen.optimise
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+pyop2.codegen.rep2loopy module
+------------------------------
+
+.. automodule:: pyop2.codegen.rep2loopy
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+pyop2.codegen.representation module
+-----------------------------------
+
+.. automodule:: pyop2.codegen.representation
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Module contents
+---------------
+
+.. automodule:: pyop2.codegen
+   :members:
+   :undoc-members:
+   :show-inheritance:
