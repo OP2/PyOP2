@@ -86,6 +86,9 @@ def apply_gpu_transforms(t_unit, target):
     if transform_strategy == "snpt":
         from pyop2.transforms.snpt import split_n_across_workgroups
         kernel, args_to_make_global = split_n_across_workgroups(kernel, 32)
+    elif transform_strategy == "auto_tiling":
+        from pyop2.transforms.auto_tiling import autotuned_tiling
+        kernel, args_to_make_global = autotuned_tiling(kernel)
     else:
         raise NotImplementedError(f"'{transform_strategy}' transform strategy.")
 
