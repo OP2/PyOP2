@@ -30,7 +30,7 @@ import numpy
 import pycuda.driver as cuda
 import pycuda.gpuarray as cuda_np
 import loopy as lp
-from pytools import memoize_method
+from pytools import memoize_method, keyed_memoize_method
 from dataclasses import dataclass
 from typing import Tuple
 import ctypes
@@ -609,8 +609,13 @@ class GlobalKernel(AbstractGlobalKernel):
         result = super().argtypes
         return result + (ctypes.c_voidp,) * len(self.get_extra_args())
 
-    @utils.cached_property
     def code_to_compile(self):
+        raise RuntimeError(
+            "In CUDA-target, code_to_compile is deprecated. Use"
+            " get_code_to_compile, instead.")
+
+    @keyed_memoize_method(key=lambda *args: ((configuration["gpu_strategy"],)))
+    def get_code_to_compile(self, *args):
         from pyop2.codegen.rep2loopy import generate
         from pyop2.transforms.gpu_utils import apply_gpu_transforms
         from pymbolic.interop.ast import to_evaluatable_python_function
@@ -621,7 +626,7 @@ class GlobalKernel(AbstractGlobalKernel):
                           include_complex=False)
 
         # Make temporary variables with initializers kernel's arguments.
-        t_unit, extra_args = apply_gpu_transforms(t_unit, "cuda")
+        t_unit, extra_args = apply_gpu_transforms(t_unit, "cuda", *args)
 
         ary_ids = [f"_op2_arg_{i}"
                    for i in range(len(extra_args))]
@@ -654,16 +659,16 @@ class GlobalKernel(AbstractGlobalKernel):
         try:
             func = self._func_cache[key]
         except KeyError:
-            func = self.compile(comm)
+            func = self.compile(comm, *args)
             self._func_cache[key] = func
 
         grid, block = self.get_grid_size(args[0], args[1])
         func(grid, block, *args)
 
     @mpi.collective
-    def compile(self, comm):
+    def compile(self, comm, *args):
         cu_func = compilation.get_prepared_cuda_function(comm,
-                                                         self)
+                                                         self, *args)
         return CUFunctionWithExtraArgs(cu_func, self.get_extra_args())
 
 

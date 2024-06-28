@@ -1,5 +1,5 @@
 import loopy as lp
-from pyop2.configuration import configuration
+from pyop2.op2 import configuration
 
 
 def get_loopy_target(target):
@@ -75,22 +75,27 @@ def preprocess_t_unit_for_gpu(t_unit):
     return t_unit.with_kernel(kernel)
 
 
-def apply_gpu_transforms(t_unit, target):
+def apply_gpu_transforms(t_unit, target, *args):
     t_unit = t_unit.copy(target=get_loopy_target(target))
     t_unit = preprocess_t_unit_for_gpu(t_unit)
     kernel = t_unit.default_entrypoint
+
     transform_strategy = configuration["gpu_strategy"]
 
     kernel = lp.assume(kernel, "end > start")
 
-    if transform_strategy == "snpt":
+    if "cell_integral" in kernel.name:
+        if transform_strategy == "snpt":
+            from pyop2.transforms.snpt import split_n_across_workgroups
+            kernel, args_to_make_global = split_n_across_workgroups(kernel, 32)
+        elif transform_strategy == "auto_tiling":
+            from pyop2.transforms.auto_tiling import autotuned_tiling
+            kernel, args_to_make_global = autotuned_tiling(kernel, *args)
+        else:
+            raise NotImplementedError(f"'{transform_strategy}' transform strategy.")
+    else:
         from pyop2.transforms.snpt import split_n_across_workgroups
         kernel, args_to_make_global = split_n_across_workgroups(kernel, 32)
-    elif transform_strategy == "auto_tiling":
-        from pyop2.transforms.auto_tiling import autotuned_tiling
-        kernel, args_to_make_global = autotuned_tiling(kernel)
-    else:
-        raise NotImplementedError(f"'{transform_strategy}' transform strategy.")
 
     t_unit = t_unit.with_kernel(kernel)
 

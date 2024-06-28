@@ -696,8 +696,38 @@ def _get_code_to_compile(comm, global_kernel):
     return code_to_compile
 
 
+def _get_gpu_code_to_compile(comm, global_kernel, *args):
+    # Determine cache key
+    hsh = md5(str(global_kernel.cache_key[1:]).encode())
+    basename = hsh.hexdigest()
+    cachedir = configuration["cache_dir"]
+    dirpart, basename = basename[:2], basename[2:]
+    cachedir = os.path.join(cachedir, dirpart)
+    cname = os.path.join(cachedir, f"{basename}_code.cu")
+
+    _check_src_hashes(comm, global_kernel)
+
+    if os.path.isfile(cname):
+        # Are we in the cache?
+        with open(cname, "r") as f:
+            code_to_compile = f.read()
+    else:
+        # No, let"s go ahead and build
+        if comm.rank == 0:
+            # No need to do this on all ranks
+            os.makedirs(cachedir, exist_ok=True)
+            with progress(INFO, "Compiling wrapper"):
+                # make sure that compiles successfully before writing to file
+                code_to_compile = global_kernel.get_code_to_compile(*args)
+                with open(cname, "w") as f:
+                    f.write(code_to_compile)
+        comm.barrier()
+
+    return code_to_compile
+
+
 @mpi.collective
-def get_prepared_cuda_function(comm, global_kernel):
+def get_prepared_cuda_function(comm, global_kernel, *args):
     from pycuda.compiler import SourceModule
 
     # Determine cache key
@@ -709,7 +739,7 @@ def get_prepared_cuda_function(comm, global_kernel):
 
     nvcc_opts = ["-use_fast_math", "-w"]
 
-    code_to_compile = _get_code_to_compile(comm, global_kernel)
+    code_to_compile = _get_gpu_code_to_compile(comm, global_kernel, *args)
     source_module = SourceModule(code_to_compile, options=nvcc_opts,
                                  cache_dir=cachedir)
 

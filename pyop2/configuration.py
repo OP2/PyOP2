@@ -148,6 +148,7 @@ class Configuration(dict):
 
     def reconfigure(self, **kwargs):
         """Update the configuration parameters with new values."""
+
         for k, v in kwargs.items():
             self[k] = v
 
