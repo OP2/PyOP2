@@ -17,13 +17,15 @@ def _make_tv_array_arg(tv):
     return arg
 
 
-def split_n_across_workgroups(kernel, workgroup_size):
+def split_n_across_workgroups(t_unit, workgroup_size):
     """
     Returns a transformed version of *kernel* with the workload in the loop
     with induction variable 'n' distributed across work-groups of size
     *workgroup_size* and each work-item in the work-group performing the work
     of a single iteration of 'n'.
     """
+
+    kernel = t_unit.default_entrypoint
 
     kernel = lp.assume(kernel, "start < end")
     kernel = lp.split_iname(kernel, "n", workgroup_size,
@@ -47,4 +49,4 @@ def split_n_across_workgroups(kernel, workgroup_size):
 
     # }}}
 
-    return kernel, args_to_make_global
+    return t_unit.with_kernel(kernel), args_to_make_global

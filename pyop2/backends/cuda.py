@@ -609,6 +609,7 @@ class GlobalKernel(AbstractGlobalKernel):
         result = super().argtypes
         return result + (ctypes.c_voidp,) * len(self.get_extra_args())
 
+    @utils.cached_property
     def code_to_compile(self):
         raise RuntimeError(
             "In CUDA-target, code_to_compile is deprecated. Use"
@@ -626,7 +627,7 @@ class GlobalKernel(AbstractGlobalKernel):
                           include_complex=False)
 
         # Make temporary variables with initializers kernel's arguments.
-        t_unit, extra_args = apply_gpu_transforms(t_unit, "cuda", *args)
+        t_unit, extra_args = apply_gpu_transforms(t_unit, "cuda", args)
 
         ary_ids = [f"_op2_arg_{i}"
                    for i in range(len(extra_args))]

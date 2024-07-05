@@ -71,32 +71,48 @@ def preprocess_t_unit_for_gpu(t_unit):
             new_args.append(arg)
 
     kernel = kernel.copy(instructions=new_insns, args=new_args)
+    kernel = lp.assume(kernel, "end > start")
 
     return t_unit.with_kernel(kernel)
 
 
-def apply_gpu_transforms(t_unit, target, *args):
+def apply_gpu_transforms(t_unit, target, dummy_arguments):
+    r"""
+    Returns ``(transformed_kernel, args_to_make_global)``, where
+    ``transformed_kernel`` is selected as per
+    ``configuration["gpu_strategy"]`` and ``args_to_make_global``
+    is an instance of ``pycuda.Array`` which come in as additional variables
+    to the kernel which were introduced during the kernel transform process.
+
+    :arg kernel: The Parloop's kernel which is to be transformed.
+    :arg dummy_arguments: The arguments with which the *kernel* is invoked.
+        This parameter could be potentially used by transform strategies the
+        employ during their transform process.
+
+    .. note::
+
+        This transformation routine is responsible for any kernel lowered
+        during a :class:`pyop2.op2.AbstractParloop`\ 's lowering. No
+        assumptions about *t_unit*\ 's loop structure is made during the
+        transform process.
+    """
     t_unit = t_unit.copy(target=get_loopy_target(target))
     t_unit = preprocess_t_unit_for_gpu(t_unit)
-    kernel = t_unit.default_entrypoint
 
     transform_strategy = configuration["gpu_strategy"]
 
-    kernel = lp.assume(kernel, "end > start")
-
-    if "cell_integral" in kernel.name:
+    if t_unit.default_entrypoint.name.endswith("form0_cell_integral"):
         if transform_strategy == "snpt":
             from pyop2.transforms.snpt import split_n_across_workgroups
-            kernel, args_to_make_global = split_n_across_workgroups(kernel, 32)
+            t_unit, args_to_make_global = split_n_across_workgroups(t_unit, 32)
         elif transform_strategy == "auto_tiling":
             from pyop2.transforms.auto_tiling import autotuned_tiling
-            kernel, args_to_make_global = autotuned_tiling(kernel, *args)
+            t_unit, args_to_make_global = autotuned_tiling(t_unit,
+                                                           dummy_arguments)
         else:
             raise NotImplementedError(f"'{transform_strategy}' transform strategy.")
     else:
         from pyop2.transforms.snpt import split_n_across_workgroups
-        kernel, args_to_make_global = split_n_across_workgroups(kernel, 32)
-
-    t_unit = t_unit.with_kernel(kernel)
+        t_unit, args_to_make_global = split_n_across_workgroups(t_unit, 32)
 
     return t_unit, args_to_make_global
