@@ -8,7 +8,7 @@ from pyop2.utils import cached_property
 from pytools import ImmutableRecord, memoize_on_first_arg
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
-from typing import Any, FrozenSet, Tuple, Sequence, Union
+from typing import Any, FrozenSet, List, Tuple, Sequence, Union
 
 
 # {{{ Modeling a transform candidate.
@@ -24,7 +24,7 @@ class SWIPC(TransformCandidate):
     """
     Single Work-item per Cell transformation.
     """
-    def __init__():
+    def __init__(self):
         pass
 
 
@@ -165,34 +165,27 @@ class MatvecStageDescr(ImmutableRecord):
                                                deriv_matrices=deriv_matrices)
 
 
-class KernelMetadata(ImmutableRecord):
-    def __init__(self, **kwargs):
-        assert isinstance(kwargs["iquad"], str)
-        assert isinstance(kwargs["coords"], str)
-        assert isinstance(kwargs["trialDoF_gather_inames"], list)
-        assert isinstance(kwargs["outDoF_init_iname"], str)
-        assert isinstance(kwargs["quad_weights"], str)
-        assert isinstance(kwargs["matvec_stage_descrs"], list)
-        assert isinstance(kwargs["eval_results"], frozenset)
-        assert isinstance(kwargs["scatter_iname"], str)
-        assert isinstance(kwargs["n_trial_derivs"], list)
-        super(KernelMetadata, self).__init__(**kwargs)
+@dataclass(frozen=True, kw_only=True)
+class KernelMetadata:
+    iquad: str
+    coords: str
+    trialDoF_gather_inames: List[str]  # noqa: N815
+    outDoF_init_iname: str  # noqa: N815
+    quad_weights: str
+    matvec_stage_descrs: List[MatvecStageDescr]
+    eval_results: FrozenSet[str]
+    scatter_iname: str
+    n_trial_derivs: List[int]
+    n_quad: int
+    n_outDoF: int  # noqa: N815
+    n_trialDoFs: List[int]  # noqa: N815
 
     @property
-    def outDoF(self):
+    def outDoF(self) -> str:
+        """
+        Returns the output DOF name in the FEM action kernel *kernel*.
+        """
         return self.matvec_stage_descrs[-1].dof_names[0]
-
-    def nquad(self, kernel):
-        return int(lp.symbolic.pw_aff_to_expr(kernel.get_iname_bounds(self.iquad, constants_only=True).size))
-
-    def n_outDoF(self, kernel):
-        ioutdof = self.matvec_stage_descrs[-1].row_iname
-        return int(lp.symbolic.pw_aff_to_expr(kernel.get_iname_bounds(ioutdof, constants_only=True).size))
-
-    def n_trialDoFs(self, kernel):
-        itrialDoFs = [mv_stg_descr.col_iname for mv_stg_descr in self.matvec_stage_descrs[:-1]]
-        return [int(lp.symbolic.pw_aff_to_expr(kernel.get_iname_bounds(itrialDoF, constants_only=True).size))
-                for itrialDoF in itrialDoFs]
 
     @property
     def n_trial_stages(self):
@@ -341,7 +334,6 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
             fem_action_phase = "quadr_wrap_up"
         else:
             print("Failed for -- ", insn)
-            exit(0)
             raise NotImplementedError(insn)
 
         new_insns.append(
@@ -498,16 +490,35 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
                               lp.match.Tagged("eval_init")))(kernel, insn)])
         for i, _ in enumerate(trialDoFs)]
 
-    print(kernel)
-    return kernel, KernelMetadata(iquad=iquad,
-                                  coords=coords,
-                                  outDoF_init_iname=outDoF_init_iname,
-                                  quad_weights=quad_weights,
-                                  matvec_stage_descrs=mv_stage_descrs_post_fusion,
-                                  scatter_iname=scatter_iname,
-                                  eval_results=eval_results,
-                                  trialDoF_gather_inames=trialDoF_gather_inames,
-                                  n_trial_derivs=n_trial_derivs)
+    n_quad = int(
+        lp.symbolic.pw_aff_to_expr(
+            kernel.get_iname_bounds(iquad, constants_only=True).size)
+    )
+    n_outDoF = int(
+        lp.symbolic.pw_aff_to_expr(kernel.get_iname_bounds(
+            mv_stage_descrs_post_fusion[-1].row_iname, constants_only=True).size)
+    )
+
+    n_trialDoFs = [
+        int(lp.symbolic.pw_aff_to_expr(
+            kernel.get_iname_bounds(mv_stg_descr.col_iname,
+                                    constants_only=True).size))
+        for mv_stg_descr in mv_stage_descrs_post_fusion[:-1]]
+
+    return kernel, KernelMetadata(
+        iquad=iquad,
+        coords=coords,
+        outDoF_init_iname=outDoF_init_iname,
+        quad_weights=quad_weights,
+        matvec_stage_descrs=mv_stage_descrs_post_fusion,
+        scatter_iname=scatter_iname,
+        eval_results=eval_results,
+        trialDoF_gather_inames=trialDoF_gather_inames,
+        n_trial_derivs=n_trial_derivs,
+        n_quad=n_quad,
+        n_outDoF=n_outDoF,
+        n_trialDoFs=n_trialDoFs,
+    )
 
 
 def tiled_transform(kernel, callables_table, tiling_config):
@@ -928,10 +939,7 @@ class ParametricTilingCandidateGenerator:
 
     @cached_property
     def nquad(self):
-        print(self.metadata)
-        print("Exiting early in nquad function.")
-        exit()
-        return self.metadata.nquad(self.fem_program.root_kernel)
+        return self.metadata.n_quad
 
     @cached_property
     def matvec_stages(self):
@@ -947,11 +955,11 @@ class ParametricTilingCandidateGenerator:
 
     @cached_property
     def n_trialDoFs(self):
-        return self.metadata.n_trialDoFs(self.fem_program.root_kernel)
+        return self.metadata.n_trialDoFs
 
     @cached_property
     def n_outDoF(self):
-        return self.metadata.n_outDoF(self.fem_program.root_kernel)
+        return self.metadata.n_outDoF
 
     @cached_property
     def n_trial_derivs(self):
@@ -959,24 +967,26 @@ class ParametricTilingCandidateGenerator:
 
     @cached_property
     def trialDoF_shapes(self):
-        sizes = [[self.fem_program.root_kernel.temporary_variables[dof_name].shape
-                  for dof_name in mv_stage.dof_names]
-                 for mv_stage in self.matvec_stages[:-1]]
+        sizes = [
+            [self.fem_program.default_entrypoint.temporary_variables[dof_name].shape
+            for dof_name in mv_stage.dof_names]
+            for mv_stage in self.matvec_stages[:-1]
+        ]
         return sizes
 
     @cached_property
     def outDoF_shape(self):
         outDoF = self.metadata.outDoF
-        return self.fem_program.root_kernel.temporary_variables[outDoF].shape
+        return self.fem_program.default_entrypoint.temporary_variables[outDoF].shape
 
     @cached_property
     def coords_shape(self):
         coords = self.metadata.coords
-        return self.fem_program.root_kernel.temporary_variables[coords].shape
+        return self.fem_program.default_entrypoint.temporary_variables[coords].shape
 
     @cached_property
     def deriv_mat_shapes(self):
-        sizes = [[self.fem_program.root_kernel.temporary_variables[mat_name].shape
+        sizes = [[self.fem_program.default_entrypoint.temporary_variables[mat_name].shape
                   for mat_name in mv_stage.deriv_matrices]
                  for mv_stage in self.matvec_stages]
         return sizes
@@ -1150,7 +1160,7 @@ class ParametricTilingCandidateGenerator:
 
         return 4.0/(nwarps) + nsync/nblocks + nwi/8
 
-    def __call__(self):
+    def __call__(self) -> Tuple[ParametricTiling, ...]:
         from itertools import product
 
         threads_to_cells = {}
@@ -1208,7 +1218,7 @@ class ParametricTilingCandidateGenerator:
         # sort the parameters with highest occupancy.
         params.sort(key=lambda P: self.estimated_exec_time(P))
 
-        return params[:self.num_param_tiling_candidates]
+        return tuple(params[:self.num_param_tiling_candidates])
 
     @memoize_method
     def convert_numpy_arrays_to_cuda_mems(self, ary):
