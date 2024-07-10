@@ -1220,13 +1220,6 @@ class ParametricTilingCandidateGenerator:
 
         return tuple(params[:self.num_param_tiling_candidates])
 
-    @memoize_method
-    def convert_numpy_arrays_to_cuda_mems(self, ary):
-        ary = np.array(ary)
-        ary_gpu = cuda.mem_alloc(ary.nbytes)
-        cuda.memcpy_htod(src=ary, dest=ary_gpu)
-        return ary_gpu
-
 # }}}
 
 
@@ -1239,56 +1232,67 @@ def get_transform_candidates(
 def _transform_kernel_with_candidate(
     kernel: lp.TranslationUnit,
     candidate: TransformCandidate) -> Tuple[lp.TranslationUnit,
-                                            Tuple[Any, ...]]:
-    raise NotImplementedError
+                                            Tuple[np.ndarray, ...]]:
+    if isinstance(candidate, SWIPC):
+        from pyop2.transforms.snpt import split_n_across_workgroups
+        return split_n_across_workgroups(kernel, 32)
+    elif isinstance(candidate, ParametricTiling):
+        return tiled_transform(kernel, candidate)
+    else:
+        raise NotImplementedError(type(candidate))
+
+def _np_ary_to_cuda_mem(ary: np.ndarray) -> cuda.DeviceAllocation:
+    assert isinstance(ary, np.ndarray)
+    ary_gpu = cuda.mem_alloc(ary.nbytes)
+    cuda.memcpy_htod(src=ary, dest=ary_gpu)
+    return ary_gpu
 
 
 def get_empirically_best_candidate(
-    fem_kernel: lp.TranslationUnit,
+    t_unit: lp.TranslationUnit,
     *,
-    kernel_args: Sequence[Any],
+    args: Sequence[Union[int, cuda.DeviceAllocation]],
+    argshapes: Sequence[int],
     candidates: Tuple[TransformCandidate, ...]
 ) -> TransformCandidate:
 
-    best_performing_time = float("inf")
-    best_performing_config = None
+    best_time = np.inf
+    best_candidate = None
+
     nminrounds = 15
     nwarmup = 5
     mintime = 0.1
 
-    copied_args = ()
-    for i, lpy_arg in enumerate(self.fem_program.args):
-        if lpy_arg.name in self.fem_program.root_kernel.get_written_variables():
+    copied_args: List[Union[int, cuda.DeviceAllocation]] = []
+    epoint_knl = t_unit.default_entrypoint
+    import pudb; pu.db
+    for i, lpy_arg in enumerate(epoint_knl.args):
+        if lpy_arg.name in epoint_knl.get_written_variables():
+            largest_sized_argument = 1/0
+            # FIXME: Just consider the largest sized argument with our own
+            # dtype for getting the shapes.
             # arg is written during kernel execution => make a copy
-            arg_gpu = cuda.mem_alloc(int(np.prod(argshapes[i])*lpy_arg.dtype.itemsize))
-            copied_args += (arg_gpu,)
+            # PS: We do need a better name than largest_sized_argument. Lulz..
+            arg_gpu = cuda.mem_alloc(int(largest_sized_argument*lpy_arg.dtype.itemsize))
+            copied_args.append(arg_gpu)
         else:
             # arg is read only => pass the same arg to the knl
-            copied_args += (args[i],)
+            copied_args.append(args[i],)
+
+    print(copied_args)
+    2/0
 
     from pyop2.gpu.tile import tiled_transform
 
-    for tiling_config in candidates:
+    for candidate in candidates:
 
-        for lpy_arg, arg, copied_arg, argshape in zip(self.fem_program.args, args, copied_args, argshapes):
-            if lpy_arg.name in self.fem_program.root_kernel.get_written_variables():
-                # arg is written during kernel execution => make a copy
-                cuda.memcpy_dtod(src=arg, dest=copied_arg,
-                                 size=int(np.prod(argshape)*lpy_arg.dtype.itemsize))
+        transformed_t_unit, extra_args = _transform_kernel_with_candidate(t_unit, candidate)
+        assert all(isinstance(extra_arg, np.ndarray) for extra_arg in extra_args)
 
-        print(75*"=")
-        print("Params:", tiling_config.stringify(),
-              "Nsync:", self.get_nsync(tiling_config),
-              "Nwarps:", self.get_effective_warps_per_sm(tiling_config))
-
-        kernel, extra_args = tiled_transform(self.fem_program.root_kernel,
-                                             self.fem_program.callables_table,
-                                             tiling_config)
-        from pymbolic import evaluate
-        kernel = self.fem_program.with_root_kernel(kernel)
-        code = lp.generate_code_v2(kernel).device_code()
+        code = lp.generate_code_v2(transformed_t_unit).device_code()
 
         glens, llens = kernel.get_grid_size_upper_bounds_as_exprs()
+        from pymbolic import evaluate
         grid = tuple(int(evaluate(glens[i], {"start": args[0], "end": args[1]})) if i < len(glens) else 1
                      for i in range(2))
         block = tuple(int(evaluate(llens[i], {"start": args[0], "end": args[1]})) if i < len(llens) else 1
@@ -1296,8 +1300,7 @@ def get_empirically_best_candidate(
 
         executable_knl = SourceModule(code, options=["-use_fast_math", "-w"]).get_function(kernel.name)
         executable_knl.prepare("i"*2+"P"*len(args[2:])+"P"*len(extra_args))
-        extra_args = tuple(self.convert_numpy_arrays_to_cuda_mems(tuple(arg))
-                           for arg in extra_args)
+        extra_args = tuple(_np_ary_to_cuda_mem(extra_arg) for extra_arg in extra_args)
 
         for i in range(nwarmup):
             executable_knl.prepared_call(grid, block, *(copied_args+extra_args))
@@ -1310,22 +1313,21 @@ def get_empirically_best_candidate(
             start_evt = cuda.Event()
             end_evt = cuda.Event()
             start_evt.record()
-            # start_evt.synchronize()
-            executable_knl.prepared_call(grid, block, *(copied_args+extra_args))
+
+            for i in range(10):
+                executable_knl.prepared_call(grid, block, *(copied_args+extra_args))
+
             end_evt.record()
             end_evt.synchronize()
-            runtimes.append(start_evt.time_till(end_evt)/1000)
+            runtimes.append(1e-3*(end_evt.time_since(start_evt)/10))
 
-        exec_time = np.average(runtimes)
-        from pyop2.configuration import configuration
-        print("GFlops/s = {}".format(configuration["gflop_count"]/exec_time))
-        print(75*"=")
+        candidate_runtime = np.median(runtimes)
 
-        if exec_time < best_performing_time:
-            best_performing_time = exec_time
-            best_performing_config = tiling_config
+        if candidate_runtime < best_time:
+            best_time = candidate_runtime
+            best_candidate = candidate
 
-    return best_performing_config
+    return best_candidate
 
 
 def _preprocess_tunit_for_autotiling(
@@ -1344,8 +1346,7 @@ def _preprocess_tunit_for_autotiling(
 
 
 def autotuned_tiling(t_unit,
-                     arguments: Tuple[Union[int, "cuda.DeviceAllocation"],
-                                      ...]):
+                     arguments: Tuple[Union[int, "cuda.DeviceAllocation"], ...]):
     """
     Returns ``(transformed_kernel, args_to_make_global)``, where
     ``transformed_kernel`` is the kernel transformed via the auto-tuning
@@ -1371,7 +1372,7 @@ def autotuned_tiling(t_unit,
     # Step.2: Find the best candidate
     best_candidate = get_empirically_best_candidate(t_unit,
                                                     candidates=candidates,
-                                                    kernel_args=arguments)
+                                                    args=arguments)
 
     # Step. 3. Transform the kernel with the best candidate
     return _transform_kernel_with_candidate(t_unit, best_candidate)
