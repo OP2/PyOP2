@@ -5,10 +5,12 @@ from math import ceil, sqrt, floor
 from pytools import memoize_method
 from pycuda.compiler import SourceModule
 from pyop2.utils import cached_property
-from pytools import ImmutableRecord, memoize_on_first_arg
+from pytools import memoize_on_first_arg
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
-from typing import Any, FrozenSet, List, Tuple, Sequence, Union
+import pycuda.gpuarray as cuda_np
+from typing import FrozenSet, List, Tuple, Sequence, Union
+from functools import reduce as ft_reduce
 
 
 # {{{ Modeling a transform candidate.
@@ -24,11 +26,13 @@ class SWIPC(TransformCandidate):
     """
     Single Work-item per Cell transformation.
     """
+
     def __init__(self):
         pass
 
 
-class ParametricTiling(ImmutableRecord, TransformCandidate):
+@dataclass
+class ParametricTiling(TransformCandidate):
     """
     Records the configuration for :func:`pyop2.gpu.tile.tiled_transform`.
 
@@ -57,47 +61,30 @@ class ParametricTiling(ImmutableRecord, TransformCandidate):
     :attr tiled_prefetch_of_quad_weights: If the quadrature weights are
         prefetched to shared memory, should they in prefetched in tile lengths?
     """
-    def __init__(self,
-                 ncells_per_block,
-                 nthreads_per_cell,
-                 operator_tile_descriptions,
-                 quad_rowtile_lengths,
-                 load_coordinates_to_shared,
-                 load_input_to_shared,
-                 load_mats_to_shared,
-                 load_quad_weights_to_shared,
-                 tiled_prefetch_of_inputs,
-                 tiled_prefetch_of_quad_weights):
-        super().__init__(ncells_per_block=ncells_per_block,
-                         nthreads_per_cell=nthreads_per_cell,
-                         operator_tile_descriptions=operator_tile_descriptions,
-                         quad_rowtile_lengths=quad_rowtile_lengths,
-                         load_coordinates_to_shared=load_coordinates_to_shared,
-                         load_input_to_shared=load_input_to_shared,
-                         load_mats_to_shared=load_mats_to_shared,
-                         load_quad_weights_to_shared=load_quad_weights_to_shared,
-                         tiled_prefetch_of_inputs=tiled_prefetch_of_inputs,
-                         tiled_prefetch_of_quad_weights=tiled_prefetch_of_quad_weights)
 
-    def stringify(self):
-        optile_str = ":".join("("+"x".join(str(o) for o in optiles)+")"
-                              for optiles in self.operator_tile_descriptions)
-        quadtile_str = ":".join(str(q) for q in
-                                self.quad_rowtile_lengths) or "()"
+    ncells_per_block: int
+    nthreads_per_cell: int
+    operator_tile_descriptions: Tuple[int, Tuple[int, ...]]
+    quad_rowtile_lengths: List[int]
+    load_coordinates_to_shared: bool
+    load_input_to_shared: bool
+    load_mats_to_shared: bool
+    load_quad_weights_to_shared: bool
+    tiled_prefetch_of_inputs: bool
+    tiled_prefetch_of_quad_weights: bool
 
-        strng = "%d, %d, %s, %s" % (self.ncells_per_block, self.nthreads_per_cell, optile_str, quadtile_str)
-
-        return strng
 
 # }}}
 
 
 # {{{ implementing the tiling transformation
 
+
 @lp.for_each_kernel
 def remove_unnecessary_deps(kernel):
 
     from loopy.schedule import get_insns_in_topologically_sorted_order
+
     insn_order = get_insns_in_topologically_sorted_order(kernel)
 
     new_insns = insn_order.copy()
@@ -106,23 +93,30 @@ def remove_unnecessary_deps(kernel):
         if isinstance(source_insn, lp.MultiAssignmentBase):
             written_var_name = source_insn.assignee_name
 
-            for j, sink_insn in enumerate(insn_order[i+1:]):
+            for j, sink_insn in enumerate(insn_order[i + 1:]):
                 if written_var_name in sink_insn.read_dependency_names():
-                    assert new_insns[j+i+1].id == sink_insn.id
-                    new_insns[j+1+i] = new_insns[j+1+i].copy(
-                        depends_on=(new_insns[j+1+i].depends_on
-                                    | frozenset([source_insn.id])))
+                    assert new_insns[j + i + 1].id == sink_insn.id
+                    new_insns[j + 1 + i] = new_insns[j + 1 + i].copy(
+                        depends_on=(
+                            new_insns[j + 1 + i].depends_on
+                            | frozenset([source_insn.id])
+                        )
+                    )
                 else:
-                    assert new_insns[j+i+1].id == sink_insn.id
-                    new_insns[j+1+i] = new_insns[j+1+i].copy(
-                        depends_on=(new_insns[j+1+i].depends_on
-                                    - frozenset([source_insn.id])))
+                    assert new_insns[j + i + 1].id == sink_insn.id
+                    new_insns[j + 1 + i] = new_insns[j + 1 + i].copy(
+                        depends_on=(
+                            new_insns[j + 1 + i].depends_on
+                            - frozenset([source_insn.id])
+                        )
+                    )
 
     return kernel.copy(instructions=new_insns)
 
 
-def find_recursive_reverse_dependencies(kernel: lp.LoopKernel,
-                                        insn_ids: FrozenSet[str]) -> FrozenSet[str]:
+def find_recursive_reverse_dependencies(
+    kernel: lp.LoopKernel, insn_ids: FrozenSet[str]
+) -> FrozenSet[str]:
     assert isinstance(insn_ids, frozenset)
     all_rev_depends = set()
     from loopy.kernel.tools import find_reverse_dependencies
@@ -130,9 +124,11 @@ def find_recursive_reverse_dependencies(kernel: lp.LoopKernel,
     new_rev_depends = insn_ids
 
     while new_rev_depends:
-        new_rev_depends = (find_reverse_dependencies(kernel, new_rev_depends)
-                           - all_rev_depends
-                           - insn_ids)
+        new_rev_depends = (
+            find_reverse_dependencies(kernel, new_rev_depends)
+            - all_rev_depends
+            - insn_ids
+        )
         all_rev_depends |= new_rev_depends
 
     return frozenset(all_rev_depends)
@@ -140,29 +136,27 @@ def find_recursive_reverse_dependencies(kernel: lp.LoopKernel,
 
 def _make_tv_array_arg(tv):
     assert tv.address_space != lp.AddressSpace.PRIVATE
-    arg = lp.ArrayArg(name=tv.name,
-                      dtype=tv.dtype,
-                      shape=tv.shape,
-                      dim_tags=tv.dim_tags,
-                      offset=tv.offset,
-                      dim_names=tv.dim_names,
-                      order=tv.order,
-                      alignment=tv.alignment,
-                      address_space=tv.address_space,
-                      is_output_only=not tv.read_only)
+    arg = lp.ArrayArg(
+        name=tv.name,
+        dtype=tv.dtype,
+        shape=tv.shape,
+        dim_tags=tv.dim_tags,
+        offset=tv.offset,
+        dim_names=tv.dim_names,
+        order=tv.order,
+        alignment=tv.alignment,
+        address_space=tv.address_space,
+        is_output_only=not tv.read_only,
+    )
     return arg
 
 
-class MatvecStageDescr(ImmutableRecord):
-    def __init__(self, dof_names, row_iname, col_iname, deriv_matrices):
-        assert isinstance(dof_names, tuple)
-        assert isinstance(row_iname, str)
-        assert isinstance(col_iname, str)
-        assert isinstance(deriv_matrices, frozenset)
-        super(MatvecStageDescr, self).__init__(dof_names=dof_names,
-                                               row_iname=row_iname,
-                                               col_iname=col_iname,
-                                               deriv_matrices=deriv_matrices)
+@dataclass(frozen=True)
+class MatvecStageDescr:
+    dof_names: Tuple[str, ...]
+    row_iname: str
+    col_iname: str
+    deriv_matrices: FrozenSet[str]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -193,13 +187,15 @@ class KernelMetadata:
 
 
 def are_mv_stages_similar(mv_stage_x, mv_stage_y):
-    return ((mv_stage_x.deriv_matrices == mv_stage_y.deriv_matrices)
-            and (mv_stage_x.col_iname == mv_stage_x.col_iname))
+    return (mv_stage_x.deriv_matrices == mv_stage_y.deriv_matrices) and (
+        mv_stage_x.col_iname == mv_stage_x.col_iname
+    )
 
 
 @memoize_on_first_arg
-def temp_vars_both_read_and_write_access(kernel: lp.LoopKernel,
-                                         insn: lp.InstructionBase):
+def temp_vars_both_read_and_write_access(
+    kernel: lp.LoopKernel, insn: lp.InstructionBase
+):
     tvs = frozenset(kernel.temporary_variables)
     read_tvs = insn.read_dependency_names() & tvs
     write_tvs = insn.write_dependency_names() & tvs
@@ -218,16 +214,27 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
     # quad iname
     # Assumption: There is only a single iname responsible for quadrature and
     # it starts with "form_ip">
-    iquad, = [iname for iname in kernel.all_inames() if iname.startswith("form_ip")]
+    (iquad,) = [iname
+                for iname in kernel.all_inames()
+                if iname.startswith("form_ip")]
 
     # trialDof_x_outputDofs_x_coords: A set containing the variable names for the
     # *temporaries* of trialDofs, outputDofs and the coordinates.
     # trialDof, outputDofs, coords := local DoFs
     # These are also the variables which are written (or initialized during the
     # gather phase).
-    trialDofs_x_outDof_x_coords = set().union(*(insn.write_dependency_names()
-                                                for insn in kernel.instructions
-                                                if lp.match.Tagged("gather")(kernel, insn))) - kernel.all_inames()
+    trialDofs_x_outDof_x_coords = (
+        ft_reduce(
+            frozenset.union,
+            (
+                insn.write_dependency_names()
+                for insn in kernel.instructions
+                if lp.match.Tagged("gather")(kernel, insn)
+            ),
+            frozenset(),
+        )
+        - kernel.all_inames()
+    )
 
     # {{{ extract outputDoF name
 
@@ -236,9 +243,11 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
     # In the "quadr" phase of the form kernel the *only* variable being written
     # is output DoF
 
-    outDoF, = {insn.assignee_name
-               for insn in kernel.instructions
-               if lp.match.Tagged("quadrature")(kernel, insn)}
+    (outDoF,) = {
+        insn.assignee_name
+        for insn in kernel.instructions
+        if lp.match.Tagged("quadrature")(kernel, insn)
+    }
 
     # }}}
 
@@ -250,10 +259,14 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
     # within the "n" loop.
     coords = set()
     for insn in kernel.instructions:
-        if lp.match.Tagged("evaluate")(kernel, insn) and (insn.within_inames == frozenset(["n"])):
-            coords = coords | (insn.read_dependency_names() & trialDofs_x_outDof_x_coords)
+        if lp.match.Tagged("evaluate")(kernel, insn) and (
+            insn.within_inames == frozenset(["n"])
+        ):
+            coords = coords | (
+                insn.read_dependency_names() & trialDofs_x_outDof_x_coords
+            )
 
-    coords, = coords
+    (coords,) = coords
 
     # }}}
 
@@ -268,9 +281,13 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
     # Logic: Already assumed that there is only one outDof pet kernel; so
     # picking up the scatter insn based on that singleton variable.
 
-    scatter_insn, = [insn for insn in kernel.instructions if lp.match.Tagged("scatter")(kernel, insn)]
+    (scatter_insn,) = [
+        insn
+        for insn in kernel.instructions
+        if lp.match.Tagged("scatter")(kernel, insn)
+    ]
     scatter_map = scatter_insn.assignee.index_tuple[0]
-    scatter_iname, = set(scatter_map.index_tuple) - set([Variable("n")])
+    (scatter_iname,) = set(scatter_map.index_tuple) - set([Variable("n")])
     scatter_iname = scatter_iname.name
 
     # }}}
@@ -280,9 +297,12 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
     # Assumption the outDoF init instruction is as follows:
     # outDoF[outDoF_init_iname, ...] <- 0
 
-    outDoF_init_iname, = [insn.assignee.index_tuple[1].name
-                          for insn in kernel.instructions
-                          if lp.match.Tagged("gather")(kernel, insn) and (outDoF == insn.assignee_name)]
+    (outDoF_init_iname,) = [
+        insn.assignee.index_tuple[1].name
+        for insn in kernel.instructions
+        if (lp.match.Tagged("gather")(kernel, insn)
+            and (outDoF == insn.assignee_name))
+    ]
 
     # }}}
 
@@ -298,9 +318,15 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
         # the eval stage and the instruction accessing would it have the
         # inames: "n, iquad, i_1".  Over here we extract what"s the name of i_1
         # in our FEM kernel.
-        iname, = set().union(*(insn.within_inames
-                               for insn in kernel.instructions
-                               if trialDoF in insn.read_dependency_names())) - {"n", iquad}
+        (iname,) = ft_reduce(
+            set.union,
+            (
+                insn.within_inames
+                for insn in kernel.instructions
+                if trialDoF in insn.read_dependency_names()
+            ),
+            set(),
+        ) - {"n", iquad}
 
         doF_inames_in_eval_stage.add(iname)
         trialDofs_to_redn_inames[trialDoF] = iname
@@ -316,16 +342,21 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
             fem_action_phase = "gather"
         elif insn.within_inames == frozenset([icell]):
             fem_action_phase = "jacobi"
-        elif (insn.within_inames == frozenset([icell, iquad])
-              and insn.expression == 0
-              and lp.match.Tagged("evaluate")(kernel, insn)):
+        elif (
+            insn.within_inames == frozenset([icell, iquad])
+            and insn.expression == 0
+            and lp.match.Tagged("evaluate")(kernel, insn)
+        ):
             fem_action_phase = "eval_init"
-        elif (insn.within_inames == frozenset([icell, iquad])
-              and lp.match.Tagged("evaluate")(kernel, insn)):
+        elif insn.within_inames == frozenset([icell, iquad]) and lp.match.Tagged(
+            "evaluate"
+        )(kernel, insn):
             fem_action_phase = "eval_wrap_up"
-        elif (insn.within_inames > frozenset([icell, iquad])
-              and temp_vars_both_read_and_write_access(kernel, insn)
-              and lp.match.Tagged("evaluate")(kernel, insn)):
+        elif (
+            insn.within_inames > frozenset([icell, iquad])
+            and temp_vars_both_read_and_write_access(kernel, insn)
+            and lp.match.Tagged("evaluate")(kernel, insn)
+        ):
             fem_action_phase = "eval_redn"
         elif lp.match.Tagged("quadrature")(kernel, insn):
             assert temp_vars_both_read_and_write_access(kernel, insn)
@@ -346,15 +377,19 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
     # {{{ extract deriv_matrices, quad_weights
 
     # derivative matrices are the constant data whose array dimensions > 1
-    deriv_matrices = {tv.name
-                      for tv in kernel.temporary_variables.values()
-                      if tv.initializer is not None and len(tv.initializer.shape) != 1}
+    deriv_matrices = {
+        tv.name
+        for tv in kernel.temporary_variables.values()
+        if tv.initializer is not None and len(tv.initializer.shape) != 1
+    }
 
     # quad_weights is the only constant data in the kernel which is a single
     # dimensional array
-    quad_weights, = [tv.name
-                     for tv in kernel.temporary_variables.values()
-                     if tv.initializer is not None and len(tv.initializer.shape) == 1]
+    (quad_weights,) = [
+        tv.name
+        for tv in kernel.temporary_variables.values()
+        if tv.initializer is not None and len(tv.initializer.shape) == 1
+    ]
     # }}}
 
     matvec_descrs = []
@@ -365,51 +400,111 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
 
     for i, (trialDoF, redn_iname) in enumerate(trialDofs_to_redn_inames.items()):
         within = parse_match("writes:%s" % trialDoF)
-        trialDof_init_insn_id, = [insn.id for insn in kernel.instructions if within(kernel, insn)]
+        (trialDof_init_insn_id,) = [
+            insn.id for insn in kernel.instructions if within(kernel, insn)
+        ]
 
         # all the recursive reverse dependencies of trialDoF_init_insn in the
         # eval-part of the kernel form the trialDoF"s matvec
 
-        matvec_insn_ids = find_recursive_reverse_dependencies(kernel,
-                                                              frozenset({trialDof_init_insn_id}))
-        kernel = lp.tag_instructions(kernel, "matvec%d" % i, "(" + " or ".join(["id:%s" % matvec_insn_id for matvec_insn_id in matvec_insn_ids]) + ") and (tag:eval_init or tag:eval_redn)")
-        vars_written_in_matvec = set().union(*(insn.write_dependency_names()
-                                               for insn in kernel.instructions
-                                               if lp.match.Tagged(f"matvec{i}")(kernel, insn)))
-        eval_init_insn_ids = [insn.id
-                              for insn in kernel.instructions
-                              if ((insn.assignee_name in vars_written_in_matvec)
-                                  and lp.match.Tagged("eval_init")(kernel, insn))]
+        matvec_insn_ids = find_recursive_reverse_dependencies(
+            kernel, frozenset({trialDof_init_insn_id})
+        )
+        kernel = lp.tag_instructions(
+            kernel,
+            "matvec%d" % i,
+            "("
+            + " or ".join(
+                ["id:%s" % matvec_insn_id for matvec_insn_id in matvec_insn_ids]
+            )
+            + ") and (tag:eval_init or tag:eval_redn)",
+        )
 
-        kernel = lp.tag_instructions(kernel,
-                                     f"matvec{i}",
-                                     " or ".join(["id:%s" % eval_init_insn_id
-                                                  for eval_init_insn_id in eval_init_insn_ids]))
+        vars_written_in_matvec = ft_reduce(
+            frozenset.union,
+            (
+                insn.write_dependency_names()
+                for insn in kernel.instructions
+                if lp.match.Tagged(f"matvec{i}")(kernel, insn)
+            ),
+            frozenset(),
+        )
+        eval_init_insn_ids = [
+            insn.id
+            for insn in kernel.instructions
+            if (
+                (insn.assignee_name in vars_written_in_matvec)
+                and lp.match.Tagged("eval_init")(kernel, insn)
+            )
+        ]
 
-        deriv_matrices_in_current_mv_stg = frozenset().union(*(insn.read_dependency_names()
-                                                               for insn in kernel.instructions
-                                                               if lp.match.Tagged(f"matvec{i}")(kernel, insn))) & deriv_matrices
+        kernel = lp.tag_instructions(
+            kernel,
+            f"matvec{i}",
+            " or ".join(
+                [
+                    "id:%s" % eval_init_insn_id
+                    for eval_init_insn_id in eval_init_insn_ids
+                ]
+            ),
+        )
 
-        matvec_descrs.append(MatvecStageDescr((trialDoF,), iquad, redn_iname, deriv_matrices_in_current_mv_stg))
+        deriv_matrices_in_current_mv_stg = (
+            ft_reduce(
+                frozenset.union,
+                (
+                    insn.read_dependency_names()
+                    for insn in kernel.instructions
+                    if lp.match.Tagged(f"matvec{i}")(kernel, insn)
+                ),
+                frozenset(),
+            )
+            & deriv_matrices
+        )
+
+        matvec_descrs.append(
+            MatvecStageDescr(
+                (trialDoF,), iquad, redn_iname, deriv_matrices_in_current_mv_stg
+            )
+        )
 
     # }}}
 
     # {{{ extract matvec producing outDoF
 
-    (quadr_stage_DoF_iname,), = {(insn.within_inames - {"n", iquad})
-                                 for insn in kernel.instructions
-                                 if lp.match.Tagged("quadrature")(kernel, insn)}
+    ((quadr_stage_DoF_iname,),) = {
+        (insn.within_inames - {"n", iquad})
+        for insn in kernel.instructions
+        if lp.match.Tagged("quadrature")(kernel, insn)
+    }
 
-    kernel = lp.tag_instructions(kernel,
-                                 "matvec%d" % (i+1),
-                                 "(tag:gather or tag:quadrature) and (reads:{0} or writes:{0})".format(outDoF))
-    kernel = lp.tag_instructions(kernel, "quadr_init", "tag:gather and tag:matvec%d" % (i+1))
+    kernel = lp.tag_instructions(
+        kernel,
+        f"matvec{i+1}",
+        "(tag:gather or tag:quadrature) and (reads:{0} or writes:{0})".format(outDoF),  # noqa: E501
+    )
+    kernel = lp.tag_instructions(
+        kernel, "quadr_init", f"tag:gather and tag:matvec{i+1}"
+    )
 
-    deriv_matrices_in_current_mv_stg = frozenset().union(*(insn.read_dependency_names()
-                                                           for insn in kernel.instructions
-                                                           if lp.match.Tagged("matvec%d" % (i+1))(kernel, insn))) & deriv_matrices
+    deriv_matrices_in_current_mv_stg = (
+        ft_reduce(
+            frozenset.union,
+            (
+                insn.read_dependency_names()
+                for insn in kernel.instructions
+                if lp.match.Tagged(f"matvec{i+1}")(kernel, insn)
+            ),
+            frozenset(),
+        )
+        & deriv_matrices
+    )
 
-    matvec_descrs.append(MatvecStageDescr((outDoF,), quadr_stage_DoF_iname, iquad, deriv_matrices_in_current_mv_stg))
+    matvec_descrs.append(
+        MatvecStageDescr(
+            (outDoF,), quadr_stage_DoF_iname, iquad, deriv_matrices_in_current_mv_stg
+        )
+    )
 
     # }}}
 
@@ -417,12 +512,19 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
     # evaluation part of the kernel.
     # Hence, eval_results =Variables which are written in the eval stage and
     # read in the quadr stage
-    eval_results = (frozenset().union(*[insn.write_dependency_names()
-                                        for insn in kernel.instructions
-                                        if lp.match.Tagged("eval_wrap_up")(kernel, insn)])
-                    & frozenset().union(*[insn.read_dependency_names()
-                                        for insn in kernel.instructions
-                                        if lp.match.Tagged("quadrature")(kernel, insn)]))
+    eval_results = frozenset().union(
+        *[
+            insn.write_dependency_names()
+            for insn in kernel.instructions
+            if lp.match.Tagged("eval_wrap_up")(kernel, insn)
+        ]
+    ) & frozenset().union(
+        *[
+            insn.read_dependency_names()
+            for insn in kernel.instructions
+            if lp.match.Tagged("quadrature")(kernel, insn)
+        ]
+    )
 
     # {{{ fuse matvec stages
 
@@ -430,9 +532,12 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
     to_be_fused_mv_stages = []
 
     for i, mv_stage_i in enumerate(matvec_descrs):
-        if any((i, mv_stage_i) in to_be_fused_stage for to_be_fused_stage in to_be_fused_mv_stages):
+        if any(
+            (i, mv_stage_i) in to_be_fused_stage
+            for to_be_fused_stage in to_be_fused_mv_stages
+        ):
             continue
-        to_be_fused_mv_stage = ((i, mv_stage_i), )
+        to_be_fused_mv_stage = ((i, mv_stage_i),)
         # do not fuse "quadr" stage matvec with any other matvec
         for j, mv_stage_j in enumerate(matvec_descrs[i+1:-1], start=i+1):
             if are_mv_stages_similar(mv_stage_i, mv_stage_j):
@@ -446,13 +551,20 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
         current_mv_stg_idx = len(mv_stage_descrs_post_fusion)
 
         def retag_insn(insn):
-            new_tags = (frozenset(tag for tag in insn.tags
-                                 if not lp.match.Tagged("matvec*")(kernel, insn))
-                        | frozenset([lp.LegacyStringInstructionTag("matvec%d" % current_mv_stg_idx)]))
-            return insn.copy(tags=new_tags)
+            new_tags = {
+                tag for tag in insn.tags
+                if not lp.match.Tagged("matvec*")(kernel, insn)
+            } | {lp.LegacyStringInstructionTag(f"matvec{current_mv_stg_idx}")}
+            return insn.copy(tags=frozenset(new_tags))
 
-        kernel = lp.map_instructions(kernel, " or ".join("tag:matvec%d" % i for i, _ in to_be_fused_mv_stage), retag_insn)
-        fused_dof_names = tuple(mv_stg.dof_names[0] for _, mv_stg in to_be_fused_mv_stage)
+        kernel = lp.map_instructions(
+            kernel,
+            " or ".join("tag:matvec%d" % i for i, _ in to_be_fused_mv_stage),
+            retag_insn,
+        )
+        fused_dof_names = tuple(
+            mv_stg.dof_names[0] for _, mv_stg in to_be_fused_mv_stage
+        )
         new_mv_stage = to_be_fused_mv_stage[0][1].copy(dof_names=fused_dof_names)
         mv_stage_descrs_post_fusion.append(new_mv_stage)
 
@@ -461,49 +573,71 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
     # {{{ trialDoF gather iname
 
     # Assumption the trialDoF gather instruction is as follows:
-    # trialDoF[trialDoF_gather_iname, ...] <- datxx[mapxx[trialDof_gather_iname, ...], ...]
+    # trialDoF[trialDoF_gather_iname, ...] <- datxx[mapxx[trialDof_gather_iname, ...], ...]  # noqa: E501
 
     trialDoF_to_gather_inames = {}
     trialDoF_gather_inames = []
     for trialDoF in trialDoFs:
-        trialDoF_gather_iname, = [insn.assignee.index_tuple[1].name
-                                  for insn in kernel.instructions
-                                  if (trialDoF == insn.assignee_name)]
+        (trialDoF_gather_iname,) = [
+            insn.assignee.index_tuple[1].name
+            for insn in kernel.instructions
+            if (trialDoF == insn.assignee_name)
+        ]
         trialDoF_to_gather_inames[trialDoF] = trialDoF_gather_iname
 
     for mv_stage in mv_stage_descrs_post_fusion[:-1]:
-        fused_trialDoF_gather_iname = trialDoF_to_gather_inames[mv_stage.dof_names[0]]
+        fused_trialDoF_gather_iname = trialDoF_to_gather_inames[
+            mv_stage.dof_names[0]]
         for trialDoF in mv_stage.dof_names[1:]:
             if trialDoF_to_gather_inames[trialDoF] == fused_trialDoF_gather_iname:
                 continue
-            kernel = lp.rename_iname(kernel, trialDoF_to_gather_inames[trialDoF],
-                                     fused_trialDoF_gather_iname,
-                                     existing_ok=True)
+            kernel = lp.rename_iname(
+                kernel,
+                trialDoF_to_gather_inames[trialDoF],
+                fused_trialDoF_gather_iname,
+                existing_ok=True,
+            )
 
         trialDoF_gather_inames.append(fused_trialDoF_gather_iname)
 
     # }}}
 
     n_trial_derivs = [
-        len([insn for insn in kernel.instructions
-             if lp.match.And((lp.match.Tagged("matvec%d" % i),
-                              lp.match.Tagged("eval_init")))(kernel, insn)])
-        for i, _ in enumerate(trialDoFs)]
+        len(
+            [
+                insn
+                for insn in kernel.instructions
+                if lp.match.And(
+                    (lp.match.Tagged("matvec%d" % i), lp.match.Tagged("eval_init"))
+                )(kernel, insn)
+            ]
+        )
+        for i, _ in enumerate(trialDoFs)
+    ]
 
     n_quad = int(
         lp.symbolic.pw_aff_to_expr(
-            kernel.get_iname_bounds(iquad, constants_only=True).size)
+            kernel.get_iname_bounds(iquad, constants_only=True).size
+        )
     )
     n_outDoF = int(
-        lp.symbolic.pw_aff_to_expr(kernel.get_iname_bounds(
-            mv_stage_descrs_post_fusion[-1].row_iname, constants_only=True).size)
+        lp.symbolic.pw_aff_to_expr(
+            kernel.get_iname_bounds(
+                mv_stage_descrs_post_fusion[-1].row_iname, constants_only=True
+            ).size
+        )
     )
 
     n_trialDoFs = [
-        int(lp.symbolic.pw_aff_to_expr(
-            kernel.get_iname_bounds(mv_stg_descr.col_iname,
-                                    constants_only=True).size))
-        for mv_stg_descr in mv_stage_descrs_post_fusion[:-1]]
+        int(
+            lp.symbolic.pw_aff_to_expr(
+                kernel.get_iname_bounds(
+                    mv_stg_descr.col_iname, constants_only=True
+                ).size
+            )
+        )
+        for mv_stg_descr in mv_stage_descrs_post_fusion[:-1]
+    ]
 
     return kernel, KernelMetadata(
         iquad=iquad,
@@ -521,17 +655,21 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
     )
 
 
-def tiled_transform(kernel, callables_table, tiling_config):
+def tiled_transform(t_unit, tiling_config):
     """
     :param tiling_config: An instance of :class:`pyop2.gpu.tiling_config
     """
 
+    kernel = t_unit.default_entrypoint
+    callables_table = t_unit.callables_table
     assert isinstance(kernel, lp.LoopKernel)
     assert isinstance(tiling_config, ParametricTiling)
 
     # {{{ Inferring variables
 
-    kernel, metadata = inference_which_should_ideally_be_done_by_passing_metadata(kernel)
+    kernel, metadata = inference_which_should_ideally_be_done_by_passing_metadata(
+        kernel
+    )
     iquad = metadata.iquad
     coords = metadata.coords
     outDoF = metadata.outDoF
@@ -554,23 +692,25 @@ def tiled_transform(kernel, callables_table, tiling_config):
     quad_tiles = tiling_config.quad_rowtile_lengths
 
     if mv_tiles == ():
-        mv_tiles = tuple((nquad, nDoF) for nDoF in n_trialDoFs) + ((n_outDoF, nquad),)
+        mv_tiles = tuple((nquad, nDoF)
+                         for nDoF in n_trialDoFs) + ((n_outDoF, nquad),)
     if quad_tiles == ():
-        quad_tiles = (nquad, )
-    quad_tile, = quad_tiles
+        quad_tiles = (nquad,)
+    (quad_tile,) = quad_tiles
 
     assert all(len(tile) == 2 for tile in mv_tiles)
     assert len(mv_tiles) == len(matvec_stage_descrs)  # one for each mv stage
-    assert len({mv_tile[0] for mv_tile in mv_tiles[:-1]}) == 1  # in the general case only one $T_e^r$ is supported
+    assert (
+        len({mv_tile[0] for mv_tile in mv_tiles[:-1]}) == 1
+    )  # in the general case only one $T_e^r$ is supported
 
     T_e_r = mv_tiles[0][0]
     T_e_cs = [tile[1] for tile in mv_tiles[:-1]]
     T_q_r = mv_tiles[-1][0]
     T_q_c = mv_tiles[-1][1]
 
-
     kernel = lp.split_iname(kernel, iquad, quad_tile, outer_iname="iquad_tile")
-    kernel = lp.rename_iname(kernel, iquad+"_inner", iquad)
+    kernel = lp.rename_iname(kernel, iquad + "_inner", iquad)
 
     # {{{ privatize temps for function evals and make them LOCAL
 
@@ -583,37 +723,57 @@ def tiled_transform(kernel, callables_table, tiling_config):
     # {{{ Duplicate inames to separate transformation logic for different matvecs
 
     for i, mv_stg_descr in enumerate(matvec_stage_descrs):
-        kernel = lp.duplicate_inames(kernel, mv_stg_descr.col_iname, "tag:matvec%d" % i, "icol%d" % i)
+        kernel = lp.duplicate_inames(
+            kernel, mv_stg_descr.col_iname, "tag:matvec%d" % i, "icol%d" % i
+        )
 
     kernel = lp.duplicate_inames(kernel, iquad, "tag:eval", "irow_eval")
-    kernel = lp.duplicate_inames(kernel, matvec_stage_descrs[-1].row_iname, "tag:quadrature", "irow_quadr")
+    kernel = lp.duplicate_inames(
+        kernel, matvec_stage_descrs[-1].row_iname, "tag:quadrature", "irow_quadr"
+    )
 
     # }}}
 
     # {{{ change address space of constants to "__global"
 
     old_temps = kernel.temporary_variables.copy()
-    args_to_make_global = [tv.initializer.flatten() for tv in old_temps.values() if tv.initializer is not None]
+    args_to_make_global = [
+        tv.initializer.flatten()
+        for tv in old_temps.values()
+        if tv.initializer is not None
+    ]
 
-    new_temps = dict((tv.name, tv) for tv in old_temps.values() if tv.initializer is None)
-    kernel = kernel.copy(args=kernel.args+[_make_tv_array_arg(tv)
-                                           for tv in old_temps.values()
-                                           if tv.initializer is not None],
-                         temporary_variables=new_temps)
+    new_temps = dict(
+        (tv.name, tv) for tv in old_temps.values() if tv.initializer is None
+    )
+    kernel = kernel.copy(
+        args=kernel.args
+        + [
+            _make_tv_array_arg(tv)
+            for tv in old_temps.values()
+            if tv.initializer is not None
+        ],
+        temporary_variables=new_temps,
+    )
 
     # }}}
 
     from loopy.loop import fuse_loop_domains
+
     kernel = fuse_loop_domains(kernel)
 
     from loopy.transform.data import remove_unused_axes_in_temporaries
+
     kernel = remove_unused_axes_in_temporaries(kernel)
 
     # Realize CUDA blocks
-    kernel = lp.split_iname(kernel, "n", nc, outer_iname="iblock", inner_iname="icell")
+    kernel = lp.split_iname(kernel, "n", nc,
+                            outer_iname="iblock", inner_iname="icell")
 
     # Privatize eval_results
-    kernel = lp.privatize_temporaries_with_inames(kernel, "icell", only_var_names=eval_results)
+    kernel = lp.privatize_temporaries_with_inames(
+        kernel, "icell", only_var_names=eval_results
+    )
 
     # cut down the size of the number of basis coeffs written by each
     # thread(if there are multiple threads)
@@ -621,6 +781,7 @@ def tiled_transform(kernel, callables_table, tiling_config):
     kernel = lp.rename_iname(kernel, outDoF_init_iname, "irow_quadr", True)
 
     from loopy.transform.make_scalar import remove_axis
+
     kernel = remove_axis(kernel, outDoF, 0)
 
     # enfoce dependency of first matvec stage onto the jacobian evaluation stage
@@ -642,29 +803,42 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
     # Splitting column in eval stage
     for i, (T_e_c, gather_iname) in enumerate(zip(T_e_cs, trialDoF_gather_inames)):
-        kernel = lp.rename_iname(kernel, gather_iname, "icol%d" % i, existing_ok=True)
-        kernel = lp.split_iname(kernel, "icol%d" % i, T_e_c, outer_iname="icoltile%d" % i)
+        kernel = lp.rename_iname(kernel, gather_iname, "icol%d" % i,
+                                 existing_ok=True)
+        kernel = lp.split_iname(
+            kernel, "icol%d" % i, T_e_c, outer_iname="icoltile%d" % i
+        )
 
     # Splitting row in the quadr stage
-    kernel = lp.split_iname(kernel, "irow_quadr", T_q_r, outer_iname="irowtile_quadr")
+    kernel = lp.split_iname(kernel, "irow_quadr", T_q_r,
+                            outer_iname="irowtile_quadr")
     # Splitting column in quadr stage
-    kernel = lp.split_iname(kernel, "icol%d" % n_trial, T_q_c, outer_iname="icoltile%d" % n_trial)
+    kernel = lp.split_iname(
+        kernel, "icol%d" % n_trial, T_q_c, outer_iname="icoltile%d" % n_trial
+    )
 
     # {{{ Also, limit the gathering of the trialDoF to the current column tile.
 
-    for i, mv_stage, T_e_c, gather_iname in zip(range(n_trial), matvec_stage_descrs, T_e_cs, trialDoF_gather_inames):
+    for i, mv_stage, T_e_c, gather_iname in zip(
+        range(n_trial), matvec_stage_descrs, T_e_cs, trialDoF_gather_inames
+    ):
         for trialDoF in mv_stage.dof_names:
             kernel = lp.split_array_axis(kernel, trialDoF, 0, T_e_c)
             kernel = remove_axis(kernel, trialDoF, 0)
 
-        kernel = lp.add_inames_to_insn(kernel, "iquad_tile,irowtile_eval", " or ".join("writes:%s" % trialDoF
-                                                                                       for trialDoF in mv_stage.dof_names))
+        kernel = lp.add_inames_to_insn(
+            kernel,
+            "iquad_tile,irowtile_eval",
+            " or ".join("writes:%s" % trialDoF for trialDoF in mv_stage.dof_names),
+        )
 
         if i > 1:
             # enforce a dependency of gather for the DoFs used in i+1 matvec
             # stage on the previous matvec. (helps in enforcing separate live
             # ranges).
-            kernel = lp.add_dependency(kernel, "iname:%s_inner" % gather_iname, "tag:matvec%d" % (i-1))
+            kernel = lp.add_dependency(
+                kernel, "iname:%s_inner" % gather_iname, "tag:matvec%d" % (i - 1)
+            )
 
     # }}}
 
@@ -672,28 +846,6 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
     if tiling_config.load_input_to_shared:
         raise NotImplementedError("More like NotYetImplementedError.")
-        # kernel = lp.privatize_temporaries_with_inames(kernel, "icell",
-        #         only_var_names=inputDoFs)
-        # from loopy.transform.precompute import precompute_for_single_kernel
-        # for i, inputDoF in enumerate(inputDoFs):
-        #     kernel = lp.assignment_to_subst(kernel, inputDoF)
-        #     input_prcmpt_iname = "input_basis_prcmpt"
-        #     if tiling_config.tiled_prefetch_of_inputs:
-        #         sweep_inames = (doF_inames_in_quad_stage[i]+"_inner", "icell")
-        #         outer_inames = "iblock,icoltile_matvec1,irowtile_matvec1"
-        #     else:
-        #         sweep_inames = ("icoltile_matvec1", doF_inames_in_quad_stage[i]+"_inner", "icell")
-        #         outer_inames = "iblock"
-        #     kernel = precompute_for_single_kernel(kernel, callables_table,
-        #             subst_use=doF_inames_in_quad_stage[i]+"_subst",
-        #             sweep_inames=sweep_inames,
-        #             precompute_outer_inames=outer_inames,
-        #             precompute_inames=(input_prcmpt_iname, "icell"),
-        #             temporary_address_space=lp.AddressSpace.LOCAL,
-        #             default_tag=None,
-        #             )
-        #     kernel = lp.split_iname(kernel, input_prcmpt_iname,
-        #             nt, inner_tag="l.0")
 
     # }}}
 
@@ -710,13 +862,17 @@ def tiled_transform(kernel, callables_table, tiling_config):
         for istage, mv_stg_descr in enumerate(matvec_stage_descrs):
             if istage < n_trial:
                 # eval stage
-                fetch_outer_inames = "iquad_tile,iblock,icoltile{0},irowtile_eval".format(istage)
+                fetch_outer_inames = (
+                    "iquad_tile,iblock,icoltile{0},irowtile_eval".format(istage)
+                )
                 sweep_inames = "irow_eval_inner, icol{0}_inner".format(istage)
                 tr = T_e_r
                 tc = T_e_cs[istage]
             else:
                 # quadr stage
-                fetch_outer_inames = "iquad_tile,iblock,icoltile{0},irowtile_quadr".format(istage)
+                fetch_outer_inames = (
+                    "iquad_tile,iblock,icoltile{0},irowtile_quadr".format(istage)
+                )
                 sweep_inames = "irow_quadr_inner, icol{0}_inner".format(istage)
                 tr = T_q_r
                 tc = T_q_c
@@ -729,51 +885,73 @@ def tiled_transform(kernel, callables_table, tiling_config):
                 prftch_into = vng("matvec%d_cnst_mtrix_prftch" % istage)
                 total_shared_vars.append(prftch_into)
 
-                kernel = add_prefetch_for_single_kernel(kernel, callables_table,
-                                                        var_name=prftch_from,
-                                                        sweep_inames=sweep_inames,
-                                                        temporary_address_space=lp.AddressSpace.LOCAL,
-                                                        dim_arg_names=prefetch_inames,
-                                                        temporary_name=prftch_into,
-                                                        compute_insn_id=ing("prftch_matvec%d" % istage),
-                                                        fetch_outer_inames=fetch_outer_inames,
-                                                        default_tag=None,
-                                                        within="tag:matvec%d" % istage)
+                kernel = add_prefetch_for_single_kernel(
+                    kernel,
+                    callables_table,
+                    var_name=prftch_from,
+                    sweep_inames=sweep_inames,
+                    temporary_address_space=lp.AddressSpace.LOCAL,
+                    dim_arg_names=prefetch_inames,
+                    temporary_name=prftch_into,
+                    compute_insn_id=ing("prftch_matvec%d" % istage),
+                    fetch_outer_inames=fetch_outer_inames,
+                    default_tag=None,
+                    within="tag:matvec%d" % istage,
+                )
 
                 new_temps = kernel.temporary_variables.copy()
 
                 lx, ly = kernel.temporary_variables[prftch_into].shape
-                assert lx*ly == tr*tc
+                assert lx * ly == tr * tc
                 # prefetch the matrices into a single shared memory location
                 # with the appropriate offsets
-                new_temps[prftch_into] = (kernel.temporary_variables[prftch_into].copy(base_storage="prftch_matrix_base",
-                                                                                       offset=i_op_pos*tr*tc,
-                                                                                       shape=((i_op_pos+1)*lx, ly)))
+                new_temps[prftch_into] = (
+                    kernel.temporary_variables[prftch_into].copy(
+                        base_storage="prftch_matrix_base",
+                        offset=i_op_pos * tr * tc,
+                        shape=((i_op_pos + 1) * lx, ly))
+                )
 
                 kernel = kernel.copy(temporary_variables=new_temps)
 
             # add dependency of the matvec stage on its prefetch instructions
-            kernel = lp.add_dependency(kernel,
-                                       "tag:matvec%d and (tag:eval_redn or tag:quadr_redn)" % istage,
-                                       "id:prftch_matvec%d*" % istage)
-            kernel = lp.add_nosync(kernel, source="id:prftch_matvec%d*" % istage,
-                                   sink="id:prftch_matvec%d*" % istage,
-                                   scope="local", empty_ok=True, force=True)
+            kernel = lp.add_dependency(
+                kernel,
+                "tag:matvec%d and (tag:eval_redn or tag:quadr_redn)" % istage,
+                "id:prftch_matvec%d*" % istage,
+            )
+            kernel = lp.add_nosync(
+                kernel,
+                source="id:prftch_matvec%d*" % istage,
+                sink="id:prftch_matvec%d*" % istage,
+                scope="local",
+                empty_ok=True,
+                force=True,
+            )
 
             # join inames to promote more coalesced memory accesses in the
             # prefetches
-            kernel = lp.join_inames(kernel, prefetch_inames, new_iname="i_matvec%d_prftch" % istage)
-            kernel = lp.split_iname(kernel, "i_matvec%d_prftch" % istage, nc*nt)  # , outer_tag="ilp")
-            kernel = lp.split_iname(kernel,
-                                    "i_matvec%d_prftch_inner" % istage,
-                                    nt, inner_tag="l.0", outer_tag="l.1")
+            kernel = lp.join_inames(
+                kernel, prefetch_inames, new_iname="i_matvec%d_prftch" % istage
+            )
+            kernel = lp.split_iname(
+                kernel, "i_matvec%d_prftch" % istage, nc * nt
+            )  # , outer_tag="ilp")
+            kernel = lp.split_iname(
+                kernel,
+                "i_matvec%d_prftch_inner" % istage,
+                nt,
+                inner_tag="l.0",
+                outer_tag="l.1",
+            )
 
         # {{{ prefetch of (i+1)-th matvec stage should depend on prefetch of
         # (i)th matvec stage
 
         for i in range(n_trial):
-            kernel = lp.add_dependency(kernel, "id:prftch_matvec%d*" % (i+1),
-                                       "tag:matvec%d" % i)
+            kernel = lp.add_dependency(
+                kernel, "id:prftch_matvec%d*" % (i + 1), "tag:matvec%d" % i
+            )
 
         # }}}
 
@@ -796,22 +974,36 @@ def tiled_transform(kernel, callables_table, tiling_config):
             fetch_outer_inames = "iquad_tile,iblock"
 
         from loopy.transform.data import add_prefetch_for_single_kernel
-        kernel = add_prefetch_for_single_kernel(kernel, callables_table,
-                                                var_name=quad_weights,
-                                                sweep_inames=sweep_inames,
-                                                temporary_address_space=lp.AddressSpace.LOCAL,
-                                                dim_arg_names=(quad_weight_prefetch_iname,),
-                                                temporary_name="cnst_quad_weight_prftch",
-                                                compute_insn_id=quad_weight_prefetch_insn,
-                                                fetch_outer_inames=fetch_outer_inames,
-                                                default_tag=None)
 
-        kernel = lp.add_dependency(kernel, "tag:matvec0 and tag:eval_init", "id:%s" %
-                                   quad_weight_prefetch_insn)
+        kernel = add_prefetch_for_single_kernel(
+            kernel,
+            callables_table,
+            var_name=quad_weights,
+            sweep_inames=sweep_inames,
+            temporary_address_space=lp.AddressSpace.LOCAL,
+            dim_arg_names=(quad_weight_prefetch_iname,),
+            temporary_name="cnst_quad_weight_prftch",
+            compute_insn_id=quad_weight_prefetch_insn,
+            fetch_outer_inames=fetch_outer_inames,
+            default_tag=None,
+        )
 
-        kernel = lp.split_iname(kernel, quad_weight_prefetch_iname, nc * nt)  # , outer_tag="ilp")
-        kernel = lp.split_iname(kernel, quad_weight_prefetch_iname+"_inner", nt,
-                                outer_tag="l.1", inner_tag="l.0")
+        kernel = lp.add_dependency(
+            kernel,
+            "tag:matvec0 and tag:eval_init",
+            f"id:{quad_weight_prefetch_insn}"
+        )
+
+        kernel = lp.split_iname(
+            kernel, quad_weight_prefetch_iname, nc * nt
+        )  # , outer_tag="ilp")
+        kernel = lp.split_iname(
+            kernel,
+            quad_weight_prefetch_iname + "_inner",
+            nt,
+            outer_tag="l.1",
+            inner_tag="l.0",
+        )
 
     # }}}
 
@@ -831,49 +1023,112 @@ def tiled_transform(kernel, callables_table, tiling_config):
         redn_accumulators = [
             insn.assignee_name
             for insn in kernel.instructions
-            if lp.match.And((lp.match.Tagged("eval_init"),
-                             lp.match.Tagged("matvec%d" % i)))(kernel, insn)]
+            if lp.match.And(
+                (lp.match.Tagged("eval_init"), lp.match.Tagged("matvec%d" % i))
+            )(kernel, insn)
+        ]
 
         # privatize temporaries for logic preservation
-        kernel = lp.privatize_temporaries_with_inames(kernel, "irow_eval_inner_outer",
-                                                      only_var_names=redn_accumulators)
+        kernel = lp.privatize_temporaries_with_inames(
+            kernel, "irow_eval_inner_outer", only_var_names=redn_accumulators
+        )
 
         # renaming inames to decouple matvec stages
-        kernel = lp.rename_iname(kernel, "irow_eval_inner_inner", "irow%d_inner_inner" % i, within="tag:matvec%d" % i)
-        kernel = lp.rename_iname(kernel, "irow_eval_inner_outer", "irow%d_inner_outer" % i, within="tag:matvec%d" % i)
+        kernel = lp.rename_iname(
+            kernel,
+            "irow_eval_inner_inner",
+            "irow%d_inner_inner" % i,
+            within="tag:matvec%d" % i,
+        )
+        kernel = lp.rename_iname(
+            kernel,
+            "irow_eval_inner_outer",
+            "irow%d_inner_outer" % i,
+            within="tag:matvec%d" % i,
+        )
 
         # schedulability constraint requires irow_inner_outer to be duplicated
         # within the eval_init stage
-        kernel = lp.duplicate_inames(kernel, "irow%d_inner_outer" % i, new_inames="irow%d_inner_outer_init" % i, within="tag:eval_init")
+        kernel = lp.duplicate_inames(
+            kernel,
+            "irow%d_inner_outer" % i,
+            new_inames="irow%d_inner_outer_init" % i,
+            within="tag:eval_init",
+        )
 
-        kernel = lp.tag_inames(kernel, "irow%d_inner_outer:unr,irow%d_inner_outer_init:unr" % (i, i))
+        kernel = lp.tag_inames(
+            kernel, "irow%d_inner_outer:unr,irow%d_inner_outer_init:unr" % (i, i)
+        )
         for trialDoF in matvec_stage_descrs[i].dof_names:
             kernel = remove_axis(kernel, trialDoF, 0)
 
     # eval wrap up:
-    kernel = lp.rename_iname(kernel, "irow_eval_inner_inner", "irow_eval_wrap_up_inner_inner", within="tag:eval_wrap_up")
-    kernel = lp.rename_iname(kernel, "irow_eval_inner_outer", "irow_eval_wrap_up_inner_outer", within="tag:eval_wrap_up")
+    kernel = lp.rename_iname(
+        kernel,
+        "irow_eval_inner_inner",
+        "irow_eval_wrap_up_inner_inner",
+        within="tag:eval_wrap_up",
+    )
+    kernel = lp.rename_iname(
+        kernel,
+        "irow_eval_inner_outer",
+        "irow_eval_wrap_up_inner_outer",
+        within="tag:eval_wrap_up",
+    )
     kernel = lp.tag_inames(kernel, "irow_eval_wrap_up_inner_outer:unr")
 
     # }}}
 
     # {{{ quadr stage:
 
-    redn_accumulators = [insn.assignee_name
-                         for insn in kernel.instructions
-                         if lp.match.Tagged("quadr_init")(kernel, insn)]
+    redn_accumulators = [
+        insn.assignee_name
+        for insn in kernel.instructions
+        if lp.match.Tagged("quadr_init")(kernel, insn)
+    ]
 
-    kernel = lp.privatize_temporaries_with_inames(kernel, "irow_quadr_inner_outer",
-                                                  only_var_names=redn_accumulators)
-    kernel = lp.rename_iname(kernel, "irow_quadr_inner_inner", "irow%d_inner_inner" % n_trial, within="tag:matvec%d" % n_trial)
-    kernel = lp.rename_iname(kernel, "irow_quadr_inner_outer", "irow%d_inner_outer" % n_trial, within="tag:matvec%d" % n_trial)
+    kernel = lp.privatize_temporaries_with_inames(
+        kernel, "irow_quadr_inner_outer", only_var_names=redn_accumulators
+    )
+    kernel = lp.rename_iname(
+        kernel,
+        "irow_quadr_inner_inner",
+        "irow%d_inner_inner" % n_trial,
+        within="tag:matvec%d" % n_trial,
+    )
+    kernel = lp.rename_iname(
+        kernel,
+        "irow_quadr_inner_outer",
+        "irow%d_inner_outer" % n_trial,
+        within="tag:matvec%d" % n_trial,
+    )
 
-    kernel = lp.rename_iname(kernel, "irow_quadr_inner_inner", "irow_quadr_wrap_up_inner_inner", within="tag:quadr_wrap_up")
-    kernel = lp.rename_iname(kernel, "irow_quadr_inner_outer", "irow_quadr_wrap_up_inner_outer", within="tag:quadr_wrap_up")
-    kernel = lp.duplicate_inames(kernel, "irow%d_inner_outer" % n_trial, new_inames="irow%d_inner_outer_init" % n_trial, within="tag:quadr_init")
-    kernel = lp.tag_inames(kernel, "irow%d_inner_outer:unr,irow%d_inner_outer_init:unr,irow_quadr_wrap_up_inner_outer:unr" % (n_trial, n_trial))
+    kernel = lp.rename_iname(
+        kernel,
+        "irow_quadr_inner_inner",
+        "irow_quadr_wrap_up_inner_inner",
+        within="tag:quadr_wrap_up",
+    )
+    kernel = lp.rename_iname(
+        kernel,
+        "irow_quadr_inner_outer",
+        "irow_quadr_wrap_up_inner_outer",
+        within="tag:quadr_wrap_up",
+    )
+    kernel = lp.duplicate_inames(
+        kernel,
+        "irow%d_inner_outer" % n_trial,
+        new_inames="irow%d_inner_outer_init" % n_trial,
+        within="tag:quadr_init",
+    )
+    kernel = lp.tag_inames(
+        kernel,
+        "irow%d_inner_outer:unr,irow%d_inner_outer_init:unr,irow_quadr_wrap_up_inner_outer:unr" % (n_trial, n_trial),  # noqa: E501
+    )
 
-    kernel = lp.add_inames_to_insn(kernel, "iquad_tile", "tag:quadr_init or tag:quadr_wrap_up")
+    kernel = lp.add_inames_to_insn(
+        kernel, "iquad_tile", "tag:quadr_init or tag:quadr_wrap_up"
+    )
 
     # }}}
 
@@ -883,11 +1138,15 @@ def tiled_transform(kernel, callables_table, tiling_config):
 
     # {{{ tagging inames
 
-    for i in range(n_trial+1):
+    for i in range(n_trial + 1):
         kernel = lp.tag_inames(kernel, "irow%d_inner_inner:l.0" % i)
 
-    kernel = lp.tag_inames(kernel, "irow_eval_wrap_up_inner_inner:l.0", ignore_nonexistent=True)
-    kernel = lp.tag_inames(kernel, "irow_quadr_wrap_up_inner_inner:l.0", ignore_nonexistent=True)
+    kernel = lp.tag_inames(
+        kernel, "irow_eval_wrap_up_inner_inner:l.0", ignore_nonexistent=True
+    )
+    kernel = lp.tag_inames(
+        kernel, "irow_quadr_wrap_up_inner_inner:l.0", ignore_nonexistent=True
+    )
 
     # }}}
 
@@ -897,14 +1156,16 @@ def tiled_transform(kernel, callables_table, tiling_config):
     kernel = kernel.copy(loop_priority=frozenset())
 
     # unroll loops must be innermost
-    for i in range(n_trial+1):
-        kernel = lp.prioritize_loops(kernel,
-                                     "icol{0}_inner,irow{0}_inner_outer".format(i))
+    for i in range(n_trial + 1):
+        kernel = lp.prioritize_loops(
+            kernel, "icol{0}_inner,irow{0}_inner_outer".format(i)
+        )
     # }}}
 
     kernel = lp.remove_unused_inames(kernel)
 
-    return kernel, args_to_make_global
+    return t_unit.with_kernel(kernel), args_to_make_global
+
 
 # }}}
 
@@ -929,6 +1190,7 @@ class ParametricTilingCandidateGenerator:
 
     See the entrypoint :meth:`__call__`
     """
+
     fem_program: lp.TranslationUnit
     num_param_tiling_candidates: int
 
@@ -968,8 +1230,14 @@ class ParametricTilingCandidateGenerator:
     @cached_property
     def trialDoF_shapes(self):
         sizes = [
-            [self.fem_program.default_entrypoint.temporary_variables[dof_name].shape
-            for dof_name in mv_stage.dof_names]
+            [
+                (self.
+                 fem_program
+                 .default_entrypoint
+                 .temporary_variables[dof_name]
+                 .shape)
+                for dof_name in mv_stage.dof_names
+            ]
             for mv_stage in self.matvec_stages[:-1]
         ]
         return sizes
@@ -986,9 +1254,17 @@ class ParametricTilingCandidateGenerator:
 
     @cached_property
     def deriv_mat_shapes(self):
-        sizes = [[self.fem_program.default_entrypoint.temporary_variables[mat_name].shape
-                  for mat_name in mv_stage.deriv_matrices]
-                 for mv_stage in self.matvec_stages]
+        sizes = [
+            [
+                (self
+                 .fem_program
+                 .default_entrypoint
+                 .temporary_variables[mat_name]
+                 .shape)
+                for mat_name in mv_stage.deriv_matrices
+            ]
+            for mv_stage in self.matvec_stages
+        ]
         return sizes
 
     def get_nsync(self, tiling_config):
@@ -1001,15 +1277,17 @@ class ParametricTilingCandidateGenerator:
         T_e_cs = [tile[1] for tile in tiles[:-1]]
         T_q_r = tiles[-1][0]
         T_q_c = tiles[-1][1]
-        quad_tile_len, = tiling_config.quad_rowtile_lengths
+        (quad_tile_len,) = tiling_config.quad_rowtile_lengths
 
         def get_nsync_for_quad(nq):
-            return ((ceil(self.n_outDoF / T_q_r)) * (ceil(nq / T_q_c))
-                     + sum(ceil(nq / T_e_r)*ceil(n_trialDoF/T_e_c)
-                           for n_trialDoF, T_e_c in zip(self.n_trialDoFs, T_e_cs)))
+            return (ceil(self.n_outDoF / T_q_r)) * (ceil(nq / T_q_c)) + sum(
+                ceil(nq / T_e_r) * ceil(n_trialDoF / T_e_c)
+                for n_trialDoF, T_e_c in zip(self.n_trialDoFs, T_e_cs)
+            )
 
-        return (floor(self.nquad/quad_tile_len)*get_nsync_for_quad(quad_tile_len)
-                + get_nsync_for_quad(self.nquad % quad_tile_len))
+        return floor(self.nquad / quad_tile_len) * get_nsync_for_quad(
+            quad_tile_len
+        ) + get_nsync_for_quad(self.nquad % quad_tile_len)
 
     def get_shared_mem_allocated(self, tiling_config):
         """
@@ -1017,47 +1295,77 @@ class ParametricTilingCandidateGenerator:
         """
         nc = tiling_config.ncells_per_block
         tiles = tiling_config.operator_tile_descriptions
-        quad_tile_len, = tiling_config.quad_rowtile_lengths
-        n_eval_mats = [len(mv_stage.deriv_matrices)
-                       for mv_stage in self.matvec_stages[:-1]]
+        (quad_tile_len,) = tiling_config.quad_rowtile_lengths
+        n_eval_mats = [
+            len(mv_stage.deriv_matrices) for mv_stage in self.matvec_stages[:-1]
+        ]
         n_q_mats = len(self.matvec_stages[-1].deriv_matrices)
 
-        shared_mem = (max(n_mat*tile[0]*tile[1]
-                          for n_mat, tile in zip(n_eval_mats+[n_q_mats, ], tiles))
-                      + quad_tile_len
-                      + nc*quad_tile_len*self.n_eval_terms)
+        shared_mem = (
+            max(
+                n_mat * tile[0] * tile[1]
+                for n_mat, tile in zip(
+                    n_eval_mats
+                    + [
+                        n_q_mats,
+                    ],
+                    tiles,
+                )
+            )
+            + quad_tile_len
+            + nc * quad_tile_len * self.n_eval_terms
+        )
 
-        return shared_mem*8
+        return shared_mem * 8
 
     def get_eta_simd(self, tiling_config):
         nc = tiling_config.ncells_per_block
         nwi = tiling_config.nthreads_per_cell
-        return (nc*nwi) / (32*ceil(nc*nwi/32))
+        return (nc * nwi) / (32 * ceil(nc * nwi / 32))
 
     def get_eta_load_balance(self, tiling_config):
         tiles = tiling_config.operator_tile_descriptions
         nwi = tiling_config.nthreads_per_cell
-        quad_tile_len, = tiling_config.quad_rowtile_lengths
+        (quad_tile_len,) = tiling_config.quad_rowtile_lengths
         T_e_r = tiles[0][0]
         T_q_r = tiles[-1][0]
 
         def get_flops_executed_for_nq(nq):
-            n1 = floor(nq/T_e_r)
-            n2 = floor(self.n_outDoF/T_q_r)
-            n3 = nwi*ceil(T_e_r/nwi)*sum(n_deriv*n_dof
-                                         for n_deriv, n_dof in zip(self.n_trial_derivs, self.n_trialDoFs))
-            n4 = nwi*ceil(T_q_r/nwi) * self.n_eval_terms * nq
-            n5 = nwi*ceil((nq % T_e_r)/nwi)*sum(n_deriv*n_dof
-                                                        for n_deriv, n_dof in zip(self.n_trial_derivs, self.n_trialDoFs))
-            n6 = nwi*ceil((self.n_outDoF % T_q_r)/nwi) * self.n_eval_terms * nq
+            n1 = floor(nq / T_e_r)
+            n2 = floor(self.n_outDoF / T_q_r)
+            n3 = (
+                nwi
+                * ceil(T_e_r / nwi)
+                * sum(
+                    n_deriv * n_dof
+                    for n_deriv, n_dof in zip(self.n_trial_derivs, self.n_trialDoFs)
+                )
+            )
+            n4 = nwi * ceil(T_q_r / nwi) * self.n_eval_terms * nq
+            n5 = (
+                nwi
+                * ceil((nq % T_e_r) / nwi)
+                * sum(
+                    n_deriv * n_dof
+                    for n_deriv, n_dof in zip(self.n_trial_derivs, self.n_trialDoFs)
+                )
+            )
+            n6 = nwi * ceil((self.n_outDoF % T_q_r) / nwi) * self.n_eval_terms * nq
 
-            return (n3*n1 + n5 + n4*n2 + n6)
+            return n3 * n1 + n5 + n4 * n2 + n6
 
-        flops_executed = (floor(self.nquad/quad_tile_len)*get_flops_executed_for_nq(quad_tile_len)
-                          + get_flops_executed_for_nq(self.nquad % quad_tile_len))
+        flops_executed = floor(self.nquad/quad_tile_len) * get_flops_executed_for_nq(
+            quad_tile_len
+        ) + get_flops_executed_for_nq(self.nquad % quad_tile_len)
 
-        useful_flops = (self.nquad * sum(n_deriv*n_dof for n_deriv, n_dof in zip(self.n_trial_derivs, self.n_trialDoFs))
-                        + self.n_eval_terms * self.nquad * self.n_outDoF)
+        useful_flops = (
+            self.nquad
+            * sum(
+                n_deriv * n_dof
+                for n_deriv, n_dof in zip(self.n_trial_derivs, self.n_trialDoFs)
+            )
+            + self.n_eval_terms * self.nquad * self.n_outDoF
+        )
 
         eta_load = useful_flops / flops_executed
 
@@ -1069,10 +1377,14 @@ class ParametricTilingCandidateGenerator:
         """
         S = self.get_shared_mem_allocated(tiling_config)
         dev = cuda.Context.get_device()
-        Smax_per_sm = dev.get_attribute(cuda.device_attribute.MAX_SHARED_MEMORY_PER_MULTIPROCESSOR)
-        Smax_per_block = dev.get_attribute(cuda.device_attribute.MAX_SHARED_MEMORY_PER_BLOCK)
+        Smax_per_sm = dev.get_attribute(
+            cuda.device_attribute.MAX_SHARED_MEMORY_PER_MULTIPROCESSOR
+        )
+        Smax_per_block = dev.get_attribute(
+            cuda.device_attribute.MAX_SHARED_MEMORY_PER_BLOCK
+        )
         Wmax = 16
-        blocks_per_sm = min(Smax_per_sm//S if S < Smax_per_block else 0, Wmax)
+        blocks_per_sm = min(Smax_per_sm // S if S < Smax_per_block else 0, Wmax)
         return blocks_per_sm
 
     def get_theoretical_warps_per_sm(self, tiling_config):
@@ -1080,25 +1392,31 @@ class ParametricTilingCandidateGenerator:
         Returns the number of warps residing on a Streaming Multiprocessor.
         """
         blocks_per_sm = self.get_theoretical_blocks_per_sm(tiling_config)
-        warps_per_block = ceil(tiling_config.nthreads_per_cell*tiling_config.ncells_per_block/32)
-        warps_per_sm = min(blocks_per_sm*warps_per_block, 16)
+        warps_per_block = ceil(
+            tiling_config.nthreads_per_cell * tiling_config.ncells_per_block / 32
+        )
+        warps_per_sm = min(blocks_per_sm * warps_per_block, 16)
         return warps_per_sm
 
     def get_effective_warps_per_sm(self, tiling_config):
         """
         Returns the effective number of warps residing on a Streaming Multiprocessor.
         """
-        return (self.get_eta_load_balance(tiling_config)
-                * self.get_eta_simd(tiling_config)
-                * self.get_theoretical_warps_per_sm(tiling_config))
+        return (
+            self.get_eta_load_balance(tiling_config)
+            * self.get_eta_simd(tiling_config)
+            * self.get_theoretical_warps_per_sm(tiling_config)
+        )
 
     def get_effective_blocks_per_sm(self, tiling_config):
         """
         Returns the effective number of warps residing on a Streaming Multiprocessor.
         """
-        return (self.get_eta_load_balance(tiling_config)
-                * self.get_eta_simd(tiling_config)
-                * self.get_theoretical_blocks_per_sm(tiling_config))
+        return (
+            self.get_eta_load_balance(tiling_config)
+            * self.get_eta_simd(tiling_config)
+            * self.get_theoretical_blocks_per_sm(tiling_config)
+        )
 
     @memoize_method
     def estimated_exec_time(self, tiling_config):
@@ -1107,58 +1425,93 @@ class ParametricTilingCandidateGenerator:
         configuration.
         """
         T_e_r = tiling_config.operator_tile_descriptions[0][0]
-        quad_tile_len, = tiling_config.quad_rowtile_lengths
+        (quad_tile_len,) = tiling_config.quad_rowtile_lengths
         nwi = tiling_config.nthreads_per_cell
         nwarps = self.get_effective_warps_per_sm(tiling_config)
         nblocks = self.get_effective_blocks_per_sm(tiling_config)
         nsync = self.get_nsync(tiling_config)
-        effective_global_bw = 21 if nwarps > 8 else 20*(nwarps/8)
-        effective_shared_bw = min(1100, 900 + 30*(nwarps-10)) if nwarps > 10 else 900*(nwarps/10)
+        effective_global_bw = 21 if nwarps > 8 else 20 * (nwarps / 8)
+        effective_shared_bw = (
+            min(1100, 900 + 30 * (nwarps - 10)) if nwarps > 10 else 900 * (nwarps/10)
+        )
 
         # gather phase times
-        num_times_trial_dofs_gather_per_quad_tile = lambda qt: ceil(qt/T_e_r)
-        num_times_trial_dofs_gathered = (floor(self.nquad/quad_tile_len)*num_times_trial_dofs_gather_per_quad_tile(quad_tile_len)
-                                         + num_times_trial_dofs_gather_per_quad_tile(self.nquad % quad_tile_len))
+        num_times_trial_dofs_gather_per_quad_tile = lambda qt: ceil(qt / T_e_r)  # noqa: E731,E501
+        num_times_trial_dofs_gathered = floor(
+            self.nquad / quad_tile_len
+        ) * num_times_trial_dofs_gather_per_quad_tile(
+            quad_tile_len
+        ) + num_times_trial_dofs_gather_per_quad_tile(
+            self.nquad % quad_tile_len
+        )
 
-        gather_phase_gbytes = 8e-9*(num_times_trial_dofs_gathered*sum(sum(np.prod(dof_shape)
-                                                                          for dof_shape in mv_stage_dof_shapes)
-                                                                      for mv_stage_dof_shapes in self.trialDoF_shapes)
-                                    + np.prod(self.coords_shape))
-        gather_phase_time = gather_phase_gbytes/effective_global_bw
+        gather_phase_gbytes = 8e-9 * (
+            num_times_trial_dofs_gathered
+            * sum(
+                sum(np.prod(dof_shape) for dof_shape in mv_stage_dof_shapes)
+                for mv_stage_dof_shapes in self.trialDoF_shapes
+            )
+            + np.prod(self.coords_shape)
+        )
+        gather_phase_time = gather_phase_gbytes / effective_global_bw
 
         # scatter phase times
-        scatter_phase_gbytes = 8e-9*(np.prod(self.outDoF_shape))*(ceil(self.nquad/quad_tile_len))
-        scatter_phase_time = scatter_phase_gbytes/effective_global_bw
+        scatter_phase_gbytes = (
+            8e-9 * (np.prod(self.outDoF_shape)) * (ceil(self.nquad / quad_tile_len))
+        )
+        scatter_phase_time = scatter_phase_gbytes / effective_global_bw
 
         # reading in the data for quad weights/deriv matrices
-        read_constant_data_into_smem_gbytes = 8e-9*(sum(sum(np.prod(deriv_mat_shape)
-                                                        for deriv_mat_shape in mv_stage_deriv_mat_shapes)
-                                                    for mv_stage_deriv_mat_shapes in self.deriv_mat_shapes)
-                                                + self.nquad)/tiling_config.ncells_per_block
+        read_constant_data_into_smem_gbytes = (
+            8e-9
+            * (
+                sum(
+                    sum(
+                        np.prod(deriv_mat_shape)
+                        for deriv_mat_shape in mv_stage_deriv_mat_shapes
+                    )
+                    for mv_stage_deriv_mat_shapes in self.deriv_mat_shapes
+                )
+                + self.nquad
+            )
+            / tiling_config.ncells_per_block
+        )
 
-        read_constants_data_into_smem_time = read_constant_data_into_smem_gbytes/effective_global_bw
+        read_constants_data_into_smem_time = (
+            read_constant_data_into_smem_gbytes / effective_global_bw
+        )
 
         # eval phase times
-        eval_phase_smem_read_gbytes = 8e-9*sum(n_trial_deriv*np.prod(mv_stage_deriv_mat_shapes[0])
-                                               for n_trial_deriv, mv_stage_deriv_mat_shapes in zip(self.n_trial_derivs, self.deriv_mat_shapes))
+        eval_phase_smem_read_gbytes = 8e-9 * sum(
+            n_trial_deriv * np.prod(mv_stage_deriv_mat_shapes[0])
+            for n_trial_deriv, mv_stage_deriv_mat_shapes in zip(
+                self.n_trial_derivs, self.deriv_mat_shapes
+            )
+        )
         eval_phase_smem_read_time = eval_phase_smem_read_gbytes / effective_shared_bw
 
         # quadr phase times
-        quadr_phase_mat_smem_read_gbytes = 8e-9*(self.n_eval_terms
-                                                 * np.prod(self.deriv_mat_shapes[-1][0]))
-        quadr_phase_rhs_smem_read_gbytes = 8e-9*(self.n_eval_terms
-                                                 * np.prod(self.deriv_mat_shapes[-1][0]))
-        quadr_phase_smem_read_time = (quadr_phase_mat_smem_read_gbytes / effective_shared_bw
-                                      + quadr_phase_rhs_smem_read_gbytes / effective_shared_bw)
+        quadr_phase_mat_smem_read_gbytes = 8e-9 * (
+            self.n_eval_terms * np.prod(self.deriv_mat_shapes[-1][0])
+        )
+        quadr_phase_rhs_smem_read_gbytes = 8e-9 * (
+            self.n_eval_terms * np.prod(self.deriv_mat_shapes[-1][0])
+        )
+        quadr_phase_smem_read_time = (
+            quadr_phase_mat_smem_read_gbytes / effective_shared_bw
+            + quadr_phase_rhs_smem_read_gbytes / effective_shared_bw
+        )
 
-        total_time = (gather_phase_time
-                      + scatter_phase_time
-                      + read_constants_data_into_smem_time
-                      + eval_phase_smem_read_time
-                      + quadr_phase_smem_read_time)
+        total_time = (
+            gather_phase_time
+            + scatter_phase_time
+            + read_constants_data_into_smem_time
+            + eval_phase_smem_read_time
+            + quadr_phase_smem_read_time
+        )
         return (total_time, nsync)
 
-        return 4.0/(nwarps) + nsync/nblocks + nwi/8
+        return 4.0 / (nwarps) + nsync / nblocks + nwi / 8
 
     def __call__(self) -> Tuple[ParametricTiling, ...]:
         from itertools import product
@@ -1166,21 +1519,22 @@ class ParametricTilingCandidateGenerator:
         threads_to_cells = {}
 
         def eta_simd(nc, nt):
-            return (nc*nt) / (32.0*ceil(nc*nt/32))
+            return (nc * nt) / (32.0 * ceil(nc * nt / 32))
 
         def get_eta_shared_mem_alias(tiles):
-            nmats = [len(mv_stage.deriv_matrices)
-                     for mv_stage in self.matvec_stages]
-            min_sm_usage_in_a_stage = min(nmat*tr*tc for nmat, (tr, tc) in
-                                          zip(nmats, tiles))
-            max_sm_usage_in_a_stage = max(nmat*tr*tc for nmat, (tr, tc) in
-                                          zip(nmats, tiles))
+            nmats = [len(mv_stage.deriv_matrices) for mv_stage in self.matvec_stages]
+            min_sm_usage_in_a_stage = min(
+                nmat * tr * tc for nmat, (tr, tc) in zip(nmats, tiles)
+            )
+            max_sm_usage_in_a_stage = max(
+                nmat * tr * tc for nmat, (tr, tc) in zip(nmats, tiles)
+            )
 
             return min_sm_usage_in_a_stage / max_sm_usage_in_a_stage
 
         for nc in range(1, 70):
             for nt in range(1, 20):
-                if eta_simd(nc, nt) > 0.97 and (nc*nt <= 256):
+                if eta_simd(nc, nt) > 0.97 and (nc * nt <= 256):
                     if nt in threads_to_cells:
                         threads_to_cells[nt].append(nc)
                     else:
@@ -1189,21 +1543,32 @@ class ParametricTilingCandidateGenerator:
         tiles = []
 
         for nquad_tiles in range(1, 14):
-            quad_tile_len = ceil(self.nquad/nquad_tiles)
-            if nquad_tiles > 1 and quad_tile_len == ceil(self.nquad/(nquad_tiles-1)):
+            quad_tile_len = ceil(self.nquad / nquad_tiles)
+            if nquad_tiles > 1 and quad_tile_len == ceil(
+                self.nquad / (nquad_tiles - 1)
+            ):
                 continue
 
-            for i in range(1, ceil(sqrt(quad_tile_len)+1)):
-                T_e_r = ceil(quad_tile_len/i)
-                for j in product(*[range(1, ceil(sqrt(ntrialDoF))+1)
-                                   for ntrialDoF in self.n_trialDoFs]):
-                    T_e_cs = tuple(ceil(ntrialDoF/jj)
-                                   for ntrialDoF, jj in zip(self.n_trialDoFs, j))
-                    for k in range(1, ceil(sqrt(self.n_outDoF))+1):
-                        T_q_r = ceil(self.n_outDoF/k)
-                        for l in range(1, ceil(sqrt(quad_tile_len))+1):
-                            T_q_c = ceil(quad_tile_len/l)
-                            current_tile = tuple((T_e_r, T_e_c) for T_e_c in T_e_cs) + ((T_q_r, T_q_c), )
+            for i in range(1, ceil(sqrt(quad_tile_len) + 1)):
+                T_e_r = ceil(quad_tile_len / i)
+                for j in product(
+                    *[
+                        range(1, ceil(sqrt(ntrialDoF)) + 1)
+                        for ntrialDoF in self.n_trialDoFs
+                    ]
+                ):
+                    T_e_cs = tuple(
+                        ceil(ntrialDoF / jj)
+                        for ntrialDoF, jj in zip(self.n_trialDoFs, j)
+                    )
+                    for k in range(1, ceil(sqrt(self.n_outDoF)) + 1):
+                        T_q_r = ceil(self.n_outDoF / k)
+                        for ell in range(1, ceil(sqrt(quad_tile_len)) + 1):
+                            T_q_c = ceil(quad_tile_len / ell)
+                            current_tile = tuple((T_e_r, T_e_c)
+                                                 for T_e_c in T_e_cs) + (
+                                (T_q_r, T_q_c),
+                            )
                             if get_eta_shared_mem_alias(current_tile) >= 0.8:
                                 tiles.append((quad_tile_len, current_tile))
 
@@ -1212,34 +1577,49 @@ class ParametricTilingCandidateGenerator:
         for quad_tile_len, tile in tiles:
             for threads in threads_to_cells:
                 for cells in threads_to_cells[threads]:
-                    params.append(ParametricTiling(cells, threads, tile,
-                                  (quad_tile_len,), False, False, True, True, False, False))
+                    params.append(
+                        ParametricTiling(
+                            cells,
+                            threads,
+                            tile,
+                            (quad_tile_len,),
+                            False,
+                            False,
+                            True,
+                            True,
+                            False,
+                            False,
+                        )
+                    )
 
         # sort the parameters with highest occupancy.
         params.sort(key=lambda P: self.estimated_exec_time(P))
 
-        return tuple(params[:self.num_param_tiling_candidates])
+        return tuple(params[: self.num_param_tiling_candidates])
+
 
 # }}}
 
 
 @lp.memoize_on_disk
 def get_transform_candidates(
-        fem_kernel: lp.TranslationUnit) -> Tuple[TransformCandidate, ...]:
+    fem_kernel: lp.TranslationUnit,
+) -> Tuple[TransformCandidate, ...]:
     return ParametricTilingCandidateGenerator(fem_kernel, 10)() + (SWIPC(),)
 
 
 def _transform_kernel_with_candidate(
-    kernel: lp.TranslationUnit,
-    candidate: TransformCandidate) -> Tuple[lp.TranslationUnit,
-                                            Tuple[np.ndarray, ...]]:
+    kernel: lp.TranslationUnit, candidate: TransformCandidate
+) -> Tuple[lp.TranslationUnit, Tuple[np.ndarray, ...]]:
     if isinstance(candidate, SWIPC):
         from pyop2.transforms.snpt import split_n_across_workgroups
+
         return split_n_across_workgroups(kernel, 32)
     elif isinstance(candidate, ParametricTiling):
         return tiled_transform(kernel, candidate)
     else:
         raise NotImplementedError(type(candidate))
+
 
 def _np_ary_to_cuda_mem(ary: np.ndarray) -> cuda.DeviceAllocation:
     assert isinstance(ary, np.ndarray)
@@ -1252,8 +1632,7 @@ def get_empirically_best_candidate(
     t_unit: lp.TranslationUnit,
     *,
     args: Sequence[Union[int, cuda.DeviceAllocation]],
-    argshapes: Sequence[int],
-    candidates: Tuple[TransformCandidate, ...]
+    candidates: Tuple[TransformCandidate, ...],
 ) -> TransformCandidate:
 
     best_time = np.inf
@@ -1265,45 +1644,53 @@ def get_empirically_best_candidate(
 
     copied_args: List[Union[int, cuda.DeviceAllocation]] = []
     epoint_knl = t_unit.default_entrypoint
-    import pudb; pu.db
-    for i, lpy_arg in enumerate(epoint_knl.args):
+    for arg_gpu, lpy_arg in zip(args, epoint_knl.args, strict=True):
         if lpy_arg.name in epoint_knl.get_written_variables():
-            largest_sized_argument = 1/0
-            # FIXME: Just consider the largest sized argument with our own
-            # dtype for getting the shapes.
-            # arg is written during kernel execution => make a copy
-            # PS: We do need a better name than largest_sized_argument. Lulz..
-            arg_gpu = cuda.mem_alloc(int(largest_sized_argument*lpy_arg.dtype.itemsize))
-            copied_args.append(arg_gpu)
-        else:
-            # arg is read only => pass the same arg to the knl
-            copied_args.append(args[i],)
+            assert isinstance(arg_gpu, cuda_np.GPUArray)
+            arg_gpu = cuda_np.empty_like(arg_gpu)
 
-    print(copied_args)
-    2/0
-
-    from pyop2.gpu.tile import tiled_transform
+        copied_args.append(arg_gpu)
 
     for candidate in candidates:
 
-        transformed_t_unit, extra_args = _transform_kernel_with_candidate(t_unit, candidate)
+        transformed_t_unit, extra_args = _transform_kernel_with_candidate(
+            t_unit, candidate
+        )
+        print(transformed_t_unit)
+        1 / 0
         assert all(isinstance(extra_arg, np.ndarray) for extra_arg in extra_args)
 
         code = lp.generate_code_v2(transformed_t_unit).device_code()
 
-        glens, llens = kernel.get_grid_size_upper_bounds_as_exprs()
+        glens, llens = transformed_t_unit.get_grid_size_upper_bounds_as_exprs()
         from pymbolic import evaluate
-        grid = tuple(int(evaluate(glens[i], {"start": args[0], "end": args[1]})) if i < len(glens) else 1
-                     for i in range(2))
-        block = tuple(int(evaluate(llens[i], {"start": args[0], "end": args[1]})) if i < len(llens) else 1
-                      for i in range(3))
 
-        executable_knl = SourceModule(code, options=["-use_fast_math", "-w"]).get_function(kernel.name)
-        executable_knl.prepare("i"*2+"P"*len(args[2:])+"P"*len(extra_args))
-        extra_args = tuple(_np_ary_to_cuda_mem(extra_arg) for extra_arg in extra_args)
+        grid = tuple(
+            (
+                int(evaluate(glens[i], {"start": args[0], "end": args[1]}))
+                if i < len(glens)
+                else 1
+            )
+            for i in range(2)
+        )
+        block = tuple(
+            (
+                int(evaluate(llens[i], {"start": args[0], "end": args[1]}))
+                if i < len(llens)
+                else 1
+            )
+            for i in range(3)
+        )
+
+        executable_knl = SourceModule(
+            code, options=["-use_fast_math", "-w"]
+        ).get_function(t_unit.default_entrypoint.name)
+        executable_knl.prepare("i" * 2 + "P" * len(args[2:]) + "P" * len(extra_args))
+        extra_args = tuple(_np_ary_to_cuda_mem(extra_arg)
+                           for extra_arg in extra_args)
 
         for i in range(nwarmup):
-            executable_knl.prepared_call(grid, block, *(copied_args+extra_args))
+            executable_knl.prepared_call(grid, block, *copied_args, *extra_args)
 
         runtimes = []
 
@@ -1315,11 +1702,11 @@ def get_empirically_best_candidate(
             start_evt.record()
 
             for i in range(10):
-                executable_knl.prepared_call(grid, block, *(copied_args+extra_args))
+                executable_knl.prepared_call(grid, block, *copied_args, *extra_args)
 
             end_evt.record()
             end_evt.synchronize()
-            runtimes.append(1e-3*(end_evt.time_since(start_evt)/10))
+            runtimes.append(1e-3 * (end_evt.time_since(start_evt) / 10))
 
         candidate_runtime = np.median(runtimes)
 
@@ -1335,9 +1722,13 @@ def _preprocess_tunit_for_autotiling(
     kernel = t_unit.default_entrypoint
 
     # remove noops
-    noop_insns = set([insn.id
-                      for insn in kernel.instructions
-                      if isinstance(insn, (lp.NoOpInstruction, lp.CInstruction))])
+    noop_insns = set(
+        [
+            insn.id
+            for insn in kernel.instructions
+            if isinstance(insn, (lp.NoOpInstruction, lp.CInstruction))
+        ]
+    )
     kernel = lp.remove_instructions(kernel, noop_insns)
     kernel = remove_unnecessary_deps(kernel)
     kernel = lp.simplify_indices(kernel)
@@ -1345,8 +1736,9 @@ def _preprocess_tunit_for_autotiling(
     return t_unit.with_kernel(kernel)
 
 
-def autotuned_tiling(t_unit,
-                     arguments: Tuple[Union[int, "cuda.DeviceAllocation"], ...]):
+def autotuned_tiling(
+    t_unit, arguments: Tuple[Union[int, "cuda.DeviceAllocation"], ...]
+):
     """
     Returns ``(transformed_kernel, args_to_make_global)``, where
     ``transformed_kernel`` is the kernel transformed via the auto-tuning
@@ -1366,15 +1758,13 @@ def autotuned_tiling(t_unit,
     # Step.1: Get candidates (memoized)
     candidates = get_transform_candidates(t_unit)
 
-    print(candidates)
-    1/0
-
     # Step.2: Find the best candidate
-    best_candidate = get_empirically_best_candidate(t_unit,
-                                                    candidates=candidates,
-                                                    args=arguments)
+    best_candidate = get_empirically_best_candidate(
+        t_unit, candidates=candidates, args=arguments
+    )
 
     # Step. 3. Transform the kernel with the best candidate
     return _transform_kernel_with_candidate(t_unit, best_candidate)
+
 
 # vim: fdm=marker
