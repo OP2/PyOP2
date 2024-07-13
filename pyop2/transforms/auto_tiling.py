@@ -6,7 +6,7 @@ from pytools import memoize_method
 from pycuda.compiler import SourceModule
 from pyop2.utils import cached_property
 from pytools import memoize_on_first_arg
-from dataclasses import dataclass
+import dataclasses as dc
 from abc import ABC, abstractmethod
 import pycuda.gpuarray as cuda_np
 from typing import FrozenSet, List, Tuple, Sequence, Union
@@ -31,7 +31,7 @@ class SWIPC(TransformCandidate):
         pass
 
 
-@dataclass
+@dc.dataclass
 class ParametricTiling(TransformCandidate):
     """
     Records the configuration for :func:`pyop2.gpu.tile.tiled_transform`.
@@ -146,20 +146,23 @@ def _make_tv_array_arg(tv):
         order=tv.order,
         alignment=tv.alignment,
         address_space=tv.address_space,
-        is_output_only=not tv.read_only,
+        is_input=tv.read_only,
+        is_output=not tv.read_only,
     )
     return arg
 
 
-@dataclass(frozen=True)
+@dc.dataclass(frozen=True)
 class MatvecStageDescr:
     dof_names: Tuple[str, ...]
     row_iname: str
     col_iname: str
     deriv_matrices: FrozenSet[str]
 
+    copy = dc.replace
 
-@dataclass(frozen=True, kw_only=True)
+
+@dc.dataclass(frozen=True, kw_only=True)
 class KernelMetadata:
     iquad: str
     coords: str
@@ -678,9 +681,9 @@ def tiled_transform(t_unit, tiling_config):
     quad_weights = metadata.quad_weights
     matvec_stage_descrs = metadata.matvec_stage_descrs
     eval_results = metadata.eval_results
-    nquad = metadata.nquad(kernel)
-    n_outDoF = metadata.n_outDoF(kernel)
-    n_trialDoFs = metadata.n_trialDoFs(kernel)
+    nquad = metadata.n_quad
+    n_outDoF = metadata.n_outDoF
+    n_trialDoFs = metadata.n_trialDoFs
     n_trial = metadata.n_trial_stages
     trialDoF_gather_inames = metadata.trialDoF_gather_inames
 
@@ -758,9 +761,8 @@ def tiled_transform(t_unit, tiling_config):
 
     # }}}
 
-    from loopy.loop import fuse_loop_domains
-
-    kernel = fuse_loop_domains(kernel)
+    from loopy.loop import merge_loop_domains
+    kernel = merge_loop_domains(kernel)
 
     from loopy.transform.data import remove_unused_axes_in_temporaries
 
@@ -1175,7 +1177,7 @@ def tiled_transform(t_unit, tiling_config):
 WARP_SIZE = 32
 
 
-@dataclass(frozen=True)
+@dc.dataclass(frozen=True)
 class ParametricTilingCandidateGenerator:
     """
     Helper class to tune the :class:`pyop2.gpu.tile.ParametricTiling` for
