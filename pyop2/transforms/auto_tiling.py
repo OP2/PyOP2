@@ -22,22 +22,21 @@ import pymbolic.primitives as prim
 # {{{ Modeling a transform candidate.
 
 
+@dc.dataclass(frozen=True, init=False)
 class TransformCandidate(ABC):
     @abstractmethod
     def __init__(self):
         pass
 
 
+@dc.dataclass(frozen=True)
 class SWIPC(TransformCandidate):
     """
     Single Work-item per Cell transformation.
     """
 
-    def __init__(self):
-        pass
 
-
-@dc.dataclass
+@dc.dataclass(frozen=True)
 class ParametricTiling(TransformCandidate):
     """
     Records the configuration for :func:`pyop2.gpu.tile.tiled_transform`.
@@ -71,7 +70,7 @@ class ParametricTiling(TransformCandidate):
     ncells_per_block: int
     nthreads_per_cell: int
     operator_tile_descriptions: Tuple[int, Tuple[int, ...]]
-    quad_rowtile_lengths: List[int]
+    quad_rowtile_lengths: Tuple[int, ...]
     load_coordinates_to_shared: bool
     load_input_to_shared: bool
     load_mats_to_shared: bool
