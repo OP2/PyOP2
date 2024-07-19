@@ -17,6 +17,7 @@ from loopy.symbolic import (
     SubstitutionRuleMappingContext,
 )
 import pymbolic.primitives as prim
+import islpy as isl
 
 
 # {{{ Modeling a transform candidate.
@@ -80,6 +81,7 @@ class ParametricTiling(TransformCandidate):
 
 
 # }}}
+
 
 # {{{ loopy transform helpers
 
@@ -216,6 +218,18 @@ def remove_invariant_inames(kernel):
     return remove_unused_inames(
         kernel.copy(instructions=new_insns), removable_inames
     )
+
+
+@lp.for_each_kernel
+def merge_domains(kernel):
+    final_dom = kernel.domains[0]
+    for dom in kernel.domains[1:]:
+        if dom.get_var_dict():
+            final_dom, dom = isl.align_two(final_dom, dom)
+            final_dom = final_dom & dom
+
+    kernel = kernel.copy(domains=[final_dom])
+    return kernel
 
 
 # }}}
@@ -704,8 +718,10 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
             new_tags = {
                 tag
                 for tag in insn.tags
-                if not (isinstance(tag, lp.LegacyStringInstructionTag)
-                        and tag.value.startswith("matvec"))
+                if not (
+                    isinstance(tag, lp.LegacyStringInstructionTag)
+                    and tag.value.startswith("matvec")
+                )
             } | {lp.LegacyStringInstructionTag(f"matvec{current_mv_stg_idx}")}
             return insn.copy(tags=frozenset(new_tags))
 
@@ -912,9 +928,7 @@ def tiled_transform(t_unit, tiling_config):
 
     # }}}
 
-    from loopy.loop import merge_loop_domains
-
-    kernel = merge_loop_domains(kernel)
+    kernel = merge_domains(kernel)
     kernel = remove_unused_axes_in_temporaries(kernel)
 
     # Realize CUDA blocks
@@ -1136,7 +1150,7 @@ def tiled_transform(t_unit, tiling_config):
             temporary_address_space=lp.AddressSpace.LOCAL,
             dim_arg_names=(quad_weight_prefetch_iname,),
             temporary_name="cnst_quad_weight_prftch",
-            compute_insn_id=quad_weight_prefetch_insn,
+            prefetch_insn_id=quad_weight_prefetch_insn,
             fetch_outer_inames=fetch_outer_inames,
             default_tag=None,
         )
@@ -1896,6 +1910,7 @@ def _preprocess_tunit_for_autotiling(
     kernel = lp.remove_instructions(kernel, noop_insns)
     kernel = remove_unnecessary_deps(kernel)
     kernel = lp.simplify_indices(kernel)
+    kernel = lp.assume(kernel, "start=0")
 
     return t_unit.with_kernel(kernel)
 
