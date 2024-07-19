@@ -11,6 +11,12 @@ from abc import ABC, abstractmethod
 import pycuda.gpuarray as cuda_np
 from typing import FrozenSet, List, Tuple, Sequence, Union
 from functools import reduce as ft_reduce
+from loopy.symbolic import (
+    IdentityMapper,
+    RuleAwareIdentityMapper,
+    SubstitutionRuleMappingContext,
+)
+import pymbolic.primitives as prim
 
 
 # {{{ Modeling a transform candidate.
@@ -76,6 +82,145 @@ class ParametricTiling(TransformCandidate):
 
 # }}}
 
+# {{{ loopy transform helpers
+
+
+class AxesRemovingMapper(IdentityMapper):
+    def __init__(self, tv_to_removable_axes):
+        self.tv_to_removable_axes = tv_to_removable_axes
+        super().__init__()
+
+    def map_subscript(self, expr):
+        removable_indices = self.tv_to_removable_axes.get(expr.aggregate.name, None)
+
+        if removable_indices:
+            assert all(expr.index_tuple[idx] == 0 for idx in removable_indices)
+            new_expr = prim.Subscript(
+                expr.aggregate,
+                tuple(
+                    self.rec(idx)
+                    for i, idx in enumerate(expr.index_tuple)
+                    if i not in removable_indices
+                ),
+            )
+
+            return new_expr
+
+        return super(AxesRemovingMapper, self).map_subscript(expr)
+
+
+def remove_unused_axes_in_temporaries(kernel):
+    new_temps = {}
+    tv_x_removable_axes = {}
+    for tv in kernel.temporary_variables.values():
+        removable_axes = tuple(
+            i for i, axis_len in enumerate(tv.shape) if axis_len == 1
+        )
+        if removable_axes:
+            tv_x_removable_axes[tv.name] = removable_axes
+            new_temps[tv.name] = tv.copy(
+                shape=tuple(axis_len for axis_len in tv.shape if axis_len != 1),
+                dim_tags=None,
+            )
+        else:
+            new_temps[tv.name] = tv
+
+    new_insns = []
+    axes_removing_mapper = AxesRemovingMapper(tv_x_removable_axes)
+
+    for insn in kernel.instructions:
+        new_insns.append(insn.with_transformed_expressions(axes_removing_mapper))
+
+    return kernel.copy(instructions=new_insns, temporary_variables=new_temps)
+
+
+class AxisRemover(RuleAwareIdentityMapper):
+    def __init__(self, rule_mapping_context, var_name, axis_num):
+        self.var_name = var_name
+        self.axis_num = axis_num
+        super(AxisRemover, self).__init__(rule_mapping_context)
+
+    def map_subscript(self, expr, expn_state):
+        if expr.aggregate.name == self.var_name:
+            if len(expr.index_tuple) == 1:
+                return prim.Variable(self.var_name)
+            else:
+                return prim.Subscript(
+                    expr.aggregate,
+                    expr.index_tuple[: self.axis_num]
+                    + expr.index_tuple[self.axis_num + 1 :],
+                )
+
+        return super(AxisRemover, self).map_subscript(expr, expn_state)
+
+
+def remove_axis(kernel, var_name, axis_num):
+    assert var_name in kernel.temporary_variables
+
+    assert axis_num < len(kernel.temporary_variables[var_name].shape)
+
+    rule_mapping_context = SubstitutionRuleMappingContext(
+        kernel.substitutions, kernel.get_var_name_generator()
+    )
+
+    kernel = AxisRemover(rule_mapping_context, var_name, axis_num).map_kernel(kernel)
+
+    if len(kernel.temporary_variables[var_name].shape) == 1:
+        new_temps = dict(
+            (
+                (tv.name, tv.copy(shape=(), dim_tags=None))
+                if tv.name == var_name
+                else (tv.name, tv)
+            )
+            for tv in kernel.temporary_variables.values()
+        )
+    else:
+        from loopy import auto
+
+        new_temps = dict(
+            (
+                (
+                    tv.name,
+                    tv.copy(
+                        shape=tv.shape[:axis_num] + tv.shape[axis_num + 1 :],
+                        strides=auto,
+                        dim_tags=None,
+                    ),
+                )
+                if tv.name == var_name
+                else (tv.name, tv)
+            )
+            for tv in kernel.temporary_variables.values()
+        )
+
+    return kernel.copy(temporary_variables=new_temps)
+
+
+def remove_invariant_inames(kernel):
+    inames_used = set()
+    untagged_inames = kernel.all_inames() - frozenset(kernel.iname_to_tags.keys())
+    for insn in kernel.instructions:
+        for iname in (
+            insn.read_dependency_names() | insn.write_dependency_names()
+        ) & untagged_inames:
+            inames_used.add(iname)
+
+    removable_inames = untagged_inames - inames_used
+
+    new_insns = [
+        insn.copy(within_inames=insn.within_inames - removable_inames)
+        for insn in kernel.instructions
+    ]
+
+    from loopy.transform.inames import remove_unused_inames
+
+    return remove_unused_inames(
+        kernel.copy(instructions=new_insns), removable_inames
+    )
+
+
+# }}}
+
 
 # {{{ implementing the tiling transformation
 
@@ -93,7 +238,7 @@ def remove_unnecessary_deps(kernel):
         if isinstance(source_insn, lp.MultiAssignmentBase):
             written_var_name = source_insn.assignee_name
 
-            for j, sink_insn in enumerate(insn_order[i + 1:]):
+            for j, sink_insn in enumerate(insn_order[i + 1 :]):
                 if written_var_name in sink_insn.read_dependency_names():
                     assert new_insns[j + i + 1].id == sink_insn.id
                     new_insns[j + 1 + i] = new_insns[j + 1 + i].copy(
@@ -210,16 +355,14 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
     Only intended to work for the vanilla representation of the form kernel.
     For ex. Sum factorized action kernels won"t fit the pattern.
     """
-    from pymbolic.primitives import Variable
-
     icell = "n"
 
     # quad iname
     # Assumption: There is only a single iname responsible for quadrature and
     # it starts with "form_ip">
-    (iquad,) = [iname
-                for iname in kernel.all_inames()
-                if iname.startswith("form_ip")]
+    (iquad,) = [
+        iname for iname in kernel.all_inames() if iname.startswith("form_ip")
+    ]
 
     # trialDof_x_outputDofs_x_coords: A set containing the variable names for the
     # *temporaries* of trialDofs, outputDofs and the coordinates.
@@ -290,7 +433,7 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
         if lp.match.Tagged("scatter")(kernel, insn)
     ]
     scatter_map = scatter_insn.assignee.index_tuple[0]
-    (scatter_iname,) = set(scatter_map.index_tuple) - set([Variable("n")])
+    (scatter_iname,) = set(scatter_map.index_tuple) - set([prim.Variable("n")])
     scatter_iname = scatter_iname.name
 
     # }}}
@@ -303,8 +446,10 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
     (outDoF_init_iname,) = [
         insn.assignee.index_tuple[1].name
         for insn in kernel.instructions
-        if (lp.match.Tagged("gather")(kernel, insn)
-            and (outDoF == insn.assignee_name))
+        if (
+            lp.match.Tagged("gather")(kernel, insn)
+            and (outDoF == insn.assignee_name)
+        )
     ]
 
     # }}}
@@ -371,7 +516,8 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
             raise NotImplementedError(insn)
 
         new_insns.append(
-            insn.tagged(lp.LegacyStringInstructionTag(fem_action_phase)))
+            insn.tagged(lp.LegacyStringInstructionTag(fem_action_phase))
+        )
 
     kernel = kernel.copy(instructions=new_insns)
 
@@ -484,7 +630,9 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
     kernel = lp.tag_instructions(
         kernel,
         f"matvec{i+1}",
-        "(tag:gather or tag:quadrature) and (reads:{0} or writes:{0})".format(outDoF),  # noqa: E501
+        "(tag:gather or tag:quadrature) and (reads:{0} or writes:{0})".format(
+            outDoF
+        ),  # noqa: E501
     )
     kernel = lp.tag_instructions(
         kernel, "quadr_init", f"tag:gather and tag:matvec{i+1}"
@@ -542,7 +690,7 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
             continue
         to_be_fused_mv_stage = ((i, mv_stage_i),)
         # do not fuse "quadr" stage matvec with any other matvec
-        for j, mv_stage_j in enumerate(matvec_descrs[i+1:-1], start=i+1):
+        for j, mv_stage_j in enumerate(matvec_descrs[i + 1 : -1], start=i + 1):
             if are_mv_stages_similar(mv_stage_i, mv_stage_j):
                 to_be_fused_mv_stage = to_be_fused_mv_stage + ((j, mv_stage_j),)
 
@@ -555,7 +703,8 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
 
         def retag_insn(insn):
             new_tags = {
-                tag for tag in insn.tags
+                tag
+                for tag in insn.tags
                 if not lp.match.Tagged("matvec*")(kernel, insn)
             } | {lp.LegacyStringInstructionTag(f"matvec{current_mv_stg_idx}")}
             return insn.copy(tags=frozenset(new_tags))
@@ -590,7 +739,8 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
 
     for mv_stage in mv_stage_descrs_post_fusion[:-1]:
         fused_trialDoF_gather_iname = trialDoF_to_gather_inames[
-            mv_stage.dof_names[0]]
+            mv_stage.dof_names[0]
+        ]
         for trialDoF in mv_stage.dof_names[1:]:
             if trialDoF_to_gather_inames[trialDoF] == fused_trialDoF_gather_iname:
                 continue
@@ -695,8 +845,9 @@ def tiled_transform(t_unit, tiling_config):
     quad_tiles = tiling_config.quad_rowtile_lengths
 
     if mv_tiles == ():
-        mv_tiles = tuple((nquad, nDoF)
-                         for nDoF in n_trialDoFs) + ((n_outDoF, nquad),)
+        mv_tiles = tuple((nquad, nDoF) for nDoF in n_trialDoFs) + (
+            (n_outDoF, nquad),
+        )
     if quad_tiles == ():
         quad_tiles = (nquad,)
     (quad_tile,) = quad_tiles
@@ -762,15 +913,14 @@ def tiled_transform(t_unit, tiling_config):
     # }}}
 
     from loopy.loop import merge_loop_domains
+
     kernel = merge_loop_domains(kernel)
-
-    from loopy.transform.data import remove_unused_axes_in_temporaries
-
     kernel = remove_unused_axes_in_temporaries(kernel)
 
     # Realize CUDA blocks
-    kernel = lp.split_iname(kernel, "n", nc,
-                            outer_iname="iblock", inner_iname="icell")
+    kernel = lp.split_iname(
+        kernel, "n", nc, outer_iname="iblock", inner_iname="icell"
+    )
 
     # Privatize eval_results
     kernel = lp.privatize_temporaries_with_inames(
@@ -781,8 +931,6 @@ def tiled_transform(t_unit, tiling_config):
     # thread(if there are multiple threads)
     kernel = lp.rename_iname(kernel, scatter_iname, "irow_quadr", True)
     kernel = lp.rename_iname(kernel, outDoF_init_iname, "irow_quadr", True)
-
-    from loopy.transform.make_scalar import remove_axis
 
     kernel = remove_axis(kernel, outDoF, 0)
 
@@ -805,15 +953,17 @@ def tiled_transform(t_unit, tiling_config):
 
     # Splitting column in eval stage
     for i, (T_e_c, gather_iname) in enumerate(zip(T_e_cs, trialDoF_gather_inames)):
-        kernel = lp.rename_iname(kernel, gather_iname, "icol%d" % i,
-                                 existing_ok=True)
+        kernel = lp.rename_iname(
+            kernel, gather_iname, "icol%d" % i, existing_ok=True
+        )
         kernel = lp.split_iname(
             kernel, "icol%d" % i, T_e_c, outer_iname="icoltile%d" % i
         )
 
     # Splitting row in the quadr stage
-    kernel = lp.split_iname(kernel, "irow_quadr", T_q_r,
-                            outer_iname="irowtile_quadr")
+    kernel = lp.split_iname(
+        kernel, "irow_quadr", T_q_r, outer_iname="irowtile_quadr"
+    )
     # Splitting column in quadr stage
     kernel = lp.split_iname(
         kernel, "icol%d" % n_trial, T_q_c, outer_iname="icoltile%d" % n_trial
@@ -907,11 +1057,12 @@ def tiled_transform(t_unit, tiling_config):
                 assert lx * ly == tr * tc
                 # prefetch the matrices into a single shared memory location
                 # with the appropriate offsets
-                new_temps[prftch_into] = (
-                    kernel.temporary_variables[prftch_into].copy(
-                        base_storage="prftch_matrix_base",
-                        offset=i_op_pos * tr * tc,
-                        shape=((i_op_pos + 1) * lx, ly))
+                new_temps[prftch_into] = kernel.temporary_variables[
+                    prftch_into
+                ].copy(
+                    base_storage="prftch_matrix_base",
+                    offset=i_op_pos * tr * tc,
+                    shape=((i_op_pos + 1) * lx, ly),
                 )
 
                 kernel = kernel.copy(temporary_variables=new_temps)
@@ -993,7 +1144,7 @@ def tiled_transform(t_unit, tiling_config):
         kernel = lp.add_dependency(
             kernel,
             "tag:matvec0 and tag:eval_init",
-            f"id:{quad_weight_prefetch_insn}"
+            f"id:{quad_weight_prefetch_insn}",
         )
 
         kernel = lp.split_iname(
@@ -1125,7 +1276,11 @@ def tiled_transform(t_unit, tiling_config):
     )
     kernel = lp.tag_inames(
         kernel,
-        "irow%d_inner_outer:unr,irow%d_inner_outer_init:unr,irow_quadr_wrap_up_inner_outer:unr" % (n_trial, n_trial),  # noqa: E501
+        {
+            f"irow{n_trial}_inner_outer": "unr",
+            f"irow{n_trial}_inner_outer_init": "unr",
+            "irow_quadr_wrap_up_inner_outer": "unr",
+        },
     )
 
     kernel = lp.add_inames_to_insn(
@@ -1233,11 +1388,11 @@ class ParametricTilingCandidateGenerator:
     def trialDoF_shapes(self):
         sizes = [
             [
-                (self.
-                 fem_program
-                 .default_entrypoint
-                 .temporary_variables[dof_name]
-                 .shape)
+                (
+                    self.fem_program.default_entrypoint.temporary_variables[
+                        dof_name
+                    ].shape
+                )
                 for dof_name in mv_stage.dof_names
             ]
             for mv_stage in self.matvec_stages[:-1]
@@ -1258,11 +1413,11 @@ class ParametricTilingCandidateGenerator:
     def deriv_mat_shapes(self):
         sizes = [
             [
-                (self
-                 .fem_program
-                 .default_entrypoint
-                 .temporary_variables[mat_name]
-                 .shape)
+                (
+                    self.fem_program.default_entrypoint.temporary_variables[
+                        mat_name
+                    ].shape
+                )
                 for mat_name in mv_stage.deriv_matrices
             ]
             for mv_stage in self.matvec_stages
@@ -1356,9 +1511,11 @@ class ParametricTilingCandidateGenerator:
 
             return n3 * n1 + n5 + n4 * n2 + n6
 
-        flops_executed = floor(self.nquad/quad_tile_len) * get_flops_executed_for_nq(
-            quad_tile_len
-        ) + get_flops_executed_for_nq(self.nquad % quad_tile_len)
+        flops_executed = floor(
+            self.nquad / quad_tile_len
+        ) * get_flops_executed_for_nq(quad_tile_len) + get_flops_executed_for_nq(
+            self.nquad % quad_tile_len
+        )
 
         useful_flops = (
             self.nquad
@@ -1434,11 +1591,15 @@ class ParametricTilingCandidateGenerator:
         nsync = self.get_nsync(tiling_config)
         effective_global_bw = 21 if nwarps > 8 else 20 * (nwarps / 8)
         effective_shared_bw = (
-            min(1100, 900 + 30 * (nwarps - 10)) if nwarps > 10 else 900 * (nwarps/10)
+            min(1100, 900 + 30 * (nwarps - 10))
+            if nwarps > 10
+            else 900 * (nwarps / 10)
         )
 
         # gather phase times
-        num_times_trial_dofs_gather_per_quad_tile = lambda qt: ceil(qt / T_e_r)  # noqa: E731,E501
+        num_times_trial_dofs_gather_per_quad_tile = lambda qt: ceil(  # noqa: E731
+            qt / T_e_r
+        )
         num_times_trial_dofs_gathered = floor(
             self.nquad / quad_tile_len
         ) * num_times_trial_dofs_gather_per_quad_tile(
@@ -1567,10 +1728,9 @@ class ParametricTilingCandidateGenerator:
                         T_q_r = ceil(self.n_outDoF / k)
                         for ell in range(1, ceil(sqrt(quad_tile_len)) + 1):
                             T_q_c = ceil(quad_tile_len / ell)
-                            current_tile = tuple((T_e_r, T_e_c)
-                                                 for T_e_c in T_e_cs) + (
-                                (T_q_r, T_q_c),
-                            )
+                            current_tile = tuple(
+                                (T_e_r, T_e_c) for T_e_c in T_e_cs
+                            ) + ((T_q_r, T_q_c),)
                             if get_eta_shared_mem_alias(current_tile) >= 0.8:
                                 tiles.append((quad_tile_len, current_tile))
 
@@ -1688,8 +1848,9 @@ def get_empirically_best_candidate(
             code, options=["-use_fast_math", "-w"]
         ).get_function(t_unit.default_entrypoint.name)
         executable_knl.prepare("i" * 2 + "P" * len(args[2:]) + "P" * len(extra_args))
-        extra_args = tuple(_np_ary_to_cuda_mem(extra_arg)
-                           for extra_arg in extra_args)
+        extra_args = tuple(
+            _np_ary_to_cuda_mem(extra_arg) for extra_arg in extra_args
+        )
 
         for i in range(nwarmup):
             executable_knl.prepared_call(grid, block, *copied_args, *extra_args)
@@ -1720,7 +1881,8 @@ def get_empirically_best_candidate(
 
 
 def _preprocess_tunit_for_autotiling(
-        t_unit: lp.TranslationUnit) -> lp.TranslationUnit:
+    t_unit: lp.TranslationUnit,
+) -> lp.TranslationUnit:
     kernel = t_unit.default_entrypoint
 
     # remove noops
