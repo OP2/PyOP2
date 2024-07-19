@@ -704,7 +704,8 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
             new_tags = {
                 tag
                 for tag in insn.tags
-                if not lp.match.Tagged("matvec*")(kernel, insn)
+                if not (isinstance(tag, lp.LegacyStringInstructionTag)
+                        and tag.value.startswith("matvec"))
             } | {lp.LegacyStringInstructionTag(f"matvec{current_mv_stg_idx}")}
             return insn.copy(tags=frozenset(new_tags))
 
