@@ -881,7 +881,7 @@ def tiled_transform(t_unit, tiling_config):
             kernel, mv_stg_descr.col_iname, "tag:matvec%d" % i, "icol%d" % i
         )
 
-    kernel = lp.duplicate_inames(kernel, iquad, "tag:eval", "irow_eval")
+    kernel = lp.duplicate_inames(kernel, iquad, "tag:evaluate", "irow_eval")
     kernel = lp.duplicate_inames(
         kernel, matvec_stage_descrs[-1].row_iname, "tag:quadrature", "irow_quadr"
     )
@@ -1045,7 +1045,7 @@ def tiled_transform(t_unit, tiling_config):
                     temporary_address_space=lp.AddressSpace.LOCAL,
                     dim_arg_names=prefetch_inames,
                     temporary_name=prftch_into,
-                    compute_insn_id=ing("prftch_matvec%d" % istage),
+                    prefetch_insn_id=ing("prftch_matvec%d" % istage),
                     fetch_outer_inames=fetch_outer_inames,
                     default_tag=None,
                     within="tag:matvec%d" % istage,
