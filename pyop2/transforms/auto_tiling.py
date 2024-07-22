@@ -995,7 +995,7 @@ def tiled_transform(t_unit, tiling_config):
         kernel = lp.add_inames_to_insn(
             kernel,
             "iquad_tile,irowtile_eval",
-            " or ".join("writes:%s" % trialDoF for trialDoF in mv_stage.dof_names),
+            " or ".join(f"writes:{trialDoF}" for trialDoF in mv_stage.dof_names),
         )
 
         if i > 1:
@@ -1003,7 +1003,7 @@ def tiled_transform(t_unit, tiling_config):
             # stage on the previous matvec. (helps in enforcing separate live
             # ranges).
             kernel = lp.add_dependency(
-                kernel, "iname:%s_inner" % gather_iname, "tag:matvec%d" % (i - 1)
+                kernel, f"iname:{gather_iname}_inner", f"tag:matvec{i-1}"
             )
 
     # }}}
@@ -1195,6 +1195,12 @@ def tiled_transform(t_unit, tiling_config):
             )(kernel, insn)
         ]
 
+        kernel = lp.add_inames_to_insn(
+            kernel,
+            inames="irow_eval_inner_inner,irow_eval_inner_outer",
+            insn_match=(f"tag:matvec{i} and" " (tag:eval_init or tag:eval_wrap_up)"),
+        )
+
         # privatize temporaries for logic preservation
         kernel = lp.privatize_temporaries_with_inames(
             kernel, "irow_eval_inner_outer", only_var_names=redn_accumulators
@@ -1204,14 +1210,14 @@ def tiled_transform(t_unit, tiling_config):
         kernel = lp.rename_iname(
             kernel,
             "irow_eval_inner_inner",
-            "irow%d_inner_inner" % i,
-            within="tag:matvec%d" % i,
+            f"irow{i}_inner_inner",
+            within=f"tag:matvec{i}",
         )
         kernel = lp.rename_iname(
             kernel,
             "irow_eval_inner_outer",
-            "irow%d_inner_outer" % i,
-            within="tag:matvec%d" % i,
+            f"irow{i}_inner_outer",
+            within=f"tag:matvec{i}",
         )
 
         # schedulability constraint requires irow_inner_outer to be duplicated
@@ -1334,6 +1340,7 @@ def tiled_transform(t_unit, tiling_config):
     # }}}
 
     kernel = lp.remove_unused_inames(kernel)
+    kernel = lp.allocate_temporaries_for_base_storage(kernel)
 
     return t_unit.with_kernel(kernel), args_to_make_global
 
@@ -1832,11 +1839,11 @@ def get_empirically_best_candidate(
         transformed_t_unit, extra_args = _transform_kernel_with_candidate(
             t_unit, candidate
         )
-        print(transformed_t_unit)
-        1 / 0
         assert all(isinstance(extra_arg, np.ndarray) for extra_arg in extra_args)
 
         code = lp.generate_code_v2(transformed_t_unit).device_code()
+        print(code)
+        1 / 0
 
         glens, llens = transformed_t_unit.get_grid_size_upper_bounds_as_exprs()
         from pymbolic import evaluate
