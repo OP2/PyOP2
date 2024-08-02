@@ -213,9 +213,7 @@ def remove_invariant_inames(kernel):
         for insn in kernel.instructions
     ]
 
-    from loopy.transform.inames import remove_unused_inames
-
-    return remove_unused_inames(
+    return lp.remove_unused_inames(
         kernel.copy(instructions=new_insns), removable_inames
     )
 
@@ -824,7 +822,8 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
     )
 
 
-def tiled_transform(t_unit, tiling_config):
+def tiled_transform(t_unit: lp.TranslationUnit,
+                    tiling_config: ParametricTiling) -> lp.TranslationUnit:
     """
     :param tiling_config: An instance of :class:`pyop2.gpu.tiling_config
     """
@@ -885,7 +884,6 @@ def tiled_transform(t_unit, tiling_config):
     # {{{ privatize temps for function evals and make them LOCAL
 
     kernel = lp.privatize_temporaries_with_inames(kernel, iquad, eval_results)
-
     kernel = lp.set_temporary_scope(kernel, eval_results, lp.AddressSpace.LOCAL)
 
     # }}}
@@ -897,9 +895,9 @@ def tiled_transform(t_unit, tiling_config):
             kernel, mv_stg_descr.col_iname, "tag:matvec%d" % i, "icol%d" % i
         )
 
-    kernel = lp.duplicate_inames(kernel, iquad, "tag:evaluate", "irow_eval")
+    kernel = lp.duplicate_inames(kernel, iquad, within="tag:evaluate", new_inames="irow_eval")
     kernel = lp.duplicate_inames(
-        kernel, matvec_stage_descrs[-1].row_iname, "tag:quadrature", "irow_quadr"
+        kernel, matvec_stage_descrs[-1].row_iname, within="tag:quadrature", new_inames="irow_quadr"
     )
 
     # }}}
@@ -943,9 +941,12 @@ def tiled_transform(t_unit, tiling_config):
 
     # cut down the size of the number of basis coeffs written by each
     # thread(if there are multiple threads)
-    kernel = lp.rename_iname(kernel, scatter_iname, "irow_quadr", True)
-    kernel = lp.rename_iname(kernel, outDoF_init_iname, "irow_quadr", True)
+    kernel = lp.rename_iname(kernel, scatter_iname, "irow_quadr", existing_ok=True)
+    kernel = lp.rename_iname(
+        kernel, outDoF_init_iname, "irow_quadr", existing_ok=True
+    )
 
+    # TODO: Try to push this stage at a later point.. just make keep the logic conotained here..
     kernel = remove_axis(kernel, outDoF, 0)
 
     # enfoce dependency of first matvec stage onto the jacobian evaluation stage
@@ -1195,12 +1196,6 @@ def tiled_transform(t_unit, tiling_config):
             )(kernel, insn)
         ]
 
-        kernel = lp.add_inames_to_insn(
-            kernel,
-            inames="irow_eval_inner_inner,irow_eval_inner_outer",
-            insn_match=(f"tag:matvec{i} and" " (tag:eval_init or tag:eval_wrap_up)"),
-        )
-
         # privatize temporaries for logic preservation
         kernel = lp.privatize_temporaries_with_inames(
             kernel, "irow_eval_inner_outer", only_var_names=redn_accumulators
@@ -1232,8 +1227,6 @@ def tiled_transform(t_unit, tiling_config):
         kernel = lp.tag_inames(
             kernel, "irow%d_inner_outer:unr,irow%d_inner_outer_init:unr" % (i, i)
         )
-        for trialDoF in matvec_stage_descrs[i].dof_names:
-            kernel = remove_axis(kernel, trialDoF, 0)
 
     # eval wrap up:
     kernel = lp.rename_iname(
@@ -1248,7 +1241,7 @@ def tiled_transform(t_unit, tiling_config):
         "irow_eval_wrap_up_inner_outer",
         within="tag:eval_wrap_up",
     )
-    kernel = lp.tag_inames(kernel, "irow_eval_wrap_up_inner_outer:unr")
+    kernel = lp.tag_inames(kernel, {"irow_eval_wrap_up_inner_outer": "unr"})
 
     # }}}
 
@@ -1319,10 +1312,8 @@ def tiled_transform(t_unit, tiling_config):
         kernel = lp.tag_inames(kernel, "irow%d_inner_inner:l.0" % i)
 
     kernel = lp.tag_inames(
-        kernel, "irow_eval_wrap_up_inner_inner:l.0", ignore_nonexistent=True
-    )
-    kernel = lp.tag_inames(
-        kernel, "irow_quadr_wrap_up_inner_inner:l.0", ignore_nonexistent=True
+        kernel, {"irow_eval_wrap_up_inner_inner": "l.0",
+                 "irow_quadr_wrap_up_inner_inner": "l.0"},
     )
 
     # }}}
@@ -1335,8 +1326,24 @@ def tiled_transform(t_unit, tiling_config):
     # unroll loops must be innermost
     for i in range(n_trial + 1):
         kernel = lp.prioritize_loops(
-            kernel, "icol{0}_inner,irow{0}_inner_outer".format(i)
+            kernel, f"icol{i}_inner,irow{i}_inner_outer"
         )
+
+    # }}}
+
+    # {{{ make coords read by every work-item.
+
+    kernel = lp.add_inames_to_insn(kernel,
+                                   inames="irow0_inner_inner",
+                                   insn_match=f"writes:{coords} or tag:jacobi")
+    for istage, mv_stage in enumerate(metadata.matvec_stage_descrs[:-1]):
+        kernel = lp.add_inames_to_insn(
+            kernel,
+            inames=f"irow{istage}_inner_inner",
+            insn_match=lp.match.Or(
+                tuple(lp.match.Writes(dof_name) for dof_name in mv_stage.dof_names)),
+        )
+
     # }}}
 
     kernel = lp.remove_unused_inames(kernel)
