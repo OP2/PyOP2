@@ -164,7 +164,9 @@ def remove_axis(kernel, var_name, axis_num):
         kernel.substitutions, kernel.get_var_name_generator()
     )
 
-    kernel = AxisRemover(rule_mapping_context, var_name, axis_num).map_kernel(kernel)
+    kernel = AxisRemover(rule_mapping_context, var_name, axis_num).map_kernel(
+        kernel
+    )
 
     if len(kernel.temporary_variables[var_name].shape) == 1:
         new_temps = dict(
@@ -664,7 +666,10 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
 
     matvec_descrs.append(
         MatvecStageDescr(
-            (outDoF,), quadr_stage_DoF_iname, iquad, deriv_matrices_in_current_mv_stg
+            (outDoF,),
+            quadr_stage_DoF_iname,
+            iquad,
+            deriv_matrices_in_current_mv_stg,
         )
     )
 
@@ -822,8 +827,9 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
     )
 
 
-def tiled_transform(t_unit: lp.TranslationUnit,
-                    tiling_config: ParametricTiling) -> lp.TranslationUnit:
+def tiled_transform(
+    t_unit: lp.TranslationUnit, tiling_config: ParametricTiling
+) -> lp.TranslationUnit:
     """
     :param tiling_config: An instance of :class:`pyop2.gpu.tiling_config
     """
@@ -895,9 +901,14 @@ def tiled_transform(t_unit: lp.TranslationUnit,
             kernel, mv_stg_descr.col_iname, "tag:matvec%d" % i, "icol%d" % i
         )
 
-    kernel = lp.duplicate_inames(kernel, iquad, within="tag:evaluate", new_inames="irow_eval")
     kernel = lp.duplicate_inames(
-        kernel, matvec_stage_descrs[-1].row_iname, within="tag:quadrature", new_inames="irow_quadr"
+        kernel, iquad, within="tag:evaluate", new_inames="irow_eval"
+    )
+    kernel = lp.duplicate_inames(
+        kernel,
+        matvec_stage_descrs[-1].row_iname,
+        within="tag:quadrature",
+        new_inames="irow_quadr",
     )
 
     # }}}
@@ -946,11 +957,12 @@ def tiled_transform(t_unit: lp.TranslationUnit,
         kernel, outDoF_init_iname, "irow_quadr", existing_ok=True
     )
 
-    # TODO: Try to push this stage at a later point.. just make keep the logic conotained here..
     kernel = remove_axis(kernel, outDoF, 0)
 
     # enfoce dependency of first matvec stage onto the jacobian evaluation stage
-    kernel = lp.add_dependency(kernel, "tag:eval_init and tag:matvec0", "tag:jacobi")
+    kernel = lp.add_dependency(
+        kernel, "tag:eval_init and tag:matvec0", "tag:jacobi"
+    )
 
     # {{{ prefetch coordinates (not implemented)
 
@@ -959,7 +971,9 @@ def tiled_transform(t_unit: lp.TranslationUnit,
         # might choose not to support it.
         kernel = lp.privatize_temporaries_with_inames(kernel, "icell", [coords])
         kernel = lp.assignment_to_subst(kernel, coords)
-        raise NotImplementedError("This might be only useful for high order meshes.")
+        raise NotImplementedError(
+            "This might be only useful for high order meshes."
+        )
 
     # }}}
 
@@ -1312,8 +1326,11 @@ def tiled_transform(t_unit: lp.TranslationUnit,
         kernel = lp.tag_inames(kernel, "irow%d_inner_inner:l.0" % i)
 
     kernel = lp.tag_inames(
-        kernel, {"irow_eval_wrap_up_inner_inner": "l.0",
-                 "irow_quadr_wrap_up_inner_inner": "l.0"},
+        kernel,
+        {
+            "irow_eval_wrap_up_inner_inner": "l.0",
+            "irow_quadr_wrap_up_inner_inner": "l.0",
+        },
     )
 
     # }}}
@@ -1325,23 +1342,24 @@ def tiled_transform(t_unit: lp.TranslationUnit,
 
     # unroll loops must be innermost
     for i in range(n_trial + 1):
-        kernel = lp.prioritize_loops(
-            kernel, f"icol{i}_inner,irow{i}_inner_outer"
-        )
+        kernel = lp.prioritize_loops(kernel, f"icol{i}_inner,irow{i}_inner_outer")
 
     # }}}
 
     # {{{ make coords read by every work-item.
 
-    kernel = lp.add_inames_to_insn(kernel,
-                                   inames="irow0_inner_inner",
-                                   insn_match=f"writes:{coords} or tag:jacobi")
+    kernel = lp.add_inames_to_insn(
+        kernel,
+        inames="irow0_inner_inner",
+        insn_match=f"writes:{coords} or tag:jacobi",
+    )
     for istage, mv_stage in enumerate(metadata.matvec_stage_descrs[:-1]):
         kernel = lp.add_inames_to_insn(
             kernel,
             inames=f"irow{istage}_inner_inner",
             insn_match=lp.match.Or(
-                tuple(lp.match.Writes(dof_name) for dof_name in mv_stage.dof_names)),
+                tuple(lp.match.Writes(dof_name) for dof_name in mv_stage.dof_names)
+            ),
         )
 
     # }}}
@@ -1679,7 +1697,9 @@ class ParametricTilingCandidateGenerator:
                 self.n_trial_derivs, self.deriv_mat_shapes
             )
         )
-        eval_phase_smem_read_time = eval_phase_smem_read_gbytes / effective_shared_bw
+        eval_phase_smem_read_time = (
+            eval_phase_smem_read_gbytes / effective_shared_bw
+        )
 
         # quadr phase times
         quadr_phase_mat_smem_read_gbytes = 8e-9 * (
@@ -1713,7 +1733,9 @@ class ParametricTilingCandidateGenerator:
             return (nc * nt) / (32.0 * ceil(nc * nt / 32))
 
         def get_eta_shared_mem_alias(tiles):
-            nmats = [len(mv_stage.deriv_matrices) for mv_stage in self.matvec_stages]
+            nmats = [
+                len(mv_stage.deriv_matrices) for mv_stage in self.matvec_stages
+            ]
             min_sm_usage_in_a_stage = min(
                 nmat * tr * tc for nmat, (tr, tc) in zip(nmats, tiles)
             )
@@ -1849,10 +1871,12 @@ def get_empirically_best_candidate(
         assert all(isinstance(extra_arg, np.ndarray) for extra_arg in extra_args)
 
         code = lp.generate_code_v2(transformed_t_unit).device_code()
-        print(code)
-        1 / 0
 
-        glens, llens = transformed_t_unit.get_grid_size_upper_bounds_as_exprs()
+        glens, llens = (
+            transformed_t_unit.default_entrypoint.get_grid_size_upper_bounds_as_exprs(  # noqa: E501
+                transformed_t_unit.callables_table
+            )
+        )
         from pymbolic import evaluate
 
         grid = tuple(
@@ -1875,13 +1899,19 @@ def get_empirically_best_candidate(
         executable_knl = SourceModule(
             code, options=["-use_fast_math", "-w"]
         ).get_function(t_unit.default_entrypoint.name)
-        executable_knl.prepare("i" * 2 + "P" * len(args[2:]) + "P" * len(extra_args))
         extra_args = tuple(
             _np_ary_to_cuda_mem(extra_arg) for extra_arg in extra_args
         )
+        executable_knl.prepare(
+            "i" * 2 + "P" * len(args[2:]) + "P" * len(extra_args)
+        )
+        prepared_args = [
+            arg.gpudata if isinstance(arg, cuda_np.GPUArray) else arg
+            for arg in [*copied_args, *extra_args]
+        ]
 
         for i in range(nwarmup):
-            executable_knl.prepared_call(grid, block, *copied_args, *extra_args)
+            executable_knl.prepared_call(grid, block, *prepared_args)
 
         runtimes = []
 
@@ -1893,13 +1923,16 @@ def get_empirically_best_candidate(
             start_evt.record()
 
             for i in range(10):
-                executable_knl.prepared_call(grid, block, *copied_args, *extra_args)
+                executable_knl.prepared_call(grid, block, *prepared_args)
 
             end_evt.record()
             end_evt.synchronize()
             runtimes.append(1e-3 * (end_evt.time_since(start_evt) / 10))
 
         candidate_runtime = np.median(runtimes)
+
+        print(f"{candidate}: {candidate_runtime}")
+        1 / 0
 
         if candidate_runtime < best_time:
             best_time = candidate_runtime
