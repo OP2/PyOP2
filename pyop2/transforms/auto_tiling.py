@@ -1931,9 +1931,6 @@ def get_empirically_best_candidate(
 
         candidate_runtime = np.median(runtimes)
 
-        print(f"{candidate}: {candidate_runtime}")
-        1 / 0
-
         if candidate_runtime < best_time:
             best_time = candidate_runtime
             best_candidate = candidate
@@ -1957,7 +1954,6 @@ def _preprocess_tunit_for_autotiling(
     kernel = lp.remove_instructions(kernel, noop_insns)
     kernel = remove_unnecessary_deps(kernel)
     kernel = lp.simplify_indices(kernel)
-    kernel = lp.assume(kernel, "start=0")
 
     return t_unit.with_kernel(kernel)
 
