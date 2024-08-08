@@ -558,8 +558,9 @@ class TestDiskCachedDecorator:
 
     def test_decorator_collective_uses_different_in_memory_caches(self, cache, cachedir):
         decorated_func = disk_cached(cache, cachedir.name)(self.myfunc)
-        collective_func = disk_cached(cache, cachedir.name, self.collective_key,
-                                      collective=True)(self.myfunc)
+        collective_func = disk_cached(
+            None, cachedir.name, self.collective_key, collective=True
+        )(self.myfunc)
 
         # obj1 should be cached on the comm cache and not the self.cache
         obj1 = collective_func("input1")

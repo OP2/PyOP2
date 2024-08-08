@@ -33,12 +33,12 @@
 
 """Provides common base classes for cached objects."""
 
+import cachetools
 import hashlib
 import os
-from pathlib import Path
 import pickle
-
-import cachetools
+from pathlib import Path
+from warnings import warn
 
 from pyop2.configuration import configuration
 from pyop2.mpi import comm_cache_keyval
@@ -261,45 +261,60 @@ def disk_cached(cache, cachedir=None, key=cachetools.keys.hashkey, collective=Fa
     if cachedir is None:
         cachedir = configuration["cache_dir"]
 
+    if collective and cache is not None:
+        warn(
+            "Global cache for collective disk cached call will not be used. "
+            "Pass `None` as the first argument"
+        )
+
     def decorator(func):
-        def wrapper(*args, **kwargs):
-            if collective:
+        if not collective:
+            def wrapper(*args, **kwargs):
+                """ Extract the key and then try the memory then disk cache
+                before falling back on calling the function and populating the
+                caches.
+                """
+                k = _as_hexdigest(key(*args, **kwargs))
+                try:
+                    v = cache[k]
+                except KeyError:
+                    v = _disk_cache_get(cachedir, k)
+
+                if v is None:
+                    v = func(*args, **kwargs)
+                    _disk_cache_set(cachedir, k, v)
+                return cache.setdefault(k, v)
+
+        else:  # Collective
+            def wrapper(*args, **kwargs):
+                """ Same as above, but in parallel over `comm`
+                """
                 comm, disk_key = key(*args, **kwargs)
                 k = _as_hexdigest(disk_key)
+
+                # Fetch the per-comm cache and set it up if not present
                 local_cache = comm.Get_attr(comm_cache_keyval)
                 if local_cache is None:
                     local_cache = {}
                     comm.Set_attr(comm_cache_keyval, local_cache)
-            else:
-                k = _as_hexdigest(key(*args, **kwargs))
-                local_cache = cache
 
-            # first try the in-memory cache
-            try:
-                return local_cache[k]
-            except KeyError:
-                pass
-
-            # then try to retrieve from disk
-            if collective:
+                # Grab value from rank 0 memory/disk cache and broadcast result
                 if comm.rank == 0:
-                    v = _disk_cache_get(cachedir, k)
+                    try:
+                        v = local_cache[k]
+                    except KeyError:
+                        v = _disk_cache_get(cachedir, k)
                     comm.bcast(v, root=0)
                 else:
                     v = comm.bcast(None, root=0)
-            else:
-                v = _disk_cache_get(cachedir, k)
-            if v is not None:
+
+                if v is None:
+                    v = func(*args, **kwargs)
+                    # Only write to the disk cache on rank 0
+                    if comm.rank == 0:
+                        _disk_cache_set(cachedir, k, v)
                 return local_cache.setdefault(k, v)
 
-            # if all else fails call func and populate the caches
-            v = func(*args, **kwargs)
-            if collective:
-                if comm.rank == 0:
-                    _disk_cache_set(cachedir, k, v)
-            else:
-                _disk_cache_set(cachedir, k, v)
-            return local_cache.setdefault(k, v)
         return wrapper
     return decorator
 
