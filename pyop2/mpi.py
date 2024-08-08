@@ -227,6 +227,7 @@ cidx_keyval = MPI.Comm.Create_keyval()
 innercomm_keyval = MPI.Comm.Create_keyval(delete_fn=delcomm_outer)
 outercomm_keyval = MPI.Comm.Create_keyval()
 compilationcomm_keyval = MPI.Comm.Create_keyval(delete_fn=delcomm_outer)
+comm_cache_keyval = MPI.Comm.Create_keyval()
 
 
 def is_pyop2_comm(comm):
@@ -539,20 +540,14 @@ def _free_comms():
             debug(f"Freeing {comm.name}, with index {key}, which has refcount {refcount[0]}")
             comm.Free()
         del _DUPED_COMM_DICT[key]
-    for kv in [refcount_keyval,
-               innercomm_keyval,
-               outercomm_keyval,
-               compilationcomm_keyval]:
+    for kv in [
+        refcount_keyval,
+        innercomm_keyval,
+        outercomm_keyval,
+        compilationcomm_keyval,
+        comm_cache_keyval
+    ]:
         MPI.Comm.Free_keyval(kv)
-
-
-def hash_comm(comm):
-    """Return a hashable identifier for a communicator."""
-    if not is_pyop2_comm(comm):
-        raise PyOP2CommError("`comm` passed to `hash_comm()` must be a PyOP2 communicator")
-    # `comm` must be a PyOP2 communicator so we can use its id()
-    # as the hash and this is stable between invocations.
-    return id(comm)
 
 
 # Install an exception hook to MPI Abort if an exception isn't caught

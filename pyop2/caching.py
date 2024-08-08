@@ -41,7 +41,7 @@ import pickle
 import cachetools
 
 from pyop2.configuration import configuration
-from pyop2.mpi import hash_comm
+from pyop2.mpi import comm_cache_keyval
 from pyop2.utils import cached_property
 
 
@@ -240,8 +240,7 @@ information.
 .. note::
     If you intend to use this decorator to cache things that are collective
     across a communicator then you must include the communicator as part of
-    the cache key. Since communicators are themselves not hashable you should
-    use :func:`pyop2.mpi.hash_comm`.
+    the cache key.
 
     You should also make sure to use unbounded caches as otherwise some ranks
     may evict results leading to deadlocks.
@@ -266,37 +265,41 @@ def disk_cached(cache, cachedir=None, key=cachetools.keys.hashkey, collective=Fa
         def wrapper(*args, **kwargs):
             if collective:
                 comm, disk_key = key(*args, **kwargs)
-                disk_key = _as_hexdigest(disk_key)
-                k = hash_comm(comm), disk_key
+                k = _as_hexdigest(disk_key)
+                local_cache = comm.Get_attr(comm_cache_keyval)
+                if local_cache is None:
+                    local_cache = {}
+                    comm.Set_attr(comm_cache_keyval, local_cache)
             else:
                 k = _as_hexdigest(key(*args, **kwargs))
+                local_cache = cache
 
             # first try the in-memory cache
             try:
-                return cache[k]
+                return local_cache[k]
             except KeyError:
                 pass
 
             # then try to retrieve from disk
             if collective:
                 if comm.rank == 0:
-                    v = _disk_cache_get(cachedir, disk_key)
+                    v = _disk_cache_get(cachedir, k)
                     comm.bcast(v, root=0)
                 else:
                     v = comm.bcast(None, root=0)
             else:
                 v = _disk_cache_get(cachedir, k)
             if v is not None:
-                return cache.setdefault(k, v)
+                return local_cache.setdefault(k, v)
 
             # if all else fails call func and populate the caches
             v = func(*args, **kwargs)
             if collective:
                 if comm.rank == 0:
-                    _disk_cache_set(cachedir, disk_key, v)
+                    _disk_cache_set(cachedir, k, v)
             else:
                 _disk_cache_set(cachedir, k, v)
-            return cache.setdefault(k, v)
+            return local_cache.setdefault(k, v)
         return wrapper
     return decorator
 
