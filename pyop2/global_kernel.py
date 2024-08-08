@@ -11,7 +11,7 @@ import pytools
 from petsc4py import PETSc
 
 from pyop2 import compilation, mpi
-from pyop2.caching import Cached
+from pyop2.caching import Cached, parallel_memory_only_cache
 from pyop2.configuration import configuration
 from pyop2.datatypes import IntType, as_ctypes
 from pyop2.types import IterationRegion, Constant, READ
@@ -334,23 +334,24 @@ class GlobalKernel(Cached):
 
         self._initialized = True
 
+    @staticmethod
+    def _call_key(self, comm, *args):
+        return comm, (0,)
+
     @mpi.collective
+    @parallel_memory_only_cache(key=_call_key)
     def __call__(self, comm, *args):
         """Execute the compiled kernel.
 
         :arg comm: Communicator the execution is collective over.
         :*args: Arguments to pass to the compiled kernel.
         """
-        # If the communicator changes then we cannot safely use the in-memory
-        # function cache. Note here that we are not using dup_comm to get a
-        # stable communicator id because we will already be using the internal one.
-        key = id(comm)
-        try:
-            func = self._func_cache[key]
-        except KeyError:
-            func = self.compile(comm)
-            self._func_cache[key] = func
+        func = self.compile(comm)
         func(*args)
+
+        # This method has to return _something_ for the `@parallel_memory_only_cache`
+        # to function correctly
+        return 0
 
     @property
     def _wrapper_name(self):
