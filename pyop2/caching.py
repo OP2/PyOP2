@@ -248,13 +248,17 @@ information.
 """
 
 
-def default_parallel_hashkey(comm, *args, **kwargs):
+def default_parallel_hashkey(*args, **kwargs):
+    comm = kwargs.get('comm')
     return comm, cachetools.keys.hashkey(*args, **kwargs)
 
 
 def parallel_memory_only_cache(key=default_parallel_hashkey):
-    """Decorator for wrapping a function to be called over a communiucator in a
-    cache that stores values in memory.
+    """Memory only cache decorator.
+
+    Decorator for wrapping a function to be called over a communiucator in a
+    cache that stores broadcastable values in memory. If the value is found in
+    the cache of rank 0 it is broadcast to all other ranks.
 
     :arg key: Callable returning the cache key for the function inputs. This
         function must return a 2-tuple where the first entry is the
@@ -278,7 +282,6 @@ def parallel_memory_only_cache(key=default_parallel_hashkey):
 
             # Grab value from rank 0 memory cache and broadcast result
             if comm.rank == 0:
-
                 v = local_cache.get(k)
                 if v is None:
                     debug(f'{COMM_WORLD.name} R{COMM_WORLD.rank}, {comm.name} R{comm.rank}: {k} memory cache miss')
@@ -289,6 +292,51 @@ def parallel_memory_only_cache(key=default_parallel_hashkey):
                 v = comm.bcast(None, root=0)
 
             if v is None:
+                v = func(*args, **kwargs)
+            return local_cache.setdefault(k, v)
+
+        return wrapper
+    return decorator
+
+
+def parallel_memory_only_cache_no_broadcast(key=default_parallel_hashkey):
+    """Memory only cache decorator.
+
+    Decorator for wrapping a function to be called over a communiucator in a
+    cache that stores non-broadcastable values in memory, for instance function
+    pointers. If the value is not present on all ranks, all ranks repeat the
+    work.
+
+    :arg key: Callable returning the cache key for the function inputs. This
+        function must return a 2-tuple where the first entry is the
+        communicator to be collective over and the second is the key. This is
+        required to ensure that deadlocks do not occur when using different
+        subcommunicators.
+    """
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            """ Extract the key and then try the memory cache before falling back
+            on calling the function and populating the cache.
+            """
+            comm, mem_key = key(*args, **kwargs)
+            k = _as_hexdigest(mem_key)
+
+            # Fetch the per-comm cache or set it up if not present
+            local_cache = comm.Get_attr(comm_cache_keyval)
+            if local_cache is None:
+                local_cache = {}
+                comm.Set_attr(comm_cache_keyval, local_cache)
+
+            # Grab value from all ranks memory cache and vote
+            v = local_cache.get(k)
+            if v is None:
+                debug(f'{COMM_WORLD.name} R{COMM_WORLD.rank}, {comm.name} R{comm.rank}: {k} memory cache miss')
+            else:
+                debug(f'{COMM_WORLD.name} R{COMM_WORLD.rank}, {comm.name} R{comm.rank}: {k} memory cache hit')
+            all_present = comm.allgather(bool(v))
+
+            # If not present in the cache of all ranks, recompute on all ranks
+            if not min(all_present):
                 v = func(*args, **kwargs)
             return local_cache.setdefault(k, v)
 

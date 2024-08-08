@@ -42,9 +42,11 @@ import ctypes
 import shlex
 from hashlib import md5
 from packaging.version import Version, InvalidVersion
+from textwrap import dedent
 
 
 from pyop2 import mpi
+from pyop2.caching import parallel_memory_only_cache_no_broadcast
 from pyop2.configuration import configuration
 from pyop2.logger import warning, debug, progress, INFO
 from pyop2.exceptions import CompilationError
@@ -317,36 +319,42 @@ class Compiler(ABC):
         dirpart, basename = basename[:2], basename[2:]
         cachedir = os.path.join(cachedir, dirpart)
         pid = os.getpid()
-        cname = os.path.join(cachedir, "%s_p%d.%s" % (basename, pid, extension))
-        oname = os.path.join(cachedir, "%s_p%d.o" % (basename, pid))
-        soname = os.path.join(cachedir, "%s.so" % basename)
+        cname = os.path.join(cachedir, f"{basename}_p{pid}.{extension}")
+        oname = os.path.join(cachedir, f"{basename}_p{pid}.o")
+        soname = os.path.join(cachedir, f"{basename}.so")
         # Link into temporary file, then rename to shared library
         # atomically (avoiding races).
-        tmpname = os.path.join(cachedir, "%s_p%d.so.tmp" % (basename, pid))
+        tmpname = os.path.join(cachedir, f"{basename}_p{pid}.so.tmp")
 
         if configuration['check_src_hashes'] or configuration['debug']:
             matching = self.comm.allreduce(basename, op=_check_op)
             if matching != basename:
                 # Dump all src code to disk for debugging
                 output = os.path.join(configuration["cache_dir"], "mismatching-kernels")
-                srcfile = os.path.join(output, "src-rank%d.c" % self.comm.rank)
+                srcfile = os.path.join(output, f"src-rank{self.comm.rank}.{extension}")
                 if self.comm.rank == 0:
                     os.makedirs(output, exist_ok=True)
                 self.comm.barrier()
                 with open(srcfile, "w") as f:
                     f.write(jitmodule.code_to_compile)
                 self.comm.barrier()
-                raise CompilationError("Generated code differs across ranks (see output in %s)" % output)
+                raise CompilationError(f"Generated code differs across ranks (see output in {output})")
+
+        # Check whether this shared object already written to disk
         try:
-            # Are we in the cache?
-            return ctypes.CDLL(soname)
+            dll = ctypes.CDLL(soname)
         except OSError:
-            # No, let's go ahead and build
+            dll = None
+        got_dll = bool(dll)
+        all_dll = self.comm.allgather(got_dll)
+
+        # If the library is not loaded _on all ranks_ build it
+        if not min(all_dll):
             if self.comm.rank == 0:
                 # No need to do this on all ranks
                 os.makedirs(cachedir, exist_ok=True)
-                logfile = os.path.join(cachedir, "%s_p%d.log" % (basename, pid))
-                errfile = os.path.join(cachedir, "%s_p%d.err" % (basename, pid))
+                logfile = os.path.join(cachedir, f"{basename}_p{pid}.log")
+                errfile = os.path.join(cachedir, f"{basename}_p{pid}.err")
                 with progress(INFO, 'Compiling wrapper'):
                     with open(cname, "w") as f:
                         f.write(jitmodule.code_to_compile)
@@ -356,7 +364,7 @@ class Compiler(ABC):
                             + compiler_flags \
                             + ('-o', tmpname, cname) \
                             + self.ldflags
-                        debug('Compilation command: %s', ' '.join(cc))
+                        debug(f"Compilation command: {' '.join(cc)}")
                         with open(logfile, "w") as log, open(errfile, "w") as err:
                             log.write("Compilation command:\n")
                             log.write(" ".join(cc))
@@ -371,11 +379,12 @@ class Compiler(ABC):
                                 else:
                                     subprocess.check_call(cc, stderr=err, stdout=log)
                             except subprocess.CalledProcessError as e:
-                                raise CompilationError(
-                                    """Command "%s" return error status %d.
-Unable to compile code
-Compile log in %s
-Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
+                                raise CompilationError(dedent(f"""
+                                    Command "{e.cmd}" return error status {e.returncode}.
+                                    Unable to compile code
+                                    Compile log in {logfile}
+                                    Compile errors in {errfile}
+                                    """))
                     else:
                         cc = (compiler,) \
                             + compiler_flags \
@@ -384,8 +393,8 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
                         ld = tuple(shlex.split(self.ld)) \
                             + ('-o', tmpname, oname) \
                             + tuple(self.expandWl(self.ldflags))
-                        debug('Compilation command: %s', ' '.join(cc))
-                        debug('Link command: %s', ' '.join(ld))
+                        debug(f"Compilation command: {' '.join(cc)}", )
+                        debug(f"Link command: {' '.join(ld)}")
                         with open(logfile, "a") as log, open(errfile, "a") as err:
                             log.write("Compilation command:\n")
                             log.write(" ".join(cc))
@@ -409,17 +418,19 @@ Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
                                     subprocess.check_call(cc, stderr=err, stdout=log)
                                     subprocess.check_call(ld, stderr=err, stdout=log)
                             except subprocess.CalledProcessError as e:
-                                raise CompilationError(
-                                    """Command "%s" return error status %d.
-Unable to compile code
-Compile log in %s
-Compile errors in %s""" % (e.cmd, e.returncode, logfile, errfile))
+                                raise CompilationError(dedent(f"""
+                                        Command "{e.cmd}" return error status {e.returncode}.
+                                        Unable to compile code
+                                        Compile log in {logfile}
+                                        Compile errors in {errfile}
+                                        """))
                     # Atomically ensure soname exists
                     os.rename(tmpname, soname)
             # Wait for compilation to complete
             self.comm.barrier()
             # Load resulting library
-            return ctypes.CDLL(soname)
+            dll = ctypes.CDLL(soname)
+        return dll
 
 
 class MacClangCompiler(Compiler):
@@ -547,6 +558,7 @@ class AnonymousCompiler(Compiler):
 
 
 @mpi.collective
+@parallel_memory_only_cache_no_broadcast()
 def load(jitmodule, extension, fn_name, cppargs=(), ldargs=(),
          argtypes=None, restype=None, comm=None):
     """Build a shared library and return a function pointer from it.
