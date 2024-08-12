@@ -40,6 +40,7 @@ import subprocess
 import sys
 import ctypes
 import shlex
+import cachetools
 from hashlib import md5
 from packaging.version import Version, InvalidVersion
 from textwrap import dedent
@@ -557,8 +558,20 @@ class AnonymousCompiler(Compiler):
     _name = "Unknown"
 
 
+def load_hashkey(*args, **kwargs):
+    from pyop2.global_kernel import GlobalKernel
+    if isinstance(args[0], str):
+        code_hash = md5(args[0].encode()).hexdigest()
+    elif isinstance(args[0], GlobalKernel):
+        code_hash = md5(str(args[0].cache_key).encode()).hexdigest()
+    else:
+        pass  # This will raise an error in load
+    comm = kwargs.get('comm')
+    return comm, cachetools.keys.hashkey(code_hash, *args[1:], **kwargs)
+
+
 @mpi.collective
-@parallel_memory_only_cache_no_broadcast()
+@parallel_memory_only_cache_no_broadcast(key=load_hashkey)
 def load(jitmodule, extension, fn_name, cppargs=(), ldargs=(),
          argtypes=None, restype=None, comm=None):
     """Build a shared library and return a function pointer from it.

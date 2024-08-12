@@ -39,6 +39,7 @@ import os
 import pickle
 from pathlib import Path
 from warnings import warn
+from functools import wraps
 
 from pyop2.configuration import configuration
 from pyop2.logger import debug
@@ -232,6 +233,234 @@ class Cached(object):
     def cache_key(self):
         """Cache key."""
         return self._key
+
+
+class _CacheMiss:
+    pass
+
+
+CACHE_MISS = _CacheMiss()
+
+
+class _CacheKey:
+    def __init__(self, key_value):
+        self.value = key_value
+
+
+class DiskCachedObject:
+    def __new__(cls, *args, **kwargs):
+        if isinstance(args[0], _CacheKey):
+            return super().__new__(cls)
+        comm, disk_key = cls._key(*args, **kwargs)
+        k = _as_hexdigest((disk_key, cls.__qualname__))
+        if comm.rank == 0:
+            value = _disk_cache_get(cls._cachedir, k)
+            if value is None:
+                value = CACHE_MISS
+            id_str = f"{COMM_WORLD.name} R{COMM_WORLD.rank}, {comm.name} R{comm.rank}: "
+            if value is CACHE_MISS:
+                debug(id_str + f'Disk cache miss for {cls.__qualname__}({args}{kwargs})')
+            else:
+                debug(id_str + f'Disk cache hit for {cls.__qualname__}({args}{kwargs})')
+            # TODO: Add communication tags to avoid cross-broadcasting
+            comm.bcast(value, root=0)
+        else:
+            value = comm.bcast(CACHE_MISS, root=0)
+            if isinstance(value, _CacheMiss):
+                # We might have the CACHE_MISS from rank 0 and
+                # `(value is CACHE_MISS) == False` which is confusing,
+                # so we set it back to the local value
+                value = CACHE_MISS
+
+        if value is CACHE_MISS:
+            # We can't call the constructor as `cls(*args, **kwargs)` since we
+            # would call `__new__` and recurse infinitely. The solution is to
+            # create a new object and pass that to `__init__`
+            value = object.__new__(cls)
+            value.__init__(*args, **kwargs)
+            value._cache_key = _CacheKey(k)
+            if comm.rank == 0:
+                # Only write to the disk cache on rank 0
+                _disk_cache_set(cls._cachedir, k, value)
+
+        debug("Disk cache modifying init")
+        cls.__init__ = cls._skip_init(cls.__init__)
+        return value
+
+    @classmethod
+    def _skip_init(cls, init):
+        """This function allows a class to skip it's init method"""
+        def restore_init(*args, **kwargs):
+            debug("Disk reset init")
+            cls.__init__ = init
+        return restore_init
+
+    def __init_subclass__(cls, cachedir=None, key=None, **kwargs):
+        if cachedir is None or key is None:
+            raise TypeError(
+                f"A `cache` and a `key` are required to subclass {__class__.__name__}.\n"
+                "Try declaring your subclass as follows:\n"
+                f"\tclass {cls.__name__}({cls.__bases__[0].__name__}, cachedir=my_cache, key=my_key)"
+            )
+        super().__init_subclass__(**kwargs)
+        cls._cachedir = cachedir
+        cls._key = key
+
+    def __getnewargs__(self):
+        return (self._cache_key, )
+
+
+# TODO: Implement this...
+# class MemoryCachedObject:
+#     def __new__(cls, *args, **kwargs):
+#         k = cls._key(*args, **kwargs), cls.__qualname__
+#         value = cls._cache.get(k, CACHE_MISS)
+#         if value is CACHE_MISS:
+#             print(f'Cache miss for {cls.__qualname__}({args}{kwargs})')
+#             # We can't call the constructor as `cls(*args, **kwargs)` since we
+#             # would call `__new__` and recurse infinitely. The solution is to
+#             # create a new object and pass that to `__init__`
+#             value = object.__new__(cls)
+#             value.__init__(*args, **kwargs)
+#             cls._cache[k] = value
+#         else:
+#             print(f'Cache hit for {cls.__qualname__}({args}{kwargs})')
+#         cls.__init__ = _skip_init(cls, cls.__init__)
+#         return value
+#
+#     def __init_subclass__(cls, cache=None, key=None, **kwargs):
+#         if cache is None or key is None:
+#             raise TypeError(
+#                 f"A `cache` and a `key` are required to subclass {__class__.__name__}.\n"
+#                 "Try declaring your subclass as follows:\n"
+#                 f"\tclass {cls.__name__}({cls.__bases__[0].__name__}, cache=my_cache, key=my_key)"
+#             )
+#         super().__init_subclass__(**kwargs)
+#         cls._cache = cache
+#         cls._key = key
+
+
+class MemoryAndDiskCachedObject(DiskCachedObject, cachedir="", key=""):
+    def __new__(cls, *args, **kwargs):
+        if isinstance(args[0], _CacheKey):
+            return super().__new__(cls, *args)
+        comm, disk_key = cls._key(*args, **kwargs)
+        # Throw the qualified name into the key as a string so the memory cache
+        # can be debugged (a little bit) by a human. This shouldn't really be
+        # necessary, but some classes do not implement a proper repr.
+        k = _as_hexdigest((disk_key, cls.__qualname__)), cls.__qualname__
+
+        # Fetch the per-comm cache or set it up if not present
+        # from pyop2.mpi import COMM_WORLD, comm_cache_keyval
+        local_cache = comm.Get_attr(comm_cache_keyval)
+        if local_cache is None:
+            local_cache = {}
+            comm.Set_attr(comm_cache_keyval, local_cache)
+
+        id_str = f"{COMM_WORLD.name} R{COMM_WORLD.rank}, {comm.name} R{comm.rank}: "
+        if comm.rank == 0:
+            value = local_cache.get(k, CACHE_MISS)
+            if value is CACHE_MISS:
+                debug(id_str + f'Memory cache miss for {cls.__qualname__}({args}{kwargs})')
+            else:
+                debug(id_str + f'Memory cache hit for {cls.__qualname__}({args}{kwargs})')
+            # TODO: Add communication tags to avoid cross-broadcasting
+            comm.bcast(value, root=0)
+        else:
+            value = comm.bcast(CACHE_MISS, root=0)
+            if isinstance(value, _CacheMiss):
+                # We might have the CACHE_MISS from rank 0 and
+                # `(value is CACHE_MISS) == False` which is confusing,
+                # so we set it back to the local value
+                value = CACHE_MISS
+
+        if value is CACHE_MISS:
+            # TODO: Fix comment
+            # We can call the constructor as `cls(*args, **kwargs)` here since we
+            # are subclassing `DiskCachedObject` and _want_ to call __new__ in
+            # case the object is in the disk cache.
+            value = super().__new__(cls, *args, **kwargs)
+            # Regardless whether the object was disk cached, init has already
+            # been called here
+            local_cache[k] = value
+
+        return value
+
+    def __init_subclass__(cls, cachedir=None, key=None, **kwargs):
+        if cachedir is None or key is None:
+            raise TypeError(
+                f"A `cache` and a `key` are required to subclass {__class__.__name__}.\n"
+                "Try declaring your subclass as follows:\n"
+                f"\tclass {cls.__name__}({cls.__bases__[0].__name__}, cache=my_cache, key=my_key)"
+            )
+        super().__init_subclass__(cachedir=cachedir, key=key, **kwargs)
+
+    def __getnewargs__(self):
+        return (self._cache_key, )
+
+
+# TODO: Remove class wrapper, this was a bad idea
+def disk_cache(cachedir, key):
+    def decorator(orig_obj):
+        if isinstance(orig_obj, type(lambda: None)):
+            # Cached function wrapper
+            @wraps(orig_obj)
+            def _wrapper(*args, **kwargs):
+                comm, disk_key = key(*args, **kwargs)
+                k = _as_hexdigest((disk_key, orig_obj.__qualname__))
+                if comm.rank == 0:
+                    # Only read from disk on rank 0
+                    value = _disk_cache_get(cachedir, k)
+                    id_str = f"{COMM_WORLD.name} R{COMM_WORLD.rank}, {comm.name} R{comm.rank}: "
+                    if value is CACHE_MISS:
+                        debug(id_str + f"Disk cache miss for {orig_obj.__qualname__}({args}{kwargs})")
+                    else:
+                        debug(id_str + f'Disk cache hit for {orig_obj.__qualname__}({args}{kwargs})')
+                    comm.bcast(value, root=0)
+                else:
+                    value = comm.bcast(CACHE_MISS, root=0)
+
+                if value is CACHE_MISS:
+                    value = orig_obj(*args, **kwargs)
+                    # Only write to the disk cache on rank 0
+                    if comm.rank == 0:
+                        _disk_cache_set(cachedir, k, value)
+                return value
+        elif isinstance(orig_obj, type(object)):
+            # Cached object wrapper
+            @wraps(orig_obj, updated=())
+            class _wrapper(orig_obj):
+                def __new__(cls, *args, **kwargs):
+                    comm, disk_key = key(*args, **kwargs)
+                    k = _as_hexdigest((disk_key, orig_obj.__qualname__))
+                    if comm.rank == 0:
+                        # Only read from disk on rank 0
+                        value = _disk_cache_get(cachedir, k)
+                        if value is None:
+                            value = CACHE_MISS
+                        id_str = f"{COMM_WORLD.name} R{COMM_WORLD.rank}, {comm.name} R{comm.rank}: "
+                        if value is CACHE_MISS:
+                            debug(id_str + f'Disk cache miss for {orig_obj.__qualname__}({args}{kwargs})')
+                        else:
+                            debug(id_str + f'Disk cache hit for {orig_obj.__qualname__}({args}{kwargs})')
+                        comm.bcast(value, root=0)
+                    else:
+                        value = comm.bcast(CACHE_MISS, root=0)
+
+                    if value is CACHE_MISS:
+                        # We can't call the constructor as `orig_obj(*args, **kwargs)`
+                        # since we might be subclassing another cached object. The
+                        # solution is to create a new object and pass it to `__init__`
+                        value = object.__new__(orig_obj)
+                        orig_obj.__init__(value, *args, **kwargs)
+                        if comm.rank == 0:
+                            # Only write to the disk cache on rank 0
+                            _disk_cache_set(cachedir, k, value)
+                    return value
+        else:
+            raise ValueError("Unknown object passed to decorator")
+        return _wrapper
+    return decorator
 
 
 cached = cachetools.cached

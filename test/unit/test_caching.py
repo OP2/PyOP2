@@ -39,7 +39,6 @@ import cachetools
 import numpy
 from pyop2 import op2, mpi
 from pyop2.caching import disk_cached
-from pyop2.mpi import comm_cache_keyval
 
 
 def _seed():
@@ -285,7 +284,14 @@ class TestGeneratedCodeCache:
     Generated Code Cache Tests.
     """
 
-    cache = op2.GlobalKernel._cache
+    @property
+    def cache(self):
+        int_comm = mpi.internal_comm(mpi.COMM_WORLD, self)
+        _cache = int_comm.Get_attr(mpi.comm_cache_keyval)
+        if _cache is None:
+            _cache = {}
+            mpi.COMM_WORLD.Set_attr(mpi.comm_cache_keyval, _cache)
+        return _cache
 
     @pytest.fixture
     def a(cls, diterset):
@@ -564,7 +570,7 @@ class TestDiskCachedDecorator:
 
         # obj1 should be cached on the comm cache and not the self.cache
         obj1 = collective_func("input1")
-        comm_cache = self.comm.Get_attr(comm_cache_keyval)
+        comm_cache = self.comm.Get_attr(mpi.comm_cache_keyval)
         assert len(cache) == 0
         assert len(comm_cache) == 1
         assert len(os.listdir(cachedir.name)) == 1
