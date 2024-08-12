@@ -501,7 +501,7 @@ def parallel_memory_only_cache(key=default_parallel_hashkey):
             on calling the function and populating the cache.
             """
             comm, mem_key = key(*args, **kwargs)
-            k = _as_hexdigest(mem_key)
+            k = _as_hexdigest(mem_key), func.__qualname__
 
             # Fetch the per-comm cache or set it up if not present
             local_cache = comm.Get_attr(comm_cache_keyval)
@@ -548,7 +548,7 @@ def parallel_memory_only_cache_no_broadcast(key=default_parallel_hashkey):
             on calling the function and populating the cache.
             """
             comm, mem_key = key(*args, **kwargs)
-            k = _as_hexdigest(mem_key)
+            k = _as_hexdigest(mem_key), func.__qualname__
 
             # Fetch the per-comm cache or set it up if not present
             local_cache = comm.Get_attr(comm_cache_keyval)
@@ -573,6 +573,7 @@ def parallel_memory_only_cache_no_broadcast(key=default_parallel_hashkey):
     return decorator
 
 
+# TODO: Change call signature
 def disk_cached(cache, cachedir=None, key=cachetools.keys.hashkey, collective=False):
     """Decorator for wrapping a function in a cache that stores values in memory and to disk.
 
@@ -648,6 +649,11 @@ def disk_cached(cache, cachedir=None, key=cachetools.keys.hashkey, collective=Fa
 
 def _as_hexdigest(key):
     return hashlib.md5(str(key).encode()).hexdigest()
+
+
+def clear_memory_cache(comm):
+    if comm.Get_attr(comm_cache_keyval) is not None:
+        comm.Set_attr(comm_cache_keyval, {})
 
 
 def _disk_cache_get(cachedir, key):
