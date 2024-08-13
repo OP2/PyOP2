@@ -354,6 +354,7 @@ class GlobalKernel:
             builder.add_argument(arg)
         return builder
 
+    # TODO: Wrap with parallel_cached_property
     @cached_property
     def code_to_compile(self):
         """Return the C/C++ source code as a string."""

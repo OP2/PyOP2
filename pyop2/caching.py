@@ -481,6 +481,80 @@ def default_parallel_hashkey(*args, **kwargs):
     comm = kwargs.get('comm')
     return comm, cachetools.keys.hashkey(*args, **kwargs)
 
+#### connor bits
+
+# ~ def pcache(comm_seeker, key=None, cache_factory=dict):
+
+    # ~ comm = comm_seeker()
+    # ~ cache = cache_factory()
+
+# ~ @pcache(cachetools.LRUCache)
+
+@pcache(DiskCache)
+
+@pcache(MemDiskCache)
+
+@pcache(MemCache)
+
+mem_cache = pcache(cache_factory=cachetools.LRUCache)
+disk_cache = mem_cache(cache_factory=DiskCache)
+
+# ~ @pcache(comm_seeker=lambda obj, *_, **_: obj.comm, cache_factory=lambda: cachetools.LRUCache(maxsize=1000))
+
+
+# ~ @pmemcache
+
+# ~ @pmemdiskcache
+
+# ~ class ParallelObject(ABC):
+    # ~ @abc.abstractproperty
+    # ~ def _comm(self):
+        # ~ pass
+
+# ~ class MyObj(ParallelObject):
+
+    # ~ @pcached_property  # assumes that obj has a "comm" attr
+    # ~ @pcached_property(lambda self: self.comm)
+    # ~ def myproperty(self):
+        # ~ ...
+
+
+# ~ def pcached_property():
+    # ~ def wrapper(self):
+        # ~ assert isinstance(self, ParallelObject)
+        # ~ ...
+
+
+# ~ from futils.mpi import ParallelObject
+
+# ~ from futils.cache import pcached_property
+
+# ~ from footils.cache import *
+
+# footils == firedrake utils
+
+# * parallel cached property
+# * memcache / cache / cached
+# * diskonlycache / disk_only_cached
+# * memdiskcache / diskcache / disk_cached
+# * memcache_no_bcast / broadcast=False
+
+# ~ parallel_cached_property = parallel_cache(lambda self: self._comm, key=lambda self: ())
+
+# ~ @time
+# ~ @timed
+# ~ def myslowfunc():
+    # ~ ..
+
+# ~ my_fast_fun = cache(my_slow_fn)
+
+####
+
+
+# TODO:
+# Implement an @parallel_cached_property decorator function
+
+
 
 def parallel_memory_only_cache(key=default_parallel_hashkey):
     """Memory only cache decorator.
