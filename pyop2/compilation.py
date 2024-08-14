@@ -566,8 +566,7 @@ def load_hashkey(*args, **kwargs):
         code_hash = md5(str(args[0].cache_key).encode()).hexdigest()
     else:
         pass  # This will raise an error in load
-    comm = kwargs.get('comm')
-    return comm, cachetools.keys.hashkey(code_hash, *args[1:], **kwargs)
+    return cachetools.keys.hashkey(code_hash, *args[1:], **kwargs)
 
 
 @mpi.collective

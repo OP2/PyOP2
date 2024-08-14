@@ -1,5 +1,4 @@
 import pytest
-from tempfile import gettempdir
 from functools import partial
 
 from pyop2.caching import (  # noqa: F401
@@ -43,7 +42,7 @@ def n_ops(n):
     return [MPI.SUM]*n
 
 
-# decorator = parallel_memory_only_cache, parallel_memory_only_cache_no_broadcast, disk_cached
+# decorator = parallel_memory_only_cache, parallel_memory_only_cache_no_broadcast, disk_only_cached
 def function_factory(state, decorator, f, **kwargs):
     def custom_function(x, comm=COMM_WORLD):
         state()
@@ -52,101 +51,87 @@ def function_factory(state, decorator, f, **kwargs):
     return decorator(**kwargs)(custom_function)
 
 
-# parent_class = DiskCachedObject, MemoryAndDiskCachedObject
-# f(x) = x**2, x**3
-def object_factory(state, parent_class, f, **kwargs):
-    class CustomObject(parent_class, **kwargs):
-        def __init__(self, x, comm=COMM_WORLD):
-            state()
-            self.x = f(x)
-
-    return CustomObject
-
-
 @pytest.fixture
 def state():
     return StateIncrement()
 
 
-@pytest.fixture
-def unique_tempdir():
-    """This allows us to run with a different tempdir for each test that
-    requires one"""
-    return gettempdir()
+@pytest.mark.parametrize("decorator, uncached_function", [
+    (memory_cache, twople),
+    (partial(memory_cache, broadcast=False), n_comms),
+    (memory_and_disk_cache, twople),
+    (disk_only_cache, twople)
+])
+def test_function_args_twice_caches(request, state, decorator, uncached_function, tmpdir):
+    if request.node.callspec.params["decorator"] in {disk_only_cache, memory_and_disk_cache}:
+        kwargs = {"cachedir": tmpdir}
+    else:
+        kwargs = {}
+
+    cached_function = function_factory(state, decorator, uncached_function, **kwargs)
+    assert state.value == 0
+    first = cached_function(2, comm=COMM_WORLD)
+    assert first == uncached_function(2)
+    assert state.value == 1
+    second = cached_function(2, comm=COMM_WORLD)
+    assert second == uncached_function(2)
+    if request.node.callspec.params["decorator"] is not disk_only_cache:
+        assert second is first
+    assert state.value == 1
+
+    clear_memory_cache(COMM_WORLD)
 
 
-# ~ @pytest.mark.parametrize("decorator, uncached_function", [
-    # ~ (parallel_memory_only_cache, twople),
-    # ~ (parallel_memory_only_cache_no_broadcast, n_comms),
-    # ~ (disk_cached, twople)
-# ~ ])
-# ~ def test_function_args_twice_caches(request, state, decorator, uncached_function, tmpdir):
-    # ~ if request.node.callspec.params["decorator"] is disk_cached:
-        # ~ kwargs = {"cachedir": tmpdir}
-    # ~ else:
-        # ~ kwargs = {}
+@pytest.mark.parametrize("decorator, uncached_function", [
+    (memory_cache, twople),
+    (partial(memory_cache, broadcast=False), n_comms),
+    (memory_and_disk_cache, twople),
+    (disk_only_cache, twople)
+])
+def test_function_args_different(request, state, decorator, uncached_function, tmpdir):
+    if request.node.callspec.params["decorator"] in {disk_only_cache, memory_and_disk_cache}:
+        kwargs = {"cachedir": tmpdir}
+    else:
+        kwargs = {}
 
-    # ~ cached_function = function_factory(state, decorator, uncached_function, **kwargs)
-    # ~ assert state.value == 0
-    # ~ first = cached_function(2, comm=COMM_WORLD)
-    # ~ assert first == uncached_function(2)
-    # ~ assert state.value == 1
-    # ~ second = cached_function(2, comm=COMM_WORLD)
-    # ~ assert second == uncached_function(2)
-    # ~ assert second is first
-    # ~ assert state.value == 1
+    cached_function = function_factory(state, decorator, uncached_function, **kwargs)
+    assert state.value == 0
+    first = cached_function(2, comm=COMM_WORLD)
+    assert first == uncached_function(2)
+    assert state.value == 1
+    second = cached_function(3, comm=COMM_WORLD)
+    assert second == uncached_function(3)
+    assert state.value == 2
 
-    # ~ clear_memory_cache(COMM_WORLD)
-
-
-# ~ @pytest.mark.parametrize("decorator, uncached_function", [
-    # ~ (parallel_memory_only_cache, twople),
-    # ~ (parallel_memory_only_cache_no_broadcast, n_comms),
-    # ~ (disk_cached, twople)
-# ~ ])
-# ~ def test_function_args_different(request, state, decorator, uncached_function, tmpdir):
-    # ~ if request.node.callspec.params["decorator"] is disk_cached:
-        # ~ kwargs = {"cachedir": tmpdir}
-    # ~ else:
-        # ~ kwargs = {}
-
-    # ~ cached_function = function_factory(state, decorator, uncached_function, **kwargs)
-    # ~ assert state.value == 0
-    # ~ first = cached_function(2, comm=COMM_WORLD)
-    # ~ assert first == uncached_function(2)
-    # ~ assert state.value == 1
-    # ~ second = cached_function(3, comm=COMM_WORLD)
-    # ~ assert second == uncached_function(3)
-    # ~ assert state.value == 2
-
-    # ~ clear_memory_cache(COMM_WORLD)
+    clear_memory_cache(COMM_WORLD)
 
 
-# ~ @pytest.mark.parallel(nprocs=3)
-# ~ @pytest.mark.parametrize("decorator, uncached_function", [
-    # ~ (parallel_memory_only_cache, twople),
-    # ~ (parallel_memory_only_cache_no_broadcast, n_comms),
-    # ~ (disk_cached, twople)
-# ~ ])
-# ~ def test_function_over_different_comms(request, state, decorator, uncached_function, tmpdir):
-    # ~ if request.node.callspec.params["decorator"] is disk_cached:
-        # ~ kwargs = {"cachedir": tmpdir}
-    # ~ else:
-        # ~ kwargs = {}
+@pytest.mark.parallel(nprocs=3)
+@pytest.mark.parametrize("decorator, uncached_function", [
+    (memory_cache, twople),
+    (partial(memory_cache, broadcast=False), n_comms),
+    (memory_and_disk_cache, twople),
+    (disk_only_cache, twople)
+])
+def test_function_over_different_comms(request, state, decorator, uncached_function, tmpdir):
+    if request.node.callspec.params["decorator"] in {disk_only_cache, memory_and_disk_cache}:
+        kwargs = {"cachedir": tmpdir}
+    else:
+        kwargs = {}
 
-    # ~ cached_function = function_factory(state, decorator, uncached_function, **kwargs)
-    # ~ assert state.value == 0
-    # ~ for ii in range(10):
-        # ~ color = 0 if COMM_WORLD.rank < 2 else MPI.UNDEFINED
-        # ~ comm12 = COMM_WORLD.Split(color=color)
-        # ~ if COMM_WORLD.rank < 2:
-            # ~ _ = cached_function(2, comm=comm12)
-            # ~ comm12.Free()
+    cached_function = function_factory(state, decorator, uncached_function, **kwargs)
+    assert state.value == 0
+    for ii in range(10):
+        color = 0 if COMM_WORLD.rank < 2 else MPI.UNDEFINED
+        comm12 = COMM_WORLD.Split(color=color)
+        if COMM_WORLD.rank < 2:
+            _ = cached_function(2, comm=comm12)
+            comm12.Free()
 
-        # ~ color = 0 if COMM_WORLD.rank > 0 else MPI.UNDEFINED
-        # ~ comm23 = COMM_WORLD.Split(color=color)
-        # ~ if COMM_WORLD.rank > 0:
-            # ~ _ = cached_function(2, comm=comm23)
-            # ~ comm23.Free()
+        color = 0 if COMM_WORLD.rank > 0 else MPI.UNDEFINED
+        comm23 = COMM_WORLD.Split(color=color)
+        if COMM_WORLD.rank > 0:
+            _ = cached_function(2, comm=comm23)
+            comm23.Free()
 
-    # ~ clear_memory_cache(COMM_WORLD)
+    clear_memory_cache(COMM_WORLD)

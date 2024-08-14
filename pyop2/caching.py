@@ -40,13 +40,14 @@ import pickle
 from collections.abc import MutableMapping
 from pathlib import Path
 from warnings import warn  # noqa F401
-from functools import wraps, partial
+from functools import wraps
 
 from pyop2.configuration import configuration
 from pyop2.logger import debug
-from pyop2.mpi import comm_cache_keyval, COMM_WORLD
+from pyop2.mpi import MPI, COMM_WORLD, comm_cache_keyval
 
 
+# TODO: Remove this? Rewrite?
 def report_cache(typ):
     """Report the size of caches of type ``typ``
 
@@ -169,11 +170,6 @@ class _CacheMiss:
 CACHE_MISS = _CacheMiss()
 
 
-class _CacheKey:
-    def __init__(self, key_value):
-        self.value = key_value
-
-
 def _as_hexdigest(*args):
     hash_ = hashlib.md5()
     for a in args:
@@ -193,7 +189,6 @@ class DictLikeDiskAccess(MutableMapping):
         :arg cachedir: The cache directory.
         """
         self.cachedir = cachedir
-        self._keys = set()
 
     def __getitem__(self, key):
         """Retrieve a value from the disk cache.
@@ -215,7 +210,6 @@ class DictLikeDiskAccess(MutableMapping):
         :arg key: The cache key, a 2-tuple of strings.
         :arg value: The new item to store in the cache.
         """
-        self._keys.add(key)
         k1, k2 = key[0][:2], key[0][2:] + key[1]
         basedir = Path(self.cachedir, k1)
         basedir.mkdir(parents=True, exist_ok=True)
@@ -229,18 +223,14 @@ class DictLikeDiskAccess(MutableMapping):
     def __delitem__(self, key):
         raise ValueError(f"Cannot remove items from {self.__class__.__name__}")
 
-    def keys(self):
-        return self._keys
-
     def __iter__(self):
-        for k in self._keys:
-            yield k
+        raise ValueError(f"Cannot iterate over keys in {self.__class__.__name__}")
 
     def __len__(self):
-        return len(self._keys)
+        raise ValueError(f"Cannot query length of {self.__class__.__name__}")
 
     def __repr__(self):
-        return "{" + " ".join(f"{k}: {v}" for k, v in self.items()) + "}"
+        return f"{self.__class__.__name__}(cachedir={self.cachedir})"
 
     def open(self, *args, **kwargs):
         return open(*args, **kwargs)
@@ -253,13 +243,41 @@ class DictLikeDiskAccess(MutableMapping):
 
 
 def default_comm_fetcher(*args, **kwargs):
-    return kwargs.get("comm")
+    comms = filter(
+        lambda arg: isinstance(arg, MPI.Comm),
+        args + tuple(kwargs.values())
+    )
+    try:
+        comm = next(comms)
+    except StopIteration:
+        raise TypeError("No comms found in args or kwargs")
+    return comm
 
 
-default_parallel_hashkey = cachetools.keys.hashkey
+def default_parallel_hashkey(*args, **kwargs):
+    """ We now want to actively remove any comms from args and kwargs to get the same disk cache key
+    """
+    hash_args = tuple(filter(
+        lambda arg: not isinstance(arg, MPI.Comm),
+        args
+    ))
+    hash_kwargs = dict(filter(
+        lambda arg: not isinstance(arg[1], MPI.Comm),
+        kwargs.items()
+    ))
+    return cachetools.keys.hashkey(*hash_args, **hash_kwargs)
 
 
-def parallel_cache(hashkey=default_parallel_hashkey, comm_fetcher=default_comm_fetcher, cache_factory=None, broadcast=True):
+class DEFAULT_CACHE(dict):
+    pass
+
+
+def parallel_cache(
+    hashkey=default_parallel_hashkey,
+    comm_fetcher=default_comm_fetcher,
+    cache_factory=lambda: DEFAULT_CACHE(),
+    broadcast=True
+):
     """Memory only cache decorator.
 
     Decorator for wrapping a function to be called over a communiucator in a
@@ -336,11 +354,7 @@ def parallel_cache(hashkey=default_parallel_hashkey, comm_fetcher=default_comm_f
 
 
 # A small collection of default simple caches
-class DEFAULT_CACHE(dict):
-    pass
-
-
-memory_cache = partial(parallel_cache, cache_factory=lambda: DEFAULT_CACHE())
+memory_cache = parallel_cache
 
 
 def disk_only_cache(*args, cachedir=configuration["cache_dir"], **kwargs):
@@ -352,77 +366,9 @@ def memory_and_disk_cache(*args, cachedir=configuration["cache_dir"], **kwargs):
         return memory_cache(*args, **kwargs)(disk_only_cache(*args, cachedir=cachedir, **kwargs)(func))
     return decorator
 
-
-# ### Some notes from Connor:
-#
-# def pcache(comm_seeker, key=None, cache_factory=dict):
-#
-#     comm = comm_seeker()
-#     cache = cache_factory()
-#
-# @pcache(cachetools.LRUCache)
-#
-# @pcache(DiskCache)
-#
-# @pcache(MemDiskCache)
-#
-# @pcache(MemCache)
-#
-# mem_cache = pcache(cache_factory=cachetools.LRUCache)
-# disk_cache = mem_cache(cache_factory=DiskCache)
-#
-# @pcache(comm_seeker=lambda obj, *_, **_: obj.comm, cache_factory=lambda: cachetools.LRUCache(maxsize=1000))
-#
-#
-# @pmemcache
-#
-# @pmemdiskcache
-#
-# class ParallelObject(ABC):
-#     @abc.abstractproperty
-#     def _comm(self):
-#         pass
-#
-# class MyObj(ParallelObject):
-#
-#     @pcached_property  # assumes that obj has a "comm" attr
-#     @pcached_property(lambda self: self.comm)
-#     def myproperty(self):
-#         ...
-#
-#
-# def pcached_property():
-#     def wrapper(self):
-#         assert isinstance(self, ParallelObject)
-#         ...
-#
-#
-# from futils.mpi import ParallelObject
-#
-# from futils.cache import pcached_property
-#
-# from footils.cache import *
-#
-# footils == firedrake utils
-
-# * parallel cached property
-# * memcache / cache / cached
-# * diskonlycache / disk_only_cached
-# * memdiskcache / diskcache / disk_cached
-# * memcache_no_bcast / broadcast=False
-#
-# parallel_cached_property = parallel_cache(lambda self: self._comm, key=lambda self: ())
-#
-# @time
-# @timed
-# def myslowfunc():
-#
-#     ..
-#
-# my_fast_fun = cache(my_slow_fn)
-#
-####
-
-
-# TODO:
-# Implement an @parallel_cached_property decorator function
+# TODO: (Wishlist)
+# * Try more exotic caches ie: memory_cache = partial(parallel_cache, cache_factory=lambda: cachetools.LRUCache(maxsize=1000))
+# * Add some sort of cache reporting
+# * Add some sort of cache statistics
+# * Refactor compilation.py to use @mem_and_disk_cached, where get_so is just uses DictLikeDiskAccess with an overloaded self.write() method
+# * Add some docstrings and maybe some exposition!
