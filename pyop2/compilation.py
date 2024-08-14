@@ -47,7 +47,7 @@ from textwrap import dedent
 
 
 from pyop2 import mpi
-from pyop2.caching import parallel_memory_only_cache_no_broadcast
+from pyop2.caching import memory_cache
 from pyop2.configuration import configuration
 from pyop2.logger import warning, debug, progress, INFO
 from pyop2.exceptions import CompilationError
@@ -571,7 +571,7 @@ def load_hashkey(*args, **kwargs):
 
 
 @mpi.collective
-@parallel_memory_only_cache_no_broadcast(key=load_hashkey)
+@memory_cache(hashkey=load_hashkey, broadcast=False)
 def load(jitmodule, extension, fn_name, cppargs=(), ldargs=(),
          argtypes=None, restype=None, comm=None):
     """Build a shared library and return a function pointer from it.

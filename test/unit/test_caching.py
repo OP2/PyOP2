@@ -38,7 +38,7 @@ import tempfile
 import cachetools
 import numpy
 from pyop2 import op2, mpi
-from pyop2.caching import disk_cached
+from pyop2.caching import memory_and_disk_cache
 
 
 def _seed():
@@ -537,34 +537,41 @@ class TestDiskCachedDecorator:
         """Example function to cache the outputs of."""
         return {arg}
 
-    def collective_key(self, *args):
-        """Return a cache key suitable for use when collective over a communicator."""
-        self.comm = mpi.internal_comm(mpi.COMM_SELF, self)
-        return self.comm, cachetools.keys.hashkey(*args)
+    def comm_fetcher(self, *args):
+        """Communicator returning function."""
+        return mpi.internal_comm(mpi.COMM_WORLD, self)
 
-    @pytest.fixture
-    def cache(cls):
-        return {}
+    def hash_key(self, *args):
+        """Hash key suitable for caching"""
+        return cachetools.keys.hashkey(*args)
 
     @pytest.fixture
     def cachedir(cls):
         return tempfile.TemporaryDirectory()
 
-    def test_decorator_in_memory_cache_reuses_results(self, cache, cachedir):
-        decorated_func = disk_cached(cache, cachedir.name)(self.myfunc)
+    def test_decorator_in_memory_cache_reuses_results(self, cachedir):
+        decorated_func = memory_and_disk_cache(
+            comm_fetcher=self.comm_fetcher,
+            cachedir=cachedir.name
+        )(self.myfunc)
 
         obj1 = decorated_func("input1")
-        assert len(cache) == 1
+        caches = self.comm_fetcher().Get_attr(mpi.comm_cache_keyval)
+        mem_cache = caches["DEFAULT_CACHE"]
+        disk_cache = caches["DictLikeDiskAccess"]
+        assert len(mem_cache) == 1
+        assert len(disk_cache) == 1
         assert len(os.listdir(cachedir.name)) == 1
 
         obj2 = decorated_func("input1")
         assert obj1 is obj2
-        assert len(cache) == 1
+        assert len(mem_cache) == 1
+        assert len(disk_cache) == 1
         assert len(os.listdir(cachedir.name)) == 1
 
-    def test_decorator_collective_uses_different_in_memory_caches(self, cache, cachedir):
-        decorated_func = disk_cached(cache, cachedir.name)(self.myfunc)
-        collective_func = disk_cached(
+    def test_decorator_collective_uses_different_in_memory_caches(self, cachedir):
+        decorated_func = memory_and_disk_cache(cachedir=cachedir.name)(self.myfunc)
+        collective_func = memory_and_disk_cache(
             None, cachedir.name, self.collective_key, collective=True
         )(self.myfunc)
 
@@ -582,8 +589,8 @@ class TestDiskCachedDecorator:
         assert len(comm_cache) == 1
         assert len(os.listdir(cachedir.name)) == 1
 
-    def test_decorator_disk_cache_reuses_results(self, cache, cachedir):
-        decorated_func = disk_cached(cache, cachedir.name)(self.myfunc)
+    def test_decorator_disk_cache_reuses_results(self, cachedir):
+        decorated_func = memory_and_disk_cache(cachedir=cachedir.name)(self.myfunc)
 
         obj1 = decorated_func("input1")
         cache.clear()
@@ -592,8 +599,8 @@ class TestDiskCachedDecorator:
         assert len(cache) == 1
         assert len(os.listdir(cachedir.name)) == 1
 
-    def test_decorator_cache_misses(self, cache, cachedir):
-        decorated_func = disk_cached(cache, cachedir.name)(self.myfunc)
+    def test_decorator_cache_misses(self, cachedir):
+        decorated_func = memory_and_disk_cache(cachedir=cachedir.name)(self.myfunc)
 
         obj1 = decorated_func("input1")
         obj2 = decorated_func("input2")
