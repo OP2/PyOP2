@@ -44,7 +44,6 @@ from functools import wraps
 from pyop2.configuration import configuration
 from pyop2.logger import debug
 from pyop2.mpi import comm_cache_keyval, COMM_WORLD
-from pyop2.utils import cached_property
 
 
 def report_cache(typ):
@@ -160,79 +159,6 @@ class ObjectCached(object):
             obj = make_obj()
             cache[key] = obj
             return obj
-
-
-class Cached(object):
-
-    """Base class providing global caching of objects. Derived classes need to
-    implement classmethods :meth:`_process_args` and :meth:`_cache_key`
-    and define a class attribute :attr:`_cache` of type :class:`dict`.
-
-    .. warning::
-        The derived class' :meth:`__init__` is still called if the object is
-        retrieved from cache. If that is not desired, derived classes can set
-        a flag indicating whether the constructor has already been called and
-        immediately return from :meth:`__init__` if the flag is set. Otherwise
-        the object will be re-initialized even if it was returned from cache!
-    """
-
-    def __new__(cls, *args, **kwargs):
-        args, kwargs = cls._process_args(*args, **kwargs)
-        key = cls._cache_key(*args, **kwargs)
-
-        def make_obj():
-            obj = super(Cached, cls).__new__(cls)
-            obj._key = key
-            obj._initialized = False
-            # obj.__init__ will be called twice when constructing
-            # something not in the cache.  The first time here, with
-            # the canonicalised args, the second time directly in the
-            # subclass.  But that one should hit the cache and return
-            # straight away.
-            obj.__init__(*args, **kwargs)
-            return obj
-
-        # Don't bother looking in caches if we're not meant to cache
-        # this object.
-        if key is None:
-            return make_obj()
-        try:
-            return cls._cache_lookup(key)
-        except (KeyError, IOError):
-            obj = make_obj()
-            cls._cache_store(key, obj)
-            return obj
-
-    @classmethod
-    def _cache_lookup(cls, key):
-        return cls._cache[key]
-
-    @classmethod
-    def _cache_store(cls, key, val):
-        cls._cache[key] = val
-
-    @classmethod
-    def _process_args(cls, *args, **kwargs):
-        """Pre-processes the arguments before they are being passed to
-        :meth:`_cache_key` and the constructor.
-
-        :rtype: *must* return a :class:`list` of *args* and a
-            :class:`dict` of *kwargs*"""
-        return args, kwargs
-
-    @classmethod
-    def _cache_key(cls, *args, **kwargs):
-        """Compute the cache key given the preprocessed constructor arguments.
-
-        :rtype: Cache key to use or ``None`` if the object is not to be cached
-
-        .. note:: The cache key must be hashable."""
-        return tuple(args) + tuple([(k, v) for k, v in kwargs.items()])
-
-    @cached_property
-    def cache_key(self):
-        """Cache key."""
-        return self._key
 
 
 class _CacheMiss:
@@ -481,56 +407,56 @@ def default_parallel_hashkey(*args, **kwargs):
     comm = kwargs.get('comm')
     return comm, cachetools.keys.hashkey(*args, **kwargs)
 
-#### connor bits
-
-# ~ def pcache(comm_seeker, key=None, cache_factory=dict):
-
-    # ~ comm = comm_seeker()
-    # ~ cache = cache_factory()
-
-# ~ @pcache(cachetools.LRUCache)
-
-@pcache(DiskCache)
-
-@pcache(MemDiskCache)
-
-@pcache(MemCache)
-
-mem_cache = pcache(cache_factory=cachetools.LRUCache)
-disk_cache = mem_cache(cache_factory=DiskCache)
-
-# ~ @pcache(comm_seeker=lambda obj, *_, **_: obj.comm, cache_factory=lambda: cachetools.LRUCache(maxsize=1000))
-
-
-# ~ @pmemcache
-
-# ~ @pmemdiskcache
-
-# ~ class ParallelObject(ABC):
-    # ~ @abc.abstractproperty
-    # ~ def _comm(self):
-        # ~ pass
-
-# ~ class MyObj(ParallelObject):
-
-    # ~ @pcached_property  # assumes that obj has a "comm" attr
-    # ~ @pcached_property(lambda self: self.comm)
-    # ~ def myproperty(self):
-        # ~ ...
-
-
-# ~ def pcached_property():
-    # ~ def wrapper(self):
-        # ~ assert isinstance(self, ParallelObject)
-        # ~ ...
-
-
-# ~ from futils.mpi import ParallelObject
-
-# ~ from futils.cache import pcached_property
-
-# ~ from footils.cache import *
-
+# ### Some notes from Connor:
+#
+# def pcache(comm_seeker, key=None, cache_factory=dict):
+#
+#     comm = comm_seeker()
+#     cache = cache_factory()
+#
+# @pcache(cachetools.LRUCache)
+#
+# @pcache(DiskCache)
+#
+# @pcache(MemDiskCache)
+#
+# @pcache(MemCache)
+#
+# mem_cache = pcache(cache_factory=cachetools.LRUCache)
+# disk_cache = mem_cache(cache_factory=DiskCache)
+#
+# @pcache(comm_seeker=lambda obj, *_, **_: obj.comm, cache_factory=lambda: cachetools.LRUCache(maxsize=1000))
+#
+#
+# @pmemcache
+#
+# @pmemdiskcache
+#
+# class ParallelObject(ABC):
+#     @abc.abstractproperty
+#     def _comm(self):
+#         pass
+#
+# class MyObj(ParallelObject):
+#
+#     @pcached_property  # assumes that obj has a "comm" attr
+#     @pcached_property(lambda self: self.comm)
+#     def myproperty(self):
+#         ...
+#
+#
+# def pcached_property():
+#     def wrapper(self):
+#         assert isinstance(self, ParallelObject)
+#         ...
+#
+#
+# from futils.mpi import ParallelObject
+#
+# from futils.cache import pcached_property
+#
+# from footils.cache import *
+#
 # footils == firedrake utils
 
 # * parallel cached property
@@ -553,7 +479,6 @@ disk_cache = mem_cache(cache_factory=DiskCache)
 
 # TODO:
 # Implement an @parallel_cached_property decorator function
-
 
 
 def parallel_memory_only_cache(key=default_parallel_hashkey):

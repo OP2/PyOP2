@@ -2,7 +2,7 @@ import pytest
 from tempfile import gettempdir
 from functools import partial
 
-from pyop2.caching import (
+from pyop2.caching import (  # noqa: F401
     disk_cached,
     parallel_memory_only_cache,
     parallel_memory_only_cache_no_broadcast,
@@ -11,7 +11,7 @@ from pyop2.caching import (
     default_parallel_hashkey,
     clear_memory_cache
 )
-from pyop2.mpi import MPI, COMM_WORLD, comm_cache_keyval
+from pyop2.mpi import MPI, COMM_WORLD, comm_cache_keyval  # noqa: F401
 
 
 # For new disk_cached API
