@@ -83,7 +83,6 @@ jobs:
           python -m pip install pulp
           python -m pip install -U flake8
           python -m pip install -U pytest-timeout
-          python -m pip install .
 
       - name: Install PyOP2 (Python <3.12)
         if: ${{ matrix.python-version != '3.12' }}
