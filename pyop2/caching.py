@@ -357,6 +357,10 @@ def parallel_cache(
 memory_cache = parallel_cache
 
 
+def serial_cache(hashkey, cache_factory=lambda: DEFAULT_CACHE()):
+    return cachetools.cached(key=hashkey, cache=cache_factory())
+
+
 def disk_only_cache(*args, cachedir=configuration["cache_dir"], **kwargs):
     return parallel_cache(*args, **kwargs, cache_factory=lambda: DictLikeDiskAccess(cachedir))
 
