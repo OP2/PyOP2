@@ -92,7 +92,7 @@ jobs:
 
         # Not sure if this is a bug in setuptools or something PyOP2 is doing wrong
       - name: Install PyOP2 (Python == 3.12)
-        if: ${{ matrix.python-version != '3.12' }}
+        if: ${{ matrix.python-version == '3.12' }}
         shell: bash
         working-directory: PyOP2
         run: python setup.py install
