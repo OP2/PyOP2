@@ -40,7 +40,6 @@ import subprocess
 import sys
 import ctypes
 import shlex
-import cachetools
 from hashlib import md5
 from packaging.version import Version, InvalidVersion
 from textwrap import dedent
