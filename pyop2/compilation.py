@@ -47,7 +47,7 @@ from textwrap import dedent
 
 
 from pyop2 import mpi
-from pyop2.caching import memory_cache
+from pyop2.caching import memory_cache, default_parallel_hashkey
 from pyop2.configuration import configuration
 from pyop2.logger import warning, debug, progress, INFO
 from pyop2.exceptions import CompilationError
@@ -566,7 +566,7 @@ def load_hashkey(*args, **kwargs):
         code_hash = md5(str(args[0].cache_key).encode()).hexdigest()
     else:
         pass  # This will raise an error in load
-    return cachetools.keys.hashkey(code_hash, *args[1:], **kwargs)
+    return default_parallel_hashkey(code_hash, *args[1:], **kwargs)
 
 
 @mpi.collective

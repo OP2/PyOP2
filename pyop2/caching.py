@@ -173,6 +173,9 @@ CACHE_MISS = _CacheMiss()
 def _as_hexdigest(*args):
     hash_ = hashlib.md5()
     for a in args:
+        # TODO: Remove or edit this check!
+        if isinstance(a, MPI.Comm) or isinstance(a, cachetools.keys._HashedTuple):
+            breakpoint()
         hash_.update(str(a).encode())
     return hash_.hexdigest()
 
@@ -298,7 +301,7 @@ def parallel_cache(
             """
             comm = comm_fetcher(*args, **kwargs)
             k = hashkey(*args, **kwargs)
-            key = _as_hexdigest(k), func.__qualname__
+            key = _as_hexdigest(*k), func.__qualname__
 
             # Fetch the per-comm cache_collection or set it up if not present
             # A collection is required since different types of cache can be set up on the same comm
@@ -317,10 +320,10 @@ def parallel_cache(
                 # Grab value from rank 0 memory cache and broadcast result
                 if comm.rank == 0:
                     value = local_cache.get(key, CACHE_MISS)
-                    if value is None:
-                        debug(f'{COMM_WORLD.name} R{COMM_WORLD.rank}, {comm.name} R{comm.rank}: {k} memory cache miss')
+                    if value is CACHE_MISS:
+                        debug(f'{COMM_WORLD.name} R{COMM_WORLD.rank}, {comm.name} R{comm.rank}: {k} {local_cache.__class__.__name__} cache miss')
                     else:
-                        debug(f'{COMM_WORLD.name} R{COMM_WORLD.rank}, {comm.name} R{comm.rank}: {k} memory cache hit')
+                        debug(f'{COMM_WORLD.name} R{COMM_WORLD.rank}, {comm.name} R{comm.rank}: {k} {local_cache.__class__.__name__} cache hit')
                     # TODO: Add communication tags to avoid cross-broadcasting
                     comm.bcast(value, root=0)
                 else:
@@ -334,10 +337,10 @@ def parallel_cache(
                 # Grab value from all ranks cache and broadcast cache hit/miss
                 value = local_cache.get(key, CACHE_MISS)
                 if value is CACHE_MISS:
-                    debug(f'{COMM_WORLD.name} R{COMM_WORLD.rank}, {comm.name} R{comm.rank}: {k} memory cache miss')
+                    debug(f'{COMM_WORLD.name} R{COMM_WORLD.rank}, {comm.name} R{comm.rank}: {k} {local_cache.__class__.__name__} cache miss')
                     cache_hit = False
                 else:
-                    debug(f'{COMM_WORLD.name} R{COMM_WORLD.rank}, {comm.name} R{comm.rank}: {k} memory cache hit')
+                    debug(f'{COMM_WORLD.name} R{COMM_WORLD.rank}, {comm.name} R{comm.rank}: {k} {local_cache.__class__.__name__} cache hit')
                     cache_hit = True
                 all_present = comm.allgather(cache_hit)
 

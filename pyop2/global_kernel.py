@@ -3,6 +3,7 @@ import ctypes
 from dataclasses import dataclass
 import os
 from typing import Optional, Tuple
+import itertools
 
 import loopy as lp
 import numpy as np
@@ -298,8 +299,13 @@ class GlobalKernel:
             raise ValueError(
                 "Cannot request constant_layers argument for non-extruded iteration"
             )
+
+        counter = itertools.count()
+        seen_maps = collections.defaultdict(lambda: next(counter))
         self.cache_key = (
-            local_kernel.cache_key, *[a.cache_key for a in arguments],
+            local_kernel.cache_key,
+            *[a.cache_key for a in arguments],
+            *[seen_maps[m] for a in arguments for m in a.maps],
             extruded, extruded_periodic, constant_layers, subset,
             iteration_region, pass_layer_arg, configuration["simd_width"]
         )
