@@ -115,12 +115,15 @@ def test_function_args_different(request, state, decorator, uncached_function, t
 ])
 def test_function_over_different_comms(request, state, decorator, uncached_function, tmpdir):
     if request.node.callspec.params["decorator"] in {disk_only_cache, memory_and_disk_cache}:
+        # In parallel different ranks can get different tempdirs, we just want one
+        tmpdir = COMM_WORLD.bcast(tmpdir, root=0)
         kwargs = {"cachedir": tmpdir}
     else:
         kwargs = {}
 
     cached_function = function_factory(state, decorator, uncached_function, **kwargs)
     assert state.value == 0
+
     for ii in range(10):
         color = 0 if COMM_WORLD.rank < 2 else MPI.UNDEFINED
         comm12 = COMM_WORLD.Split(color=color)

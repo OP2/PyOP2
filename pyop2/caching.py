@@ -267,7 +267,7 @@ class DictLikeDiskAccess(MutableMapping):
         """
         filepath = Path(self.cachedir, key[0][:2], key[0][2:] + key[1])
         try:
-            with self.open(filepath, "rb") as fh:
+            with self.open(filepath, mode="rb") as fh:
                 value = self.read(fh)
         except FileNotFoundError:
             raise KeyError("File not on disk, cache miss")
@@ -285,7 +285,7 @@ class DictLikeDiskAccess(MutableMapping):
 
         tempfile = basedir.joinpath(f"{k2}_p{os.getpid()}.tmp")
         filepath = basedir.joinpath(k2)
-        with self.open(tempfile, "wb") as fh:
+        with self.open(tempfile, mode="wb") as fh:
             self.write(fh, value)
         tempfile.rename(filepath)
 
@@ -359,6 +359,8 @@ def instrument(cls):
                 self.hit += 1
             return value
 
+        # JBTODO: Only instrument get, since we have to use get and get item in wrapper
+        #     OR... find away around the hack in compilation.py
         def __getitem__(self, key):
             try:
                 value = super().__getitem__(key)
@@ -465,7 +467,8 @@ def parallel_cache(
 
             if value is CACHE_MISS:
                 value = func(*args, **kwargs)
-            return local_cache.setdefault(key, value)
+                local_cache[key] = value
+            return local_cache[key]
 
         return wrapper
     return decorator
