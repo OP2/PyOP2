@@ -108,8 +108,8 @@ class Configuration(dict):
             ("PYOP2_NODE_LOCAL_COMPILATION", bool, True),
         "no_fork_available":
             ("PYOP2_NO_FORK_AVAILABLE", bool, False),
-        "print_cache_size":
-            ("PYOP2_PRINT_CACHE_SIZE", bool, False),
+        "print_cache_info":
+            ("PYOP2_CACHE_INFO", bool, False),
         "matnest":
             ("PYOP2_MATNEST", bool, True),
         "block_sparsity":

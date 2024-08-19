@@ -45,6 +45,7 @@ def _seed():
 
 
 nelems = 8
+default_cache_name = DEFAULT_CACHE().__class__.__name__
 
 
 @pytest.fixture
@@ -286,11 +287,11 @@ class TestGeneratedCodeCache:
     @property
     def cache(self):
         int_comm = mpi.internal_comm(mpi.COMM_WORLD, self)
-        _cache = int_comm.Get_attr(mpi.comm_cache_keyval)
-        if _cache is None:
-            _cache = {'DEFAULT_CACHE': DEFAULT_CACHE()}
-            mpi.COMM_WORLD.Set_attr(mpi.comm_cache_keyval, _cache)
-        return _cache['DEFAULT_CACHE']
+        _cache_collection = int_comm.Get_attr(mpi.comm_cache_keyval)
+        if _cache_collection is None:
+            _cache_collection = {default_cache_name: DEFAULT_CACHE()}
+            mpi.COMM_WORLD.Set_attr(mpi.comm_cache_keyval, _cache_collection)
+        return _cache_collection[default_cache_name]
 
     @pytest.fixture
     def a(cls, diterset):
@@ -541,7 +542,7 @@ class TestDiskCachedDecorator:
         """This fixture provides a temporary comm so that each test gets it's own
         communicator and that caches are cleaned on free."""
         temporary_comm = mpi.COMM_WORLD.Dup()
-        temporary_comm.name = "pytest temporary COMM_WORLD"
+        temporary_comm.name = "pytest temp COMM_WORLD"
         with mpi.temp_internal_comm(temporary_comm) as comm:
             yield comm
         temporary_comm.Free()
@@ -556,7 +557,7 @@ class TestDiskCachedDecorator:
         )(self.myfunc)
 
         obj1 = decorated_func("input1", comm=comm)
-        mem_cache = comm.Get_attr(mpi.comm_cache_keyval)["DEFAULT_CACHE"]
+        mem_cache = comm.Get_attr(mpi.comm_cache_keyval)[default_cache_name]
         assert len(mem_cache) == 1
         assert len(os.listdir(cachedir.name)) == 1
 
@@ -571,7 +572,7 @@ class TestDiskCachedDecorator:
         )(self.myfunc)
 
         temporary_comm = mpi.COMM_SELF.Dup()
-        temporary_comm.name = "pytest temporary COMM_SELF"
+        temporary_comm.name = "pytest temp COMM_SELF"
         with mpi.temp_internal_comm(temporary_comm) as comm_self:
             comm_self_func = memory_and_disk_cache(
                 cachedir=cachedir.name
@@ -579,13 +580,13 @@ class TestDiskCachedDecorator:
 
             # obj1 should be cached on the COMM_WORLD cache
             obj1 = comm_world_func("input1", comm=comm)
-            comm_world_cache = comm.Get_attr(mpi.comm_cache_keyval)["DEFAULT_CACHE"]
+            comm_world_cache = comm.Get_attr(mpi.comm_cache_keyval)[default_cache_name]
             assert len(comm_world_cache) == 1
             assert len(os.listdir(cachedir.name)) == 1
 
             # obj2 should be cached on the COMM_SELF cache
             obj2 = comm_self_func("input1", comm=comm_self)
-            comm_self_cache = comm_self.Get_attr(mpi.comm_cache_keyval)["DEFAULT_CACHE"]
+            comm_self_cache = comm_self.Get_attr(mpi.comm_cache_keyval)[default_cache_name]
             assert obj1 == obj2 and obj1 is not obj2
             assert len(comm_world_cache) == 1
             assert len(comm_self_cache) == 1
@@ -599,7 +600,7 @@ class TestDiskCachedDecorator:
         obj1 = decorated_func("input1", comm=comm)
         clear_memory_cache(comm)
         obj2 = decorated_func("input1", comm=comm)
-        mem_cache = comm.Get_attr(mpi.comm_cache_keyval)["DEFAULT_CACHE"]
+        mem_cache = comm.Get_attr(mpi.comm_cache_keyval)[default_cache_name]
         assert obj1 == obj2 and obj1 is not obj2
         assert len(mem_cache) == 1
         assert len(os.listdir(cachedir.name)) == 1
@@ -609,7 +610,7 @@ class TestDiskCachedDecorator:
 
         obj1 = decorated_func("input1", comm=comm)
         obj2 = decorated_func("input2", comm=comm)
-        mem_cache = comm.Get_attr(mpi.comm_cache_keyval)["DEFAULT_CACHE"]
+        mem_cache = comm.Get_attr(mpi.comm_cache_keyval)[default_cache_name]
         assert obj1 != obj2
         assert len(mem_cache) == 2
         assert len(os.listdir(cachedir.name)) == 2
