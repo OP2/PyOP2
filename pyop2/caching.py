@@ -244,7 +244,7 @@ CACHE_MISS = _CacheMiss()
 def _as_hexdigest(*args):
     hash_ = hashlib.md5()
     for a in args:
-        # TODO: Remove or edit this check!
+        # JBTODO: Remove or edit this check!
         if isinstance(a, MPI.Comm) or isinstance(a, cachetools.keys._HashedTuple):
             breakpoint()
         hash_.update(str(a).encode())
@@ -252,12 +252,14 @@ def _as_hexdigest(*args):
 
 
 class DictLikeDiskAccess(MutableMapping):
-    def __init__(self, cachedir):
+    def __init__(self, cachedir, extension=".pickle"):
         """
 
         :arg cachedir: The cache directory.
+        :arg extension: Optional extension to use for written files.
         """
         self.cachedir = cachedir
+        self.extension = extension
 
     def __getitem__(self, key):
         """Retrieve a value from the disk cache.
@@ -267,7 +269,7 @@ class DictLikeDiskAccess(MutableMapping):
         """
         filepath = Path(self.cachedir, key[0][:2], key[0][2:] + key[1])
         try:
-            with self.open(filepath, mode="rb") as fh:
+            with self.open(filepath.with_suffix(self.extension), mode="rb") as fh:
                 value = self.read(fh)
         except FileNotFoundError:
             raise KeyError("File not on disk, cache miss")
@@ -287,7 +289,7 @@ class DictLikeDiskAccess(MutableMapping):
         filepath = basedir.joinpath(k2)
         with self.open(tempfile, mode="wb") as fh:
             self.write(fh, value)
-        tempfile.rename(filepath)
+        tempfile.rename(filepath.with_suffix(self.extension))
 
     def __delitem__(self, key):
         raise NotImplementedError(f"Cannot remove items from {self.__class__.__name__}")
@@ -299,11 +301,11 @@ class DictLikeDiskAccess(MutableMapping):
         raise NotImplementedError(f"Cannot query length of {self.__class__.__name__}")
 
     def __repr__(self):
-        return f"{self.__class__.__name__}(cachedir={self.cachedir})"
+        return f"{self.__class__.__name__}(cachedir={self.cachedir}, extension={self.extension})"
 
     def __eq__(self, other):
         # Instances are the same if they have the same cachedir
-        return self.cachedir == other.cachedir
+        return (self.cachedir == other.cachedir and self.extension == other.extension)
 
     def open(self, *args, **kwargs):
         return open(*args, **kwargs)
@@ -359,8 +361,6 @@ def instrument(cls):
                 self.hit += 1
             return value
 
-        # JBTODO: Only instrument get, since we have to use get and get item in wrapper
-        #     OR... find away around the hack in compilation.py
         def __getitem__(self, key):
             try:
                 value = super().__getitem__(key)
@@ -441,7 +441,7 @@ def parallel_cache(
                             )
                         else:
                             debug(f'{COMM_WORLD.name} R{COMM_WORLD.rank}, {comm.name} R{comm.rank}: {k} {local_cache.__class__.__name__} cache hit')
-                        # TODO: Add communication tags to avoid cross-broadcasting
+                        # JBTODO: Add communication tags to avoid cross-broadcasting
                         comm.bcast(value, root=0)
                     else:
                         value = comm.bcast(CACHE_MISS, root=0)
@@ -467,8 +467,7 @@ def parallel_cache(
 
             if value is CACHE_MISS:
                 value = func(*args, **kwargs)
-                local_cache[key] = value
-            return local_cache[key]
+            return local_cache.setdefault(key, value)
 
         return wrapper
     return decorator
@@ -497,13 +496,13 @@ def memory_and_disk_cache(*args, cachedir=configuration["cache_dir"], **kwargs):
         return memory_cache(*args, **kwargs)(disk_only_cache(*args, cachedir=cachedir, **kwargs)(func))
     return decorator
 
-# TODO: (Wishlist)
+# JBTODO: (Wishlist)
 # * Try more exotic caches ie: memory_cache = partial(parallel_cache, cache_factory=lambda: cachetools.LRUCache(maxsize=1000)) ✓
 # * Add some sort of cache reporting ✓
 # * Add some sort of cache statistics ✓
-# * Refactor compilation.py to use @mem_and_disk_cached, where get_so is just uses DictLikeDiskAccess with an overloaded self.write() method
+# * Refactor compilation.py to use @mem_and_disk_cached, where get_so is just uses DictLikeDiskAccess with an overloaded self.write() method ✓
 # * Systematic investigation into cache sizes/types for Firedrake
-#   - Is a mem cache needed for DLLs?
+#   - Is a mem cache needed for DLLs? No
 #   - Is LRUCache better than a simple dict? (memory profile test suite)
 #   - What is the optimal maxsize?
 # * Add some docstrings and maybe some exposition!

@@ -46,10 +46,12 @@ from textwrap import dedent
 from functools import partial
 from pathlib import Path
 from contextlib import contextmanager
+from tempfile import gettempdir
+from itertools import cycle
 
 
 from pyop2 import mpi
-from pyop2.caching import parallel_cache, memory_cache, default_parallel_hashkey
+from pyop2.caching import parallel_cache, memory_cache, default_parallel_hashkey, _as_hexdigest, DictLikeDiskAccess
 from pyop2.configuration import configuration
 from pyop2.logger import warning, debug, progress, INFO
 from pyop2.exceptions import CompilationError
@@ -417,6 +419,7 @@ def load_hashkey(*args, **kwargs):
     return default_parallel_hashkey(code_hash, *args[1:], **kwargs)
 
 
+# JBTODO: This should not be memory cached
 @mpi.collective
 @memory_cache(hashkey=load_hashkey, broadcast=False)
 def load(jitmodule, extension, fn_name, cppargs=(), ldargs=(),
@@ -467,7 +470,12 @@ def load(jitmodule, extension, fn_name, cppargs=(), ldargs=(),
 
     debug = configuration["debug"]
     compiler_instance = compiler(cppargs, ldargs, debug=debug)
-    dll = _make_so_wrapper(compiler_instance, code, extension, comm)
+    if configuration['check_src_hashes'] or configuration['debug']:
+        check_source_hashes(compiler_instance, code, extension, comm)
+    # This call is cached on disk
+    so_name = make_so(compiler_instance, code, extension, comm)
+    # This call is cached in memory by the OS
+    dll = ctypes.CDLL(so_name)
 
     if isinstance(jitmodule, GlobalKernel):
         _add_profiling_events(dll, code.local_kernel.events)
@@ -490,37 +498,18 @@ def expandWl(ldflags):
             yield flag
 
 
-from pyop2.caching import DictLikeDiskAccess
-
-
 class CompilerDiskAccess(DictLikeDiskAccess):
     @contextmanager
-    def open(self, *args, **kwargs):
-        # In the parent class the `open` method is called by `read` as:
-        #   open(filename, mode="rb")
-        # and the `write` method as:
-        #   open(tempname, mode="wb")
-        # Here we bypass this and just return the filename (pathlib.Path object)
-        # letting the read and write methods handle file opening.
-        if args[0].suffix:
-            # Writing: drop PID and extension
-            args[0].touch()
-            filename = args[0].with_name(args[0].name.split('_p')[0])
-        else:
-            # Reading: Add extension
-            filename = args[0].with_suffix(".so")
+    def open(self, filename, *args, **kwargs):
         yield filename
 
-    def write(self, *args, **kwargs):
-        filename = args[0]
-        compiler, jitmodule, extension, comm = args[1]
-        _legacy_make_so(compiler, jitmodule, filename, extension, comm)
+    def write(self, filename, value):
+        shutil.copy(value, filename)
 
     def read(self, filename):
-        try:
-            return _legacy_load_so(filename)
-        except OSError as e:
-            raise FileNotFoundError(e)
+        if not filename.exists():
+            raise FileNotFoundError("File not on disk, cache miss")
+        return filename
 
 
 def _make_so_hashkey(compiler, jitmodule, extension, comm):
@@ -533,21 +522,33 @@ def _make_so_hashkey(compiler, jitmodule, extension, comm):
     return (compiler, exe, compiler_flags, compiler.ld, compiler.ldflags, jitmodule.cache_key)
 
 
+def check_source_hashes(compiler, jitmodule, extension, comm):
+    # Reconstruct hash from filename
+    hashval = _as_hexdigest(_make_so_hashkey(compiler, jitmodule, extension, comm))
+    with mpi.temp_internal_comm(comm) as icomm:
+        matching = icomm.allreduce(hashval, op=_check_op)
+        if matching != hashval:
+            # Dump all src code to disk for debugging
+            output = Path(configuration["cache_dir"]).joinpath("mismatching-kernels")
+            srcfile = output.with_name(f"src-rank{icomm.rank}.{extension}")
+            if icomm.rank == 0:
+                output.mkdir(exist_ok=True)
+            icomm.barrier()
+            with open(srcfile, "w") as fh:
+                fh.write(jitmodule.code_to_compile)
+            icomm.barrier()
+            raise CompilationError(f"Generated code differs across ranks (see output in {output})")
+
+
+FILE_CYCLER = cycle(f"{ii:02x}" for ii in range(256))
+
+
 @mpi.collective
 @parallel_cache(
     hashkey=_make_so_hashkey,
-    cache_factory=lambda: CompilerDiskAccess(configuration['cache_dir']),
-    broadcast=False
+    cache_factory=lambda: CompilerDiskAccess(configuration['cache_dir'], extension=".so"),
 )
-def _make_so_wrapper(compiler, jitmodule, extension, comm):
-    # The creation of the shared library is handled by the `write` method of
-    # `CompilerDiskAccess` above.
-    # JBTODO: This is a bit of a hack...
-    return (compiler, jitmodule, extension, comm)
-
-
-@mpi.collective
-def _legacy_make_so(compiler, jitmodule, filename, extension, comm):
+def make_so(compiler, jitmodule, extension, comm, filename=None):
     """Build a shared library and load it
 
     :arg compiler: The compiler to use to create the shared library.
@@ -555,8 +556,17 @@ def _legacy_make_so(compiler, jitmodule, filename, extension, comm):
     :arg filename: The filename of the library to create.
     :arg extension: extension of the source file (c, cpp).
     :arg comm: Communicator over which to perform compilation.
+    :arg filename: Optional
     Returns a :class:`ctypes.CDLL` object of the resulting shared
     library."""
+    if filename is None:
+        tempdir = Path(gettempdir()).joinpath(f"pyop2-tempcache-uid{os.getuid()}")
+        tempdir.mkdir(exist_ok=True)
+        filename = tempdir.joinpath(f"foo{next(FILE_CYCLER)}.c")
+    else:
+        filename = Path(filename).absolute()
+        filename.parent.mkdir(exist_ok=True)
+
     # Compilation communicators are reference counted on the PyOP2 comm
     icomm = mpi.internal_comm(comm, compiler)
     ccomm = mpi.compilation_comm(icomm, compiler)
@@ -578,26 +588,10 @@ def _legacy_make_so(compiler, jitmodule, filename, extension, comm):
     tempname = filename.with_stem(f"{base}_p{pid}.so")
     soname = filename.with_suffix(".so")
 
-    if configuration['check_src_hashes'] or configuration['debug']:
-        # Reconstruct hash from filename
-        hashval = "".join(filename.parts[-2:])
-        matching = ccomm.allreduce(hashval, op=_check_op)
-        if matching != hashval:
-            # Dump all src code to disk for debugging
-            output = Path(configuration["cache_dir"]).joinpath("mismatching-kernels")
-            srcfile = output.with_name(f"src-rank{comm.rank}.{extension}")
-            if ccomm.rank == 0:
-                output.mkdir(exist_ok=True)
-            ccomm.barrier()
-            with open(srcfile, "w") as fh:
-                fh.write(jitmodule.code_to_compile)
-            ccomm.barrier()
-            raise CompilationError(f"Generated code differs across ranks (see output in {output})")
-
     # Compile on compilation communicator (ccomm) rank 0
     if comm.rank == 0:
-        logfile = path.with_name(f"{base}_p{pid}.log")
-        errfile = path.with_name(f"{base}_p{pid}.err")
+        logfile = path.joinpath(f"{base}_p{pid}.log")
+        errfile = path.joinpath(f"{base}_p{pid}.err")
         with progress(INFO, 'Compiling wrapper'):
             with open(cname, "w") as fh:
                 fh.write(jitmodule.code_to_compile)
@@ -610,31 +604,27 @@ def _legacy_make_so(compiler, jitmodule, filename, extension, comm):
                 _run(cc, logfile, errfile)
                 # Extract linker specific "cflags" from ldflags
                 ld = tuple(shlex.split(compiler.ld)) + ('-o', str(tempname), str(oname)) + tuple(expandWl(compiler.ldflags))
-                _run(ld, logfile, errfile)
+                _run(ld, logfile, errfile, step="Linker", filemode="a")
             # Atomically ensure soname exists
             tempname.rename(soname)
     # Wait for compilation to complete
     ccomm.barrier()
+    return soname
 
 
-def _legacy_load_so(filename):
-    # Load library
-    dll = ctypes.CDLL(filename)
-    return dll
-
-
-def _run(cc, logfile, errfile):
-    debug(f"Compilation command: {' '.join(cc)}")
+def _run(cc, logfile, errfile, step="Compilation", filemode="w"):
+    debug(f"{step} command: {' '.join(cc)}")
     try:
         if configuration['no_fork_available']:
-            cc += ("2>", str(errfile), ">", str(logfile))
+            redirect = ">" if filemode == "w" else ">>"
+            cc += (f"2{redirect}", str(errfile), redirect, str(logfile))
             cmd = " ".join(cc)
             status = os.system(cmd)
             if status != 0:
                 raise subprocess.CalledProcessError(status, cmd)
         else:
-            with open(logfile, "w") as log, open(errfile, "w") as err:
-                log.write("Compilation command:\n")
+            with open(logfile, filemode) as log, open(errfile, filemode) as err:
+                log.write(f"{step} command:\n")
                 log.write(" ".join(cc))
                 log.write("\n\n")
                 subprocess.check_call(cc, stderr=err, stdout=log)

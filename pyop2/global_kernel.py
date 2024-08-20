@@ -360,13 +360,13 @@ class GlobalKernel:
             builder.add_argument(arg)
         return builder
 
-    # TODO: Wrap with parallel_cached_property
     @cached_property
     def code_to_compile(self):
         """Return the C/C++ source code as a string."""
         from pyop2.codegen.rep2loopy import generate
 
         wrapper = generate(self.builder)
+        # JBTODO: Expensive? Can this be wrapped with a cache?
         code = lp.generate_code_v2(wrapper)
 
         if self.local_kernel.cpp:
