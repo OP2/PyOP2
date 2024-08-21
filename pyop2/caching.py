@@ -392,7 +392,7 @@ def parallel_cache(
 ):
     """Memory only cache decorator.
 
-    Decorator for wrapping a function to be called over a communiucator in a
+    Decorator for wrapping a function to be called over a communicator in a
     cache that stores broadcastable values in memory. If the value is found in
     the cache of rank 0 it is broadcast to all other ranks.
 
