@@ -48,6 +48,7 @@ from pathlib import Path
 from contextlib import contextmanager
 from tempfile import gettempdir
 from itertools import cycle
+from uuid import uuid4
 
 
 from pyop2 import mpi
@@ -194,7 +195,7 @@ def sniff_compiler(exe, comm=mpi.COMM_WORLD):
         version = sniff_compiler_version(temp)
         compiler = partial(compiler, version=version)
 
-    return comm.bcast(compiler, 0)
+    return comm.bcast(compiler, root=0)
 
 
 class Compiler(ABC):
@@ -568,11 +569,13 @@ def make_so(compiler, jitmodule, extension, comm, filename=None):
     library."""
     if filename is None:
         # JBTODO: Remove this directory at some point?
+        # Directory must be unique per user for shared machines
         pyop2_tempdir = Path(gettempdir()).joinpath(f"pyop2-tempcache-uid{os.getuid()}")
-        tempdir = pyop2_tempdir.joinpath(f"{os.getpid()}")
-        # ~ tempdir = Path(mkdtemp(dir=pyop2_tempdir.joinpath(f"{os.getpid()}")))
+        # A UUID should ensure we have a unique path
+        uuid = uuid4().hex
+        tempdir = pyop2_tempdir.joinpath(f"{uuid[:2]}")
         # This path + filename should be unique
-        filename = tempdir.joinpath("foo.c")
+        filename = tempdir.joinpath(f"{uuid[2:]}.{extension}")
     else:
         pyop2_tempdir = None
         filename = Path(filename).absolute()
@@ -589,6 +592,7 @@ def make_so(compiler, jitmodule, extension, comm, filename=None):
         exe = compiler.cc
         compiler_flags = compiler.cflags
 
+    # JBTODO: Do we still need to worry about atomic file renaming in this function?
     base = filename.name
     path = filename.parent
     pid = os.getpid()
@@ -599,7 +603,7 @@ def make_so(compiler, jitmodule, extension, comm, filename=None):
     soname = filename.with_suffix(".so")
 
     # Compile on compilation communicator (ccomm) rank 0
-    if comm.rank == 0:
+    if ccomm.rank == 0:
         if pyop2_tempdir is None:
             filename.parent.mkdir(exist_ok=True)
         else:
@@ -622,9 +626,8 @@ def make_so(compiler, jitmodule, extension, comm, filename=None):
                 _run(ld, logfile, errfile, step="Linker", filemode="a")
             # Atomically ensure soname exists
             tempname.rename(soname)
-    # Wait for compilation to complete
-    ccomm.barrier()
-    return soname
+
+    return ccomm.bcast(soname, root=0)
 
 
 # JBTODO: Probably don't want to do this if we fail to compile...
