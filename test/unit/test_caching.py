@@ -290,7 +290,7 @@ class TestGeneratedCodeCache:
         _cache_collection = int_comm.Get_attr(mpi.comm_cache_keyval)
         if _cache_collection is None:
             _cache_collection = {default_cache_name: DEFAULT_CACHE()}
-            mpi.COMM_WORLD.Set_attr(mpi.comm_cache_keyval, _cache_collection)
+            int_comm.Set_attr(mpi.comm_cache_keyval, _cache_collection)
         return _cache_collection[default_cache_name]
 
     @pytest.fixture

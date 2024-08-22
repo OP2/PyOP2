@@ -55,6 +55,7 @@ from pyop2.caching import parallel_cache, memory_cache, default_parallel_hashkey
 from pyop2.configuration import configuration
 from pyop2.logger import warning, debug, progress, INFO
 from pyop2.exceptions import CompilationError
+import pyop2.global_kernel
 from petsc4py import PETSc
 
 
@@ -420,6 +421,7 @@ def load_hashkey(*args, **kwargs):
 
 
 # JBTODO: This should not be memory cached
+# ...benchmarking disagrees with my assessment
 @mpi.collective
 @memory_cache(hashkey=load_hashkey, broadcast=False)
 def load(jitmodule, extension, fn_name, cppargs=(), ldargs=(),
@@ -440,8 +442,6 @@ def load(jitmodule, extension, fn_name, cppargs=(), ldargs=(),
     :kwarg comm: Optional communicator to compile the code on (only
         rank 0 compiles code) (defaults to pyop2.mpi.COMM_WORLD).
     """
-    from pyop2.global_kernel import GlobalKernel
-
     if isinstance(jitmodule, str):
         class StrCode(object):
             def __init__(self, code, argtypes):
@@ -451,7 +451,7 @@ def load(jitmodule, extension, fn_name, cppargs=(), ldargs=(),
                 # cache key
                 self.argtypes = argtypes
         code = StrCode(jitmodule, argtypes)
-    elif isinstance(jitmodule, GlobalKernel):
+    elif isinstance(jitmodule, pyop2.global_kernel.GlobalKernel):
         code = jitmodule
     else:
         raise ValueError("Don't know how to compile code of type %r" % type(jitmodule))
@@ -477,7 +477,7 @@ def load(jitmodule, extension, fn_name, cppargs=(), ldargs=(),
     # This call is cached in memory by the OS
     dll = ctypes.CDLL(so_name)
 
-    if isinstance(jitmodule, GlobalKernel):
+    if isinstance(jitmodule, pyop2.global_kernel.GlobalKernel):
         _add_profiling_events(dll, code.local_kernel.events)
 
     fn = getattr(dll, fn_name)
@@ -510,6 +510,13 @@ class CompilerDiskAccess(DictLikeDiskAccess):
         if not filename.exists():
             raise FileNotFoundError("File not on disk, cache miss")
         return filename
+
+    def setdefault(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            self[key] = default
+        return self[key]
 
 
 def _make_so_hashkey(compiler, jitmodule, extension, comm):
@@ -546,7 +553,7 @@ FILE_CYCLER = cycle(f"{ii:02x}" for ii in range(256))
 @mpi.collective
 @parallel_cache(
     hashkey=_make_so_hashkey,
-    cache_factory=lambda: CompilerDiskAccess(configuration['cache_dir'], extension=".so"),
+    cache_factory=lambda: CompilerDiskAccess(configuration['cache_dir'], extension=".so")
 )
 def make_so(compiler, jitmodule, extension, comm, filename=None):
     """Build a shared library and load it
@@ -560,12 +567,15 @@ def make_so(compiler, jitmodule, extension, comm, filename=None):
     Returns a :class:`ctypes.CDLL` object of the resulting shared
     library."""
     if filename is None:
-        tempdir = Path(gettempdir()).joinpath(f"pyop2-tempcache-uid{os.getuid()}")
-        tempdir.mkdir(exist_ok=True)
-        filename = tempdir.joinpath(f"foo{next(FILE_CYCLER)}.c")
+        # JBTODO: Remove this directory at some point?
+        pyop2_tempdir = Path(gettempdir()).joinpath(f"pyop2-tempcache-uid{os.getuid()}")
+        tempdir = pyop2_tempdir.joinpath(f"{os.getpid()}")
+        # ~ tempdir = Path(mkdtemp(dir=pyop2_tempdir.joinpath(f"{os.getpid()}")))
+        # This path + filename should be unique
+        filename = tempdir.joinpath("foo.c")
     else:
+        pyop2_tempdir = None
         filename = Path(filename).absolute()
-        filename.parent.mkdir(exist_ok=True)
 
     # Compilation communicators are reference counted on the PyOP2 comm
     icomm = mpi.internal_comm(comm, compiler)
@@ -590,6 +600,11 @@ def make_so(compiler, jitmodule, extension, comm, filename=None):
 
     # Compile on compilation communicator (ccomm) rank 0
     if comm.rank == 0:
+        if pyop2_tempdir is None:
+            filename.parent.mkdir(exist_ok=True)
+        else:
+            pyop2_tempdir.mkdir(exist_ok=True)
+            tempdir.mkdir(exist_ok=True)
         logfile = path.joinpath(f"{base}_p{pid}.log")
         errfile = path.joinpath(f"{base}_p{pid}.err")
         with progress(INFO, 'Compiling wrapper'):
@@ -610,6 +625,12 @@ def make_so(compiler, jitmodule, extension, comm, filename=None):
     # Wait for compilation to complete
     ccomm.barrier()
     return soname
+
+
+# JBTODO: Probably don't want to do this if we fail to compile...
+# ~ @atexit
+# ~ def _cleanup_tempdir():
+    # ~ pyop2_tempdir = Path(gettempdir()).joinpath(f"pyop2-tempcache-uid{os.getuid()}")
 
 
 def _run(cc, logfile, errfile, step="Compilation", filemode="w"):

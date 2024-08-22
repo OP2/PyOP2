@@ -10,7 +10,8 @@ import numpy as np
 import pytools
 from petsc4py import PETSc
 
-from pyop2 import compilation, mpi
+from pyop2 import mpi
+from pyop2.compilation import load
 from pyop2.configuration import configuration
 from pyop2.datatypes import IntType, as_ctypes
 from pyop2.types import IterationRegion, Constant, READ
@@ -397,11 +398,15 @@ class GlobalKernel:
             + tuple(self.local_kernel.ldargs)
         )
 
-        return compilation.load(self, extension, self.name,
-                                cppargs=cppargs,
-                                ldargs=ldargs,
-                                restype=ctypes.c_int,
-                                comm=comm)
+        return load(
+            self,
+            extension,
+            self.name,
+            cppargs=cppargs,
+            ldargs=ldargs,
+            restype=ctypes.c_int,
+            comm=comm
+        )
 
     @cached_property
     def argtypes(self):
