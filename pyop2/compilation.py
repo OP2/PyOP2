@@ -425,6 +425,7 @@ def load_hashkey(*args, **kwargs):
 # ...benchmarking disagrees with my assessment
 @mpi.collective
 @memory_cache(hashkey=load_hashkey, broadcast=False)
+@PETSc.Log.EventDecorator()
 def load(jitmodule, extension, fn_name, cppargs=(), ldargs=(),
          argtypes=None, restype=None, comm=None):
     """Build a shared library and return a function pointer from it.
@@ -556,6 +557,7 @@ FILE_CYCLER = cycle(f"{ii:02x}" for ii in range(256))
     hashkey=_make_so_hashkey,
     cache_factory=lambda: CompilerDiskAccess(configuration['cache_dir'], extension=".so")
 )
+@PETSc.Log.EventDecorator()
 def make_so(compiler, jitmodule, extension, comm, filename=None):
     """Build a shared library and load it
 

@@ -48,6 +48,7 @@ from pyop2.logger import debug
 from pyop2.mpi import (
     MPI, COMM_WORLD, comm_cache_keyval, temp_internal_comm
 )
+from petsc4py import PETSc
 
 
 # Caches created here are registered as a tuple of
@@ -403,6 +404,7 @@ def parallel_cache(
         subcommunicators.
     """
     def decorator(func):
+        @PETSc.Log.EventDecorator("PyOP2 Cache Wrapper")
         @wraps(func)
         def wrapper(*args, **kwargs):
             """ Extract the key and then try the memory cache before falling back
@@ -429,6 +431,10 @@ def parallel_cache(
                 # If this is a new cache or function add it to the list of known caches
                 if (comm, comm.name, func, local_cache) not in [k[1:] for k in _KNOWN_CACHES]:
                     _KNOWN_CACHES.append((next(_CACHE_CIDX), comm, comm.name, func, local_cache))
+
+                # JBTODO: Replace everything below here with:
+                # value = local_cache.get(key, CACHE_MISS)
+                # and add an optional PYOP2_SPMD_STRICT environment variable
 
                 if broadcast:
                     # Grab value from rank 0 memory cache and broadcast result
