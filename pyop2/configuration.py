@@ -40,6 +40,7 @@ from loopy.target.c import CWithGNULibcTarget
 from pyop2.exceptions import ConfigurationError
 
 
+# JBTODO: Add a PYOP2_SPMD_STRICT environment variable to add various SPMD checks.
 class Configuration(dict):
     r"""PyOP2 configuration parameters
 

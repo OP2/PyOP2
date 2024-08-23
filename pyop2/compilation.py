@@ -47,7 +47,6 @@ from functools import partial
 from pathlib import Path
 from contextlib import contextmanager
 from tempfile import gettempdir
-from itertools import cycle
 from uuid import uuid4
 
 
@@ -69,6 +68,8 @@ def _check_hashes(x, y, datatype):
 
 _check_op = mpi.MPI.Op.Create(_check_hashes, commute=True)
 _compiler = None
+# Directory must be unique per user for shared machines
+MEM_TMP_DIR = Path(gettempdir()).joinpath(f"pyop2-tempcache-uid{os.getuid()}")
 
 
 def set_default_compiler(compiler):
@@ -421,8 +422,6 @@ def load_hashkey(*args, **kwargs):
     return default_parallel_hashkey(code_hash, *args[1:], **kwargs)
 
 
-# JBTODO: This should not be memory cached
-# ...benchmarking disagrees with my assessment
 @mpi.collective
 @memory_cache(hashkey=load_hashkey, broadcast=False)
 @PETSc.Log.EventDecorator()
@@ -476,7 +475,7 @@ def load(jitmodule, extension, fn_name, cppargs=(), ldargs=(),
         check_source_hashes(compiler_instance, code, extension, comm)
     # This call is cached on disk
     so_name = make_so(compiler_instance, code, extension, comm)
-    # This call is cached in memory by the OS
+    # This call might be cached in memory by the OS (system dependent)
     dll = ctypes.CDLL(so_name)
 
     if isinstance(jitmodule, pyop2.global_kernel.GlobalKernel):
@@ -532,6 +531,14 @@ def _make_so_hashkey(compiler, jitmodule, extension, comm):
 
 
 def check_source_hashes(compiler, jitmodule, extension, comm):
+    """A check to see whether code generated on all ranks is identical.
+
+    :arg compiler: The compiler to use to create the shared library.
+    :arg jitmodule: The JIT Module which can generate the code to compile.
+    :arg filename: The filename of the library to create.
+    :arg extension: extension of the source file (c, cpp).
+    :arg comm: Communicator over which to perform compilation.
+    """
     # Reconstruct hash from filename
     hashval = _as_hexdigest(_make_so_hashkey(compiler, jitmodule, extension, comm))
     with mpi.temp_internal_comm(comm) as icomm:
@@ -547,9 +554,6 @@ def check_source_hashes(compiler, jitmodule, extension, comm):
                 fh.write(jitmodule.code_to_compile)
             icomm.barrier()
             raise CompilationError(f"Generated code differs across ranks (see output in {output})")
-
-
-FILE_CYCLER = cycle(f"{ii:02x}" for ii in range(256))
 
 
 @mpi.collective
@@ -570,16 +574,14 @@ def make_so(compiler, jitmodule, extension, comm, filename=None):
     Returns a :class:`ctypes.CDLL` object of the resulting shared
     library."""
     if filename is None:
-        # JBTODO: Remove this directory at some point?
-        # Directory must be unique per user for shared machines
-        pyop2_tempdir = Path(gettempdir()).joinpath(f"pyop2-tempcache-uid{os.getuid()}")
         # A UUID should ensure we have a unique path
         uuid = uuid4().hex
-        tempdir = pyop2_tempdir.joinpath(f"{uuid[:2]}")
+        # Taking the first two characters avoids using excessive filesystem inodes
+        tempdir = MEM_TMP_DIR.joinpath(f"{uuid[:2]}")
         # This path + filename should be unique
         filename = tempdir.joinpath(f"{uuid[2:]}.{extension}")
     else:
-        pyop2_tempdir = None
+        tempdir = None
         filename = Path(filename).absolute()
 
     # Compilation communicators are reference counted on the PyOP2 comm
@@ -594,8 +596,8 @@ def make_so(compiler, jitmodule, extension, comm, filename=None):
         exe = compiler.cc
         compiler_flags = compiler.cflags
 
-    # JBTODO: Do we still need to worry about atomic file renaming in this function?
-    base = filename.name
+    # TODO: Do we still need to worry about atomic file renaming in this function?
+    base = filename.stem
     path = filename.parent
     pid = os.getpid()
     cname = filename.with_name(f"{base}_p{pid}.{extension}")
@@ -606,11 +608,10 @@ def make_so(compiler, jitmodule, extension, comm, filename=None):
 
     # Compile on compilation communicator (ccomm) rank 0
     if ccomm.rank == 0:
-        if pyop2_tempdir is None:
+        if tempdir is None:
             filename.parent.mkdir(exist_ok=True)
         else:
-            pyop2_tempdir.mkdir(exist_ok=True)
-            tempdir.mkdir(exist_ok=True)
+            tempdir.mkdir(parents=True, exist_ok=True)
         logfile = path.joinpath(f"{base}_p{pid}.log")
         errfile = path.joinpath(f"{base}_p{pid}.err")
         with progress(INFO, 'Compiling wrapper'):
@@ -632,13 +633,9 @@ def make_so(compiler, jitmodule, extension, comm, filename=None):
     return ccomm.bcast(soname, root=0)
 
 
-# JBTODO: Probably don't want to do this if we fail to compile...
-# ~ @atexit
-# ~ def _cleanup_tempdir():
-    # ~ pyop2_tempdir = Path(gettempdir()).joinpath(f"pyop2-tempcache-uid{os.getuid()}")
-
-
 def _run(cc, logfile, errfile, step="Compilation", filemode="w"):
+    """ Run a compilation command and handle logging + errors.
+    """
     debug(f"{step} command: {' '.join(cc)}")
     try:
         if configuration['no_fork_available']:
@@ -686,28 +683,29 @@ def clear_cache(prompt=False):
 
     :arg prompt: if ``True`` prompt before removing any files
     """
-    cachedir = configuration['cache_dir']
+    cachedirs = [configuration['cache_dir'], MEM_TMP_DIR]
 
-    if not os.path.exists(cachedir):
-        print("Cache directory could not be found")
-        return
-    if len(os.listdir(cachedir)) == 0:
-        print("No cached libraries to remove")
-        return
+    for directory in cachedirs:
+        if not os.path.exists(directory):
+            print("Cache directory could not be found")
+            return
+        if len(os.listdir(directory)) == 0:
+            print("No cached libraries to remove")
+            return
 
-    remove = True
-    if prompt:
-        user = input(f"Remove cached libraries from {cachedir}? [Y/n]: ")
+        remove = True
+        if prompt:
+            user = input(f"Remove cached libraries from {directory}? [Y/n]: ")
 
-        while user.lower() not in ['', 'y', 'n']:
-            print("Please answer y or n.")
-            user = input(f"Remove cached libraries from {cachedir}? [Y/n]: ")
+            while user.lower() not in ['', 'y', 'n']:
+                print("Please answer y or n.")
+                user = input(f"Remove cached libraries from {directory}? [Y/n]: ")
 
-        if user.lower() == 'n':
-            remove = False
+            if user.lower() == 'n':
+                remove = False
 
-    if remove:
-        print(f"Removing cached libraries from {cachedir}")
-        shutil.rmtree(cachedir, ignore_errors=True)
-    else:
-        print("Not removing cached libraries")
+        if remove:
+            print(f"Removing cached libraries from {directory}")
+            shutil.rmtree(directory, ignore_errors=True)
+        else:
+            print("Not removing cached libraries")

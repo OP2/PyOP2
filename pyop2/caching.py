@@ -36,6 +36,7 @@ import cachetools
 import hashlib
 import os
 import pickle
+import weakref
 from collections.abc import MutableMapping
 from pathlib import Path
 from warnings import warn  # noqa F401
@@ -44,6 +45,7 @@ from itertools import count
 from functools import partial, wraps
 
 from pyop2.configuration import configuration
+from pyop2.exceptions import CachingError, HashError  # noqa: F401
 from pyop2.logger import debug
 from pyop2.mpi import (
     MPI, COMM_WORLD, comm_cache_keyval, temp_internal_comm
@@ -245,9 +247,8 @@ CACHE_MISS = _CacheMiss()
 def _as_hexdigest(*args):
     hash_ = hashlib.md5()
     for a in args:
-        # JBTODO: Remove or edit this check!
-        if isinstance(a, MPI.Comm) or isinstance(a, cachetools.keys._HashedTuple):
-            breakpoint()
+        if isinstance(a, MPI.Comm):
+            raise HashError("Communicators cannot be hashed, caching will be broken!")
         hash_.update(str(a).encode())
     return hash_.hexdigest()
 
@@ -385,6 +386,8 @@ EXOTIC_CACHE = partial(instrument(cachetools.LRUCache), maxsize=100)
 # - DictLikeDiskAccess = instrument(DictLikeDiskAccess)
 
 
+# JBTODO: This functionality should only be enabled with a PYOP2_SPMD_STRICT
+# environment variable.
 def parallel_cache(
     hashkey=default_parallel_hashkey,
     comm_fetcher=default_comm_fetcher,
@@ -429,8 +432,13 @@ def parallel_cache(
                 local_cache = cache_collection[cf.__class__.__name__]
 
                 # If this is a new cache or function add it to the list of known caches
-                if (comm, comm.name, func, local_cache) not in [k[1:] for k in _KNOWN_CACHES]:
-                    _KNOWN_CACHES.append((next(_CACHE_CIDX), comm, comm.name, func, local_cache))
+                if (comm, comm.name, func, weakref.ref(local_cache)) not in [c[1:] for c in _KNOWN_CACHES]:
+                    # JBTODO: When a comm is freed we will not hold a ref to the cache,
+                    # but we should have a finalizer that extracts the stats before the object
+                    # is deleted.
+                    _KNOWN_CACHES.append(
+                        (next(_CACHE_CIDX), comm, comm.name, func, weakref.ref(local_cache))
+                    )
 
                 # JBTODO: Replace everything below here with:
                 # value = local_cache.get(key, CACHE_MISS)
@@ -508,7 +516,7 @@ def memory_and_disk_cache(*args, cachedir=configuration["cache_dir"], **kwargs):
 # * Add some sort of cache statistics ✓
 # * Refactor compilation.py to use @mem_and_disk_cached, where get_so is just uses DictLikeDiskAccess with an overloaded self.write() method ✓
 # * Systematic investigation into cache sizes/types for Firedrake
-#   - Is a mem cache needed for DLLs? No
+#   - Is a mem cache needed for DLLs? ~~No~~ Yes!!
 #   - Is LRUCache better than a simple dict? (memory profile test suite)
 #   - What is the optimal maxsize?
 # * Add some docstrings and maybe some exposition!

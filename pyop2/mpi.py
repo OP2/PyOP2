@@ -160,6 +160,8 @@ class PyOP2CommError(ValueError):
 # PYOP2_FINALISED flag.
 
 
+# JBTODO: Make this decorator infinitely more useful by adding barriers before
+# and after the function call, if being run with PYOP2_SPMD_STRICT=1.
 def collective(fn):
     extra = trim("""
     This function is logically collective over MPI ranks, it is an
