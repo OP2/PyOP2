@@ -678,6 +678,7 @@ def _add_profiling_events(dll, events):
             ctypes.c_int.in_dll(dll, 'ID_'+e).value = PETSc.Log.Event(e).id
 
 
+# JBTODO: Move to caching??
 def clear_cache(prompt=False):
     """Clear the PyOP2 compiler cache.
 
@@ -688,10 +689,10 @@ def clear_cache(prompt=False):
     for directory in cachedirs:
         if not os.path.exists(directory):
             print("Cache directory could not be found")
-            return
+            continue
         if len(os.listdir(directory)) == 0:
             print("No cached libraries to remove")
-            return
+            continue
 
         remove = True
         if prompt:
