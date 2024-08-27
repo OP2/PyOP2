@@ -402,12 +402,12 @@ class DEFAULT_CACHE(dict):
     pass
 
 
-# Examples of how to instrument and use different default caches:
-# ~ DEFAULT_CACHE = instrument(DEFAULT_CACHE)
-# ~ DEFAULT_CACHE = instrument(cachetools.LRUCache)
-# ~ DEFAULT_CACHE = partial(DEFAULT_CACHE, maxsize=100)
+# Example of how to instrument and use different default caches:
 EXOTIC_CACHE = partial(instrument(cachetools.LRUCache), maxsize=100)
-# ~ DictLikeDiskAccess = instrument(DictLikeDiskAccess)
+# Turn on cache measurements if printing cache info is enabled
+if configuration["print_cache_info"] or _running_on_ci:
+    DEFAULT_CACHE = instrument(DEFAULT_CACHE)
+    DictLikeDiskAccess = instrument(DictLikeDiskAccess)
 
 
 # JBTODO: This functionality should only be enabled with a PYOP2_SPMD_STRICT
@@ -509,7 +509,6 @@ def parallel_cache(
     return decorator
 
 
-# JBTODO: This needs some more thought
 def clear_memory_cache(comm):
     with temp_internal_comm(comm) as icomm:
         if icomm.Get_attr(comm_cache_keyval) is not None:
@@ -540,6 +539,6 @@ def memory_and_disk_cache(*args, cachedir=configuration["cache_dir"], **kwargs):
 # * Refactor compilation.py to use @mem_and_disk_cached, where get_so is just uses DictLikeDiskAccess with an overloaded self.write() method ✓
 # * Systematic investigation into cache sizes/types for Firedrake
 #   - Is a mem cache needed for DLLs? ~~No~~ Yes!!
-#   - Is LRUCache better than a simple dict? (memory profile test suite)
-#   - What is the optimal maxsize?
+#   - Is LRUCache better than a simple dict? (memory profile test suite) No
+#   - What is the optimal maxsize? ∞
 # * Add some docstrings and maybe some exposition!

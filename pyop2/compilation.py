@@ -68,8 +68,10 @@ def _check_hashes(x, y, datatype):
 
 _check_op = mpi.MPI.Op.Create(_check_hashes, commute=True)
 _compiler = None
-# Directory must be unique per user for shared machines
-MEM_TMP_DIR = Path(gettempdir()).joinpath(f"pyop2-tempcache-uid{os.getuid()}")
+# Directory must be unique per VENV for multiple installs
+# _and_ per user for shared machines
+_EXE_HASH = md5(sys.executable.encode()).hexdigest()[-6:]
+MEM_TMP_DIR = Path(gettempdir()).joinpath(f"pyop2-tempcache-uid{os.getuid()}").joinpath(_EXE_HASH)
 
 
 def set_default_compiler(compiler):
@@ -678,9 +680,8 @@ def _add_profiling_events(dll, events):
             ctypes.c_int.in_dll(dll, 'ID_'+e).value = PETSc.Log.Event(e).id
 
 
-# JBTODO: Move to caching??
-def clear_cache(prompt=False):
-    """Clear the PyOP2 compiler cache.
+def clear_compiler_disk_cache(prompt=False):
+    """Clear the PyOP2 compiler disk cache.
 
     :arg prompt: if ``True`` prompt before removing any files
     """
