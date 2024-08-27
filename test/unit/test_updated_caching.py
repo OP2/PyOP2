@@ -2,7 +2,6 @@ import ctypes
 import pytest
 import os
 import tempfile
-from functools import partial
 from itertools import chain
 from textwrap import dedent
 
@@ -63,7 +62,7 @@ def state():
 
 @pytest.mark.parametrize("decorator, uncached_function", [
     (memory_cache, twople),
-    (partial(memory_cache, broadcast=False), n_comms),
+    (memory_cache, n_comms),
     (memory_and_disk_cache, twople),
     (disk_only_cache, twople)
 ])
@@ -89,7 +88,7 @@ def test_function_args_twice_caches(request, state, decorator, uncached_function
 
 @pytest.mark.parametrize("decorator, uncached_function", [
     (memory_cache, twople),
-    (partial(memory_cache, broadcast=False), n_comms),
+    (memory_cache, n_comms),
     (memory_and_disk_cache, twople),
     (disk_only_cache, twople)
 ])
@@ -114,7 +113,7 @@ def test_function_args_different(request, state, decorator, uncached_function, t
 @pytest.mark.parallel(nprocs=3)
 @pytest.mark.parametrize("decorator, uncached_function", [
     (memory_cache, twople),
-    (partial(memory_cache, broadcast=False), n_comms),
+    (memory_cache, n_comms),
     (memory_and_disk_cache, twople),
     (disk_only_cache, twople)
 ])

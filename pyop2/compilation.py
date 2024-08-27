@@ -425,7 +425,7 @@ def load_hashkey(*args, **kwargs):
 
 
 @mpi.collective
-@memory_cache(hashkey=load_hashkey, broadcast=False)
+@memory_cache(hashkey=load_hashkey)
 @PETSc.Log.EventDecorator()
 def load(jitmodule, extension, fn_name, cppargs=(), ldargs=(),
          argtypes=None, restype=None, comm=None):
