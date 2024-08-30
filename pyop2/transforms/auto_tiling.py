@@ -20,6 +20,14 @@ import pymbolic.primitives as prim
 import islpy as isl
 
 
+class AutotilingFallback(Warning):
+    """
+    Warning raised when the kernel transform strategy via
+    ``gpu_strategy=auto_tiling`` falls back to the Single Work-item per Cell
+    transformation.
+    """
+
+
 # {{{ Modeling a transform candidate.
 
 
@@ -363,6 +371,13 @@ def temp_vars_both_read_and_write_access(
     return read_tvs & write_tvs
 
 
+class MetadataMismatchError(RuntimeError):
+    """
+    Raised when the matching logic in
+    :func:`inference_which_should_ideally_be_done_by_passing_metadata` fails.
+    """
+
+
 def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
     """
     Only intended to work for the vanilla representation of the form kernel.
@@ -479,15 +494,18 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
         # the eval stage and the instruction accessing would it have the
         # inames: "n, iquad, i_1".  Over here we extract what"s the name of i_1
         # in our FEM kernel.
-        (iname,) = ft_reduce(
-            set.union,
-            (
-                insn.within_inames
-                for insn in kernel.instructions
-                if trialDoF in insn.read_dependency_names()
-            ),
-            set(),
-        ) - {"n", iquad}
+        try:
+            (iname,) = ft_reduce(
+                set.union,
+                (
+                    insn.within_inames
+                    for insn in kernel.instructions
+                    if trialDoF in insn.read_dependency_names()
+                ),
+                set(),
+            ) - {"n", iquad}
+        except ValueError:
+            raise MetadataMismatchError
 
         doF_inames_in_eval_stage.add(iname)
         trialDofs_to_redn_inames[trialDoF] = iname
@@ -1817,7 +1835,14 @@ class ParametricTilingCandidateGenerator:
 def get_transform_candidates(
     fem_kernel: lp.TranslationUnit,
 ) -> Tuple[TransformCandidate, ...]:
-    return ParametricTilingCandidateGenerator(fem_kernel, 10)() + (SWIPC(),)
+    try:
+        return ParametricTilingCandidateGenerator(fem_kernel, 10)() + (SWIPC(),)
+    except MetadataMismatchError:
+        # fallback to no auto-tiling
+        import warnings
+
+        warnings.warn("Metadata mismatch error", AutotilingFallback)
+        return (SWIPC(),)
 
 
 def _transform_kernel_with_candidate(
