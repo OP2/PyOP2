@@ -388,9 +388,12 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
     # quad iname
     # Assumption: There is only a single iname responsible for quadrature and
     # it starts with "form_ip">
-    (iquad,) = [
-        iname for iname in kernel.all_inames() if iname.startswith("form_ip")
-    ]
+    try:
+        (iquad,) = [
+            iname for iname in kernel.all_inames() if iname.startswith("form_ip")
+        ]
+    except ValueError:
+        raise MetadataMismatchError
 
     # trialDof_x_outputDofs_x_coords: A set containing the variable names for the
     # *temporaries* of trialDofs, outputDofs and the coordinates.
