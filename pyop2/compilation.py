@@ -548,7 +548,7 @@ def check_source_hashes(compiler, jitmodule, extension, comm):
         if matching != hashval:
             # Dump all src code to disk for debugging
             output = Path(configuration["cache_dir"]).joinpath("mismatching-kernels")
-            srcfile = output.with_name(f"src-rank{icomm.rank}.{extension}")
+            srcfile = output.joinpath(f"src-rank{icomm.rank}.{extension}")
             if icomm.rank == 0:
                 output.mkdir(exist_ok=True)
             icomm.barrier()
