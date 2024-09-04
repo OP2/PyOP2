@@ -1,4 +1,5 @@
 import collections.abc
+import textwrap
 import ctypes
 from dataclasses import dataclass
 import itertools
@@ -247,6 +248,41 @@ class MixedMatKernelArg:
         return MatPack
 
 
+def with_petsc_event(knl):
+    event_name = knl.name
+
+    preambles = [
+        (
+            "99_petsc",
+            textwrap.dedent(f"""
+                #include <petsclog.h>
+
+                // Prepare a dummy event so that things compile. This is overwridden using
+                // the object file.
+                PetscLogEvent id_pyop3_loop = -1;
+            """)
+        )
+    ]
+
+    start_insn = lp.CInstruction((), f"PetscLogEventBegin(id_pyop3_loop, 0, 0, 0, 0);", id="petsc_log_begin")
+    stop_insn = lp.CInstruction((), f"PetscLogEventEnd(id_pyop3_loop, 0, 0, 0, 0);", id="petsc_log_end")
+
+    return _with_region_markers(knl, start_insn, stop_insn, preambles)
+
+
+def _with_region_markers(knl, start_insn, stop_insn, preambles):
+    preambles = knl.preambles + tuple(preambles)
+
+    assert start_insn.id is not None
+    insns = (
+        start_insn,
+        *(insn.copy(depends_on=insn.depends_on | {start_insn.id}) for insn in knl.instructions),
+        stop_insn.copy(depends_on=frozenset(insn.id for insn in knl.instructions)),
+    )
+
+    return knl.copy(preambles=preambles, instructions=insns)
+
+
 class GlobalKernel(Cached):
     """Class representing the generated code for the global computation.
 
@@ -389,6 +425,13 @@ class GlobalKernel(Cached):
         from pyop2.codegen.rep2loopy import generate
 
         wrapper = generate(self.builder)
+
+        if os.environ.get("PYOP2_ADD_PETSC_EVENT") == "1":
+            entrypoint = wrapper.default_entrypoint
+            assert entrypoint.name == self.name
+            entrypoint = with_petsc_event(entrypoint)
+            wrapper = wrapper.with_kernel(entrypoint)
+
         code = lp.generate_code_v2(wrapper)
 
         if self.local_kernel.cpp:
@@ -419,11 +462,16 @@ class GlobalKernel(Cached):
             + tuple(self.local_kernel.ldargs)
         )
 
-        return compilation.load(self, extension, self.name,
+        lib, fn = compilation.load(self, extension, self.name,
                                 cppargs=cppargs,
                                 ldargs=ldargs,
                                 restype=ctypes.c_int,
                                 comm=comm)
+
+        if os.environ.get("PYOP2_ADD_PETSC_EVENT") == "1":
+            ctypes.c_int.in_dll(lib, f"id_pyop3_loop").value = PETSc.Log.Event("pyop3_loop").id
+        return fn
+
 
     @cached_property
     def argtypes(self):

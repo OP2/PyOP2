@@ -250,7 +250,7 @@ class Parloop:
         self.global_to_local_begin()
         self._compute(self.iterset.core_part)
         self.global_to_local_end()
-        self._compute(self.iterset.owned_part)
+        # self._compute(self.iterset.owned_part)
         requests = self.reduction_begin()
         self.local_to_global_begin()
         self.update_arg_data_state()
