@@ -1597,7 +1597,7 @@ class TestParLoopAPI:
         s2 = op2.Set(10)
         m = op2.Map(s1, s2, 3)
         d = op2.Dat(s2 ** 1, [0] * 10, dtype=int)
-        k = op2.Kernel("static void k(int *x) {}", "k")
+        k = op2.Kernel("static void k(int64_t *x) {}", "k")
         op2.par_loop(k, s1, d(op2.READ, m))
 
     def test_frozen_dats_cannot_use_different_access_mode(self):
@@ -1605,7 +1605,7 @@ class TestParLoopAPI:
         s2 = op2.Set(3)
         m = op2.Map(s1, s2, 3, [0]*6)
         d = op2.Dat(s2**1, [0]*3, dtype=int)
-        k = op2.Kernel("static void k(int *x) {}", "k")
+        k = op2.Kernel("static void k(int64_t *x) {}", "k")
 
         with d.frozen_halo(op2.INC):
             op2.par_loop(k, s1, d(op2.INC, m))
