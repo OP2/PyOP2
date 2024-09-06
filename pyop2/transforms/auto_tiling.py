@@ -420,11 +420,14 @@ def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
     # In the "quadr" phase of the form kernel the *only* variable being written
     # is output DoF
 
-    (outDoF,) = {
-        insn.assignee_name
-        for insn in kernel.instructions
-        if lp.match.Tagged("quadrature")(kernel, insn)
-    }
+    try:
+        (outDoF,) = {
+            insn.assignee_name
+            for insn in kernel.instructions
+            if lp.match.Tagged("quadrature")(kernel, insn)
+        }
+    except ValueError:
+        raise MetadataMismatchError
 
     # }}}
 
