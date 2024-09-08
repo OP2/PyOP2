@@ -378,7 +378,9 @@ class MetadataMismatchError(RuntimeError):
     """
 
 
-def inference_which_should_ideally_be_done_by_passing_metadata(kernel):
+def inference_which_should_ideally_be_done_by_passing_metadata(
+    kernel: lp.LoopKernel,
+) -> Tuple[lp.LoopKernel, KernelMetadata]:
     """
     Only intended to work for the vanilla representation of the form kernel.
     For ex. Sum factorized action kernels won"t fit the pattern.
@@ -888,6 +890,24 @@ def tiled_transform(
     nt = tiling_config.nthreads_per_cell
     mv_tiles = tiling_config.operator_tile_descriptions
     quad_tiles = tiling_config.quad_rowtile_lengths
+
+    # {{{ if there's any loop being shared b/w coords gathering and DOF-gather => distribute it.
+
+    (coords_gather_insn,) = [
+        insn
+        for insn in kernel.instructions
+        if coords in insn.write_dependency_names()
+    ]
+    if coords_gather_insn.within_inames & frozenset(trialDoF_gather_inames):
+        kernel = lp.duplicate_inames(
+            kernel,
+            sorted(
+                coords_gather_insn.within_inames & frozenset(trialDoF_gather_inames)
+            ),
+            within=lp.match.Writes(coords),
+        )
+
+    # }}}
 
     if mv_tiles == ():
         mv_tiles = tuple((nquad, nDoF) for nDoF in n_trialDoFs) + (
