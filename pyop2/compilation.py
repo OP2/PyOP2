@@ -737,7 +737,7 @@ def get_prepared_cuda_function(comm, global_kernel, *args):
     dirpart, basename = basename[:2], basename[2:]
     cachedir = os.path.join(cachedir, dirpart)
 
-    nvcc_opts = ["-use_fast_math", "-w"]
+    nvcc_opts = ["-use_fast_math", "-w", "-Wno-deprecated-gpu-targets"]
 
     code_to_compile = _get_gpu_code_to_compile(comm, global_kernel, *args)
     source_module = SourceModule(code_to_compile, options=nvcc_opts,

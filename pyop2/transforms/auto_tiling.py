@@ -1948,7 +1948,8 @@ def get_empirically_best_candidate(
         )
 
         executable_knl = SourceModule(
-            code, options=["-use_fast_math", "-w"]
+            code, options=["-use_fast_math", "-w",
+                           "-Wno-deprecated-gpu-targets"]
         ).get_function(t_unit.default_entrypoint.name)
         extra_args = tuple(
             _np_ary_to_cuda_mem(extra_arg) for extra_arg in extra_args
