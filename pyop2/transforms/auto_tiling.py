@@ -1675,9 +1675,9 @@ class ParametricTilingCandidateGenerator:
         """
         T_e_r = tiling_config.operator_tile_descriptions[0][0]
         (quad_tile_len,) = tiling_config.quad_rowtile_lengths
-        nwi = tiling_config.nthreads_per_cell
         nwarps = self.get_effective_warps_per_sm(tiling_config)
-        nblocks = self.get_effective_blocks_per_sm(tiling_config)
+        if nwarps == 0:
+            return (np.inf, 0)
         nsync = self.get_nsync(tiling_config)
         effective_global_bw = 21 if nwarps > 8 else 20 * (nwarps / 8)
         effective_shared_bw = (
@@ -1765,8 +1765,6 @@ class ParametricTilingCandidateGenerator:
             + quadr_phase_smem_read_time
         )
         return (total_time, nsync)
-
-        return 4.0 / (nwarps) + nsync / nblocks + nwi / 8
 
     def __call__(self) -> Tuple[ParametricTiling, ...]:
         from itertools import product
