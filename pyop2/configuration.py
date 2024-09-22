@@ -74,6 +74,12 @@ class Configuration(dict):
         cdim > 1 be built as block sparsities, or dof sparsities.  The
         former saves memory but changes which preconditioners are
         available for the resulting matrices.  (Default yes)
+    :param gpu_strategy: A :class:str` indicating the transformation strategy
+        that must be applied to a :class:`pyop2.global_kernel.GlobalKernel`
+        when offloading to a GPGPU. Can be one of:
+        - ``"snpt"``: Single-"N" Per Thread. In the transform strategy, the
+          work of each element of the iteration set over which a global kernel
+          operates is assigned to a work-item (i.e. a CUDA thread)
     """
     # name, env variable, type, default, write once
     cache_dir = os.path.join(gettempdir(), "pyop2-cache-uid%s" % os.getuid())
@@ -113,7 +119,9 @@ class Configuration(dict):
         "matnest":
             ("PYOP2_MATNEST", bool, True),
         "block_sparsity":
-            ("PYOP2_BLOCK_SPARSITY", bool, True)
+            ("PYOP2_BLOCK_SPARSITY", bool, True),
+        "gpu_strategy":
+            ("PYOP2_GPU_STRATEGY", str, "snpt"),
     }
     """Default values for PyOP2 configuration parameters"""
 
