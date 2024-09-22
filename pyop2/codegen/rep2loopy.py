@@ -543,6 +543,7 @@ def generate(builder, wrapper_name=None, include_math=True, include_petsc=True, 
                                 options=options,
                                 assumptions=assumptions,
                                 lang_version=(2018, 2),
+                                silenced_warnings=["v1_scheduler_fallback"],
                                 name=wrapper_name)
 
     # prioritize loops
