@@ -35,10 +35,9 @@
 import os
 import pytest
 import tempfile
-import cachetools
 import numpy
 from pyop2 import op2, mpi
-from pyop2.caching import disk_cached
+from pyop2.caching import DEFAULT_CACHE, memory_and_disk_cache, clear_memory_cache
 
 
 def _seed():
@@ -46,6 +45,7 @@ def _seed():
 
 
 nelems = 8
+default_cache_name = DEFAULT_CACHE().__class__.__name__
 
 
 @pytest.fixture
@@ -284,7 +284,14 @@ class TestGeneratedCodeCache:
     Generated Code Cache Tests.
     """
 
-    cache = op2.GlobalKernel._cache
+    @property
+    def cache(self):
+        int_comm = mpi.internal_comm(mpi.COMM_WORLD, self)
+        _cache_collection = int_comm.Get_attr(mpi.comm_cache_keyval)
+        if _cache_collection is None:
+            _cache_collection = {default_cache_name: DEFAULT_CACHE()}
+            int_comm.Set_attr(mpi.comm_cache_keyval, _cache_collection)
+        return _cache_collection[default_cache_name]
 
     @pytest.fixture
     def a(cls, diterset):
@@ -526,68 +533,86 @@ class TestSparsityCache:
 class TestDiskCachedDecorator:
 
     @staticmethod
-    def myfunc(arg):
+    def myfunc(arg, comm):
         """Example function to cache the outputs of."""
         return {arg}
 
-    def collective_key(self, *args):
-        """Return a cache key suitable for use when collective over a communicator."""
-        self.comm = mpi.internal_comm(mpi.COMM_SELF, self)
-        return self.comm, cachetools.keys.hashkey(*args)
-
     @pytest.fixture
-    def cache(cls):
-        return {}
+    def comm(self):
+        """This fixture provides a temporary comm so that each test gets it's own
+        communicator and that caches are cleaned on free."""
+        temporary_comm = mpi.COMM_WORLD.Dup()
+        temporary_comm.name = "pytest temp COMM_WORLD"
+        with mpi.temp_internal_comm(temporary_comm) as comm:
+            yield comm
+        temporary_comm.Free()
 
     @pytest.fixture
     def cachedir(cls):
         return tempfile.TemporaryDirectory()
 
-    def test_decorator_in_memory_cache_reuses_results(self, cache, cachedir):
-        decorated_func = disk_cached(cache, cachedir.name)(self.myfunc)
+    def test_decorator_in_memory_cache_reuses_results(self, cachedir, comm):
+        decorated_func = memory_and_disk_cache(
+            cachedir=cachedir.name
+        )(self.myfunc)
 
-        obj1 = decorated_func("input1")
-        assert len(cache) == 1
+        obj1 = decorated_func("input1", comm=comm)
+        mem_cache = comm.Get_attr(mpi.comm_cache_keyval)[default_cache_name]
+        assert len(mem_cache) == 1
         assert len(os.listdir(cachedir.name)) == 1
 
-        obj2 = decorated_func("input1")
+        obj2 = decorated_func("input1", comm=comm)
         assert obj1 is obj2
-        assert len(cache) == 1
+        assert len(mem_cache) == 1
         assert len(os.listdir(cachedir.name)) == 1
 
-    def test_decorator_collective_has_different_in_memory_key(self, cache, cachedir):
-        decorated_func = disk_cached(cache, cachedir.name)(self.myfunc)
-        collective_func = disk_cached(cache, cachedir.name, self.collective_key,
-                                      collective=True)(self.myfunc)
+    def test_decorator_uses_different_in_memory_caches_on_different_comms(self, cachedir, comm):
+        comm_world_func = memory_and_disk_cache(
+            cachedir=cachedir.name
+        )(self.myfunc)
 
-        obj1 = collective_func("input1")
-        assert len(cache) == 1
-        assert len(os.listdir(cachedir.name)) == 1
+        temporary_comm = mpi.COMM_SELF.Dup()
+        temporary_comm.name = "pytest temp COMM_SELF"
+        with mpi.temp_internal_comm(temporary_comm) as comm_self:
+            comm_self_func = memory_and_disk_cache(
+                cachedir=cachedir.name
+            )(self.myfunc)
 
-        # The new entry should have a different in-memory key since the communicator
-        # is not included but the same key on disk.
-        obj2 = decorated_func("input1")
+            # obj1 should be cached on the COMM_WORLD cache
+            obj1 = comm_world_func("input1", comm=comm)
+            comm_world_cache = comm.Get_attr(mpi.comm_cache_keyval)[default_cache_name]
+            assert len(comm_world_cache) == 1
+            assert len(os.listdir(cachedir.name)) == 1
+
+            # obj2 should be cached on the COMM_SELF cache
+            obj2 = comm_self_func("input1", comm=comm_self)
+            comm_self_cache = comm_self.Get_attr(mpi.comm_cache_keyval)[default_cache_name]
+            assert obj1 == obj2 and obj1 is not obj2
+            assert len(comm_world_cache) == 1
+            assert len(comm_self_cache) == 1
+            assert len(os.listdir(cachedir.name)) == 1
+
+        temporary_comm.Free()
+
+    def test_decorator_disk_cache_reuses_results(self, cachedir, comm):
+        decorated_func = memory_and_disk_cache(cachedir=cachedir.name)(self.myfunc)
+
+        obj1 = decorated_func("input1", comm=comm)
+        clear_memory_cache(comm)
+        obj2 = decorated_func("input1", comm=comm)
+        mem_cache = comm.Get_attr(mpi.comm_cache_keyval)[default_cache_name]
         assert obj1 == obj2 and obj1 is not obj2
-        assert len(cache) == 2
+        assert len(mem_cache) == 1
         assert len(os.listdir(cachedir.name)) == 1
 
-    def test_decorator_disk_cache_reuses_results(self, cache, cachedir):
-        decorated_func = disk_cached(cache, cachedir.name)(self.myfunc)
+    def test_decorator_cache_misses(self, cachedir, comm):
+        decorated_func = memory_and_disk_cache(cachedir=cachedir.name)(self.myfunc)
 
-        obj1 = decorated_func("input1")
-        cache.clear()
-        obj2 = decorated_func("input1")
-        assert obj1 == obj2 and obj1 is not obj2
-        assert len(cache) == 1
-        assert len(os.listdir(cachedir.name)) == 1
-
-    def test_decorator_cache_misses(self, cache, cachedir):
-        decorated_func = disk_cached(cache, cachedir.name)(self.myfunc)
-
-        obj1 = decorated_func("input1")
-        obj2 = decorated_func("input2")
+        obj1 = decorated_func("input1", comm=comm)
+        obj2 = decorated_func("input2", comm=comm)
+        mem_cache = comm.Get_attr(mpi.comm_cache_keyval)[default_cache_name]
         assert obj1 != obj2
-        assert len(cache) == 2
+        assert len(mem_cache) == 2
         assert len(os.listdir(cachedir.name)) == 2
 
 
