@@ -351,6 +351,38 @@ class DictLikeDiskAccess(MutableMapping):
         pickle.dump(value, filehandle)
 
 
+class NoShardDiskAccess(DictLikeDiskAccess):
+    def __getitem__(self, key):
+        """Retrieve a value from the disk cache.
+
+        :arg key: The cache key, a 2-tuple of strings.
+        :returns: The cached object if found.
+        """
+        filepath = Path(self.cachedir, key[0] + key[1])
+        try:
+            with self.open(filepath.with_suffix(self.extension), mode="rb") as fh:
+                value = self.read(fh)
+        except FileNotFoundError:
+            raise KeyError("File not on disk, cache miss")
+        return value
+
+    def __setitem__(self, key, value):
+        """Store a new value in the disk cache.
+
+        :arg key: The cache key, a 2-tuple of strings.
+        :arg value: The new item to store in the cache.
+        """
+        k = key[0] + key[1]
+        basedir = Path(self.cachedir)
+        basedir.mkdir(parents=True, exist_ok=True)
+
+        tempfile = basedir.joinpath(f"{k}_p{os.getpid()}.tmp")
+        filepath = basedir.joinpath(k)
+        with self.open(tempfile, mode="wb") as fh:
+            self.write(fh, value)
+        tempfile.rename(filepath.with_suffix(self.extension))
+
+
 def default_comm_fetcher(*args, **kwargs):
     """ A sensible default comm fetcher for use with `parallel_cache`.
     """

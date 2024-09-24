@@ -51,7 +51,7 @@ from uuid import uuid4
 
 
 from pyop2 import mpi
-from pyop2.caching import parallel_cache, memory_cache, default_parallel_hashkey, _as_hexdigest, DictLikeDiskAccess
+from pyop2.caching import parallel_cache, memory_cache, default_parallel_hashkey, _as_hexdigest, NoShardDiskAccess
 from pyop2.configuration import configuration
 from pyop2.logger import warning, debug, progress, INFO
 from pyop2.exceptions import CompilationError
@@ -501,7 +501,7 @@ def expandWl(ldflags):
             yield flag
 
 
-class CompilerDiskAccess(DictLikeDiskAccess):
+class CompilerDiskAccess(NoShardDiskAccess):
     @contextmanager
     def open(self, filename, *args, **kwargs):
         yield filename
