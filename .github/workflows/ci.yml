@@ -28,13 +28,6 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
-        with:
-          detached: true
-          limit-access-to-actor: true
-        timeout-minutes: 15
-
       - name: Install system dependencies
         shell: bash
         run: |
