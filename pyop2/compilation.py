@@ -46,8 +46,8 @@ from textwrap import dedent
 from functools import partial
 from pathlib import Path
 from contextlib import contextmanager
-from tempfile import gettempdir
-from uuid import uuid4
+from tempfile import gettempdir, mkstemp
+from random import randint
 
 
 from pyop2 import mpi
@@ -575,17 +575,6 @@ def make_so(compiler, jitmodule, extension, comm, filename=None):
     :arg filename: Optional
     Returns a :class:`ctypes.CDLL` object of the resulting shared
     library."""
-    if filename is None:
-        # A UUID should ensure we have a unique path
-        uuid = uuid4().hex
-        # Taking the first two characters avoids using excessive filesystem inodes
-        tempdir = MEM_TMP_DIR.joinpath(f"{uuid[:2]}")
-        # This path + filename should be unique
-        filename = tempdir.joinpath(f"{uuid[2:]}.{extension}")
-    else:
-        tempdir = None
-        filename = Path(filename).absolute()
-
     # Compilation communicators are reference counted on the PyOP2 comm
     icomm = mpi.internal_comm(comm, compiler)
     ccomm = mpi.compilation_comm(icomm, compiler)
@@ -598,39 +587,40 @@ def make_so(compiler, jitmodule, extension, comm, filename=None):
         exe = compiler.cc
         compiler_flags = compiler.cflags
 
-    # TODO: Do we still need to worry about atomic file renaming in this function?
-    base = filename.stem
-    path = filename.parent
-    pid = os.getpid()
-    cname = filename.with_name(f"{base}_p{pid}.{extension}")
-    oname = filename.with_name(f"{base}_p{pid}.o")
-    # Link into temporary file, then rename to shared library atomically (avoiding races).
-    tempname = filename.with_stem(f"{base}_p{pid}.so")
-    soname = filename.with_suffix(".so")
-
     # Compile on compilation communicator (ccomm) rank 0
+    soname = None
     if ccomm.rank == 0:
-        if tempdir is None:
-            filename.parent.mkdir(exist_ok=True)
-        else:
+        if filename is None:
+            # Adding random 2-digit hexnum avoids using excessive filesystem inodes
+            tempdir = MEM_TMP_DIR.joinpath(f"{randint(0, 255):02x}")
             tempdir.mkdir(parents=True, exist_ok=True)
-        logfile = path.joinpath(f"{base}_p{pid}.log")
-        errfile = path.joinpath(f"{base}_p{pid}.err")
+            # This path + filename should be unique
+            _, filename = mkstemp(suffix=f".{extension}", dir=tempdir, text=True)
+            filename = Path(filename)
+        else:
+            filename.parent.mkdir(exist_ok=True)
+
+        cname = filename
+        oname = filename.with_suffix(".o")
+        soname = filename.with_suffix(".so")
+        logfile = filename.with_suffix(".log")
+        errfile = filename.with_suffix(".err")
         with progress(INFO, 'Compiling wrapper'):
+            # Write source code to disk
             with open(cname, "w") as fh:
                 fh.write(jitmodule.code_to_compile)
-            # Compiler also links
+
             if not compiler.ld:
-                cc = (exe,) + compiler_flags + ('-o', str(tempname), str(cname)) + compiler.ldflags
+                # Compile and link
+                cc = (exe,) + compiler_flags + ('-o', str(soname), str(cname)) + compiler.ldflags
                 _run(cc, logfile, errfile)
             else:
+                # Compile
                 cc = (exe,) + compiler_flags + ('-c', '-o', oname, cname)
                 _run(cc, logfile, errfile)
-                # Extract linker specific "cflags" from ldflags
-                ld = tuple(shlex.split(compiler.ld)) + ('-o', str(tempname), str(oname)) + tuple(expandWl(compiler.ldflags))
+                # Extract linker specific "cflags" from ldflags and link
+                ld = tuple(shlex.split(compiler.ld)) + ('-o', str(soname), str(oname)) + tuple(expandWl(compiler.ldflags))
                 _run(ld, logfile, errfile, step="Linker", filemode="a")
-            # Atomically ensure soname exists
-            tempname.rename(soname)
 
     return ccomm.bcast(soname, root=0)
 
@@ -664,10 +654,10 @@ def _run(cc, logfile, errfile, step="Compilation", filemode="w"):
 
 def _add_profiling_events(dll, events):
     """
-        If PyOP2 is in profiling mode, events are attached to dll to profile the local linear algebra calls.
-        The event is generated here in python and then set in the shared library,
-        so that memory is not allocated over and over again in the C kernel. The naming
-        convention is that the event ids are named by the event name prefixed by "ID_".
+    If PyOP2 is in profiling mode, events are attached to dll to profile the local linear algebra calls.
+    The event is generated here in python and then set in the shared library,
+    so that memory is not allocated over and over again in the C kernel. The naming
+    convention is that the event ids are named by the event name prefixed by "ID_".
     """
     if PETSc.Log.isActive():
         # also link the events from the linear algebra callables

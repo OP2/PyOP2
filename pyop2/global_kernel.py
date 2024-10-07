@@ -367,7 +367,6 @@ class GlobalKernel:
         from pyop2.codegen.rep2loopy import generate
 
         wrapper = generate(self.builder)
-        # JBTODO: Expensive? Can this be wrapped with a cache?
         code = lp.generate_code_v2(wrapper)
 
         if self.local_kernel.cpp:

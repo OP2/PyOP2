@@ -43,7 +43,8 @@ from pathlib import Path
 from warnings import warn  # noqa F401
 from collections import defaultdict
 from itertools import count
-from functools import partial, wraps
+from functools import wraps
+from tempfile import mkstemp
 
 from pyop2.configuration import configuration
 from pyop2.exceptions import CachingError, HashError  # noqa: F401
@@ -319,10 +320,21 @@ class DictLikeDiskAccess(MutableMapping):
         basedir = Path(self.cachedir, k1)
         basedir.mkdir(parents=True, exist_ok=True)
 
-        tempfile = basedir.joinpath(f"{k2}_p{os.getpid()}.tmp")
-        filepath = basedir.joinpath(k2)
+        # Care must be taken here to ensure that the file is created safely as
+        # the filesystem may be network based. `mkstemp` does so securely without
+        # race conditions:
+        # https://docs.python.org/3/library/tempfile.html#tempfile.mkstemp
+        _, tempfile = mkstemp(suffix=".tmp", prefix=k2, dir=basedir, text=False)
+        tempfile = Path(tempfile)
+        # Open using `tempfile` (the filename) rather than the file descriptor
+        # to allow redefining `self.open`
         with self.open(tempfile, mode="wb") as fh:
             self.write(fh, value)
+
+        # Renaming (moving) the file is guaranteed by any POSIX compliant
+        # filesystem to be atomic. This may fail if somehow the destination is
+        # on another filesystem, but that shouldn't happen here.
+        filepath = basedir.joinpath(k2)
         tempfile.rename(filepath.with_suffix(self.extension))
 
     def __delitem__(self, key):
@@ -417,7 +429,9 @@ class DEFAULT_CACHE(dict):
 
 
 # Example of how to instrument and use different default caches:
-EXOTIC_CACHE = partial(instrument(cachetools.LRUCache), maxsize=100)
+# from functools import partial
+# EXOTIC_CACHE = partial(instrument(cachetools.LRUCache), maxsize=100)
+
 # Turn on cache measurements if printing cache info is enabled
 if configuration["print_cache_info"] or _running_on_ci:
     DEFAULT_CACHE = instrument(DEFAULT_CACHE)
@@ -562,14 +576,3 @@ def memory_and_disk_cache(*args, cachedir=configuration["cache_dir"], **kwargs):
     def decorator(func):
         return memory_cache(*args, **kwargs)(disk_only_cache(*args, cachedir=cachedir, **kwargs)(func))
     return decorator
-
-# JBTODO: (Wishlist)
-# * Try more exotic caches ie: memory_cache = partial(parallel_cache, cache_factory=lambda: cachetools.LRUCache(maxsize=1000)) ✓
-# * Add some sort of cache reporting ✓
-# * Add some sort of cache statistics ✓
-# * Refactor compilation.py to use @mem_and_disk_cached, where get_so is just uses DictLikeDiskAccess with an overloaded self.write() method ✓
-# * Systematic investigation into cache sizes/types for Firedrake
-#   - Is a mem cache needed for DLLs? ~~No~~ Yes!!
-#   - Is LRUCache better than a simple dict? (memory profile test suite) No
-#   - What is the optimal maxsize? ∞
-# * Add some docstrings and maybe some exposition!
