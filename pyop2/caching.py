@@ -324,12 +324,14 @@ class DictLikeDiskAccess(MutableMapping):
         # the filesystem may be network based. `mkstemp` does so securely without
         # race conditions:
         # https://docs.python.org/3/library/tempfile.html#tempfile.mkstemp
-        _, tempfile = mkstemp(suffix=".tmp", prefix=k2, dir=basedir, text=False)
+        # The file descriptor must also be closed after use with `os.close()`.
+        fd, tempfile = mkstemp(suffix=".tmp", prefix=k2, dir=basedir, text=False)
         tempfile = Path(tempfile)
         # Open using `tempfile` (the filename) rather than the file descriptor
         # to allow redefining `self.open`
         with self.open(tempfile, mode="wb") as fh:
             self.write(fh, value)
+        os.close(fd)
 
         # Renaming (moving) the file is guaranteed by any POSIX compliant
         # filesystem to be atomic. This may fail if somehow the destination is

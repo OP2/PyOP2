@@ -595,7 +595,7 @@ def make_so(compiler, jitmodule, extension, comm, filename=None):
             tempdir = MEM_TMP_DIR.joinpath(f"{randint(0, 255):02x}")
             tempdir.mkdir(parents=True, exist_ok=True)
             # This path + filename should be unique
-            _, filename = mkstemp(suffix=f".{extension}", dir=tempdir, text=True)
+            descriptor, filename = mkstemp(suffix=f".{extension}", dir=tempdir, text=True)
             filename = Path(filename)
         else:
             filename.parent.mkdir(exist_ok=True)
@@ -609,6 +609,7 @@ def make_so(compiler, jitmodule, extension, comm, filename=None):
             # Write source code to disk
             with open(cname, "w") as fh:
                 fh.write(jitmodule.code_to_compile)
+            os.close(descriptor)
 
             if not compiler.ld:
                 # Compile and link
