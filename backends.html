@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>PyOP2 Backends &#8212; PyOP2 2020.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=fa44fd50" />
+    <link rel="stylesheet" type="text/css" href="_static/classic.css?v=def86cc0" />
+    
+    <script src="_static/documentation_options.js?v=63d4e452"></script>
+    <script src="_static/doctools.js?v=9a2dae69"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="PyOP2 Linear Algebra Interface" href="linear_algebra.html" />
+    <link rel="prev" title="PyOP2 Architecture" href="architecture.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="linear_algebra.html" title="PyOP2 Linear Algebra Interface"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="architecture.html" title="PyOP2 Architecture"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">PyOP2 2020.0 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">PyOP2 Backends</a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="pyop2-backends">
+<span id="backends"></span><h1>PyOP2 Backends<a class="headerlink" href="#pyop2-backends" title="Link to this heading">¶</a></h1>
+<p>PyOP2 provides a number of different backends to be able to run parallel
+computations on different hardware architectures. The currently supported
+backends are</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">sequential</span></code>: runs sequentially on a single CPU core.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">openmp</span></code>: runs multiple threads on an SMP CPU using OpenMP. The number of
+threads is set with the environment variable <code class="docutils literal notranslate"><span class="pre">OMP_NUM_THREADS</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cuda</span></code>: offloads computation to a NVIDA GPU (requires <span class="xref std std-ref">CUDA and pycuda</span>)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">opencl</span></code>: offloads computation to an OpenCL device, either a multi-core
+CPU or a GPU (requires <span class="xref std std-ref">OpenCL and pyopencl</span>)</p></li>
+</ul>
+<p>Distributed parallel computations using MPI are supported by PyOP2 and
+described in detail in <a class="reference internal" href="mpi.html"><span class="doc">MPI</span></a>. Datastructures must be partitioned among
+MPI processes with overlapping regions, so called halos.  The host backends
+<code class="docutils literal notranslate"><span class="pre">sequential</span></code> and <code class="docutils literal notranslate"><span class="pre">openmp</span></code> have full MPI support, the device backends
+<code class="docutils literal notranslate"><span class="pre">cuda</span></code> and <code class="docutils literal notranslate"><span class="pre">opencl</span></code> only support parallel loops on <code class="xref py py-class docutils literal notranslate"><span class="pre">Dats</span></code>. Hybrid parallel computations with OpenMP are possible, where
+<code class="docutils literal notranslate"><span class="pre">OMP_NUM_THREADS</span></code> threads are launched per MPI rank.</p>
+<section id="host-backends">
+<span id="id1"></span><h2>Host backends<a class="headerlink" href="#host-backends" title="Link to this heading">¶</a></h2>
+<p>Any computation in PyOP2 requires the generation of code at runtime specific
+to each individual <code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code>. The host backends generate code
+which is just-in-time (JIT) compiled into a shared library callable
+via <code class="xref py py-mod docutils literal notranslate"><span class="pre">ctypes</span></code>.  The compilation procedure also takes care of
+caching the compiled library on disk, such that the compilation cost
+is not paid every time.</p>
+<section id="sequential-backend">
+<span id="id2"></span><h3>Sequential backend<a class="headerlink" href="#sequential-backend" title="Link to this heading">¶</a></h3>
+<p>Since there is no parallel computation for the sequential backend, the
+generated code is a C wrapper function with a <code class="docutils literal notranslate"><span class="pre">for</span></code> loop calling the kernel
+for the respective <code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code>.  This wrapper also takes care of
+staging in and out the data as requested by the access descriptors requested
+in the parallel loop.  Both the kernel and the wrapper function are
+just-in-time compiled in a single compilation unit such that the kernel call
+can be inlined and does not incur any function call overhead.</p>
+<p>Recall the <code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code> calling the <code class="docutils literal notranslate"><span class="pre">midpoint</span></code> kernel from
+<a class="reference internal" href="kernels.html"><span class="doc">PyOP2 Kernels</span></a>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">op2</span><span class="o">.</span><span class="n">par_loop</span><span class="p">(</span><span class="n">midpoint</span><span class="p">,</span> <span class="n">cells</span><span class="p">,</span>
+             <span class="n">midpoints</span><span class="p">(</span><span class="n">op2</span><span class="o">.</span><span class="n">WRITE</span><span class="p">),</span>
+             <span class="n">coordinates</span><span class="p">(</span><span class="n">op2</span><span class="o">.</span><span class="n">READ</span><span class="p">,</span> <span class="n">cell2vertex</span><span class="p">))</span>
+</pre></div>
+</div>
+<p>The JIT compiled code for this loop is the kernel followed by the generated
+wrapper code:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="linenos"> 1</span><span class="kr">inline</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">midpoint</span><span class="p">(</span><span class="kt">double</span><span class="w"> </span><span class="n">p</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="n">coords</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span><span class="w"> </span><span class="p">{</span>
+<span class="linenos"> 2</span><span class="w">  </span><span class="n">p</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">coords</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">coords</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">coords</span><span class="p">[</span><span class="mi">2</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">3.0</span><span class="p">;</span>
+<span class="linenos"> 3</span><span class="w">  </span><span class="n">p</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">coords</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">coords</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">coords</span><span class="p">[</span><span class="mi">2</span><span class="p">][</span><span class="mi">1</span><span class="p">])</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">3.0</span><span class="p">;</span>
+<span class="linenos"> 4</span><span class="p">}</span>
+<span class="linenos"> 5</span>
+<span class="linenos"> 6</span><span class="kt">void</span><span class="w"> </span><span class="nf">wrap_midpoint__</span><span class="p">(</span><span class="n">PyObject</span><span class="w"> </span><span class="o">*</span><span class="n">_start</span><span class="p">,</span><span class="w"> </span><span class="n">PyObject</span><span class="w"> </span><span class="o">*</span><span class="n">_end</span><span class="p">,</span>
+<span class="linenos"> 7</span><span class="w">                     </span><span class="n">PyObject</span><span class="w"> </span><span class="o">*</span><span class="n">_arg0_0</span><span class="p">,</span>
+<span class="linenos"> 8</span><span class="w">                     </span><span class="n">PyObject</span><span class="w"> </span><span class="o">*</span><span class="n">_arg1_0</span><span class="p">,</span><span class="w"> </span><span class="n">PyObject</span><span class="w"> </span><span class="o">*</span><span class="n">_arg1_0_map0_0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="linenos"> 9</span><span class="w">  </span><span class="kt">int</span><span class="w"> </span><span class="n">start</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="p">)</span><span class="n">PyInt_AsLong</span><span class="p">(</span><span class="n">_start</span><span class="p">);</span>
+<span class="linenos">10</span><span class="w">  </span><span class="kt">int</span><span class="w"> </span><span class="n">end</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="p">)</span><span class="n">PyInt_AsLong</span><span class="p">(</span><span class="n">_end</span><span class="p">);</span>
+<span class="linenos">11</span><span class="w">  </span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="n">arg0_0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="p">)(((</span><span class="n">PyArrayObject</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">_arg0_0</span><span class="p">)</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">);</span>
+<span class="linenos">12</span><span class="w">  </span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="n">arg1_0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="p">)(((</span><span class="n">PyArrayObject</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">_arg1_0</span><span class="p">)</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">);</span>
+<span class="linenos">13</span><span class="w">  </span><span class="kt">int</span><span class="w"> </span><span class="o">*</span><span class="n">arg1_0_map0_0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="o">*</span><span class="p">)(((</span><span class="n">PyArrayObject</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">_arg1_0_map0_0</span><span class="p">)</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">);</span>
+<span class="linenos">14</span><span class="w">  </span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="n">arg1_0_vec</span><span class="p">[</span><span class="mi">3</span><span class="p">];</span>
+<span class="linenos">15</span><span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">start</span><span class="p">;</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">end</span><span class="p">;</span><span class="w"> </span><span class="n">n</span><span class="o">++</span><span class="w"> </span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="linenos">16</span><span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">n</span><span class="p">;</span>
+<span class="linenos">17</span><span class="w">    </span><span class="n">arg1_0_vec</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">arg1_0</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">arg1_0_map0_0</span><span class="p">[</span><span class="n">i</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="linenos">18</span><span class="w">    </span><span class="n">arg1_0_vec</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">arg1_0</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">arg1_0_map0_0</span><span class="p">[</span><span class="n">i</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="linenos">19</span><span class="w">    </span><span class="n">arg1_0_vec</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">arg1_0</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">arg1_0_map0_0</span><span class="p">[</span><span class="n">i</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="linenos">20</span><span class="w">    </span><span class="n">midpoint</span><span class="p">(</span><span class="n">arg0_0</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="n">arg1_0_vec</span><span class="p">);</span>
+<span class="linenos">21</span><span class="w">  </span><span class="p">}</span>
+<span class="linenos">22</span><span class="p">}</span>
+</pre></div>
+</div>
+<p>Note that the wrapper function is called directly from Python and therefore
+all arguments are plain Python objects, which first need to be unwrapped. The
+arguments <code class="docutils literal notranslate"><span class="pre">_start</span></code> and <code class="docutils literal notranslate"><span class="pre">_end</span></code> define the iteration set indices to iterate
+over. The remaining arguments are <code class="xref py py-class docutils literal notranslate"><span class="pre">arrays</span></code>
+corresponding to a <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> or <code class="xref py py-class docutils literal notranslate"><span class="pre">Map</span></code> passed to the
+<code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code>. Arguments are consecutively numbered to avoid name
+clashes.</p>
+<p>The first <code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code> argument <code class="docutils literal notranslate"><span class="pre">midpoints</span></code> is direct and
+therefore no corresponding <code class="xref py py-class docutils literal notranslate"><span class="pre">Map</span></code> is passed to the wrapper
+function and the data pointer is passed straight to the kernel with an
+appropriate offset. The second argument <code class="docutils literal notranslate"><span class="pre">coordinates</span></code> is indirect and hence
+a <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code>-<code class="xref py py-class docutils literal notranslate"><span class="pre">Map</span></code> pair is passed. Pointers to the data
+are gathered via the <code class="xref py py-class docutils literal notranslate"><span class="pre">Map</span></code> of arity 3 and staged in the array
+<code class="docutils literal notranslate"><span class="pre">arg1_0_vec</span></code>, which is passed to the kernel. The coordinate data can
+therefore be accessed in the kernel via double indirection with the
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Map</span></code> already applied. Note that for both arguments, the
+pointers are to two consecutive double values, since the
+<code class="xref py py-class docutils literal notranslate"><span class="pre">DataSet</span></code> is of dimension two in either case.</p>
+</section>
+<section id="openmp-backend">
+<span id="id3"></span><h3>OpenMP backend<a class="headerlink" href="#openmp-backend" title="Link to this heading">¶</a></h3>
+<p>In contrast to the sequential backend, the outermost <code class="docutils literal notranslate"><span class="pre">for</span></code> loop in the
+OpenMP backend is annotated with OpenMP pragmas to execute in parallel with
+multiple threads. To avoid race conditions on data access, the iteration set
+is coloured and a thread safe execution plan is computed as described in
+<a class="reference internal" href="plan.html#plan-colouring"><span class="std std-ref">Colouring</span></a>.</p>
+<p>The JIT compiled code for the parallel loop from above changes as follows:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="linenos"> 1</span><span class="kt">void</span><span class="w"> </span><span class="nf">wrap_midpoint__</span><span class="p">(</span><span class="n">PyObject</span><span class="o">*</span><span class="w"> </span><span class="n">_boffset</span><span class="p">,</span>
+<span class="linenos"> 2</span><span class="w">                     </span><span class="n">PyObject</span><span class="o">*</span><span class="w"> </span><span class="n">_nblocks</span><span class="p">,</span>
+<span class="linenos"> 3</span><span class="w">                     </span><span class="n">PyObject</span><span class="o">*</span><span class="w"> </span><span class="n">_blkmap</span><span class="p">,</span>
+<span class="linenos"> 4</span><span class="w">                     </span><span class="n">PyObject</span><span class="o">*</span><span class="w"> </span><span class="n">_offset</span><span class="p">,</span>
+<span class="linenos"> 5</span><span class="w">                     </span><span class="n">PyObject</span><span class="o">*</span><span class="w"> </span><span class="n">_nelems</span><span class="p">,</span>
+<span class="linenos"> 6</span><span class="w">                     </span><span class="n">PyObject</span><span class="w"> </span><span class="o">*</span><span class="n">_arg0_0</span><span class="p">,</span>
+<span class="linenos"> 7</span><span class="w">                     </span><span class="n">PyObject</span><span class="w"> </span><span class="o">*</span><span class="n">_arg1_0</span><span class="p">,</span><span class="w"> </span><span class="n">PyObject</span><span class="w"> </span><span class="o">*</span><span class="n">_arg1_0_map0_0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="linenos"> 8</span><span class="w">  </span><span class="kt">int</span><span class="w"> </span><span class="n">boffset</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="p">)</span><span class="n">PyInt_AsLong</span><span class="p">(</span><span class="n">_boffset</span><span class="p">);</span>
+<span class="linenos"> 9</span><span class="w">  </span><span class="kt">int</span><span class="w"> </span><span class="n">nblocks</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="p">)</span><span class="n">PyInt_AsLong</span><span class="p">(</span><span class="n">_nblocks</span><span class="p">);</span>
+<span class="linenos">10</span><span class="w">  </span><span class="kt">int</span><span class="o">*</span><span class="w"> </span><span class="n">blkmap</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="o">*</span><span class="p">)(((</span><span class="n">PyArrayObject</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">_blkmap</span><span class="p">)</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">);</span>
+<span class="linenos">11</span><span class="w">  </span><span class="kt">int</span><span class="o">*</span><span class="w"> </span><span class="n">offset</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="o">*</span><span class="p">)(((</span><span class="n">PyArrayObject</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">_offset</span><span class="p">)</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">);</span>
+<span class="linenos">12</span><span class="w">  </span><span class="kt">int</span><span class="o">*</span><span class="w"> </span><span class="n">nelems</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="o">*</span><span class="p">)(((</span><span class="n">PyArrayObject</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">_nelems</span><span class="p">)</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">);</span>
+<span class="linenos">13</span><span class="w">  </span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="n">arg0_0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="p">)(((</span><span class="n">PyArrayObject</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">_arg0_0</span><span class="p">)</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">);</span>
+<span class="linenos">14</span><span class="w">  </span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="n">arg1_0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="p">)(((</span><span class="n">PyArrayObject</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">_arg1_0</span><span class="p">)</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">);</span>
+<span class="linenos">15</span><span class="w">  </span><span class="kt">int</span><span class="w"> </span><span class="o">*</span><span class="n">arg1_0_map0_0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="o">*</span><span class="p">)(((</span><span class="n">PyArrayObject</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">_arg1_0_map0_0</span><span class="p">)</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">);</span>
+<span class="linenos">16</span><span class="w">  </span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="n">arg1_0_vec</span><span class="p">[</span><span class="mi">32</span><span class="p">][</span><span class="mi">3</span><span class="p">];</span>
+<span class="linenos">17</span><span class="w">  </span><span class="cp">#ifdef _OPENMP</span>
+<span class="linenos">18</span><span class="w">  </span><span class="kt">int</span><span class="w"> </span><span class="n">nthread</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">omp_get_max_threads</span><span class="p">();</span>
+<span class="linenos">19</span><span class="w">  </span><span class="cp">#else</span>
+<span class="linenos">20</span><span class="w">  </span><span class="kt">int</span><span class="w"> </span><span class="n">nthread</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="linenos">21</span><span class="w">  </span><span class="cp">#endif</span>
+<span class="linenos">22</span><span class="w">  </span><span class="cp">#pragma omp parallel shared(boffset, nblocks, nelems, blkmap)</span>
+<span class="linenos">23</span><span class="w">  </span><span class="p">{</span>
+<span class="linenos">24</span><span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">tid</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">omp_get_thread_num</span><span class="p">();</span>
+<span class="linenos">25</span><span class="w">    </span><span class="cp">#pragma omp for schedule(static)</span>
+<span class="linenos">26</span><span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">__b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">boffset</span><span class="p">;</span><span class="w"> </span><span class="n">__b</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">boffset</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">nblocks</span><span class="p">;</span><span class="w"> </span><span class="n">__b</span><span class="o">++</span><span class="p">)</span>
+<span class="linenos">27</span><span class="w">    </span><span class="p">{</span>
+<span class="linenos">28</span><span class="w">      </span><span class="kt">int</span><span class="w"> </span><span class="n">bid</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">blkmap</span><span class="p">[</span><span class="n">__b</span><span class="p">];</span>
+<span class="linenos">29</span><span class="w">      </span><span class="kt">int</span><span class="w"> </span><span class="n">nelem</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">nelems</span><span class="p">[</span><span class="n">bid</span><span class="p">];</span>
+<span class="linenos">30</span><span class="w">      </span><span class="kt">int</span><span class="w"> </span><span class="n">efirst</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">offset</span><span class="p">[</span><span class="n">bid</span><span class="p">];</span>
+<span class="linenos">31</span><span class="w">      </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">efirst</span><span class="p">;</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">efirst</span><span class="o">+</span><span class="w"> </span><span class="n">nelem</span><span class="p">;</span><span class="w"> </span><span class="n">n</span><span class="o">++</span><span class="w"> </span><span class="p">)</span>
+<span class="linenos">32</span><span class="w">      </span><span class="p">{</span>
+<span class="linenos">33</span><span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">n</span><span class="p">;</span>
+<span class="linenos">34</span><span class="w">        </span><span class="n">arg1_0_vec</span><span class="p">[</span><span class="n">tid</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">arg1_0</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">arg1_0_map0_0</span><span class="p">[</span><span class="n">i</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="linenos">35</span><span class="w">        </span><span class="n">arg1_0_vec</span><span class="p">[</span><span class="n">tid</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">arg1_0</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">arg1_0_map0_0</span><span class="p">[</span><span class="n">i</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="linenos">36</span><span class="w">        </span><span class="n">arg1_0_vec</span><span class="p">[</span><span class="n">tid</span><span class="p">][</span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">arg1_0</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">arg1_0_map0_0</span><span class="p">[</span><span class="n">i</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="linenos">37</span><span class="w">        </span><span class="n">midpoint</span><span class="p">(</span><span class="n">arg0_0</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="n">arg1_0_vec</span><span class="p">[</span><span class="n">tid</span><span class="p">]);</span>
+<span class="linenos">38</span><span class="w">      </span><span class="p">}</span>
+<span class="linenos">39</span><span class="w">    </span><span class="p">}</span>
+<span class="linenos">40</span><span class="w">  </span><span class="p">}</span>
+<span class="linenos">41</span><span class="p">}</span>
+</pre></div>
+</div>
+<p>Computation is split into <code class="docutils literal notranslate"><span class="pre">nblocks</span></code> blocks which start at an initial offset
+<code class="docutils literal notranslate"><span class="pre">boffset</span></code> and correspond to colours that can be executed conflict free in
+parallel. This loop over colours is therefore wrapped in an OpenMP parallel
+region and is annotated with an <code class="docutils literal notranslate"><span class="pre">omp</span> <span class="pre">for</span></code> pragma. The block id <code class="docutils literal notranslate"><span class="pre">bid</span></code> for
+each of these blocks is given by the block map <code class="docutils literal notranslate"><span class="pre">blkmap</span></code> and is the index
+into the arrays <code class="docutils literal notranslate"><span class="pre">nelems</span></code> and <code class="docutils literal notranslate"><span class="pre">offset</span></code> provided as part of the execution
+plan. These are the number of elements that are part of the given block and
+its starting index. Note that each thread needs its own staging array
+<code class="docutils literal notranslate"><span class="pre">arg1_0_vec</span></code>, which is therefore scoped by the thread id.</p>
+</section>
+</section>
+<section id="device-backends">
+<span id="id4"></span><h2>Device backends<a class="headerlink" href="#device-backends" title="Link to this heading">¶</a></h2>
+<p>As with the host backends, the device backends have most of the implementation
+in common. The PyOP2 data carriers <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">Global</span></code>
+and <code class="xref py py-class docutils literal notranslate"><span class="pre">Const</span></code> have a data array in host memory and a separate
+array in device memory. Flags indicate the present state of a given data
+carrier:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">DEVICE_UNALLOCATED</span></code>: no data is allocated on the device</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">HOST_UNALLOCATED</span></code>: no data is allocated on the host</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">DEVICE</span></code>: data is up-to-date (valid) on the device, but invalid on the
+host</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">HOST</span></code>: data is up-to-date (valid) on the host, but invalid on the device</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">BOTH</span></code>: data is up-to-date (valid) on both the host and device</p></li>
+</ul>
+<p>When a <code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code> is called, PyOP2 uses the
+<a class="reference internal" href="concepts.html#access-descriptors"><span class="std std-ref">Access descriptors</span></a> to determine which data needs to be allocated or
+transferred from host to device prior to launching the kernel. Data is only
+transferred if it is out of date at the target location and all data transfer
+is triggered lazily i.e. the actual copy only occurs once the data is
+requested. In particular there is no automatic transfer back of data from
+device to host unless it is accessed on the host.</p>
+<p>A newly created device <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> has no associated device data and
+starts out in the state <code class="docutils literal notranslate"><span class="pre">DEVICE_UNALLOCATED</span></code>. The diagram below shows all
+actions that involve a state transition, which can be divided into three
+groups: calling explicit data transfer functions (red), access data on the
+host (black) and using the <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> in a <code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code>
+(blue). There is no need for users to explicitly initiate data transfers and
+the tranfer functions are only given for completeness.</p>
+<figure class="align-center" id="id7">
+<img alt="_images/pyop2_device_data_state.svg" src="_images/pyop2_device_data_state.svg" />
+<figcaption>
+<p><span class="caption-text">State transitions of a data carrier on PyOP2 device backends</span><a class="headerlink" href="#id7" title="Link to this image">¶</a></p>
+</figcaption>
+</figure>
+<p>When a device <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> is used in a <code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code> for the
+first time, data is allocated on the device. If the <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> is
+only read, the host array is transferred to device if it was in state <code class="docutils literal notranslate"><span class="pre">HOST</span></code>
+or <code class="docutils literal notranslate"><span class="pre">DEVICE_UNALLOCATED</span></code> before the <code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code> and the
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> is in the state <code class="docutils literal notranslate"><span class="pre">BOTH</span></code> afterwards, unless it was in
+state <code class="docutils literal notranslate"><span class="pre">DEVICE</span></code> in which case it remains in that state. If the
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> is written to, data transfer before the
+<code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code> is necessary unless the access descriptor is
+<code class="xref py py-data docutils literal notranslate"><span class="pre">WRITE</span></code> and the host data is out of date afterwards and the
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> is in the state <code class="docutils literal notranslate"><span class="pre">DEVICE</span></code>. An overview of the state
+transitions and necessary memory allocations and data transfers for the two
+cases is given in the table below:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Initial state</p></th>
+<th class="head"><p><code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code> read</p></th>
+<th class="head"><p><code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code> written to</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">DEVICE_UNALLOCATED</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">BOTH</span></code> (alloc, transfer h2d)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DEVICE</span></code> (alloc, transfer h2d unless write-only)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">DEVICE</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DEVICE</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DEVICE</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HOST</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">BOTH</span></code> (transfer h2d)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DEVICE</span></code> (transfer h2d unless write-only)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">BOTH</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">BOTH</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DEVICE</span></code></p></td>
+</tr>
+</tbody>
+</table>
+<p>Accessing data on the host initiates a device to host data transfer if the
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> is in state <code class="docutils literal notranslate"><span class="pre">DEVICE</span></code> and leaves it in state <code class="docutils literal notranslate"><span class="pre">HOST</span></code>
+when using the <code class="xref py py-meth docutils literal notranslate"><span class="pre">data()</span></code> property and <code class="docutils literal notranslate"><span class="pre">BOTH</span></code> when using
+<code class="xref py py-meth docutils literal notranslate"><span class="pre">data_ro()</span></code>.</p>
+<p>The state transitions described above apply in the same way to a
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Global</span></code>. A <code class="xref py py-class docutils literal notranslate"><span class="pre">Const</span></code> is read-only, never modified
+on device and therefore never out of date on the host. Hence there is no
+state <code class="docutils literal notranslate"><span class="pre">DEVICE</span></code> and it is not necessary to copy back <code class="xref py py-class docutils literal notranslate"><span class="pre">Const</span></code>
+data from device to host.</p>
+<section id="cuda-backend">
+<span id="id5"></span><h3>CUDA backend<a class="headerlink" href="#cuda-backend" title="Link to this heading">¶</a></h3>
+<p>The CUDA backend makes extensive use of <a class="reference external" href="http://mathema.tician.de/software/pycuda/">PyCUDA</a> and its infrastructure for
+just-in-time compilation of CUDA kernels and interfacing them to Python.
+Linear solvers and sparse matrix data structures are implemented on top of the
+<a class="reference external" href="http://cusplibrary.github.io">CUSP library</a> and are described in greater detail in <a class="reference internal" href="linear_algebra.html"><span class="doc">PyOP2 Linear Algebra Interface</span></a>.
+Code generation uses a template based approach, where a <code class="docutils literal notranslate"><span class="pre">__global__</span></code> stub
+routine to be called from the host is generated, which takes care of data
+marshalling and calling the user kernel as an inline <code class="docutils literal notranslate"><span class="pre">__device__</span></code> function.</p>
+<p>We consider the same <code class="docutils literal notranslate"><span class="pre">midpoint</span></code> kernel as in the previous examples, which
+requires no CUDA-specific modifications and is automatically annotated with a
+<code class="docutils literal notranslate"><span class="pre">__device__</span></code> qualifier. <a class="reference external" href="http://mathema.tician.de/software/pycuda/">PyCUDA</a> automatically generates a host stub for the
+generated kernel stub <code class="docutils literal notranslate"><span class="pre">__midpoint_stub</span></code> given a list of parameter types. It
+takes care of translating Python objects to plain C data types and pointers,
+such that a CUDA kernel can be launched straight from Python. The entire CUDA
+code PyOP2 generates is as follows:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="linenos"> 1</span><span class="n">__device__</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">midpoint</span><span class="p">(</span><span class="kt">double</span><span class="w"> </span><span class="n">p</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="n">coords</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>
+<span class="linenos"> 2</span><span class="p">{</span>
+<span class="linenos"> 3</span><span class="w">  </span><span class="n">p</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">((</span><span class="n">coords</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">coords</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">coords</span><span class="p">[</span><span class="mi">2</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">3.0</span><span class="p">;</span>
+<span class="linenos"> 4</span><span class="w">  </span><span class="n">p</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">((</span><span class="n">coords</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">coords</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="mi">1</span><span class="p">])</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">coords</span><span class="p">[</span><span class="mi">2</span><span class="p">][</span><span class="mi">1</span><span class="p">])</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">3.0</span><span class="p">;</span>
+<span class="linenos"> 5</span><span class="p">}</span>
+<span class="linenos"> 6</span>
+<span class="linenos"> 7</span><span class="n">__global__</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">__midpoint_stub</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">set_size</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">set_offset</span><span class="p">,</span>
+<span class="linenos"> 8</span><span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="n">arg0</span><span class="p">,</span>
+<span class="linenos"> 9</span><span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="n">ind_arg1</span><span class="p">,</span>
+<span class="linenos">10</span><span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="o">*</span><span class="n">ind_map</span><span class="p">,</span>
+<span class="linenos">11</span><span class="w">    </span><span class="kt">short</span><span class="w"> </span><span class="o">*</span><span class="n">loc_map</span><span class="p">,</span>
+<span class="linenos">12</span><span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="o">*</span><span class="n">ind_sizes</span><span class="p">,</span>
+<span class="linenos">13</span><span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="o">*</span><span class="n">ind_offs</span><span class="p">,</span>
+<span class="linenos">14</span><span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">block_offset</span><span class="p">,</span>
+<span class="linenos">15</span><span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="o">*</span><span class="n">blkmap</span><span class="p">,</span>
+<span class="linenos">16</span><span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="o">*</span><span class="n">offset</span><span class="p">,</span>
+<span class="linenos">17</span><span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="o">*</span><span class="n">nelems</span><span class="p">,</span>
+<span class="linenos">18</span><span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="o">*</span><span class="n">nthrcol</span><span class="p">,</span>
+<span class="linenos">19</span><span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="o">*</span><span class="n">thrcol</span><span class="p">,</span>
+<span class="linenos">20</span><span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">nblocks</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="linenos">21</span><span class="w">  </span><span class="k">extern</span><span class="w"> </span><span class="n">__shared__</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="n">shared</span><span class="p">[];</span>
+<span class="linenos">22</span><span class="w">  </span><span class="n">__shared__</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="o">*</span><span class="n">ind_arg1_map</span><span class="p">;</span>
+<span class="linenos">23</span><span class="w">  </span><span class="n">__shared__</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">ind_arg1_size</span><span class="p">;</span>
+<span class="linenos">24</span><span class="w">  </span><span class="n">__shared__</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">ind_arg1_shared</span><span class="p">;</span>
+<span class="linenos">25</span><span class="w">  </span><span class="n">__shared__</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">nelem</span><span class="p">,</span><span class="w"> </span><span class="n">offset_b</span><span class="p">,</span><span class="w"> </span><span class="n">offset_b_abs</span><span class="p">;</span>
+<span class="linenos">26</span>
+<span class="linenos">27</span><span class="w">  </span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="n">ind_arg1_vec</span><span class="p">[</span><span class="mi">3</span><span class="p">];</span>
+<span class="linenos">28</span>
+<span class="linenos">29</span><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">blockIdx</span><span class="p">.</span><span class="n">x</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">blockIdx</span><span class="p">.</span><span class="n">y</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">gridDim</span><span class="p">.</span><span class="n">x</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="n">nblocks</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="p">;</span>
+<span class="linenos">30</span><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">threadIdx</span><span class="p">.</span><span class="n">x</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="linenos">31</span><span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">blockId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">blkmap</span><span class="p">[</span><span class="n">blockIdx</span><span class="p">.</span><span class="n">x</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">blockIdx</span><span class="p">.</span><span class="n">y</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">gridDim</span><span class="p">.</span><span class="n">x</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">block_offset</span><span class="p">];</span>
+<span class="linenos">32</span><span class="w">    </span><span class="n">nelem</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">nelems</span><span class="p">[</span><span class="n">blockId</span><span class="p">];</span>
+<span class="linenos">33</span><span class="w">    </span><span class="n">offset_b_abs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">offset</span><span class="p">[</span><span class="n">blockId</span><span class="p">];</span>
+<span class="linenos">34</span><span class="w">    </span><span class="n">offset_b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">offset_b_abs</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">set_offset</span><span class="p">;</span>
+<span class="linenos">35</span>
+<span class="linenos">36</span><span class="w">    </span><span class="n">ind_arg1_size</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ind_sizes</span><span class="p">[</span><span class="mi">0</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">blockId</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">1</span><span class="p">];</span>
+<span class="linenos">37</span><span class="w">    </span><span class="n">ind_arg1_map</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">ind_map</span><span class="p">[</span><span class="mi">0</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">set_size</span><span class="p">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">ind_offs</span><span class="p">[</span><span class="mi">0</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">blockId</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">1</span><span class="p">];</span>
+<span class="linenos">38</span>
+<span class="linenos">39</span><span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">nbytes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="linenos">40</span><span class="w">    </span><span class="n">ind_arg1_shared</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="o">&amp;</span><span class="n">shared</span><span class="p">[</span><span class="n">nbytes</span><span class="p">];</span>
+<span class="linenos">41</span><span class="w">  </span><span class="p">}</span>
+<span class="linenos">42</span>
+<span class="linenos">43</span><span class="w">  </span><span class="n">__syncthreads</span><span class="p">();</span>
+<span class="linenos">44</span>
+<span class="linenos">45</span><span class="w">  </span><span class="c1">// Copy into shared memory</span>
+<span class="linenos">46</span><span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">idx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">threadIdx</span><span class="p">.</span><span class="n">x</span><span class="p">;</span><span class="w"> </span><span class="n">idx</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">ind_arg1_size</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w"> </span><span class="n">idx</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">blockDim</span><span class="p">.</span><span class="n">x</span><span class="w"> </span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="linenos">47</span><span class="w">    </span><span class="n">ind_arg1_shared</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ind_arg1</span><span class="p">[</span><span class="n">idx</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">ind_arg1_map</span><span class="p">[</span><span class="n">idx</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">];</span>
+<span class="linenos">48</span><span class="w">  </span><span class="p">}</span>
+<span class="linenos">49</span>
+<span class="linenos">50</span><span class="w">  </span><span class="n">__syncthreads</span><span class="p">();</span>
+<span class="linenos">51</span>
+<span class="linenos">52</span><span class="w">  </span><span class="c1">// process set elements</span>
+<span class="linenos">53</span><span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">idx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">threadIdx</span><span class="p">.</span><span class="n">x</span><span class="p">;</span><span class="w"> </span><span class="n">idx</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">nelem</span><span class="p">;</span><span class="w"> </span><span class="n">idx</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">blockDim</span><span class="p">.</span><span class="n">x</span><span class="w"> </span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="linenos">54</span><span class="w">    </span><span class="n">ind_arg1_vec</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ind_arg1_shared</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">loc_map</span><span class="p">[</span><span class="mi">0</span><span class="o">*</span><span class="n">set_size</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">idx</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">offset_b</span><span class="p">]</span><span class="o">*</span><span class="mi">2</span><span class="p">;</span>
+<span class="linenos">55</span><span class="w">    </span><span class="n">ind_arg1_vec</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ind_arg1_shared</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">loc_map</span><span class="p">[</span><span class="mi">1</span><span class="o">*</span><span class="n">set_size</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">idx</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">offset_b</span><span class="p">]</span><span class="o">*</span><span class="mi">2</span><span class="p">;</span>
+<span class="linenos">56</span><span class="w">    </span><span class="n">ind_arg1_vec</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ind_arg1_shared</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">loc_map</span><span class="p">[</span><span class="mi">2</span><span class="o">*</span><span class="n">set_size</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">idx</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">offset_b</span><span class="p">]</span><span class="o">*</span><span class="mi">2</span><span class="p">;</span>
+<span class="linenos">57</span>
+<span class="linenos">58</span><span class="w">    </span><span class="n">midpoint</span><span class="p">(</span><span class="n">arg0</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">idx</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">offset_b_abs</span><span class="p">),</span><span class="w"> </span><span class="n">ind_arg1_vec</span><span class="p">);</span>
+<span class="linenos">59</span><span class="w">  </span><span class="p">}</span>
+<span class="linenos">60</span><span class="p">}</span>
+</pre></div>
+</div>
+<p>The CUDA kernel <code class="docutils literal notranslate"><span class="pre">__midpoint_stub</span></code> is launched on the GPU for a specific
+number of threads in parallel. Each thread is identified inside the kernel by
+its thread id <code class="docutils literal notranslate"><span class="pre">threadIdx</span></code> within a block of threads identified by a two
+dimensional block id <code class="docutils literal notranslate"><span class="pre">blockIdx</span></code> within a grid of blocks.</p>
+<p>As for OpenMP, there is the potential for data races, which are prevented by
+colouring the iteration set and computing a parallel execution plan, where all
+elements of the same colour can be modified simultaneously. Each colour is
+computed by a block of threads in parallel. All threads of a thread block have
+access to a shared memory, which is used as a shared staging area initialised
+by thread 0 of each block, see lines 30-41 above. A call to
+<code class="docutils literal notranslate"><span class="pre">__syncthreads()</span></code> ensures these initial values are visible to all threads of
+the block. After this barrier, all threads cooperatively gather data from the
+indirectly accessed <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> via the <code class="xref py py-class docutils literal notranslate"><span class="pre">Map</span></code>, followed
+by another synchronisation. Following that, each thread loops over the
+elements in the partition with an increment of the block size. In each
+iteration a thread-private array of pointers to coordinate data in shared
+memory is built which is then passed to the <code class="docutils literal notranslate"><span class="pre">midpoint</span></code> kernel. As for other
+backends, the first, directly accessed, argument, is passed as a pointer to
+global device memory with a suitable offset.</p>
+</section>
+<section id="opencl-backend">
+<span id="id6"></span><h3>OpenCL backend<a class="headerlink" href="#opencl-backend" title="Link to this heading">¶</a></h3>
+<p>The other device backend OpenCL is structurally very similar to the CUDA
+backend. It uses <a class="reference external" href="http://mathema.tician.de/software/pyopencl/">PyOpenCL</a> to interface to the OpenCL drivers and runtime.
+Linear algebra operations are handled by <a class="reference external" href="http://www.mcs.anl.gov/petsc/petsc-as/">PETSc</a> as described in
+<a class="reference internal" href="linear_algebra.html"><span class="doc">PyOP2 Linear Algebra Interface</span></a>. PyOP2 generates a kernel stub from a template similar
+to the CUDA case.</p>
+<p>Consider the <code class="docutils literal notranslate"><span class="pre">midpoint</span></code> kernel from previous examples, whose parameters in
+the kernel signature are automatically annotated with OpenCL storage
+qualifiers. <a class="reference external" href="http://mathema.tician.de/software/pyopencl/">PyOpenCL</a> provides Python wrappers for OpenCL runtime functions to
+build a kernel from a code string, set its arguments and enqueue the kernel
+for execution. It takes care of the necessary conversion from Python objects
+to plain C data types. PyOP2 generates the following code for the <code class="docutils literal notranslate"><span class="pre">midpoint</span></code>
+example:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="linenos"> 1</span><span class="cp">#define ROUND_UP(bytes) (((bytes) + 15) &amp; ~15)</span>
+<span class="linenos"> 2</span>
+<span class="linenos"> 3</span><span class="kt">void</span><span class="w"> </span><span class="nf">midpoint</span><span class="p">(</span><span class="n">__global</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">p</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span><span class="w"> </span><span class="n">__local</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="n">coords</span><span class="p">[</span><span class="mi">2</span><span class="p">]);</span>
+<span class="linenos"> 4</span><span class="kt">void</span><span class="w"> </span><span class="nf">midpoint</span><span class="p">(</span><span class="n">__global</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">p</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span><span class="w"> </span><span class="n">__local</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="n">coords</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>
+<span class="linenos"> 5</span><span class="p">{</span>
+<span class="linenos"> 6</span><span class="w">  </span><span class="n">p</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">((</span><span class="n">coords</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">coords</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">coords</span><span class="p">[</span><span class="mi">2</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">3.0</span><span class="p">;</span>
+<span class="linenos"> 7</span><span class="w">  </span><span class="n">p</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">((</span><span class="n">coords</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">coords</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="mi">1</span><span class="p">])</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">coords</span><span class="p">[</span><span class="mi">2</span><span class="p">][</span><span class="mi">1</span><span class="p">])</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">3.0</span><span class="p">;</span>
+<span class="linenos"> 8</span><span class="p">}</span>
+<span class="linenos"> 9</span>
+<span class="linenos">10</span><span class="n">__kernel</span><span class="w"> </span><span class="nf">__attribute__</span><span class="p">((</span><span class="n">reqd_work_group_size</span><span class="p">(</span><span class="mi">668</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">)))</span>
+<span class="linenos">11</span><span class="kt">void</span><span class="w"> </span><span class="n">__midpoint_stub</span><span class="p">(</span>
+<span class="linenos">12</span><span class="w">    </span><span class="n">__global</span><span class="w"> </span><span class="kt">double</span><span class="o">*</span><span class="w"> </span><span class="n">arg0</span><span class="p">,</span>
+<span class="linenos">13</span><span class="w">    </span><span class="n">__global</span><span class="w"> </span><span class="kt">double</span><span class="o">*</span><span class="w"> </span><span class="n">ind_arg1</span><span class="p">,</span>
+<span class="linenos">14</span><span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">set_size</span><span class="p">,</span>
+<span class="linenos">15</span><span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">set_offset</span><span class="p">,</span>
+<span class="linenos">16</span><span class="w">    </span><span class="n">__global</span><span class="w"> </span><span class="kt">int</span><span class="o">*</span><span class="w"> </span><span class="n">p_ind_map</span><span class="p">,</span>
+<span class="linenos">17</span><span class="w">    </span><span class="n">__global</span><span class="w"> </span><span class="kt">short</span><span class="w"> </span><span class="o">*</span><span class="n">p_loc_map</span><span class="p">,</span>
+<span class="linenos">18</span><span class="w">    </span><span class="n">__global</span><span class="w"> </span><span class="kt">int</span><span class="o">*</span><span class="w"> </span><span class="n">p_ind_sizes</span><span class="p">,</span>
+<span class="linenos">19</span><span class="w">    </span><span class="n">__global</span><span class="w"> </span><span class="kt">int</span><span class="o">*</span><span class="w"> </span><span class="n">p_ind_offsets</span><span class="p">,</span>
+<span class="linenos">20</span><span class="w">    </span><span class="n">__global</span><span class="w"> </span><span class="kt">int</span><span class="o">*</span><span class="w"> </span><span class="n">p_blk_map</span><span class="p">,</span>
+<span class="linenos">21</span><span class="w">    </span><span class="n">__global</span><span class="w"> </span><span class="kt">int</span><span class="o">*</span><span class="w"> </span><span class="n">p_offset</span><span class="p">,</span>
+<span class="linenos">22</span><span class="w">    </span><span class="n">__global</span><span class="w"> </span><span class="kt">int</span><span class="o">*</span><span class="w"> </span><span class="n">p_nelems</span><span class="p">,</span>
+<span class="linenos">23</span><span class="w">    </span><span class="n">__global</span><span class="w"> </span><span class="kt">int</span><span class="o">*</span><span class="w"> </span><span class="n">p_nthrcol</span><span class="p">,</span>
+<span class="linenos">24</span><span class="w">    </span><span class="n">__global</span><span class="w"> </span><span class="kt">int</span><span class="o">*</span><span class="w"> </span><span class="n">p_thrcol</span><span class="p">,</span>
+<span class="linenos">25</span><span class="w">    </span><span class="n">__private</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">block_offset</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="linenos">26</span><span class="w">  </span><span class="n">__local</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="n">shared</span><span class="w"> </span><span class="p">[</span><span class="mi">64</span><span class="p">]</span><span class="w"> </span><span class="n">__attribute__</span><span class="p">((</span><span class="n">aligned</span><span class="p">(</span><span class="k">sizeof</span><span class="p">(</span><span class="kt">long</span><span class="p">))));</span>
+<span class="linenos">27</span><span class="w">  </span><span class="n">__local</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">offset_b</span><span class="p">;</span>
+<span class="linenos">28</span><span class="w">  </span><span class="n">__local</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">offset_b_abs</span><span class="p">;</span>
+<span class="linenos">29</span><span class="w">  </span><span class="n">__local</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">active_threads_count</span><span class="p">;</span>
+<span class="linenos">30</span>
+<span class="linenos">31</span><span class="w">  </span><span class="kt">int</span><span class="w"> </span><span class="n">nbytes</span><span class="p">;</span>
+<span class="linenos">32</span><span class="w">  </span><span class="kt">int</span><span class="w"> </span><span class="n">block_id</span><span class="p">;</span>
+<span class="linenos">33</span>
+<span class="linenos">34</span><span class="w">  </span><span class="kt">int</span><span class="w"> </span><span class="n">i_1</span><span class="p">;</span>
+<span class="linenos">35</span><span class="w">  </span><span class="c1">// shared indirection mappings</span>
+<span class="linenos">36</span><span class="w">  </span><span class="n">__global</span><span class="w"> </span><span class="kt">int</span><span class="o">*</span><span class="w"> </span><span class="n">__local</span><span class="w"> </span><span class="n">ind_arg1_map</span><span class="p">;</span>
+<span class="linenos">37</span><span class="w">  </span><span class="n">__local</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">ind_arg1_size</span><span class="p">;</span>
+<span class="linenos">38</span><span class="w">  </span><span class="n">__local</span><span class="w"> </span><span class="kt">double</span><span class="o">*</span><span class="w"> </span><span class="n">__local</span><span class="w"> </span><span class="n">ind_arg1_shared</span><span class="p">;</span>
+<span class="linenos">39</span><span class="w">  </span><span class="n">__local</span><span class="w"> </span><span class="kt">double</span><span class="o">*</span><span class="w"> </span><span class="n">ind_arg1_vec</span><span class="p">[</span><span class="mi">3</span><span class="p">];</span>
+<span class="linenos">40</span>
+<span class="linenos">41</span><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">get_local_id</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="linenos">42</span><span class="w">    </span><span class="n">block_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">p_blk_map</span><span class="p">[</span><span class="n">get_group_id</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">block_offset</span><span class="p">];</span>
+<span class="linenos">43</span><span class="w">    </span><span class="n">active_threads_count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">p_nelems</span><span class="p">[</span><span class="n">block_id</span><span class="p">];</span>
+<span class="linenos">44</span><span class="w">    </span><span class="n">offset_b_abs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">p_offset</span><span class="p">[</span><span class="n">block_id</span><span class="p">];</span>
+<span class="linenos">45</span><span class="w">    </span><span class="n">offset_b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">offset_b_abs</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">set_offset</span><span class="p">;</span><span class="n">ind_arg1_size</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">p_ind_sizes</span><span class="p">[</span><span class="mi">0</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">block_id</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">1</span><span class="p">];</span>
+<span class="linenos">46</span><span class="w">    </span><span class="n">ind_arg1_map</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">p_ind_map</span><span class="p">[</span><span class="mi">0</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">set_size</span><span class="p">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">p_ind_offsets</span><span class="p">[</span><span class="mi">0</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">block_id</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">1</span><span class="p">];</span>
+<span class="linenos">47</span>
+<span class="linenos">48</span><span class="w">    </span><span class="n">nbytes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="linenos">49</span><span class="w">    </span><span class="n">ind_arg1_shared</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">__local</span><span class="w"> </span><span class="kt">double</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="o">&amp;</span><span class="n">shared</span><span class="p">[</span><span class="n">nbytes</span><span class="p">]);</span>
+<span class="linenos">50</span><span class="w">    </span><span class="n">nbytes</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">ROUND_UP</span><span class="p">(</span><span class="n">ind_arg1_size</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">double</span><span class="p">));</span>
+<span class="linenos">51</span><span class="w">  </span><span class="p">}</span>
+<span class="linenos">52</span><span class="w">  </span><span class="n">barrier</span><span class="p">(</span><span class="n">CLK_LOCAL_MEM_FENCE</span><span class="p">);</span>
+<span class="linenos">53</span>
+<span class="linenos">54</span><span class="w">  </span><span class="c1">// staging in of indirect dats</span>
+<span class="linenos">55</span><span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">i_1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">get_local_id</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span><span class="w"> </span><span class="n">i_1</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">ind_arg1_size</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w"> </span><span class="n">i_1</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">get_local_size</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="linenos">56</span><span class="w">    </span><span class="n">ind_arg1_shared</span><span class="p">[</span><span class="n">i_1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ind_arg1</span><span class="p">[</span><span class="n">i_1</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">ind_arg1_map</span><span class="p">[</span><span class="n">i_1</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">];</span>
+<span class="linenos">57</span><span class="w">  </span><span class="p">}</span>
+<span class="linenos">58</span><span class="w">  </span><span class="n">barrier</span><span class="p">(</span><span class="n">CLK_LOCAL_MEM_FENCE</span><span class="p">);</span>
+<span class="linenos">59</span>
+<span class="linenos">60</span><span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">i_1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">get_local_id</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span><span class="w"> </span><span class="n">i_1</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">active_threads_count</span><span class="p">;</span><span class="w"> </span><span class="n">i_1</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">get_local_size</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="linenos">61</span><span class="w">    </span><span class="n">ind_arg1_vec</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ind_arg1_shared</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">p_loc_map</span><span class="p">[</span><span class="n">i_1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">0</span><span class="o">*</span><span class="n">set_size</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">offset_b</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="linenos">62</span><span class="w">    </span><span class="n">ind_arg1_vec</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ind_arg1_shared</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">p_loc_map</span><span class="p">[</span><span class="n">i_1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="o">*</span><span class="n">set_size</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">offset_b</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="linenos">63</span><span class="w">    </span><span class="n">ind_arg1_vec</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ind_arg1_shared</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">p_loc_map</span><span class="p">[</span><span class="n">i_1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">2</span><span class="o">*</span><span class="n">set_size</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">offset_b</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="linenos">64</span>
+<span class="linenos">65</span><span class="w">    </span><span class="n">midpoint</span><span class="p">((</span><span class="n">__global</span><span class="w"> </span><span class="kt">double</span><span class="o">*</span><span class="w"> </span><span class="n">__private</span><span class="p">)(</span><span class="n">arg0</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="n">i_1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">offset_b_abs</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">),</span><span class="w"> </span><span class="n">ind_arg1_vec</span><span class="p">);</span>
+<span class="linenos">66</span><span class="w">  </span><span class="p">}</span>
+<span class="linenos">67</span><span class="p">}</span>
+</pre></div>
+</div>
+<p>Parallel computations in OpenCL are executed by <em>work items</em> organised into
+<em>work groups</em>. OpenCL requires the annotation of all pointer arguments with
+the memory region they point to: <code class="docutils literal notranslate"><span class="pre">__global</span></code> memory is visible to any work
+item, <code class="docutils literal notranslate"><span class="pre">__local</span></code> memory to any work item within the same work group and
+<code class="docutils literal notranslate"><span class="pre">__private</span></code> memory is private to a work item. PyOP2 does this annotation
+automatically for the user kernel if the OpenCL backend is used. Local memory
+therefore corresponds to CUDA’s shared memory and private memory is called
+local memory in CUDA. The work item id within the work group is accessed via
+the OpenCL runtime call <code class="docutils literal notranslate"><span class="pre">get_local_id(0)</span></code>, the work group id via
+<code class="docutils literal notranslate"><span class="pre">get_group_id(0)</span></code>. A barrier synchronisation across all work items of a work
+group is enforced with a call to <code class="docutils literal notranslate"><span class="pre">barrier(CLK_LOCAL_MEM_FENCE)</span></code>. Bearing
+these differences in mind, the OpenCL kernel stub is structurally almost
+identical to the corresponding CUDA version above.</p>
+<p>The required local memory size per work group <code class="docutils literal notranslate"><span class="pre">reqd_work_group_size</span></code> is
+computed as part of the execution plan. In CUDA this value is a launch
+parameter to the kernel, whereas in OpenCL it needs to be hard coded as a
+kernel attribute.</p>
+</section>
+</section>
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#">PyOP2 Backends</a><ul>
+<li><a class="reference internal" href="#host-backends">Host backends</a><ul>
+<li><a class="reference internal" href="#sequential-backend">Sequential backend</a></li>
+<li><a class="reference internal" href="#openmp-backend">OpenMP backend</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#device-backends">Device backends</a><ul>
+<li><a class="reference internal" href="#cuda-backend">CUDA backend</a></li>
+<li><a class="reference internal" href="#opencl-backend">OpenCL backend</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="architecture.html"
+                          title="previous chapter">PyOP2 Architecture</a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="linear_algebra.html"
+                          title="next chapter">PyOP2 Linear Algebra Interface</a></p>
+  </div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/backends.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="linear_algebra.html" title="PyOP2 Linear Algebra Interface"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="architecture.html" title="PyOP2 Architecture"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">PyOP2 2020.0 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">PyOP2 Backends</a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright 2012-2013, Imperial College et al.
+      Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 8.0.2.
+    </div>
+  </body>
+</html>

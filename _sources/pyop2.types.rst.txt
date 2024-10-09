@@ -1,0 +1,85 @@
+pyop2.types package
+===================
+
+Submodules
+----------
+
+pyop2.types.access module
+-------------------------
+
+.. automodule:: pyop2.types.access
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+pyop2.types.dat module
+----------------------
+
+.. automodule:: pyop2.types.dat
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+pyop2.types.data\_carrier module
+--------------------------------
+
+.. automodule:: pyop2.types.data_carrier
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+pyop2.types.dataset module
+--------------------------
+
+.. automodule:: pyop2.types.dataset
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+pyop2.types.glob module
+-----------------------
+
+.. automodule:: pyop2.types.glob
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+pyop2.types.halo module
+-----------------------
+
+.. automodule:: pyop2.types.halo
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+pyop2.types.map module
+----------------------
+
+.. automodule:: pyop2.types.map
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+pyop2.types.mat module
+----------------------
+
+.. automodule:: pyop2.types.mat
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+pyop2.types.set module
+----------------------
+
+.. automodule:: pyop2.types.set
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Module contents
+---------------
+
+.. automodule:: pyop2.types
+   :members:
+   :undoc-members:
+   :show-inheritance:

@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>PyOP2 Kernels &#8212; PyOP2 2020.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=fa44fd50" />
+    <link rel="stylesheet" type="text/css" href="_static/classic.css?v=def86cc0" />
+    
+    <script src="_static/documentation_options.js?v=63d4e452"></script>
+    <script src="_static/doctools.js?v=9a2dae69"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="The PyOP2 Intermediate Representation" href="ir.html" />
+    <link rel="prev" title="PyOP2 Concepts" href="concepts.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="ir.html" title="The PyOP2 Intermediate Representation"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="concepts.html" title="PyOP2 Concepts"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">PyOP2 2020.0 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">PyOP2 Kernels</a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="pyop2-kernels">
+<span id="kernels"></span><h1>PyOP2 Kernels<a class="headerlink" href="#pyop2-kernels" title="Link to this heading">¶</a></h1>
+<p>Kernels in PyOP2 define the local operations that are to be performed for each
+element of the iteration set the kernel is executed over. There must be a one
+to one match between the arguments declared in the kernel signature and the
+actual arguments passed to the parallel loop executing this kernel. As
+described in <a class="reference internal" href="concepts.html"><span class="doc">PyOP2 Concepts</span></a>, data is accessed directly on the iteration set
+or via mappings passed in the <code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code> call.</p>
+<p>The kernel only sees data corresponding to the current element of the
+iteration set it is invoked for. Any data read by the kernel i.e. accessed as
+<code class="xref py py-data docutils literal notranslate"><span class="pre">READ</span></code>, <code class="xref py py-data docutils literal notranslate"><span class="pre">RW</span></code> or <code class="xref py py-data docutils literal notranslate"><span class="pre">INC</span></code> is automatically
+gathered via the mapping relationship in the <em>staging in</em> phase and the kernel
+is passed pointers to the staging memory. Similarly, after the kernel has been
+invoked, any modified data i.e. accessed as <code class="xref py py-data docutils literal notranslate"><span class="pre">WRITE</span></code>,
+<code class="xref py py-data docutils literal notranslate"><span class="pre">RW</span></code> or <code class="xref py py-data docutils literal notranslate"><span class="pre">INC</span></code> is scattered back out via the
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Map</span></code> in the <em>staging out</em> phase. It is only safe for a kernel
+to manipulate data in the way declared via the access descriptor in the
+parallel loop call. Any modifications to an argument accessed read-only would
+not be written back since the staging out phase is skipped for this argument.
+Similarly, the result of reading an argument declared as write-only is
+undefined since the data has not been staged in.</p>
+<section id="kernel-api">
+<span id="id1"></span><h2>Kernel API<a class="headerlink" href="#kernel-api" title="Link to this heading">¶</a></h2>
+<p>Consider a <code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code> computing the midpoint of a triangle given
+the three vertex coordinates. Note that we make use of a covenience in the
+PyOP2 syntax, which allow declaring an anonymous <code class="xref py py-class docutils literal notranslate"><span class="pre">DataSet</span></code> of a
+dimension greater one by using the <code class="docutils literal notranslate"><span class="pre">**</span></code> operator. We omit the actual data in
+the declaration of the <code class="xref py py-class docutils literal notranslate"><span class="pre">Map</span></code> <code class="docutils literal notranslate"><span class="pre">cell2vertex</span></code> and
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> <code class="docutils literal notranslate"><span class="pre">coordinates</span></code>.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">vertices</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Set</span><span class="p">(</span><span class="n">num_vertices</span><span class="p">)</span>
+<span class="n">cells</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Set</span><span class="p">(</span><span class="n">num_cells</span><span class="p">)</span>
+
+<span class="n">cell2vertex</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Map</span><span class="p">(</span><span class="n">cells</span><span class="p">,</span> <span class="n">vertices</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="p">[</span><span class="o">...</span><span class="p">])</span>
+
+<span class="n">coordinates</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Dat</span><span class="p">(</span><span class="n">vertices</span> <span class="o">**</span> <span class="mi">2</span><span class="p">,</span> <span class="p">[</span><span class="o">...</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
+<span class="n">midpoints</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Dat</span><span class="p">(</span><span class="n">cells</span> <span class="o">**</span> <span class="mi">2</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
+
+<span class="n">op2</span><span class="o">.</span><span class="n">par_loop</span><span class="p">(</span><span class="n">midpoint</span><span class="p">,</span> <span class="n">cells</span><span class="p">,</span>
+             <span class="n">midpoints</span><span class="p">(</span><span class="n">op2</span><span class="o">.</span><span class="n">WRITE</span><span class="p">),</span>
+             <span class="n">coordinates</span><span class="p">(</span><span class="n">op2</span><span class="o">.</span><span class="n">READ</span><span class="p">,</span> <span class="n">cell2vertex</span><span class="p">))</span>
+</pre></div>
+</div>
+<p>Kernels are implemented in a restricted subset of C99 and are declared by
+passing a <em>C code string</em> and the <em>kernel function name</em>, which must match the
+name in the C kernel signature, to the <code class="xref py py-class docutils literal notranslate"><span class="pre">Kernel</span></code> constructor:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">midpoint</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Kernel</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">void midpoint(double p[2], double *coords[2]) {</span>
+<span class="s2">  p[0] = (coords[0][0] + coords[1][0] + coords[2][0]) / 3.0;</span>
+<span class="s2">  p[1] = (coords[0][1] + coords[1][1] + coords[2][1]) / 3.0;</span>
+<span class="s2">}&quot;&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;midpoint&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Since kernels cannot return any value, the return type is always <code class="docutils literal notranslate"><span class="pre">void</span></code>. The
+kernel argument <code class="docutils literal notranslate"><span class="pre">p</span></code> corresponds to the third <code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code>
+argument <code class="docutils literal notranslate"><span class="pre">midpoints</span></code> and <code class="docutils literal notranslate"><span class="pre">coords</span></code> to the fourth argument <code class="docutils literal notranslate"><span class="pre">coordinates</span></code>
+respectively. Argument names need not agree, the matching is by position.</p>
+<p>Data types of kernel arguments must match the type of data passed to the
+parallel loop. The Python types <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code> and <code class="xref py py-class docutils literal notranslate"><span class="pre">numpy.float64</span></code>
+correspond to a C <code class="xref py py-class docutils literal notranslate"><span class="pre">double</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">numpy.float32</span></code> to a C
+<code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code> or <code class="xref py py-class docutils literal notranslate"><span class="pre">numpy.int64</span></code> to a C <code class="xref py py-class docutils literal notranslate"><span class="pre">long</span></code> and
+<code class="xref py py-class docutils literal notranslate"><span class="pre">numpy.int32</span></code> to a C <code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code>.</p>
+<p>Direct <code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code> arguments such as <code class="docutils literal notranslate"><span class="pre">midpoints</span></code> are passed to
+the kernel as a <code class="docutils literal notranslate"><span class="pre">double</span> <span class="pre">*</span></code>, indirect arguments such as <code class="docutils literal notranslate"><span class="pre">coordinates</span></code> as a
+<code class="docutils literal notranslate"><span class="pre">double</span> <span class="pre">**</span></code> with the first indirection due to the map and the second
+indirection due the data dimension. The kernel signature above uses arrays
+with explicit sizes to draw attention to the fact that these are known. We
+could have interchangibly used a kernel signature with plain pointers:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">void</span><span class="w"> </span><span class="n">midpoint</span><span class="p">(</span><span class="kt">double</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">p</span><span class="p">,</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="o">**</span><span class="w"> </span><span class="n">coords</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Argument creation supports an optional flag <code class="docutils literal notranslate"><span class="pre">flatten</span></code>, which is used
+for kernels which expect data to be laid out by component:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">midpoint</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Kernel</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">void midpoint(double p[2], double *coords[1]) {</span>
+<span class="s2">  p[0] = (coords[0][0] + coords[1][0] + coords[2][0]) / 3.0;</span>
+<span class="s2">  p[1] = (coords[3][0] + coords[4][0] + coords[5][0]) / 3.0;</span>
+<span class="s2">}&quot;&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;midpoint&quot;</span><span class="p">)</span>
+
+<span class="n">op2</span><span class="o">.</span><span class="n">par_loop</span><span class="p">(</span><span class="n">midpoint</span><span class="p">,</span> <span class="n">cells</span><span class="p">,</span>
+             <span class="n">midpoints</span><span class="p">(</span><span class="n">op2</span><span class="o">.</span><span class="n">WRITE</span><span class="p">),</span>
+             <span class="n">coordinates</span><span class="p">(</span><span class="n">op2</span><span class="o">.</span><span class="n">READ</span><span class="p">,</span> <span class="n">cell2vertex</span><span class="p">,</span> <span class="n">flatten</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
+</pre></div>
+</div>
+</section>
+<section id="data-layout">
+<span id="id2"></span><h2>Data layout<a class="headerlink" href="#data-layout" title="Link to this heading">¶</a></h2>
+<p>Data for a <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> declared on a <code class="xref py py-class docutils literal notranslate"><span class="pre">Set</span></code> is
+stored contiguously for all elements of the set. For each element,
+this is a contiguous chunk of data of a shape given by the
+<code class="xref py py-class docutils literal notranslate"><span class="pre">DataSet</span></code> <code class="docutils literal notranslate"><span class="pre">dim</span></code> and the datatype of the
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code>.  The size of this chunk is the product of the
+extents of the <code class="docutils literal notranslate"><span class="pre">dim</span></code> tuple times the size of the datatype.</p>
+<p>During execution of the <code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code>, the kernel is called
+for each element of the iteration set and passed data for each of its
+arguments corresponding to the current set element <code class="docutils literal notranslate"><span class="pre">i</span></code> only.</p>
+<p>For a directly accessed argument such as <code class="docutils literal notranslate"><span class="pre">midpoints</span></code> above, the
+kernel is passed a pointer to the beginning of the chunk of data for
+the element <code class="docutils literal notranslate"><span class="pre">i</span></code> the kernel is currently called for. In CUDA/OpenCL
+<code class="docutils literal notranslate"><span class="pre">i</span></code> is the global thread id since the kernel is launched in parallel
+for all elements.</p>
+<figure class="align-center" id="id4">
+<img alt="_images/direct_arg.svg" src="_images/direct_arg.svg" />
+<figcaption>
+<p><span class="caption-text">Data layout for a directly accessed <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> argument with
+<code class="docutils literal notranslate"><span class="pre">dim</span></code> 2</span><a class="headerlink" href="#id4" title="Link to this image">¶</a></p>
+</figcaption>
+</figure>
+<p>For an indirectly accessed argument such as <code class="docutils literal notranslate"><span class="pre">coordinates</span></code> above,
+PyOP2 gathers pointers to the data via the <code class="xref py py-class docutils literal notranslate"><span class="pre">Map</span></code>
+<code class="docutils literal notranslate"><span class="pre">cell2vertex</span></code> used for the indirection. The kernel is passed a list
+of pointers of length corresponding to the <em>arity</em> of the
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Map</span></code>, in the example above 3. Each of these points to
+the data chunk for the element in the target <code class="xref py py-class docutils literal notranslate"><span class="pre">Set</span></code> given
+by <code class="xref py py-class docutils literal notranslate"><span class="pre">Map</span></code> entries <code class="docutils literal notranslate"><span class="pre">(i,</span> <span class="pre">0)</span></code>, <code class="docutils literal notranslate"><span class="pre">(i,</span> <span class="pre">1)</span></code> and <code class="docutils literal notranslate"><span class="pre">(i,</span> <span class="pre">2)</span></code>.</p>
+<figure class="align-center" id="id5">
+<img alt="_images/indirect_arg.svg" src="_images/indirect_arg.svg" />
+<figcaption>
+<p><span class="caption-text">Data layout for a <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> argument with <code class="docutils literal notranslate"><span class="pre">dim</span></code> 2 indirectly
+accessed through a <code class="xref py py-class docutils literal notranslate"><span class="pre">Map</span></code> of <code class="docutils literal notranslate"><span class="pre">arity</span></code> 3</span><a class="headerlink" href="#id5" title="Link to this image">¶</a></p>
+</figcaption>
+</figure>
+<p>If the argument is created with the keyword argument <code class="docutils literal notranslate"><span class="pre">flatten</span></code> set
+to <code class="docutils literal notranslate"><span class="pre">True</span></code>, a flattened vector of pointers is passed to the kernel.
+This vector is of length <code class="docutils literal notranslate"><span class="pre">dim</span> <span class="pre">*</span> <span class="pre">arity</span></code> (where <code class="docutils literal notranslate"><span class="pre">dim</span></code> is the product
+of the extents of the <code class="docutils literal notranslate"><span class="pre">dim</span></code> tuple), which is 6 in the example above.
+Each entry points to a single data value of the <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code>.
+The ordering is by component of <code class="docutils literal notranslate"><span class="pre">dim</span></code> i.e. the first component of
+each data item for each element in the target set pointed to by the
+map followed by the second component etc.</p>
+<figure class="align-center" id="id6">
+<img alt="_images/indirect_arg_flattened.svg" src="_images/indirect_arg_flattened.svg" />
+<figcaption>
+<p><span class="caption-text">Data layout for a flattened <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> argument with <code class="docutils literal notranslate"><span class="pre">dim</span></code> 2
+indirectly accessed through a <code class="xref py py-class docutils literal notranslate"><span class="pre">Map</span></code> of <code class="docutils literal notranslate"><span class="pre">arity</span></code> 3</span><a class="headerlink" href="#id6" title="Link to this image">¶</a></p>
+</figcaption>
+</figure>
+</section>
+<section id="local-iteration-spaces">
+<span id="id3"></span><h2>Local iteration spaces<a class="headerlink" href="#local-iteration-spaces" title="Link to this heading">¶</a></h2>
+<p>PyOP2 supports complex kernels with large local working set sizes, which may
+not run very efficiently on architectures with a limited amount of registers
+and on-chip resources. In many cases the resource usage is proportional to the
+size of the <em>local iteration space</em> the kernel operates on.</p>
+<p>Consider a finite-element local assembly kernel for vector-valued basis
+functions of second order on triangles.  There are kernels more complex and
+computing considerably larger local tensors commonly found in finite-element
+computations, in particular for higher-order basis functions, and this kernel
+only serves to illustrate the concept. For each element in the iteration set,
+this kernel computes a 12x12 local tensor:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">void</span><span class="w"> </span><span class="nf">kernel</span><span class="p">(</span><span class="kt">double</span><span class="w"> </span><span class="n">A</span><span class="p">[</span><span class="mi">12</span><span class="p">][</span><span class="mi">12</span><span class="p">],</span><span class="w"> </span><span class="p">...)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="p">...</span>
+<span class="w">  </span><span class="c1">// loops over the local iteration space</span>
+<span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">12</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">12</span><span class="p">;</span><span class="w"> </span><span class="n">k</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="n">A</span><span class="p">[</span><span class="n">j</span><span class="p">][</span><span class="n">k</span><span class="p">]</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="p">...</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>PyOP2 invokes this kernel for each element in the iteration set:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">ele</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">ele</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">nele</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">ele</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="kt">double</span><span class="w"> </span><span class="n">A</span><span class="p">[</span><span class="mi">12</span><span class="p">][</span><span class="mi">12</span><span class="p">];</span>
+<span class="w">  </span><span class="p">...</span>
+<span class="w">  </span><span class="n">kernel</span><span class="p">(</span><span class="n">A</span><span class="p">,</span><span class="w"> </span><span class="p">...);</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>To improve the efficiency of executing complex kernels on manycore
+platforms, their operation can be distributed among several threads
+which each compute a single point in this local iteration space to
+increase the level of parallelism and to lower the amount of resources
+required per thread. In the case of the kernel above we obtain:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">void</span><span class="w"> </span><span class="nf">mass</span><span class="p">(</span><span class="kt">double</span><span class="w"> </span><span class="n">A</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="mi">1</span><span class="p">],</span><span class="w"> </span><span class="p">...,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">j</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">k</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="p">...</span>
+<span class="w">  </span><span class="n">A</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="p">...</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>Note how the doubly nested loop over basis function is hoisted out of the
+kernel, which receives its position in the local iteration space to compute as
+additional arguments <code class="docutils literal notranslate"><span class="pre">j</span></code> and <code class="docutils literal notranslate"><span class="pre">k</span></code>. PyOP2 then calls the kernel for
+each element of the local iteration space for each set element:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">ele</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">ele</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">nele</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">ele</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="kt">double</span><span class="w"> </span><span class="n">A</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="mi">1</span><span class="p">];</span>
+<span class="w">  </span><span class="p">...</span>
+<span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">12</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">12</span><span class="p">;</span><span class="w"> </span><span class="n">k</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="n">kernel</span><span class="p">(</span><span class="n">A</span><span class="p">,</span><span class="w"> </span><span class="p">...,</span><span class="w"> </span><span class="n">j</span><span class="p">,</span><span class="w"> </span><span class="n">k</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>On manycore platforms, the local iteration space does not translate into a
+loop nest, but rather into a larger number of threads being launched to
+compute each of its elements:</p>
+<figure class="align-center" id="id7">
+<img alt="_images/iteration_spaces.svg" src="_images/iteration_spaces.svg" />
+<figcaption>
+<p><span class="caption-text">Local iteration space for a kernel computing a 12x12 local tensor</span><a class="headerlink" href="#id7" title="Link to this image">¶</a></p>
+</figcaption>
+</figure>
+<p>PyOP2 needs to be told to loop over this local iteration space by
+indexing the corresponding maps with an
+<code class="xref py py-class docutils literal notranslate"><span class="pre">IterationIndex</span></code> <code class="xref py py-data docutils literal notranslate"><span class="pre">i</span></code> in the
+<code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code> call.</p>
+</section>
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#">PyOP2 Kernels</a><ul>
+<li><a class="reference internal" href="#kernel-api">Kernel API</a></li>
+<li><a class="reference internal" href="#data-layout">Data layout</a></li>
+<li><a class="reference internal" href="#local-iteration-spaces">Local iteration spaces</a></li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="concepts.html"
+                          title="previous chapter">PyOP2 Concepts</a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="ir.html"
+                          title="next chapter">The PyOP2 Intermediate Representation</a></p>
+  </div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/kernels.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="ir.html" title="The PyOP2 Intermediate Representation"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="concepts.html" title="PyOP2 Concepts"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">PyOP2 2020.0 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">PyOP2 Kernels</a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright 2012-2013, Imperial College et al.
+      Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 8.0.2.
+    </div>
+  </body>
+</html>

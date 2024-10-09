@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>PyOP2 Concepts &#8212; PyOP2 2020.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=fa44fd50" />
+    <link rel="stylesheet" type="text/css" href="_static/classic.css?v=def86cc0" />
+    
+    <script src="_static/documentation_options.js?v=63d4e452"></script>
+    <script src="_static/doctools.js?v=9a2dae69"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="PyOP2 Kernels" href="kernels.html" />
+    <link rel="prev" title="Installing PyOP2" href="installation.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="kernels.html" title="PyOP2 Kernels"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="installation.html" title="Installing PyOP2"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">PyOP2 2020.0 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">PyOP2 Concepts</a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="pyop2-concepts">
+<span id="concepts"></span><h1>PyOP2 Concepts<a class="headerlink" href="#pyop2-concepts" title="Link to this heading">¶</a></h1>
+<p>Many numerical algorithms and scientific computations on unstructured meshes
+can be viewed as the <em>independent application</em> of a <em>local operation</em>
+everywhere on a mesh. This local operation is often called a computational
+<em>kernel</em> and its independent application lends itself naturally to parallel
+computation. An unstructured mesh can be described by <em>sets of entities</em>
+(vertices, edges, cells) and the connectivity between those sets forming the
+topology of the mesh.</p>
+<p>PyOP2 is a domain-specific language (DSL) for the parallel executions of
+computational kernels on unstructured meshes or graphs.</p>
+<section id="sets-and-mappings">
+<span id="sets"></span><h2>Sets and mappings<a class="headerlink" href="#sets-and-mappings" title="Link to this heading">¶</a></h2>
+<p>A mesh is defined by <code class="xref py py-class docutils literal notranslate"><span class="pre">sets</span></code> of entities and
+<code class="xref py py-class docutils literal notranslate"><span class="pre">mappings</span></code> between these sets. Sets are used to represent
+entities in the mesh (nodes in the graph) or degrees of freedom of data
+(fields) living “on” the mesh (graph), while maps define the connectivity
+between entities (links in the graph) or degrees of freedom, for example
+associating an edge with its incident vertices. Sets of mesh entities may
+coincide with sets of degrees of freedom, but this is not necessarily the case
+e.g. the set of degrees of freedom for a field may be defined on the vertices
+of the mesh and the midpoints of edges connecting the vertices.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>There is a requirement for the map to be of <em>constant arity</em>, that is each
+element in the source set must be associated with a constant number of
+elements in the target set. There is no requirement for the map to be
+injective or surjective. This restriction excludes certain kinds of mappings
+e.g. a map from vertices to incident egdes or cells is only possible on a
+very regular mesh where the multiplicity of any vertex is constant.</p>
+</div>
+<p>In the following we declare a <code class="xref py py-class docutils literal notranslate"><span class="pre">Set</span></code> <code class="docutils literal notranslate"><span class="pre">vertices</span></code>, a
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Set</span></code> <code class="docutils literal notranslate"><span class="pre">edges</span></code> and a <code class="xref py py-class docutils literal notranslate"><span class="pre">Map</span></code> <code class="docutils literal notranslate"><span class="pre">edges2vertices</span></code>
+between them, which associates the two incident vertices with each edge:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">vertices</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Set</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span>
+<span class="n">edges</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Set</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span>
+<span class="n">edges2vertices</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Map</span><span class="p">(</span><span class="n">edges</span><span class="p">,</span> <span class="n">vertices</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">],</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">]])</span>
+</pre></div>
+</div>
+</section>
+<section id="data">
+<span id="id1"></span><h2>Data<a class="headerlink" href="#data" title="Link to this heading">¶</a></h2>
+<p>PyOP2 distinguishes three kinds of user provided data: data that lives on a
+set (often referred to as a field) is represented by a <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code>,
+data that has no association with a set by a <code class="xref py py-class docutils literal notranslate"><span class="pre">Global</span></code> and data
+that is visible globally and referred to by a unique identifier is declared as
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Const</span></code>. Examples of the use of these data types are given in
+the <a class="reference internal" href="#par-loops"><span class="std std-ref">Parallel loops</span></a> section below.</p>
+<section id="dat">
+<span id="data-dat"></span><h3>Dat<a class="headerlink" href="#dat" title="Link to this heading">¶</a></h3>
+<p>Since a set does not have any type but only a cardinality, data declared on a
+set through a <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> needs additional metadata to allow PyOP2 to
+interpret the data and to specify how much memory is required to store it. This
+metadata is the <em>datatype</em> and the <em>shape</em> of the data associated with any
+given set element. The shape is not associated with the <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code>
+directly, but with a <code class="xref py py-class docutils literal notranslate"><span class="pre">DataSet</span></code>. One can associate a scalar with
+each element of the set or a one- or higher-dimensional vector. Similar to the
+restriction on maps, the shape and therefore the size of the data associated
+which each element needs to be uniform. PyOP2 supports all common primitive
+data types supported by <a class="reference external" href="http://docs.scipy.org/doc/numpy/reference/arrays.dtypes.html">NumPy</a>.  Custom datatypes are supported insofar as
+the user implements the serialisation and deserialisation of that type into
+primitive data that can be handled by PyOP2.</p>
+<p>Declaring coordinate data on the <code class="docutils literal notranslate"><span class="pre">vertices</span></code> defined above, where two float
+coordinates are associated with each vertex, is done like this:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">dvertices</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">DataSet</span><span class="p">(</span><span class="n">vertices</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<span class="n">coordinates</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Dat</span><span class="p">(</span><span class="n">dvertices</span><span class="p">,</span>
+                      <span class="p">[[</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">],</span> <span class="p">[</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">],</span> <span class="p">[</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">],</span> <span class="p">[</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">]],</span>
+                      <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="global">
+<span id="data-global"></span><h3>Global<a class="headerlink" href="#global" title="Link to this heading">¶</a></h3>
+<p>In contrast to a <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code>, a <code class="xref py py-class docutils literal notranslate"><span class="pre">Global</span></code> has no
+association to a set and the shape and type of the data are declared directly
+on the <code class="xref py py-class docutils literal notranslate"><span class="pre">Global</span></code>. A 2x2 elasticity tensor would be defined as
+follows:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">elasticity</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Global</span><span class="p">((</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="p">[[</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">],</span> <span class="p">[</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">]],</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="const">
+<span id="data-const"></span><h3>Const<a class="headerlink" href="#const" title="Link to this heading">¶</a></h3>
+<p>Data that is globally visible and read-only to kernels is declared with a
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Const</span></code> and needs to have a globally unique identifier.  It does
+not need to be declared as an argument to a <code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code>, but is
+accessible in a kernel by name. A globally visible parameter <code class="docutils literal notranslate"><span class="pre">eps</span></code> would be
+declared as follows:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">eps</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Const</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mf">1e-14</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;eps&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="mat">
+<span id="data-mat"></span><h3>Mat<a class="headerlink" href="#mat" title="Link to this heading">¶</a></h3>
+<p>In a PyOP2 context, a (sparse) matrix is a linear operator from one set to
+another. In other words, it is a linear function which takes a
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> on one set <span class="math">A</span> and returns the value of a
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> on another set <span class="math">B</span>. Of course, in particular,
+<span class="math">A</span> may be the same set as <span class="math">B</span>. This makes the operation of at
+least some matrices equivalent to the operation of a particular PyOP2 kernel.</p>
+<p>PyOP2 can be used to assemble <code class="xref py py-class docutils literal notranslate"><span class="pre">matrices</span></code>, which are defined
+on a <code class="xref py py-class docutils literal notranslate"><span class="pre">sparsity</span> <span class="pre">pattern</span></code> which is built from a pair of
+<code class="xref py py-class docutils literal notranslate"><span class="pre">DataSets</span></code> defining the row and column spaces the
+sparsity maps between and one or more pairs of maps, one for the row and one
+for the column space of the matrix respectively. The sparsity uniquely defines
+the non-zero structure of the sparse matrix and can be constructed purely from
+those mappings. To declare a <code class="xref py py-class docutils literal notranslate"><span class="pre">Mat</span></code> on a <code class="xref py py-class docutils literal notranslate"><span class="pre">Sparsity</span></code>
+only the data type needs to be given.</p>
+<p>Since the construction of large sparsity patterns is a very expensive
+operation, the decoupling of <code class="xref py py-class docutils literal notranslate"><span class="pre">Mat</span></code> and <code class="xref py py-class docutils literal notranslate"><span class="pre">Sparsity</span></code>
+allows the reuse of sparsity patterns for a number of matrices without
+recomputation. In fact PyOP2 takes care of caching sparsity patterns on behalf
+of the user, so declaring a sparsity on the same maps as a previously declared
+sparsity yields the cached object instead of building another one.</p>
+<p>Defining a matrix of floats on a sparsity which spans from the space of
+vertices to the space of vertices via the edges is done as follows:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">sparsity</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Sparsity</span><span class="p">((</span><span class="n">dvertices</span><span class="p">,</span> <span class="n">dvertices</span><span class="p">),</span>
+                        <span class="p">[(</span><span class="n">edges2vertices</span><span class="p">,</span> <span class="n">edges2vertices</span><span class="p">)])</span>
+<span class="n">matrix</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Mat</span><span class="p">(</span><span class="n">sparsity</span><span class="p">,</span> <span class="nb">float</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="parallel-loops">
+<span id="par-loops"></span><h2>Parallel loops<a class="headerlink" href="#parallel-loops" title="Link to this heading">¶</a></h2>
+<p>Computations in PyOP2 are executed as <code class="xref py py-func docutils literal notranslate"><span class="pre">parallel</span> <span class="pre">loops</span></code>
+of a <code class="xref py py-class docutils literal notranslate"><span class="pre">Kernel</span></code> over an <em>iteration set</em>. Parallel loops are the
+core construct of PyOP2 and hide most of its complexity such as parallel
+scheduling, partitioning, colouring, data transfer from and to device and
+staging of the data into on chip memory. Computations in a parallel loop must
+be independent of the order in which they are executed over the set to allow
+PyOP2 maximum flexibility to schedule the computation in the most efficient
+way. Kernels are described in more detail in <a class="reference internal" href="kernels.html"><span class="doc">PyOP2 Kernels</span></a>.</p>
+<section id="loop-invocations">
+<span id="id2"></span><h3>Loop invocations<a class="headerlink" href="#loop-invocations" title="Link to this heading">¶</a></h3>
+<p>A parallel loop invocation requires as arguments, other than the iteration set
+and the kernel to operate on, the data the kernel reads and/or writes. A
+parallel loop argument is constructed by calling the underlying data object
+(i.e. the <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> or <code class="xref py py-class docutils literal notranslate"><span class="pre">Global</span></code>) and passing an
+<em>access descriptor</em> and the mapping to be used when accessing the data. The
+mapping is required for an <em>indirectly accessed</em> <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> not
+declared on the same set as the iteration set of the parallel loop. In the
+case of <em>directly accessed</em> data defined on the same set as the iteration set
+the map is omitted and only an access descriptor given.</p>
+<p>Consider a parallel loop that translates the <code class="docutils literal notranslate"><span class="pre">coordinate</span></code> field by a
+constant offset given by the <code class="xref py py-class docutils literal notranslate"><span class="pre">Const</span></code> <code class="docutils literal notranslate"><span class="pre">offset</span></code>. Note how the
+kernel has access to the local variable <code class="docutils literal notranslate"><span class="pre">offset</span></code> even though it has not been
+passed as an argument to the <code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code>. This loop is direct and
+the argument <code class="docutils literal notranslate"><span class="pre">coordinates</span></code> is read and written:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">op2</span><span class="o">.</span><span class="n">Const</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="p">[</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;offset&quot;</span><span class="p">);</span>
+
+<span class="n">translate</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Kernel</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;void translate(double * coords) {</span>
+<span class="s2">  coords[0] += offset[0];</span>
+<span class="s2">  coords[1] += offset[1];</span>
+<span class="s2">}&quot;&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;translate&quot;</span><span class="p">)</span>
+
+<span class="n">op2</span><span class="o">.</span><span class="n">par_loop</span><span class="p">(</span><span class="n">translate</span><span class="p">,</span> <span class="n">vertices</span><span class="p">,</span> <span class="n">coordinates</span><span class="p">(</span><span class="n">op2</span><span class="o">.</span><span class="n">RW</span><span class="p">))</span>
+</pre></div>
+</div>
+</section>
+<section id="access-descriptors">
+<span id="id3"></span><h3>Access descriptors<a class="headerlink" href="#access-descriptors" title="Link to this heading">¶</a></h3>
+<p>Access descriptors define how the data is accessed by the kernel and give
+PyOP2 crucial information as to how the data needs to be treated during
+staging in before and staging out after kernel execution. They must be one of
+<code class="xref py py-data docutils literal notranslate"><span class="pre">pyop2.READ</span></code> (read-only), <code class="xref py py-data docutils literal notranslate"><span class="pre">pyop2.WRITE</span></code> (write-only),
+<code class="xref py py-data docutils literal notranslate"><span class="pre">pyop2.RW</span></code> (read-write), <code class="xref py py-data docutils literal notranslate"><span class="pre">pyop2.INC</span></code> (increment),
+<code class="xref py py-data docutils literal notranslate"><span class="pre">pyop2.MIN</span></code> (minimum reduction) or <code class="xref py py-data docutils literal notranslate"><span class="pre">pyop2.MAX</span></code> (maximum
+reduction).</p>
+<p>Not all of these descriptors apply to all PyOP2 data types. A
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> can have modes <code class="xref py py-data docutils literal notranslate"><span class="pre">READ</span></code>, <code class="xref py py-data docutils literal notranslate"><span class="pre">WRITE</span></code>,
+<code class="xref py py-data docutils literal notranslate"><span class="pre">RW</span></code> and <code class="xref py py-data docutils literal notranslate"><span class="pre">INC</span></code>. For a <code class="xref py py-class docutils literal notranslate"><span class="pre">Global</span></code> the
+valid modes are <code class="xref py py-data docutils literal notranslate"><span class="pre">READ</span></code>, <code class="xref py py-data docutils literal notranslate"><span class="pre">INC</span></code>, <code class="xref py py-data docutils literal notranslate"><span class="pre">MIN</span></code> and
+<code class="xref py py-data docutils literal notranslate"><span class="pre">MAX</span></code> and for a <code class="xref py py-class docutils literal notranslate"><span class="pre">Mat</span></code> only <code class="xref py py-data docutils literal notranslate"><span class="pre">WRITE</span></code> and
+<code class="xref py py-data docutils literal notranslate"><span class="pre">INC</span></code> are allowed.</p>
+</section>
+<section id="loops-assembling-matrices">
+<span id="matrix-loops"></span><h3>Loops assembling matrices<a class="headerlink" href="#loops-assembling-matrices" title="Link to this heading">¶</a></h3>
+<p>We declare a parallel loop assembling the <code class="docutils literal notranslate"><span class="pre">matrix</span></code> via a given <code class="docutils literal notranslate"><span class="pre">kernel</span></code>
+which we’ll assume has been defined before over the <code class="docutils literal notranslate"><span class="pre">edges</span></code> and with
+<code class="docutils literal notranslate"><span class="pre">coordinates</span></code> as input data. The <code class="docutils literal notranslate"><span class="pre">matrix</span></code> is the output argument of this
+parallel loop and therefore has the access descriptor <code class="xref py py-data docutils literal notranslate"><span class="pre">INC</span></code> since
+the assembly accumulates contributions from different vertices via the
+<code class="docutils literal notranslate"><span class="pre">edges2vertices</span></code> mapping. Note that the mappings are being indexed with the
+<code class="xref py py-class docutils literal notranslate"><span class="pre">iteration</span> <span class="pre">indices</span></code> <code class="docutils literal notranslate"><span class="pre">op2.i[0]</span></code> and
+<code class="docutils literal notranslate"><span class="pre">op2.i[1]</span></code> respectively. This means that PyOP2 generates a <a class="reference internal" href="kernels.html#local-iteration-spaces"><span class="std std-ref">local
+iteration space</span></a> of size <code class="docutils literal notranslate"><span class="pre">arity</span> <span class="pre">*</span> <span class="pre">arity</span></code> with the
+<code class="docutils literal notranslate"><span class="pre">arity</span></code> of the <code class="xref py py-class docutils literal notranslate"><span class="pre">Map</span></code> <code class="docutils literal notranslate"><span class="pre">edges2vertices</span></code> for any given element
+of the iteration set.  This local iteration space is then iterated over using
+the iteration indices on the maps.  The kernel is assumed to only apply to a
+single point in that local iteration space. The <code class="docutils literal notranslate"><span class="pre">coordinates</span></code> are accessed
+via the same mapping, but are a read-only input argument to the kernel and
+therefore use the access descriptor <code class="xref py py-data docutils literal notranslate"><span class="pre">READ</span></code>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">op2</span><span class="o">.</span><span class="n">par_loop</span><span class="p">(</span><span class="n">kernel</span><span class="p">,</span> <span class="n">edges</span><span class="p">,</span>
+             <span class="n">matrix</span><span class="p">(</span><span class="n">op2</span><span class="o">.</span><span class="n">INC</span><span class="p">,</span> <span class="p">(</span><span class="n">edges2vertices</span><span class="p">[</span><span class="n">op2</span><span class="o">.</span><span class="n">i</span><span class="p">[</span><span class="mi">0</span><span class="p">]],</span>
+                              <span class="n">edges2vertices</span><span class="p">[</span><span class="n">op2</span><span class="o">.</span><span class="n">i</span><span class="p">[</span><span class="mi">1</span><span class="p">]])),</span>
+             <span class="n">coordinates</span><span class="p">(</span><span class="n">op2</span><span class="o">.</span><span class="n">READ</span><span class="p">,</span> <span class="n">edges2vertices</span><span class="p">))</span>
+</pre></div>
+</div>
+<p>You can stack up multiple successive parallel loops that add values to
+a matrix, before you use the resulting values, you must explicitly
+tell PyOP2 that you want to do so, by calling
+<code class="xref py py-meth docutils literal notranslate"><span class="pre">assemble()</span></code> on the matrix.  Note that executing a
+<code class="xref py py-func docutils literal notranslate"><span class="pre">solve()</span></code> will do this automatically for you.</p>
+</section>
+<section id="loops-with-global-reductions">
+<span id="reduction-loops"></span><h3>Loops with global reductions<a class="headerlink" href="#loops-with-global-reductions" title="Link to this heading">¶</a></h3>
+<p><code class="xref py py-class docutils literal notranslate"><span class="pre">Globals</span></code> are used primarily for reductions where a
+given quantity on a field is reduced to a single number by summation or
+finding the minimum or maximum. Consider a kernel computing the <a class="reference external" href="https://en.wikipedia.org/wiki/L2_norm#Euclidean_norm">L2 norm</a> of
+the <code class="docutils literal notranslate"><span class="pre">pressure</span></code> field defined on the set of <code class="docutils literal notranslate"><span class="pre">vertices</span></code> as <code class="docutils literal notranslate"><span class="pre">l2norm</span></code>. Note
+that the <code class="xref py py-class docutils literal notranslate"><span class="pre">Dat</span></code> constructor automatically creates an anonymous
+<code class="xref py py-class docutils literal notranslate"><span class="pre">DataSet</span></code> of dimension 1 if a <code class="xref py py-class docutils literal notranslate"><span class="pre">Set</span></code> is passed as
+the first argument. We assume <code class="docutils literal notranslate"><span class="pre">pressure</span></code> is the result of some prior
+computation and only give the declaration for context.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">pressure</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Dat</span><span class="p">(</span><span class="n">vertices</span><span class="p">,</span> <span class="p">[</span><span class="o">...</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
+<span class="n">l2norm</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Global</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="p">[</span><span class="mf">0.0</span><span class="p">])</span>
+
+<span class="n">norm</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Kernel</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;void norm(double * out, double * field) {</span>
+<span class="s2">  *out += field[0] * field[0];</span>
+<span class="s2">}&quot;&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;norm&quot;</span><span class="p">)</span>
+
+<span class="n">op2</span><span class="o">.</span><span class="n">par_loop</span><span class="p">(</span><span class="n">pressure</span><span class="p">,</span> <span class="n">vertices</span><span class="p">,</span>
+             <span class="n">l2norm</span><span class="p">(</span><span class="n">op2</span><span class="o">.</span><span class="n">INC</span><span class="p">),</span>
+             <span class="n">vertices</span><span class="p">(</span><span class="n">op2</span><span class="o">.</span><span class="n">READ</span><span class="p">))</span>
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#">PyOP2 Concepts</a><ul>
+<li><a class="reference internal" href="#sets-and-mappings">Sets and mappings</a></li>
+<li><a class="reference internal" href="#data">Data</a><ul>
+<li><a class="reference internal" href="#dat">Dat</a></li>
+<li><a class="reference internal" href="#global">Global</a></li>
+<li><a class="reference internal" href="#const">Const</a></li>
+<li><a class="reference internal" href="#mat">Mat</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#parallel-loops">Parallel loops</a><ul>
+<li><a class="reference internal" href="#loop-invocations">Loop invocations</a></li>
+<li><a class="reference internal" href="#access-descriptors">Access descriptors</a></li>
+<li><a class="reference internal" href="#loops-assembling-matrices">Loops assembling matrices</a></li>
+<li><a class="reference internal" href="#loops-with-global-reductions">Loops with global reductions</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="installation.html"
+                          title="previous chapter">Installing PyOP2</a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="kernels.html"
+                          title="next chapter">PyOP2 Kernels</a></p>
+  </div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/concepts.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="kernels.html" title="PyOP2 Kernels"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="installation.html" title="Installing PyOP2"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">PyOP2 2020.0 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">PyOP2 Concepts</a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright 2012-2013, Imperial College et al.
+      Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 8.0.2.
+    </div>
+  </body>
+</html>

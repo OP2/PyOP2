@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Welcome to PyOP2’s documentation! &#8212; PyOP2 2020.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=fa44fd50" />
+    <link rel="stylesheet" type="text/css" href="_static/classic.css?v=def86cc0" />
+    
+    <script src="_static/documentation_options.js?v=63d4e452"></script>
+    <script src="_static/doctools.js?v=9a2dae69"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Installing PyOP2" href="installation.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="installation.html" title="Installing PyOP2"
+             accesskey="N">next</a> |</li>
+        <li class="nav-item nav-item-0"><a href="#">PyOP2 2020.0 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">Welcome to PyOP2’s documentation!</a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="welcome-to-pyop2-s-documentation">
+<h1>Welcome to PyOP2’s documentation!<a class="headerlink" href="#welcome-to-pyop2-s-documentation" title="Link to this heading">¶</a></h1>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>The prose documentation contained here is significantly out-of-date and thus
+contains many inaccuracies. It is, nevertheless, quite a useful resource for
+people new to PyOP2. Please read with care.</p>
+<p>The API documentation, however, is updated regularly and can be considered
+accurate.</p>
+</div>
+<p>Contents:</p>
+<div class="toctree-wrapper compound">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installing PyOP2</a></li>
+<li class="toctree-l1"><a class="reference internal" href="concepts.html">PyOP2 Concepts</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="concepts.html#sets-and-mappings">Sets and mappings</a></li>
+<li class="toctree-l2"><a class="reference internal" href="concepts.html#data">Data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="concepts.html#parallel-loops">Parallel loops</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="kernels.html">PyOP2 Kernels</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="kernels.html#kernel-api">Kernel API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kernels.html#data-layout">Data layout</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kernels.html#local-iteration-spaces">Local iteration spaces</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="ir.html">The PyOP2 Intermediate Representation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="ir.html#using-the-intermediate-representation">Using the Intermediate Representation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ir.html#achieving-performance-portability-with-the-ir">Achieving Performance Portability with the IR</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ir.html#optimizing-kernels-on-cpus">Optimizing kernels on CPUs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ir.html#how-to-select-specific-kernel-optimizations">How to select specific kernel optimizations</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="architecture.html">PyOP2 Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html#multiple-backend-support">Multiple Backend Support</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="backends.html">PyOP2 Backends</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="backends.html#host-backends">Host backends</a></li>
+<li class="toctree-l2"><a class="reference internal" href="backends.html#device-backends">Device backends</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="linear_algebra.html">PyOP2 Linear Algebra Interface</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="linear_algebra.html#sparse-matrix-storage-formats">Sparse Matrix Storage Formats</a></li>
+<li class="toctree-l2"><a class="reference internal" href="linear_algebra.html#matrix-assembly">Matrix assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="linear_algebra.html#building-a-sparsity-pattern">Building a sparsity pattern</a></li>
+<li class="toctree-l2"><a class="reference internal" href="linear_algebra.html#solving-a-linear-system">Solving a linear system</a></li>
+<li class="toctree-l2"><a class="reference internal" href="linear_algebra.html#gpu-matrix-assembly">GPU matrix assembly</a></li>
+<li class="toctree-l2"><a class="reference internal" href="linear_algebra.html#gpu-linear-algebra">GPU linear algebra</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="plan.html">Parallel Execution Plan</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="plan.html#partitioning">Partitioning</a></li>
+<li class="toctree-l2"><a class="reference internal" href="plan.html#local-renumbering-and-staging">Local Renumbering and Staging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="plan.html#colouring">Colouring</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="mixed.html">Mixed Types</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="mixed.html#mixed-set-dataset-map-and-dat">Mixed Set, DataSet, Map and Dat</a></li>
+<li class="toctree-l2"><a class="reference internal" href="mixed.html#block-sparsity-and-mat">Block Sparsity and Mat</a></li>
+<li class="toctree-l2"><a class="reference internal" href="mixed.html#mixed-assembly">Mixed Assembly</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="mpi.html">MPI</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="mpi.html#local-numbering">Local Numbering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="mpi.html#computation-communication-overlap">Computation-communication Overlap</a></li>
+<li class="toctree-l2"><a class="reference internal" href="mpi.html#halo-exchange">Halo exchange</a></li>
+<li class="toctree-l2"><a class="reference internal" href="mpi.html#distributed-assembly">Distributed Assembly</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="caching.html">Caching in PyOP2</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="caching.html#class-caches">Class caches</a></li>
+<li class="toctree-l2"><a class="reference internal" href="caching.html#object-caches">Object caches</a></li>
+<li class="toctree-l2"><a class="reference internal" href="caching.html#debugging-cache-leaks">Debugging cache leaks</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="profiling.html">Profiling</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="profiling.html#profiling-pyop2-programs">Profiling PyOP2 programs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="profiling.html#using-pyop2-s-internal-timers">Using PyOP2’s internal timers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="profiling.html#line-by-line-profiling">Line-by-line profiling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="profiling.html#memory-profiling">Memory profiling</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="user.html">pyop2 user documentation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="user.html#pyop2-package"><code class="xref py py-mod docutils literal notranslate"><span class="pre">pyop2</span></code> Package</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="pyop2.html">pyop2 package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="pyop2.html#subpackages">Subpackages</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pyop2.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pyop2.html#pyop2-caching-module">pyop2.caching module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pyop2.html#pyop2-compilation-module">pyop2.compilation module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pyop2.html#module-pyop2.configuration">pyop2.configuration module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pyop2.html#module-pyop2.datatypes">pyop2.datatypes module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pyop2.html#module-pyop2.exceptions">pyop2.exceptions module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pyop2.html#pyop2-global-kernel-module">pyop2.global_kernel module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pyop2.html#pyop2-local-kernel-module">pyop2.local_kernel module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pyop2.html#module-pyop2.logger">pyop2.logger module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pyop2.html#module-pyop2.mpi">pyop2.mpi module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pyop2.html#pyop2-op2-module">pyop2.op2 module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pyop2.html#pyop2-parloop-module">pyop2.parloop module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pyop2.html#module-pyop2.profiling">pyop2.profiling module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pyop2.html#pyop2-sparsity-module">pyop2.sparsity module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pyop2.html#module-pyop2.utils">pyop2.utils module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pyop2.html#pyop2-version-module">pyop2.version module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pyop2.html#module-contents">Module contents</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</section>
+<section id="indices-and-tables">
+<h1>Indices and tables<a class="headerlink" href="#indices-and-tables" title="Link to this heading">¶</a></h1>
+<ul class="simple">
+<li><p><a class="reference internal" href="genindex.html"><span class="std std-ref">Index</span></a></p></li>
+<li><p><a class="reference internal" href="py-modindex.html"><span class="std std-ref">Module Index</span></a></p></li>
+<li><p><a class="reference internal" href="search.html"><span class="std std-ref">Search Page</span></a></p></li>
+</ul>
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="#">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#">Welcome to PyOP2’s documentation!</a></li>
+<li><a class="reference internal" href="#indices-and-tables">Indices and tables</a></li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="installation.html"
+                          title="next chapter">Installing PyOP2</a></p>
+  </div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/index.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="installation.html" title="Installing PyOP2"
+             >next</a> |</li>
+        <li class="nav-item nav-item-0"><a href="#">PyOP2 2020.0 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">Welcome to PyOP2’s documentation!</a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright 2012-2013, Imperial College et al.
+      Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 8.0.2.
+    </div>
+  </body>
+</html>

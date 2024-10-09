@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Caching in PyOP2 &#8212; PyOP2 2020.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=fa44fd50" />
+    <link rel="stylesheet" type="text/css" href="_static/classic.css?v=def86cc0" />
+    
+    <script src="_static/documentation_options.js?v=63d4e452"></script>
+    <script src="_static/doctools.js?v=9a2dae69"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Profiling" href="profiling.html" />
+    <link rel="prev" title="MPI" href="mpi.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="profiling.html" title="Profiling"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="mpi.html" title="MPI"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">PyOP2 2020.0 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">Caching in PyOP2</a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="caching-in-pyop2">
+<span id="caching"></span><h1>Caching in PyOP2<a class="headerlink" href="#caching-in-pyop2" title="Link to this heading">¶</a></h1>
+<p>PyOP2 makes heavy use of caches to ensure performance is not adversely
+affected by too many runtime computations.  The caching in PyOP2 takes
+a number of forms:</p>
+<ol class="arabic">
+<li><p>Disk-based caching of generated code</p>
+<p>Since compiling a generated code module may be an expensive
+operation, PyOP2 caches the generated code on disk such that
+subsequent runs of the same simulation will not have to pay a
+compilation cost.</p>
+</li>
+<li><p>In memory caching of generated code function pointers</p>
+<p>Once code has been generated and loaded into the running PyOP2
+process, we cache the resulting callable function pointer for the
+lifetime of the process, such that subsequent calls to the same
+generated code are fast.</p>
+</li>
+<li><p>In memory caching of expensive to build objects</p>
+<p>Some PyOP2 objects, in particular <code class="xref py py-class docutils literal notranslate"><span class="pre">Sparsity</span></code> objects,
+can be expensive to construct.  Since a sparsity does not change if
+it is built again with the same arguments, we only construct the
+sparsity once for each unique set of arguments.</p>
+</li>
+</ol>
+<p>The caching strategies for PyOP2 follow from two axioms:</p>
+<ol class="arabic simple">
+<li><p>For PyOP2 <code class="xref py py-class docutils literal notranslate"><span class="pre">Set</span></code>s and <code class="xref py py-class docutils literal notranslate"><span class="pre">Map</span></code>s, equality
+is identity</p></li>
+<li><p>Caches of generated code should depend on metadata, but not data</p></li>
+</ol>
+<p>The first axiom implies that two <code class="xref py py-class docutils literal notranslate"><span class="pre">Set</span></code>s or
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Map</span></code>s compare equal if and only if they are the same
+object.  The second implies that generated code must be <em>independent</em>
+of the absolute size of the data the <code class="xref py py-func docutils literal notranslate"><span class="pre">par_loop()</span></code> that
+generated it executed over.  For example, the size of the iteration
+set should not be part of the key, but the arity of any maps and size
+and type of every data item should be.</p>
+<p>On consequence of these rules is that there are effectively two
+separate types of cache in PyOP2, object and class caches,
+distinguished by where the cache itself lives.</p>
+<section id="class-caches">
+<h2>Class caches<a class="headerlink" href="#class-caches" title="Link to this heading">¶</a></h2>
+<p>These are used to cache objects that depend on metadata, but not
+object instances, such are generated code.  They are implemented by
+the cacheable class inheriting from <code class="xref py py-class docutils literal notranslate"><span class="pre">Cached</span></code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>There is currently no eviction strategy for class caches, should
+they grow too large, for example by executing many different parallel
+loops, an out of memory error can occur</p>
+</div>
+</section>
+<section id="object-caches">
+<h2>Object caches<a class="headerlink" href="#object-caches" title="Link to this heading">¶</a></h2>
+<p>These are used to cache objects that are built on top of
+<code class="xref py py-class docutils literal notranslate"><span class="pre">Set</span></code>s and <code class="xref py py-class docutils literal notranslate"><span class="pre">Map</span></code>s.  They are implemented by the
+cacheable class inheriting from <code class="xref py py-class docutils literal notranslate"><span class="pre">ObjectCached</span></code> and the
+caching instance defining a <code class="docutils literal notranslate"><span class="pre">_cache</span></code> attribute.</p>
+<p>The motivation for these caches is that cache key for objects such as
+sparsities relies on an identical sparsity being built if the
+arguments are identical.  So that users of the API do not have to
+worry too much about carrying around “temporary” objects forever such
+that they will hit caches, PyOP2 builds up a hierarchy of caches of
+transient objects on top of the immutable sets and maps.</p>
+<p>So, for example, the user can build and throw away
+<code class="xref py py-class docutils literal notranslate"><span class="pre">DataSet</span></code>s as normal in their code.  Internally, however,
+these instances are cached on the set they are built on top of.  Thus,
+in the following snippet, we have that <code class="docutils literal notranslate"><span class="pre">ds</span></code> and <code class="docutils literal notranslate"><span class="pre">ds2</span></code> are the same
+object:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">s</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">Set</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+<span class="n">ds</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">DataSet</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+<span class="n">ds2</span> <span class="o">=</span> <span class="n">op2</span><span class="o">.</span><span class="n">DataSet</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+<span class="k">assert</span> <span class="n">ds</span> <span class="ow">is</span> <span class="n">ds2</span>
+</pre></div>
+</div>
+<p>The setup of these caches is such that the lifetime of objects in the
+cache is tied to the lifetime of both the caching and the cached
+object.  In the above example, as long as the user program holds a
+reference to one of <code class="docutils literal notranslate"><span class="pre">s</span></code>, <code class="docutils literal notranslate"><span class="pre">ds</span></code> or <code class="docutils literal notranslate"><span class="pre">ds2</span></code> all three objects will
+remain live.  As soon as all references are lost, all three become
+candidates for garbage collection.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The cache eviction strategy for these caches relies on the Python
+garbage collector, and hence on the user not holding onto
+references to some of either the cached or the caching objects for
+too long.  Should the objects on which the caches live persist, an
+out of memory error may occur.</p>
+</div>
+</section>
+<section id="debugging-cache-leaks">
+<h2>Debugging cache leaks<a class="headerlink" href="#debugging-cache-leaks" title="Link to this heading">¶</a></h2>
+<p>To debug potential problems with the cache, PyOP2 can be instructed to
+print the size of both object and class caches at program exit.  This
+can be done by setting the environment variable
+<code class="docutils literal notranslate"><span class="pre">PYOP2_PRINT_CACHE_SIZE</span></code> to 1 before running a PyOP2 program, or
+passing the <code class="docutils literal notranslate"><span class="pre">print_cache_size</span></code> to <code class="xref py py-func docutils literal notranslate"><span class="pre">init()</span></code>.</p>
+</section>
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#">Caching in PyOP2</a><ul>
+<li><a class="reference internal" href="#class-caches">Class caches</a></li>
+<li><a class="reference internal" href="#object-caches">Object caches</a></li>
+<li><a class="reference internal" href="#debugging-cache-leaks">Debugging cache leaks</a></li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="mpi.html"
+                          title="previous chapter">MPI</a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="profiling.html"
+                          title="next chapter">Profiling</a></p>
+  </div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/caching.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="profiling.html" title="Profiling"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="mpi.html" title="MPI"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">PyOP2 2020.0 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">Caching in PyOP2</a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright 2012-2013, Imperial College et al.
+      Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 8.0.2.
+    </div>
+  </body>
+</html>

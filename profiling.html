@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Profiling &#8212; PyOP2 2020.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=fa44fd50" />
+    <link rel="stylesheet" type="text/css" href="_static/classic.css?v=def86cc0" />
+    
+    <script src="_static/documentation_options.js?v=63d4e452"></script>
+    <script src="_static/doctools.js?v=9a2dae69"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="pyop2 user documentation" href="user.html" />
+    <link rel="prev" title="Caching in PyOP2" href="caching.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="user.html" title="pyop2 user documentation"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="caching.html" title="Caching in PyOP2"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">PyOP2 2020.0 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">Profiling</a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="profiling">
+<h1>Profiling<a class="headerlink" href="#profiling" title="Link to this heading">¶</a></h1>
+<section id="profiling-pyop2-programs">
+<h2>Profiling PyOP2 programs<a class="headerlink" href="#profiling-pyop2-programs" title="Link to this heading">¶</a></h2>
+<p>Profiling a PyOP2 program is as simple as profiling any other Python
+code. You can profile the jacobi demo in the PyOP2 <code class="docutils literal notranslate"><span class="pre">demo</span></code> folder as
+follows:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="o">-</span><span class="n">m</span> <span class="n">cProfile</span> <span class="o">-</span><span class="n">o</span> <span class="n">jacobi</span><span class="o">.</span><span class="n">dat</span> <span class="n">jacobi</span><span class="o">.</span><span class="n">py</span>
+</pre></div>
+</div>
+<p>This will run the entire program under <a class="reference external" href="https://docs.python.org/2/library/profile.html#cProfile">cProfile</a> and write the profiling
+data to <code class="docutils literal notranslate"><span class="pre">jacobi.dat</span></code>. Omitting <code class="docutils literal notranslate"><span class="pre">-o</span></code> will print a summary to stdout,
+which is not very helpful in most cases.</p>
+<section id="creating-a-graph">
+<h3>Creating a graph<a class="headerlink" href="#creating-a-graph" title="Link to this heading">¶</a></h3>
+<p>There is a much more intuitive way of representing the profiling data
+using the excellent <a class="reference external" href="https://code.google.com/p/jrfonseca/wiki/Gprof2Dot">gprof2dot</a> to generate a graph. Install from <a class="reference external" href="http://pypi.python.org/pypi/gprof2dot/">PyPI</a> with</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">sudo</span> <span class="n">pip</span> <span class="n">install</span> <span class="n">gprof2dot</span>
+</pre></div>
+</div>
+<p>Use as follows to create a PDF:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">gprof2dot</span> <span class="o">-</span><span class="n">f</span> <span class="n">pstats</span> <span class="o">-</span><span class="n">n</span> <span class="mi">1</span> <span class="n">jacobi</span><span class="o">.</span><span class="n">dat</span> <span class="o">|</span> <span class="n">dot</span> <span class="o">-</span><span class="n">Tpdf</span> <span class="o">-</span><span class="n">o</span> <span class="n">jacobi</span><span class="o">.</span><span class="n">pdf</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">-f</span> <span class="pre">pstats</span></code> tells <code class="docutils literal notranslate"><span class="pre">gprof2dot</span></code> that it is dealing with Python
+<a class="reference external" href="https://docs.python.org/2/library/profile.html#cProfile">cProfile</a> data (and not actual <em>gprof</em> data) and <code class="docutils literal notranslate"><span class="pre">-n</span> <span class="pre">1</span></code> ignores
+everything that makes up less than 1% of the total runtime - most likely
+you are not interested in that (the default is 0.5).</p>
+</section>
+<section id="consolidating-profiles-from-different-runs">
+<h3>Consolidating profiles from different runs<a class="headerlink" href="#consolidating-profiles-from-different-runs" title="Link to this heading">¶</a></h3>
+<p>To aggregate profiling data from different runs, save the following as
+<code class="docutils literal notranslate"><span class="pre">concat.py</span></code>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="sd">&quot;&quot;&quot;Usage: concat.py PATTERN FILE&quot;&quot;&quot;</span>
+
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">from</span> <span class="nn">glob</span> <span class="kn">import</span> <span class="n">glob</span>
+<span class="kn">from</span> <span class="nn">pstats</span> <span class="kn">import</span> <span class="n">Stats</span>
+
+<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">3</span><span class="p">:</span>
+    <span class="nb">print</span> <span class="vm">__doc__</span>
+    <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+<span class="n">files</span> <span class="o">=</span> <span class="n">glob</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+<span class="n">s</span> <span class="o">=</span> <span class="n">Stats</span><span class="p">(</span><span class="n">files</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+<span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">files</span><span class="p">[</span><span class="mi">1</span><span class="p">:]:</span> <span class="n">s</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+<span class="n">s</span><span class="o">.</span><span class="n">dump_stats</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>
+</pre></div>
+</div>
+<p>With profiles from different runs named <code class="docutils literal notranslate"><span class="pre">&lt;basename&gt;.*.part</span></code>, use it
+as</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="n">concat</span><span class="o">.</span><span class="n">py</span> <span class="s1">&#39;&lt;basename&gt;.*.part&#39;</span> <span class="o">&lt;</span><span class="n">basename</span><span class="o">&gt;.</span><span class="n">dat</span>
+</pre></div>
+</div>
+<p>and then call <code class="docutils literal notranslate"><span class="pre">gprof2dot</span></code> as before.</p>
+</section>
+</section>
+<section id="using-pyop2-s-internal-timers">
+<h2>Using PyOP2’s internal timers<a class="headerlink" href="#using-pyop2-s-internal-timers" title="Link to this heading">¶</a></h2>
+<p>PyOP2 automatically times the execution of certain regions:</p>
+<ul class="simple">
+<li><p>Sparsity building</p></li>
+<li><p>Plan construction</p></li>
+<li><p>Parallel loop kernel execution</p></li>
+<li><p>Halo exchange</p></li>
+<li><p>Reductions</p></li>
+<li><p>PETSc Krylov solver</p></li>
+</ul>
+<p>To output those timings, call <code class="xref py py-func docutils literal notranslate"><span class="pre">summary()</span></code> in your
+PyOP2 program or run with the environment variable
+<code class="docutils literal notranslate"><span class="pre">PYOP2_PRINT_SUMMARY</span></code> set to 1.</p>
+<p>To query e.g. the timer for parallel loop execution programatically,
+use the <code class="xref py py-func docutils literal notranslate"><span class="pre">timing()</span></code> helper:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">pyop2</span> <span class="kn">import</span> <span class="n">timing</span>
+<span class="n">timing</span><span class="p">(</span><span class="s2">&quot;ParLoop compute&quot;</span><span class="p">)</span>               <span class="c1"># get total time</span>
+<span class="n">timing</span><span class="p">(</span><span class="s2">&quot;ParLoop compute&quot;</span><span class="p">,</span> <span class="n">total</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>  <span class="c1"># get average time per call</span>
+</pre></div>
+</div>
+<p>To add additional timers to your own code, you can use the
+<a class="reference internal" href="pyop2.html#pyop2.profiling.timed_region" title="pyop2.profiling.timed_region"><code class="xref py py-func docutils literal notranslate"><span class="pre">timed_region()</span></code></a> and
+<a class="reference internal" href="pyop2.html#pyop2.profiling.timed_function" title="pyop2.profiling.timed_function"><code class="xref py py-func docutils literal notranslate"><span class="pre">timed_function()</span></code></a> helpers:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">pyop2.profiling</span> <span class="kn">import</span> <span class="n">timed_region</span><span class="p">,</span> <span class="n">timed_function</span>
+
+<span class="k">with</span> <span class="n">timed_region</span><span class="p">(</span><span class="s2">&quot;my code&quot;</span><span class="p">):</span>
+    <span class="c1"># my code</span>
+
+<span class="nd">@timed_function</span><span class="p">(</span><span class="s2">&quot;my function&quot;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">my_func</span><span class="p">():</span>
+    <span class="c1"># my func</span>
+</pre></div>
+</div>
+</section>
+<section id="line-by-line-profiling">
+<h2>Line-by-line profiling<a class="headerlink" href="#line-by-line-profiling" title="Link to this heading">¶</a></h2>
+<p>To get a line-by-line profile of a given function, install Robert Kern’s
+<a class="reference external" href="https://pythonhosted.org/line_profiler/">line profiler</a> and:</p>
+<ol class="arabic">
+<li><p>Import the <code class="xref py py-func docutils literal notranslate"><span class="pre">profile()</span></code> decorator:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">pyop2.profiling</span> <span class="kn">import</span> <span class="n">profile</span>
+</pre></div>
+</div>
+</li>
+<li><p>Decorate the function to profile with <code class="docutils literal notranslate"><span class="pre">&#64;profile</span></code></p></li>
+<li><p>Run your script with <code class="docutils literal notranslate"><span class="pre">kernprof.py</span> <span class="pre">-l</span> <span class="pre">&lt;script.py&gt;</span></code></p></li>
+<li><p>Generate an annotated source file with</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="o">-</span><span class="n">m</span> <span class="n">line_profiler</span> <span class="o">&lt;</span><span class="n">script</span><span class="o">.</span><span class="n">py</span><span class="o">.</span><span class="n">lprof</span><span class="o">&gt;</span>
+</pre></div>
+</div>
+</li>
+</ol>
+<p>Note that <code class="docutils literal notranslate"><span class="pre">kernprof.py</span></code> injects the <code class="docutils literal notranslate"><span class="pre">&#64;profile</span></code> decorator into the
+Python builtins namespace. PyOP2 provides a passthrough version of this
+decorator which does nothing if <code class="docutils literal notranslate"><span class="pre">profile</span></code> is not found in
+<code class="docutils literal notranslate"><span class="pre">__builtins__</span></code>. This means you can run your script regularly without
+having to remove the decorators again.</p>
+<p>The <code class="xref py py-func docutils literal notranslate"><span class="pre">profile()</span></code> decorator also works with the
+memory profiler (see below). PyOP2 therefore provides the
+<code class="xref py py-func docutils literal notranslate"><span class="pre">lineprof()</span></code> decorator which is only enabled when
+running with <code class="docutils literal notranslate"><span class="pre">kernprof.py</span></code>.</p>
+<p>A number of PyOP2 internal functions are decorated such that running
+your PyOP2 application with <code class="docutils literal notranslate"><span class="pre">kernprof.py</span></code> will produce a line-by-line
+profile of the parallel loop computation (but not the generated code!).</p>
+</section>
+<section id="memory-profiling">
+<h2>Memory profiling<a class="headerlink" href="#memory-profiling" title="Link to this heading">¶</a></h2>
+<p>To profile the memory usage of your application, install Fabian
+Pedregosa’s <a class="reference external" href="https://github.com/fabianp/memory_profiler">memory profiler</a> and:</p>
+<ol class="arabic">
+<li><p>Import the <code class="xref py py-func docutils literal notranslate"><span class="pre">profile()</span></code> decorator:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">pyop2.profiling</span> <span class="kn">import</span> <span class="n">profile</span>
+</pre></div>
+</div>
+</li>
+<li><p>Decorate the function to profile with <code class="docutils literal notranslate"><span class="pre">&#64;profile</span></code>.</p></li>
+<li><p>Run your script with</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="o">-</span><span class="n">m</span> <span class="n">memory_profiler</span> <span class="o">&lt;</span><span class="n">script</span><span class="o">.</span><span class="n">py</span><span class="o">&gt;</span>
+</pre></div>
+</div>
+<p>to get a line-by-line memory profile of your function.</p>
+</li>
+<li><p>Run your script with</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">memprof</span> <span class="n">run</span> <span class="o">--</span><span class="n">python</span> <span class="o">&lt;</span><span class="n">script</span><span class="o">.</span><span class="n">py</span><span class="o">&gt;</span>
+</pre></div>
+</div>
+<p>to record memory usage of your program over time.</p>
+</li>
+<li><p>Generate a plot of the memory profile with <code class="docutils literal notranslate"><span class="pre">memprof</span> <span class="pre">plot</span></code>.</p></li>
+</ol>
+<p>Note that <code class="docutils literal notranslate"><span class="pre">memprof</span></code> and <code class="docutils literal notranslate"><span class="pre">python</span> <span class="pre">-m</span> <span class="pre">memory_profiler</span></code> inject the
+<code class="docutils literal notranslate"><span class="pre">&#64;profile</span></code> decorator into the Python builtins namespace. PyOP2
+provides a passthrough version of this decorator which does nothing if
+<code class="docutils literal notranslate"><span class="pre">profile</span></code> is not found in <code class="docutils literal notranslate"><span class="pre">__builtins__</span></code>. This means you can run
+your script regularly without having to remove the decorators again.</p>
+<p>The <code class="xref py py-func docutils literal notranslate"><span class="pre">profile()</span></code> decorator also works with the line
+profiler (see below). PyOP2 therefore provides the
+<code class="xref py py-func docutils literal notranslate"><span class="pre">memprof()</span></code> decorator which is only enabled when
+running with <code class="docutils literal notranslate"><span class="pre">memprof</span></code>.</p>
+<p>A number of PyOP2 internal functions are decorated such that running
+your PyOP2 application with <code class="docutils literal notranslate"><span class="pre">memprof</span> <span class="pre">run</span></code> will produce a memory
+profile of the parallel loop computation (but not the generated code!).</p>
+</section>
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#">Profiling</a><ul>
+<li><a class="reference internal" href="#profiling-pyop2-programs">Profiling PyOP2 programs</a><ul>
+<li><a class="reference internal" href="#creating-a-graph">Creating a graph</a></li>
+<li><a class="reference internal" href="#consolidating-profiles-from-different-runs">Consolidating profiles from different runs</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#using-pyop2-s-internal-timers">Using PyOP2’s internal timers</a></li>
+<li><a class="reference internal" href="#line-by-line-profiling">Line-by-line profiling</a></li>
+<li><a class="reference internal" href="#memory-profiling">Memory profiling</a></li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="caching.html"
+                          title="previous chapter">Caching in PyOP2</a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="user.html"
+                          title="next chapter">pyop2 user documentation</a></p>
+  </div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/profiling.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="user.html" title="pyop2 user documentation"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="caching.html" title="Caching in PyOP2"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">PyOP2 2020.0 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">Profiling</a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright 2012-2013, Imperial College et al.
+      Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 8.0.2.
+    </div>
+  </body>
+</html>
