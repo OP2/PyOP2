@@ -340,9 +340,9 @@ class TestExtrusion:
     def test_extrusion(self, elements, dat_coords, dat_field, coords_map, field_map):
         g = op2.Global(1, data=0.0, name='g', comm=COMM_WORLD)
         mass = op2.Kernel("""
-static void comp_vol(double A[1], double x[6][2], double y[1])
+static void comp_vol(double A[1], double x[12], double y[1])
 {
-    double abs = x[0][0]*(x[2][1]-x[4][1])+x[2][0]*(x[4][1]-x[0][1])+x[4][0]*(x[0][1]-x[2][1]);
+    double abs = x[0]*(x[5]-x[9])+x[4]*(x[9]-x[1])+x[8]*(x[1]-x[5]);
     if (abs < 0)
       abs = abs * (-1.0);
     A[0]+=0.5*abs*0.1 * y[0];
