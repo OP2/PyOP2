@@ -1766,7 +1766,10 @@ class ParametricTilingCandidateGenerator:
         )
         return (total_time, nsync)
 
-    def __call__(self) -> Tuple[ParametricTiling, ...]:
+    def _get_all_configurations(self) -> FrozenSet[ParametricTiling]:
+        """
+        Returns a :class:`frozenset` of all configurations in our search space.
+        """
         from itertools import product
 
         threads_to_cells = {}
@@ -1845,9 +1848,11 @@ class ParametricTilingCandidateGenerator:
                             False,
                         )
                     )
+        return frozenset(params)
 
-        # sort the parameters with highest occupancy.
-        params.sort(key=lambda P: self.estimated_exec_time(P))
+    def __call__(self) -> Tuple[ParametricTiling, ...]:
+        params = sorted(self._get_all_configurations(),
+                        key=self.estimated_exec_time)
 
         return tuple(params[: self.num_param_tiling_candidates])
 
