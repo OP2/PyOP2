@@ -546,10 +546,6 @@ def generate(builder, wrapper_name=None):
                                 lang_version=(2018, 2),
                                 name=wrapper_name)
 
-    # prioritize loops
-    for indices in context.index_ordering:
-        wrapper = loopy.prioritize_loops(wrapper, indices)
-
     # register kernel
     kernel = builder.kernel
     headers = set(kernel.headers)
