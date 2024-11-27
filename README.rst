@@ -4,6 +4,9 @@
 
 .. contents::
 
+This repository is archived, PyOP2 can now be found inside the `Firedrake repository <https://github.com/firedrakeproject/firedrake.git>`_
+========
+
 Installing PyOP2
 ================
 
